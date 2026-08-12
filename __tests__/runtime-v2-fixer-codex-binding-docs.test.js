@@ -15,7 +15,8 @@ describe('APE v2 Codex ticket-binding docs', () => {
     expect(protocol).not.toContain('dispatch.env');
     expect(protocol).not.toMatch(/launch the\s+subagent with that environment/i);
     expect(protocol).toMatch(/host-native tool[\s\S]*generated\s+name[\s\S]*dispatch intent/i);
-    expect(protocol).toMatch(/binding probe[\s\S]*probe-status[\s\S]*probe-ack/i);
+    expect(protocol).toMatch(/start` directly[\s\S]*no synthetic pre-run canary/i);
+    expect(protocol).not.toMatch(/probe-status|probe-ack/i);
     expect(protocol).toMatch(/receipt_capability[\s\S]*action: "record"/i);
   });
 

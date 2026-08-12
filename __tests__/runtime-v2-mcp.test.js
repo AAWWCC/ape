@@ -180,8 +180,8 @@ describe('APE v2 MCP public surface', () => {
     expect(responses[1].result.tools).toHaveLength(4);
   });
 
-  it('starts a Claude-native run without forwarding an undefined Codex binding probe', async () => {
-    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-claude-start-'));
+  it.each(['claude', 'codex'])('starts a %s-native run without a synthetic binding probe', async (host) => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), `ape-mcp-${host}-start-`));
     try {
       await writeFile(path.join(scratch, 'README.md'), '# fixture\n');
       execFileSync('git', ['init', '-q'], { cwd: scratch });
@@ -202,7 +202,7 @@ describe('APE v2 MCP public surface', () => {
               objective: 'Update the fixture documentation',
               mode: 'phase',
               lane: 'mechanical',
-              host: 'claude',
+              host,
               claimed_paths: ['README.md'],
               behavioral: false,
               hooks_trusted: true,
@@ -213,8 +213,9 @@ describe('APE v2 MCP public surface', () => {
         },
       ]);
       expect(responses[0].result.isError).not.toBe(true);
-      expect(responses[0].result.content[0].text).not.toMatch(/unsupported undefined data/);
-      expect(JSON.parse(responses[0].result.content[0].text).run.plan_contract_version).toBe(1);
+      const started = JSON.parse(responses[0].result.content[0].text);
+      expect(started.run.plan_contract_version).toBe(1);
+      expect(started).not.toHaveProperty('binding_probe');
     } finally {
       await rm(scratch, { recursive: true, force: true });
     }

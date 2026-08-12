@@ -280,7 +280,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.17.1' };
+    return { name: 'ape', version: '2.17.2' };
   }
 }
 
@@ -427,11 +427,6 @@ async function dispatchApeRun(projectDir, input) {
       subagents_available: input.subagents_available ?? false,
       explicit_invocation: input.explicit_invocation ?? false,
       binding_protocol: 'native-v1',
-      // The input guard accepts JSON data, and `undefined` is deliberately not
-      // JSON. Codex needs the native-binding canary marker; Claude does not, so
-      // omit the field entirely instead of forwarding `binding_probe:
-      // undefined` and rejecting every Claude start before run creation.
-      ...(input.host === 'codex' ? { binding_probe: 'required-v1' } : {}),
     });
   }
   if (action === 'next') return nextRun(projectDir, { wait_ms: input.wait_ms });

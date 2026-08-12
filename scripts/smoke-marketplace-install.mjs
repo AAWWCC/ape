@@ -51,7 +51,7 @@ async function findPackage(root, manifestDirectory) {
           const manifestPath = join(target, 'plugin.json');
           if (await exists(manifestPath)) {
             const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-            if (manifest.name === 'ape' && manifest.version === '2.17.1') {
+            if (manifest.name === 'ape' && manifest.version === '2.17.2') {
               matches.push(dirname(target));
             }
           }
@@ -124,7 +124,7 @@ async function initializeInstalled(host, pluginRoot) {
       params: { protocolVersion: '2025-06-18' },
     })}\n`);
   });
-  if (response?.result?.serverInfo?.version !== '2.17.1') {
+  if (response?.result?.serverInfo?.version !== '2.17.2') {
     throw new Error(`${host} installed MCP returned the wrong server version`);
   }
 }
