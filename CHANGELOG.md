@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.17.1 — 2026-08-12
+
+Fix Codex native binding launches when the host omits `agent_type`. The runtime now preserves the
+intended explorer role through that host-specific omission and keeps the binding probe and launch
+dispatch aligned. This patch also carries the existing deterministic package, marketplace smoke,
+and release-artifact guarantees forward under a new immutable plugin version.
+
 ## 2.17.0 — 2026-08-11
 
 Initial public release. APE 2.17 introduces deterministic, allowlisted public packages for the

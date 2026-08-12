@@ -178,7 +178,7 @@ function pathFailures(normalized) {
   if (/^plugins\/[^/]+\/assets(?:\/|$)/u.test(normalized)) failures.push('packaged assets directory');
   if (normalized === 'docs/research' || normalized.startsWith('docs/research/')) failures.push('private research history');
   if (normalized === 'benchmarks' || normalized.startsWith('benchmarks/')) failures.push('private benchmark history');
-  if (/runtime-v2-release-(?!2-17-0|artifacts|version-parity)[^/]*\.test\.js$/u.test(normalized)) failures.push('private release-history test');
+  if (/runtime-v2-release-(?!2-17-1|artifacts|version-parity)[^/]*\.test\.js$/u.test(normalized)) failures.push('private release-history test');
   if (AUDIO_EXTENSIONS.has(extname(normalized).toLowerCase())) failures.push('audio extension');
   return failures;
 }
