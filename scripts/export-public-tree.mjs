@@ -18,7 +18,7 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = dirname(SCRIPT_DIR);
-const PUBLIC_VERSION = '2.17.0';
+const PUBLIC_VERSION = '2.17.1';
 const PUBLIC_FILES = Object.freeze([
   '.gitattributes',
   'LICENSE',
@@ -98,7 +98,7 @@ function includePath(normalized) {
   if (normalized.startsWith('evals/results/') && normalized !== 'evals/results/.gitignore') return false;
   if (normalized === 'docs/research' || normalized.startsWith('docs/research/')) return false;
   if (normalized === 'benchmarks' || normalized.startsWith('benchmarks/')) return false;
-  if (/^__tests__\/runtime-v2-release-(?!2-17-0|artifacts|version-parity)[^/]*\.test\.js$/u.test(normalized)) {
+  if (/^__tests__\/runtime-v2-release-(?!2-17-1|artifacts|version-parity)[^/]*\.test\.js$/u.test(normalized)) {
     return false;
   }
   if (/^__tests__\/runtime-v2-audit-/u.test(normalized)) return false;
