@@ -1,0 +1,6 @@
+interface:
+  display_name: "APE Override"
+  short_description: "Audit and recover blocked APE state"
+  default_prompt: "Use $ape:override to perform a reason-audited APE recovery action."
+policy:
+  allow_implicit_invocation: false

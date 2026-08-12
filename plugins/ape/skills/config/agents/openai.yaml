@@ -1,0 +1,6 @@
+interface:
+  display_name: "APE Config"
+  short_description: "Configure and diagnose the APE runtime"
+  default_prompt: "Use $ape:config to inspect or update APE runtime configuration."
+policy:
+  allow_implicit_invocation: false

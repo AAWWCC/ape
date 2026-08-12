@@ -1,0 +1,6 @@
+interface:
+  display_name: "APE History"
+  short_description: "Inspect and maintain durable APE history"
+  default_prompt: "Use $ape:history to inspect or explicitly maintain APE run history."
+policy:
+  allow_implicit_invocation: false

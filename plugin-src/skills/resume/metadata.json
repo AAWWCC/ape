@@ -1,0 +1,5 @@
+{
+  "name": "resume",
+  "description": "Resume an interrupted APE run from persisted machine state.",
+  "invocation": "explicit"
+}

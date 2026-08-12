@@ -1,0 +1,6 @@
+{
+  "name": "override",
+  "description": "Abort or reset APE state with a mandatory audit reason.",
+  "argumentHint": "<abort|reset> --reason \"why\" [--run-id <id>]",
+  "invocation": "explicit"
+}

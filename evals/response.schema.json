@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "APE prompt evaluation batch response",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "suite_version": {"type": "integer", "enum": [1]},
+    "case_results": {
+      "type": "array",
+      "minItems": 36,
+      "maxItems": 36,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "status": {"type": "string", "enum": ["passed", "failed"]},
+          "verdict": {"type": "string", "enum": ["agree", "disagree", "pass", "fail", "none"]},
+          "blocking": {"type": "boolean"},
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "approve", "block", "advisory", "follow-exact", "report-deviation",
+              "public-behavior-test", "source-text-test", "reject-source-assertion",
+              "fixture-pair", "live-source-dependency", "accept-red-evidence",
+              "reject-red-evidence", "accept-contradiction", "reject-contradiction",
+              "scope-expansion", "authored-test-remediation", "write-fix", "refuse",
+              "execute", "invoke-control-plane", "invoke-status", "invoke-run",
+              "invoke-resume", "invoke-config", "invoke-history", "invoke-roadmap",
+              "invoke-override", "do-not-invoke"
+            ]
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": {"type": "string"},
+            "uniqueItems": true
+          },
+          "tool_trace": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "tool": {"type": "string"},
+                "action": {"type": "string"}
+              },
+              "required": ["tool", "action"]
+            }
+          },
+          "command_intents": {
+            "type": "array",
+            "items": {"type": "string"},
+            "uniqueItems": true
+          },
+          "write_intents": {
+            "type": "array",
+            "items": {"type": "string"},
+            "uniqueItems": true
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "selected_skill": {"type": ["string", "null"], "enum": ["status", "run", "resume", "config", "history", "roadmap", "override", null]},
+              "plan_action": {"type": "string", "enum": ["none", "follow-exact", "report-deviation"]},
+              "failure_kind": {"type": "string", "enum": ["none", "capability", "invalid-red-evidence", "test-contradiction"]},
+              "test_strategy": {"type": "string", "enum": ["none", "public-behavior", "source-text", "synthetic-fixture-pair", "live-source"]},
+              "scope_expansion_paths": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+              "test_remediation_paths": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+              "red_evidence_valid": {"type": ["boolean", "null"]},
+              "plan_deviation_reported": {"type": ["boolean", "null"]},
+              "notes": {"type": "string"}
+            },
+            "required": [
+              "selected_skill", "plan_action", "failure_kind", "test_strategy",
+              "scope_expansion_paths", "test_remediation_paths", "red_evidence_valid",
+              "plan_deviation_reported", "notes"
+            ]
+          }
+        },
+        "required": [
+          "id", "status", "verdict", "blocking", "disposition", "reason_codes",
+          "tool_trace", "command_intents", "write_intents", "details"
+        ]
+      }
+    }
+  },
+  "required": ["suite_version", "case_results"]
+}

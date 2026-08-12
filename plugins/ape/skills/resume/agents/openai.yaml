@@ -1,0 +1,6 @@
+interface:
+  display_name: "APE Resume"
+  short_description: "Resume an interrupted durable APE run"
+  default_prompt: "Use $ape:resume to continue the active APE run from persisted state."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "ape",
+  "owner": {
+    "name": "AAWWCC"
+  },
+  "metadata": {
+    "description": "Marketplace for the APE plugin (installs from this repo)"
+  },
+  "plugins": [
+    {
+      "name": "ape",
+      "source": "./plugins/ape-claude",
+      "description": "APE — durable, evidence-gated engineering runs for AI coding agents."
+    }
+  ]
+}

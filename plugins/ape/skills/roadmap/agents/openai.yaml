@@ -1,0 +1,6 @@
+interface:
+  display_name: "APE Roadmap"
+  short_description: "Inspect and evolve the governed roadmap"
+  default_prompt: "Use $ape:roadmap to inspect or explicitly evolve the APE roadmap."
+policy:
+  allow_implicit_invocation: false

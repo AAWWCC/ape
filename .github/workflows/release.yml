@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  host-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TZ: UTC
+      LC_ALL: C
+      LANG: C
+      APE_PUBLIC_REQUIRE_FORBIDDEN_HASHES: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.15.0
+          cache: npm
+      - name: Pin archive timestamps to the tag commit
+        shell: bash
+        run: |
+          epoch="$(git log -1 --format=%ct "${GITHUB_SHA}")"
+          echo "SOURCE_DATE_EPOCH=${epoch}" >> "${GITHUB_ENV}"
+      - name: Assert bundled Node and npm toolchain
+        shell: bash
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(npm --version)" = "11.12.1"
+      - run: npm ci
+      - name: Verify release identity
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+      - run: npm run typecheck
+      - run: npm run bundle
+      - name: Require fresh committed bundles
+        run: git diff --exit-code -- dist/
+      - run: npm run package:check
+      - run: npm run package:reproducible
+      - name: Validate the credential-free prompt evaluation release gate
+        run: npm run eval:prompts:check
+      - run: npm run public:check
+      - run: npm run smoke:plugins
+      - name: Verify a clean full public source export
+        shell: bash
+        run: npm run public:export -- --out "${RUNNER_TEMP}/ape-public-${GITHUB_SHA}"
+      - run: npm run release:reproducible
+      - name: Install pinned host CLIs in the unprivileged validation job
+        run: npm install --global @openai/codex@0.147.0 @anthropic-ai/claude-code@2.1.228
+      - name: Assert host CLI versions
+        shell: bash
+        run: |
+          test "$(codex --version)" = "codex-cli 0.147.0"
+          claude --version | grep --extended-regexp '^2\.1\.228([[:space:]]|$)'
+      - run: npm run smoke:marketplaces
+      - run: npm run validate
+
+  publish:
+    needs: host-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      TZ: UTC
+      LC_ALL: C
+      LANG: C
+      APE_PUBLIC_REQUIRE_FORBIDDEN_HASHES: '1'
+      GH_CLI_VERSION: 2.76.2
+      GH_CLI_SHA256: 62544b0f3759bbf1155c0ac3d75838b5fe23d66dfb75cf8368f84fff8f82b93e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.15.0
+          cache: npm
+      - name: Pin archive timestamps to the tag commit
+        shell: bash
+        run: |
+          epoch="$(git log -1 --format=%ct "${GITHUB_SHA}")"
+          echo "SOURCE_DATE_EPOCH=${epoch}" >> "${GITHUB_ENV}"
+      - name: Install checksum-pinned GitHub CLI
+        shell: bash
+        run: |
+          archive="${RUNNER_TEMP}/gh_${GH_CLI_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            --output "${archive}" \
+            "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_amd64.tar.gz"
+          echo "${GH_CLI_SHA256}  ${archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "${archive}" --directory "${RUNNER_TEMP}"
+          echo "${RUNNER_TEMP}/gh_${GH_CLI_VERSION}_linux_amd64/bin" >> "${GITHUB_PATH}"
+      - name: Assert release toolchain
+        shell: bash
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(npm --version)" = "11.12.1"
+          test "$(gh --version | head -n 1)" = "gh version ${GH_CLI_VERSION} (2025-07-30)"
+      - run: npm ci
+      - name: Verify release identity
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+      - run: npm run typecheck
+      - run: npm run bundle
+      - name: Require fresh committed bundles
+        run: git diff --exit-code -- dist/
+      - run: npm run package:check
+      - run: npm run package:reproducible
+      - name: Validate the credential-free prompt evaluation release gate
+        run: npm run eval:prompts:check
+      - run: npm run public:check
+      - run: npm run smoke:plugins
+      - name: Verify a clean full public source export
+        shell: bash
+        run: npm run public:export -- --out "${RUNNER_TEMP}/ape-public-${GITHUB_SHA}"
+      - run: npm run release:artifacts
+      - run: npm run release:reproducible
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: |
+            release/ape-*.tar.gz
+            release/ape-*.spdx.json
+            release/release-manifest.json
+            release/SHA256SUMS
+      - name: Publish immutable GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release create "${GITHUB_REF_NAME}" release/* --verify-tag --generate-notes --title "APE ${GITHUB_REF_NAME#v}"

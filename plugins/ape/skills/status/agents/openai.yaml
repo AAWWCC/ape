@@ -1,0 +1,6 @@
+interface:
+  display_name: "APE Status"
+  short_description: "Show the current APE run and gate state"
+  default_prompt: "Use $ape:status to show the active run, ticket, lane, and gate state."
+policy:
+  allow_implicit_invocation: true

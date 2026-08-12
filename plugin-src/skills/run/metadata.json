@@ -1,0 +1,6 @@
+{
+  "name": "run",
+  "description": "Start or advance an explicit APE native-agent run.",
+  "argumentHint": "[objective] [--lane auto|mechanical|fast|full] [--mode phase|debug|spike|land]",
+  "invocation": "explicit"
+}

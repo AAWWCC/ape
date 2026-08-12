@@ -1,0 +1,6 @@
+{
+  "name": "config",
+  "description": "Read, update, diagnose, or wire the APE host-neutral runtime configuration.",
+  "argumentHint": "[get|set|doctor|wire|unwire|init] [key] [value]",
+  "invocation": "explicit"
+}

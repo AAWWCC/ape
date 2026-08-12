@@ -1,0 +1,6 @@
+{
+  "name": "roadmap",
+  "description": "Seed, inspect, and evolve the runtime-owned APE roadmap.",
+  "argumentHint": "[status|register|supersede] [--reason \"why\"]",
+  "invocation": "explicit"
+}

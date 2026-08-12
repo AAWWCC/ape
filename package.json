@@ -1,0 +1,81 @@
+{
+  "name": "ape",
+  "version": "2.17.0",
+  "type": "module",
+  "private": true,
+  "description": "APE — durable, evidence-gated engineering runs for AI coding agents",
+  "author": {
+    "name": "AAWWCC",
+    "url": "https://github.com/AAWWCC"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "codex",
+    "mcp",
+    "plugin",
+    "pipeline",
+    "build",
+    "ship",
+    "plan",
+    "resumable",
+    "tdd",
+    "verification",
+    "autonomous",
+    "ape"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AAWWCC/ape.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AAWWCC/ape/issues"
+  },
+  "homepage": "https://github.com/AAWWCC/ape#readme",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:agent": "vitest run --maxWorkers=3",
+    "test:watch": "vitest",
+    "test:v2": "vitest run runtime-v2-",
+    "test:claude-schema": "node scripts/run-claude-schema-calibration.mjs",
+    "test:timings": "node scripts/update-test-durations.mjs",
+    "eval:prompts:check": "node evals/prompt-evals.mjs check",
+    "eval:prompts:plan": "node evals/prompt-evals.mjs plan",
+    "eval:prompts:run": "node evals/prompt-evals.mjs run",
+    "eval:prompts:verify": "node evals/prompt-evals.mjs verify",
+    "typecheck": "tsc -p jsconfig.json --noEmit",
+    "bundle": "node scripts/bundle-mcp.mjs",
+    "bundle:reach": "node scripts/bundle-reach.mjs",
+    "docs:config": "node scripts/generate-config-docs.mjs",
+    "docs:check": "node scripts/generate-config-docs.mjs --check",
+    "package:plugins": "node scripts/build-plugin-packages.mjs",
+    "package:check": "npm run docs:check && node scripts/build-plugin-packages.mjs --check",
+    "package:reproducible": "node scripts/check-plugin-reproducibility.mjs",
+    "release:artifacts": "node scripts/build-release-artifacts.mjs",
+    "release:reproducible": "node scripts/check-release-reproducibility.mjs",
+    "public:check": "node scripts/check-public-surface.mjs",
+    "public:export": "node scripts/export-public-tree.mjs",
+    "smoke:plugins": "node scripts/smoke-plugin-mcp.mjs",
+    "smoke:marketplaces": "node scripts/smoke-marketplace-install.mjs",
+    "reinstall:codex": "node scripts/reinstall-codex-plugin.mjs",
+    "statusline:svg": "node scripts/render-statusline-svg.mjs",
+    "benchmark:verify": "node scripts/benchmark-v2.mjs",
+    "validate:claude": "claude plugin validate ./plugins/ape-claude && claude plugin validate ./plugins/ape-claude --strict",
+    "validate:codex": "node scripts/smoke-marketplace-install.mjs --host codex",
+    "validate": "npm run validate:claude && npm run validate:codex"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.5",
+    "@vitest/coverage-v8": "^4.1.10",
+    "esbuild": "^0.28.1",
+    "fast-check": "^4.9.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
+}

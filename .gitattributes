@@ -1,0 +1,26 @@
+# Normalize line endings so cross-platform checkouts don't churn (field report:
+# plan/doc files showed as spuriously modified on Windows). text=auto eol=lf
+# stores everything as LF in the repo and checks out LF on every OS — APE is a
+# Node tool and its hooks/scripts/bundle must stay LF (a CRLF shell script or
+# bundle shebang breaks). This only governs FUTURE normalization; existing files
+# are untouched until an explicit `git add --renormalize .`.
+* text=auto eol=lf
+
+# Shell scripts MUST be LF regardless of content detection (a CRLF #! line fails).
+*.sh text eol=lf
+
+# Common binaries — never normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+
+# Generated bundles contain upstream code-generator template literals with
+# intentional space-only lines. Preserve their reproducible bytes while
+# keeping Git's whitespace diagnostics enabled for authored source.
+dist/*.mjs -whitespace
+plugins/*/dist/*.mjs -whitespace

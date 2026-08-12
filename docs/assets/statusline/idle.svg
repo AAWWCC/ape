@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="461" height="50" viewBox="0 0 461 50" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="14">
+<rect width="461" height="50" rx="8" fill="#16161e"/>
+<rect x="16.00" y="10" width="92.40" height="30" fill="rgb(122,162,247)"/>
+<rect x="108.40" y="10" width="109.20" height="30" fill="rgb(41,46,66)"/>
+<rect x="217.60" y="10" width="75.60" height="30" fill="rgb(59,66,97)"/>
+<rect x="293.20" y="10" width="92.40" height="30" fill="rgb(86,95,137)"/>
+<g transform="translate(23.35 19.75) scale(0.65625)"><path d="M5.1 0.8 V3.2 M8 0.8 V3.2 M10.9 0.8 V3.2 M5.1 12.8 V15.2 M8 12.8 V15.2 M10.9 12.8 V15.2 M0.8 5.1 H3.2 M0.8 8 H3.2 M0.8 10.9 H3.2 M12.8 5.1 H15.2 M12.8 8 H15.2 M12.8 10.9 H15.2" fill="none" stroke="rgb(26,27,38)" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.6 3.4 h6.8 a1.2 1.2 0 0 1 1.2 1.2 v6.8 a1.2 1.2 0 0 1 -1.2 1.2 H4.6 a1.2 1.2 0 0 1 -1.2 -1.2 V4.6 a1.2 1.2 0 0 1 1.2 -1.2 Z" fill="none" stroke="rgb(26,27,38)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.3 6.3 h3.4 v3.4 h-3.4 Z" fill="rgb(26,27,38)"/></g>
+<text x="45.40" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">F</text>
+<text x="53.80" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">a</text>
+<text x="62.20" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">b</text>
+<text x="70.60" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">l</text>
+<text x="79.00" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">e</text>
+<text x="95.80" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">5</text>
+<path d="M108.40 10 L117.20 25 L108.40 40 Z" fill="rgb(122,162,247)"/>
+<g transform="translate(124.15 19.75) scale(0.65625)"><path d="M1.2 3.6 h4.6 l1.6 2 h7.4 a1 1 0 0 1 1 1 v5.8 a1 1 0 0 1 -1 1 H2.2 a1 1 0 0 1 -1 -1 V4.6 a1 1 0 0 1 1 -1 Z" fill="rgb(125,207,255)"/></g>
+<text x="146.20" y="25" fill="rgb(125,207,255)" text-anchor="middle" dominant-baseline="central">a</text>
+<text x="154.60" y="25" fill="rgb(125,207,255)" text-anchor="middle" dominant-baseline="central">p</text>
+<text x="163.00" y="25" fill="rgb(125,207,255)" text-anchor="middle" dominant-baseline="central">p</text>
+<text x="171.40" y="25" fill="rgb(125,207,255)" text-anchor="middle" dominant-baseline="central">s</text>
+<text x="179.80" y="25" fill="rgb(125,207,255)" text-anchor="middle" dominant-baseline="central">/</text>
+<text x="188.20" y="25" fill="rgb(125,207,255)" text-anchor="middle" dominant-baseline="central">a</text>
+<text x="196.60" y="25" fill="rgb(125,207,255)" text-anchor="middle" dominant-baseline="central">p</text>
+<text x="205.00" y="25" fill="rgb(125,207,255)" text-anchor="middle" dominant-baseline="central">e</text>
+<path d="M217.60 10 L226.40 25 L217.60 40 Z" fill="rgb(41,46,66)"/>
+<g transform="translate(233.35 19.75) scale(0.65625)"><path d="M4.2 5.6 V10.4" fill="none" stroke="rgb(158,206,106)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M11.8 7.4 C11.8 9.8 8.4 9.6 5.4 11.1" fill="none" stroke="rgb(158,206,106)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.2 5.5 a1.9 1.9 0 1 1 0.001 0 Z M4.2 14.3 a1.9 1.9 0 1 1 0.001 0 Z M11.8 7.3 a1.9 1.9 0 1 1 0.001 0 Z" fill="none" stroke="rgb(158,206,106)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="255.40" y="25" fill="rgb(158,206,106)" text-anchor="middle" dominant-baseline="central">m</text>
+<text x="263.80" y="25" fill="rgb(158,206,106)" text-anchor="middle" dominant-baseline="central">a</text>
+<text x="272.20" y="25" fill="rgb(158,206,106)" text-anchor="middle" dominant-baseline="central">i</text>
+<text x="280.60" y="25" fill="rgb(158,206,106)" text-anchor="middle" dominant-baseline="central">n</text>
+<path d="M293.20 10 L302.00 25 L293.20 40 Z" fill="rgb(59,66,97)"/>
+<text x="314.20" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">A</text>
+<text x="322.60" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">P</text>
+<text x="331.00" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">E</text>
+<text x="347.80" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">i</text>
+<text x="356.20" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">d</text>
+<text x="364.60" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">l</text>
+<text x="373.00" y="25" fill="rgb(26,27,38)" text-anchor="middle" dominant-baseline="central">e</text>
+<path d="M385.60 10 L394.40 25 L385.60 40 Z" fill="rgb(86,95,137)"/>
+<g transform="translate(409.75 19.75) scale(0.65625)"><path d="M2.1 12.2 A6.4 6.4 0 1 1 13.9 12.2" fill="none" stroke="rgb(158,206,106)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 10.6 L11.6 5.8" fill="none" stroke="rgb(158,206,106)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 10.6 a1.3 1.3 0 1 1 0.001 0 Z" fill="rgb(158,206,106)"/></g>
+<text x="431.80" y="25" fill="rgb(158,206,106)" text-anchor="middle" dominant-baseline="central">8</text>
+<text x="440.20" y="25" fill="rgb(158,206,106)" text-anchor="middle" dominant-baseline="central">%</text>
+</svg>

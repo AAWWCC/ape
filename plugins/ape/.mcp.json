@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "ape": {
+      "command": "node",
+      "args": [
+        "./dist/ape-mcp.bundle.mjs",
+        "--host",
+        "codex"
+      ],
+      "cwd": "."
+    }
+  }
+}

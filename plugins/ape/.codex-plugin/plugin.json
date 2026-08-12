@@ -1,0 +1,40 @@
+{
+  "name": "ape",
+  "version": "2.17.0",
+  "description": "Durable, evidence-gated engineering runs for AI coding agents.",
+  "author": {
+    "name": "AAWWCC",
+    "url": "https://github.com/AAWWCC"
+  },
+  "repository": "https://github.com/AAWWCC/ape",
+  "homepage": "https://github.com/AAWWCC/ape#readme",
+  "license": "MIT",
+  "keywords": [
+    "agents",
+    "claude",
+    "codex",
+    "mcp",
+    "resumable",
+    "tdd",
+    "verification"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "APE",
+    "shortDescription": "Resumable, evidence-gated AI coding",
+    "longDescription": "APE coordinates durable coding runs with runtime-owned state, test-first behavioral implementation where applicable, independent review, and verified shipping.",
+    "developerName": "AAWWCC",
+    "category": "Engineering",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/AAWWCC/ape",
+    "defaultPrompt": [
+      "Run this change as a resumable, evidence-gated APE workflow"
+    ],
+    "brandColor": "#F59E0B",
+    "screenshots": []
+  }
+}

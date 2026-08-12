@@ -1,0 +1,93 @@
+#!/usr/bin/env node
+// LARP MODE — the advisory notification-sound hook. Plays a platform-native
+// .wav on a session lifecycle event so a watching human gets an audible cue.
+//
+// This entry is the fail-OPEN twin of `bin/ape-hook.mjs` (which fails CLOSED
+// because it enforces policy). LARP enforces nothing: the entire body swallows
+// every error, emits no decision, and always exits 0, so a broken audio path,
+// config file, or payload can never wedge a session. Keep the two entries
+// separate — merging LARP into the policy hook would force one entry to pick
+// a single failure posture.
+//
+// Decision logic lives in lib/runtime/larp.js; this file is only I/O: read
+// the payload, load the config fail-open, resolve the asset, spawn the player
+// detached + unref'd so the hook returns inside its latency budget.
+
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  deriveLarpEvent,
+  loadPackageSoundManifest,
+  resolveLarpDecision,
+  resolvePlayerCommand,
+} from '../lib/runtime/larp.js';
+import { loadRuntimeConfig } from '../lib/runtime/config.js';
+import { resolveGovernedRoot, runtimePaths } from '../lib/runtime/paths.js';
+
+// Works from both homes of this module: bin/ (dev source) and dist/ (bundle).
+const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const PACKAGE_SOUNDS = loadPackageSoundManifest(
+  join(PLUGIN_ROOT, 'assets', 'sounds', 'manifest.json'),
+);
+// PLUGIN_ROOT is Codex's host-specific plugin-root extension. Codex Stop and
+// SubagentStop command hooks require valid JSON on stdout even for a neutral
+// advisory result, while Claude's supplemental async hooks must stay silent.
+const CODEX_HOOK = typeof process.env.PLUGIN_ROOT === 'string'
+  && process.env.PLUGIN_ROOT.length > 0;
+
+try {
+  // Accumulate raw stdin Buffers and decode EXACTLY ONCE (Buffer.concat then a
+  // single toString('utf8')): `body += chunk` re-decodes each Buffer on its own
+  // and mangles a multibyte UTF-8 codepoint split across a pipe-read boundary
+  // into U+FFFD (audit finding 1.8). The cap stays on BYTE length; the fail-OPEN
+  // oversize path is unchanged — break out to silence, never throw a decision.
+  const chunks = [];
+  let bodyBytes = 0;
+  for await (const chunk of process.stdin) {
+    bodyBytes += Buffer.byteLength(chunk);
+    if (bodyBytes > 256 * 1024) break; // oversized payload -> silence, not failure
+    chunks.push(chunk);
+  }
+  const body = Buffer.concat(chunks).toString('utf8');
+  const input = bodyBytes <= 256 * 1024 && body.trim() ? JSON.parse(body) : {};
+
+  const event = deriveLarpEvent(input);
+  if (event) {
+    let config = {};
+    try {
+      const projectDir = resolveGovernedRoot({
+        explicitDir: input.project_dir,
+        cwd: input.cwd,
+      });
+      config = await loadRuntimeConfig(runtimePaths(projectDir).config);
+    } catch {
+      // unreadable/hostile config -> env-only decision over shipped defaults
+    }
+    const decision = resolveLarpDecision({
+      event,
+      config,
+      env: process.env,
+      packageSounds: PACKAGE_SOUNDS,
+    });
+    if (decision.play) {
+      const file = isAbsolute(decision.file)
+        ? decision.file
+        : join(PLUGIN_ROOT, decision.file);
+      const player = existsSync(file) ? resolvePlayerCommand(process.platform, file) : null;
+      if (player) {
+        const child = spawn(player.command, player.args, {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.on('error', () => {});
+        child.unref();
+      }
+    }
+  }
+} catch (cause) {
+  process.stderr.write(`ape-larp: ${cause?.message ?? String(cause)}\n`);
+}
+if (CODEX_HOOK) process.stdout.write('{}\n');
+process.exit(0);

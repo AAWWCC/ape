@@ -1,0 +1,5 @@
+{
+  "name": "status",
+  "description": "Show the active APE run, pending tickets, lane, and gate state.",
+  "invocation": "implicit"
+}

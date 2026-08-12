@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ape": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/dist/ape-mcp.bundle.mjs",
+        "--host",
+        "claude"
+      ]
+    }
+  }
+}

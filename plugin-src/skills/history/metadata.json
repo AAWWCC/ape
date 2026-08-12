@@ -1,0 +1,6 @@
+{
+  "name": "history",
+  "description": "Query, explain, import, inspect, or explicitly maintain APE machine history.",
+  "argumentHint": "[query|explain|import|maintenance-status|compact-artifacts] [run-or-requirement-id]",
+  "invocation": "explicit"
+}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "APE Run"
+  short_description: "Start or advance a governed coding run"
+  default_prompt: "Use $ape:run to start or advance an explicit evidence-gated coding run."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "target": "ES2022",
+    "strict": false,
+    "noImplicitAny": false,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": [
+    "lib/**/*.js",
+    "bin/*.mjs",
+    "scripts/*.mjs"
+  ],
+  "exclude": ["node_modules"]
+}
