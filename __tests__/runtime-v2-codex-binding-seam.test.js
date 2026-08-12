@@ -293,6 +293,29 @@ describe('APE v2 native Codex dispatch handshake', () => {
     ]);
   });
 
+  it('rejects an explicit type mismatch even when the dispatch task-name capability is valid', async () => {
+    const { dir, action } = await startedCodexProject();
+    const launch = await invokeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: 'codex-parent-session',
+      turn_id: 'turn-1',
+      tool_use_id: 'spawn-wrong-type',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: {
+        task_name: action.dispatch.agent_name,
+        agent_type: 'explorer',
+        message: 'gAAAAABencrypted-v2-message',
+        model: action.dispatch.model.model,
+        reasoning_effort: action.dispatch.model.reasoning_effort,
+      },
+    });
+    expect(launch.decision).toBe('deny');
+    expect((await statusRun(dir)).dispatches).toEqual([
+      expect.objectContaining({ ticket_id: action.ticket.ticket_id, status: 'prepared', launch_attempts: 0 }),
+    ]);
+  });
+
   it('authorizes spawn_agent, binds SubagentStart, injects a receipt capability, and admits the claimed write', async () => {
     const { dir, action } = await startedCodexProject();
     expect((await statusRun(dir)).dispatches).toEqual([
@@ -313,7 +336,6 @@ describe('APE v2 native Codex dispatch handshake', () => {
       tool_name: 'collaborationspawn_agent',
       tool_input: {
         task_name: action.dispatch.agent_name,
-        agent_type: action.dispatch.agent_type,
         message: 'gAAAAABencrypted-v2-message',
         model: action.dispatch.model.model,
         reasoning_effort: action.dispatch.model.reasoning_effort,
