@@ -199,7 +199,10 @@ describe('APE v2 MCP task cancellation and compatibility', () => {
     await atomicWriteJson(paths.config, {
       shipping: { auto_merge: true, provider: 'github', required_remote_checks: false },
       policy: { full_suite_cache: false },
-      gates: { inline_grace_ms: 0 },
+      // Keep the task's charged effect active after the detached suite starts.
+      // The probe below is then a deterministic pre-terminal cancellation
+      // barrier instead of racing the task's completed generation.
+      gates: { inline_grace_ms: 5_000 },
       test_commands: { full: `node "${probe}"` },
     });
     const tree = await currentTreeSha(projectDir);
@@ -260,19 +263,20 @@ describe('APE v2 MCP task cancellation and compatibility', () => {
         },
       });
       expect(created.result.resultType).toBe('task');
-      let liveWatch = null;
-      for (let index = 0; index < 600; index += 1) {
-        liveWatch = (await readJson(paths.active, null))?.gates_watch ?? null;
-        if (liveWatch) break;
+      for (let index = 0; index < 2_000; index += 1) {
+        if (await exists(started)) break;
         await new Promise((resolve) => setTimeout(resolve, 2));
       }
-      expect(liveWatch, 'the task operation must start a gate watch before cancellation').toBeTruthy();
-      runnerPid = liveWatch.pid;
+      expect(await exists(started), 'the gate command must start before cancellation').toBe(true);
       const cancelledAck = await handle({
         jsonrpc: '2.0', id: 2, method: 'tasks/cancel',
         params: { project_dir: projectDir, taskId: created.result.taskId, _meta: taskMeta() },
       });
       expect(cancelledAck.result).toEqual({ resultType: 'complete' });
+
+      const liveWatch = (await readJson(paths.active, null))?.gates_watch ?? null;
+      expect(liveWatch, 'the task operation must persist the attributable gate watch').toBeTruthy();
+      runnerPid = liveWatch.pid;
 
       let terminal = null;
       for (let index = 0; index < 300; index += 1) {
