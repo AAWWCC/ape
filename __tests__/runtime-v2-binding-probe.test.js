@@ -104,6 +104,32 @@ describe('APE v2 pre-run native binding probe', () => {
     });
   });
 
+  it('rejects an explicit type mismatch even when the probe task-name capability is valid', async () => {
+    const dir = await project();
+    const paths = runtimePaths(dir);
+    const action = await prepareBindingProbe(paths, {
+      host: 'codex',
+      model: { model: 'gpt-5.6-terra', reasoning_effort: 'medium' },
+    });
+    const launch = await invokeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: 'parent-session',
+      turn_id: 'turn-1',
+      tool_use_id: 'spawn-probe-wrong-type',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: {
+        task_name: action.dispatch.agent_name,
+        agent_type: 'worker',
+        message: 'gAAAAABencrypted-v2-message',
+        model: action.dispatch.model.model,
+        reasoning_effort: action.dispatch.model.reasoning_effort,
+      },
+    });
+    expect(launch.hookSpecificOutput?.permissionDecision ?? launch.decision).toBe('deny');
+    expect(await bindingProbeStatus(paths)).toMatchObject({ status: 'prepared', launch_observations: 0 });
+  });
+
   it('blocks start without consuming a run attempt, then proves prepared → launched → bound → acknowledged through real Codex event shapes', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
@@ -146,7 +172,6 @@ describe('APE v2 pre-run native binding probe', () => {
       tool_name: 'collaborationspawn_agent',
       tool_input: {
         task_name: action.dispatch.agent_name,
-        agent_type: action.dispatch.agent_type,
         message: 'gAAAAABencrypted-v2-message',
         model: action.dispatch.model.model,
         reasoning_effort: action.dispatch.model.reasoning_effort,
