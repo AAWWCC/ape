@@ -66,20 +66,17 @@ to `ape_run next`, which is the action that advances those states. A gate-blocke
 explicitly null aim refuses before any effect. Other actions reject `run_id`. If `active.json` is
 unreadable, use an unaimed `override reset`; the runtime cannot safely confirm an aimed recovery.
 
-### Codex binding preflight
+### Native agent binding
 
-Codex `start` requires a fresh canary:
+Codex and Claude both bind each real `dispatch_agent`; `start` does not launch a synthetic canary.
+The host-native launch reserves the runtime-created intent, and `SubagentStart` binds the host child
+before injecting its one-time receipt capability. Codex uses the randomized generated task name as
+the launch capability because Multi-Agent V2 omits `agent_type`; when lifecycle events omit that
+redundant field too, the unique launched intent supplies the expected role while the host-issued
+child session and agent IDs remain the identity boundary. An explicit mismatched type is rejected.
 
-1. `probe` returns `dispatch_probe` after ordinary doctor checks.
-2. Spawn it with the returned task name, type, model, reasoning effort, and message unchanged.
-3. PreToolUse consumes the visible task-name capability; `SubagentStart` binds the host child and
-   injects a receipt capability.
-4. `probe-status` must show a bound canary awaiting acknowledgement.
-5. Send its `probe_id` and `probe_capability` to `probe-ack`; `start` consumes the completed proof.
-
-The record stores hashes, not plaintext capabilities. Missing, expired, replayed, or unbound proofs
-fail as infrastructure without consuming a stage attempt. Claude uses its existing native binding
-path and does not run this preflight.
+The legacy `probe`, `probe-status`, and `probe-ack` actions remain available as optional diagnostics,
+but a probe is neither required nor consumed by `start`.
 
 ### External-tool claims
 

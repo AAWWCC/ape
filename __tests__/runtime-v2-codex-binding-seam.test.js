@@ -343,13 +343,25 @@ describe('APE v2 native Codex dispatch handshake', () => {
     });
     expect(launch.decision).toBe('allow');
 
+    const explicitMismatch = await invokeHook({
+      hook_event_name: 'SubagentStart',
+      project_dir: dir,
+      session_id: 'codex-child-session',
+      turn_id: 'turn-1',
+      agent_id: agentId,
+      agent_type: 'ape:wrong-role',
+    });
+    expect(explicitMismatch.decision).toBe('deny');
+
+    // Real Multi-Agent V2 lifecycle payloads may omit agent_type. The unique
+    // launched intent already pins the expected role; child session + agent id
+    // are the host-attested identity used for binding and later tool calls.
     const start = await invokeHook({
       hook_event_name: 'SubagentStart',
       project_dir: dir,
       session_id: 'codex-child-session',
       turn_id: 'turn-1',
       agent_id: agentId,
-      agent_type: action.dispatch.agent_type,
     });
     expect(start.decision).toBe('allow');
     expect(start.hookSpecificOutput?.additionalContext).toMatch(
@@ -370,7 +382,6 @@ describe('APE v2 native Codex dispatch handshake', () => {
       session_id: 'codex-child-session',
       turn_id: 'turn-1',
       agent_id: agentId,
-      agent_type: action.dispatch.agent_type,
       tool_name: 'Write',
       tool_input: { file_path: target, content: 'export const changed = true;\n' },
     });

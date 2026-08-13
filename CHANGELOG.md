@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.17.2 — 2026-08-12
+
+Codex runs now start directly and prove native binding on each real stage agent, matching Claude's
+workflow instead of spending an extra agent launch on a mandatory pre-run canary. Multi-Agent V2
+lifecycle events may omit `agent_type`; APE now uses the unique launched intent plus host-issued
+child session and agent IDs in that case, while still rejecting an explicitly mismatched type. The
+legacy probe actions remain optional diagnostics and no longer gate or modify run creation.
+
 ## 2.17.1 — 2026-08-12
 
 Fix Codex native binding launches when the host omits `agent_type`. The runtime now preserves the

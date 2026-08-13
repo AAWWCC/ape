@@ -14,7 +14,7 @@ import {
 import { RECEIPT_INPUT_SCHEMA } from '../lib/runtime/receipt-input.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
-import { bindCodexDispatch, completeCodexBindingProbe } from './codex-native-test-helper.js';
+import { bindCodexDispatch } from './codex-native-test-helper.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -544,7 +544,6 @@ describe('APE v2 bounded ape_history responses at the MCP wire', () => {
 describe('APE v2 bounded MCP responses over a live run', () => {
   it('bounds the wire while the persisted state and ticket files stay complete', async () => {
     const dir = await project();
-    await completeCodexBindingProbe(root, dir);
     const started = await apeRun({
       action: 'start',
       project_dir: dir,
