@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.17.4 — 2026-08-14
+
 Codex run start is fail-closed on a fresh, live native-binding preflight again. APE now requires
 the canary launch and child binding to be acknowledged, consumes that proof exactly once before
 the first Git mutation, and reports missing, expired, replayed, or observed-but-unbound probes as

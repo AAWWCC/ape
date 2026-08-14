@@ -18,7 +18,7 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = dirname(SCRIPT_DIR);
-const PUBLIC_VERSION = '2.17.3';
+const PUBLIC_VERSION = '2.17.4';
 const PUBLIC_FILES = Object.freeze([
   '.gitattributes',
   'LICENSE',
