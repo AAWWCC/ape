@@ -33,7 +33,7 @@ async function project(prefix = 'ape-start-hygiene-') {
   await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 1;\n');
   await writeFile(path.join(dir, 'tests', 'value.test.js'), 'throw new Error("red");\n');
   await writeFile(path.join(dir, 'docs', 'notes.md'), '# Notes\n');
-  git(dir, 'init', '-q');
+  git(dir, 'init', '-q', '-b', 'main');
   git(dir, 'config', 'user.email', 'ape@example.test');
   git(dir, 'config', 'user.name', 'APE Test');
   git(dir, 'add', '.');
