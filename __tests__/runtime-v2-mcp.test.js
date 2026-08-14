@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,13 @@ import { describe, expect, it } from 'vitest';
 import { LANES } from '../lib/runtime/constants.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+const verificationProfiles = [{
+  id: 'api-contract',
+  description: 'Verify the fixture API contract.',
+  command: 'node --test',
+  timeout_ms: 30_000,
+}];
 
 function session(messages) {
   return new Promise((resolve, reject) => {
@@ -114,6 +121,25 @@ describe('APE v2 MCP public surface', () => {
     ]));
     expect(run.inputSchema.properties.probe_id).toMatchObject({ type: 'string' });
     expect(run.inputSchema.properties.probe_capability).toMatchObject({ type: 'string' });
+  });
+
+  it('advertises aimed answer-preflight with a mandatory audit reason and canonical additive-only scope fields', async () => {
+    const responses = await session([
+      { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
+    ]);
+    const run = responses[0].result.tools.find((tool) => tool.name === 'ape_run');
+    expect(run.inputSchema.properties.action.enum).toContain('answer-preflight');
+    for (const field of [
+      'reason', 'preflight_hash', 'answers', 'claimed_paths', 'test_paths', 'risk_triggers',
+    ]) {
+      expect(run.inputSchema.properties).toHaveProperty(field);
+    }
+    for (const legacyField of ['add_claimed_paths', 'add_test_paths', 'add_risk_triggers']) {
+      expect(run.inputSchema.properties).not.toHaveProperty(legacyField);
+    }
+    expect(run.inputSchema.properties).not.toHaveProperty('remove_claimed_paths');
+    expect(run.inputSchema.properties).not.toHaveProperty('remove_test_paths');
+    expect(run.inputSchema.properties).not.toHaveProperty('remove_risk_triggers');
   });
 
   it('advertises bounded audited artifact maintenance on ape_history', async () => {
@@ -231,4 +257,178 @@ describe('APE v2 MCP public surface', () => {
       await rm(scratch, { recursive: true, force: true });
     }
   });
+
+  it('defaults omitted mode and version for Claude fast behavioral starts before selecting preflight', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-claude-preflight-'));
+    try {
+      await mkdir(path.join(scratch, '.ape', 'runtime'), { recursive: true });
+      await writeFile(path.join(scratch, '.ape', 'runtime', 'config.json'), JSON.stringify({
+        shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
+        test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
+        verification: { profiles: verificationProfiles },
+      }));
+      await writeFile(path.join(scratch, 'value.js'), 'export const value = 1;\n');
+      await writeFile(path.join(scratch, 'value.test.js'), 'import "./value.js";\n');
+      execFileSync('git', ['init', '-q'], { cwd: scratch });
+      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: scratch });
+      execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
+      execFileSync('git', ['add', '.'], { cwd: scratch });
+      execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
+
+      const responses = await session([{
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'ape_run',
+          arguments: {
+            action: 'start',
+            project_dir: scratch,
+            objective: 'Change the fixture behavior.',
+            lane: 'fast',
+            host: 'claude',
+            claimed_paths: ['value.js'],
+            test_paths: ['value.test.js'],
+            behavioral: true,
+            hooks_trusted: true,
+            subagents_available: true,
+            explicit_invocation: true,
+          },
+        },
+      }]);
+      expect(responses[0].result.isError).not.toBe(true);
+      const started = JSON.parse(responses[0].result.content[0].text);
+      expect(started.run.mode).toBe('phase');
+      expect(started.run.plan_contract_version).toBe(2);
+      expect(started.run.verification_profiles).toEqual(verificationProfiles);
+      const ticket = started.actions.find((action) => action.type === 'dispatch_agent')?.ticket;
+      expect(ticket).toMatchObject({
+        stage_id: 'preflight',
+        role: 'preflight_analyst',
+        writable: false,
+        plan_contract_version: 2,
+        verification_profiles: verificationProfiles,
+      });
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('defaults omitted mode to phase and plan v2 when behavioral mechanical escalates to full', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-claude-mechanical-escalation-'));
+    try {
+      await mkdir(path.join(scratch, '.ape', 'runtime'), { recursive: true });
+      await writeFile(path.join(scratch, '.ape', 'runtime', 'config.json'), JSON.stringify({
+        shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
+        test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
+        verification: { profiles: verificationProfiles },
+      }));
+      await writeFile(path.join(scratch, 'value.js'), 'export const value = 1;\n');
+      await writeFile(path.join(scratch, 'value.test.js'), 'import "./value.js";\n');
+      execFileSync('git', ['init', '-q'], { cwd: scratch });
+      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: scratch });
+      execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
+      execFileSync('git', ['add', '.'], { cwd: scratch });
+      execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
+
+      const responses = await session([{
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'ape_run',
+          arguments: {
+            action: 'start',
+            project_dir: scratch,
+            objective: 'Change behavior despite a mechanical lane request.',
+            lane: 'mechanical',
+            host: 'claude',
+            claimed_paths: ['value.js'],
+            test_paths: ['value.test.js'],
+            risk_triggers: ['public-api'],
+            behavioral: true,
+            hooks_trusted: true,
+            subagents_available: true,
+            explicit_invocation: true,
+          },
+        },
+      }]);
+
+      expect(responses[0].result.isError).not.toBe(true);
+      const started = JSON.parse(responses[0].result.content[0].text);
+      expect(started.run).toMatchObject({
+        mode: 'phase',
+        lane: 'full',
+        plan_contract_version: 2,
+        verification_profiles: verificationProfiles,
+      });
+      expect(started.run.risk_triggers).toEqual(['public-api']);
+      const ticket = started.actions.find((action) => action.type === 'dispatch_agent')?.ticket;
+      expect(ticket).toMatchObject({
+        stage_id: 'preflight',
+        role: 'preflight_analyst',
+        writable: false,
+        plan_contract_version: 2,
+        verification_profiles: verificationProfiles,
+      });
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('forwards explicit-v1 context to the legacy Claude full-run planner without preflight profiles', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-claude-plan-v1-'));
+    try {
+      await mkdir(path.join(scratch, '.ape', 'runtime'), { recursive: true });
+      await writeFile(path.join(scratch, '.ape', 'runtime', 'config.json'), JSON.stringify({
+        shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
+        test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
+        verification: { profiles: verificationProfiles },
+      }));
+      await writeFile(path.join(scratch, 'value.js'), 'export const value = 1;\n');
+      await writeFile(path.join(scratch, 'value.test.js'), 'import "./value.js";\n');
+      execFileSync('git', ['init', '-q'], { cwd: scratch });
+      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: scratch });
+      execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
+      execFileSync('git', ['add', '.'], { cwd: scratch });
+      execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
+
+      const responses = await session([{
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'ape_run',
+          arguments: {
+            action: 'start',
+            project_dir: scratch,
+            objective: 'Change the fixture behavior through the legacy plan contract.',
+            mode: 'phase',
+            lane: 'full',
+            host: 'claude',
+            claimed_paths: ['value.js'],
+            test_paths: ['value.test.js'],
+            behavioral: true,
+            hooks_trusted: true,
+            subagents_available: true,
+            explicit_invocation: true,
+            plan_contract_version: 1,
+          },
+        },
+      }]);
+      expect(responses[0].result.isError).not.toBe(true);
+      const started = JSON.parse(responses[0].result.content[0].text);
+      expect(started.run.plan_contract_version).toBe(1);
+      const ticket = started.actions.find((action) => action.type === 'dispatch_agent')?.ticket;
+      expect(ticket).toMatchObject({
+        stage_id: 'plan',
+        role: 'planner',
+        writable: false,
+        plan_contract_version: 1,
+      });
+      expect(ticket).not.toHaveProperty('verification_profiles');
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

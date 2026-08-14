@@ -22,7 +22,11 @@ The parent orchestrator owns every APE control call. It never performs stage wor
 5. Require exactly one receipt JSON matching the ticket's `output_schema`, including the exact
    injected `receipt_capability`. Call `ape_run` with `action: "record"` and place that complete
    receipt inside `receipt`. Never repair, fabricate, or omit agent evidence.
-6. After all receipts in the returned group are recorded, call `ape_run next` and repeat until the
+6. If recording preflight returns `input_required`, obtain complete exact answers for all question
+   ids and submit one aimed `answer-preflight` action with the exact hash, a bounded audit `reason`,
+   and additive-only `claimed_paths`, `test_paths`, and canonical `risk_triggers`. Do not dispatch a
+   writer while the hold remains.
+7. After all receipts in the returned group are recorded, call `ape_run next` and repeat until the
    runtime reports `completed` or `blocked`. Poll `next` while a shipping run reports pending remote
    checks.
 

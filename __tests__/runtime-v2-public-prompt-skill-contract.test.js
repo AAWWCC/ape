@@ -6,6 +6,7 @@ import { PlanContractSchema } from '../lib/runtime/plan-contract.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const ROLES = [
+  'preflight_analyst',
   'planner',
   'plan_checker',
   'plan_critic',
@@ -19,6 +20,7 @@ const ROLES = [
 ];
 const SKILLS = ['config', 'history', 'override', 'resume', 'roadmap', 'run', 'status'];
 const ROLE_BUDGETS = {
+  preflight_analyst: 260,
   planner: 220,
   plan_checker: 220,
   plan_critic: 220,
@@ -52,7 +54,7 @@ function splitSkill(text) {
 }
 
 describe('public prompt contracts', () => {
-  it('ships one common contract and ten bounded role prompts', async () => {
+  it('ships one common contract and eleven bounded role prompts', async () => {
     const files = (await readdir(path.join(ROOT, 'prompts'))).filter((name) => name.endsWith('.md')).sort();
     expect(files).toEqual(['common.md', ...ROLES.map((role) => `${role}.md`)].sort());
     expect(words(await read('prompts', 'common.md'))).toBeLessThanOrEqual(450);
@@ -61,7 +63,7 @@ describe('public prompt contracts', () => {
     }
   });
 
-  it('keeps ten Claude wrappers thin and common-before-role', async () => {
+  it('keeps eleven Claude wrappers thin and common-before-role', async () => {
     const agentFiles = (await readdir(path.join(ROOT, 'agents'))).filter((name) => name.endsWith('.md')).sort();
     expect(agentFiles).toEqual(ROLES.map((role) => `${role.replaceAll('_', '-')}.md`).sort());
     for (const role of ROLES) {
@@ -109,6 +111,11 @@ describe('public prompt contracts', () => {
       role,
       (await read('prompts', `${role}.md`)).replace(/\s+/g, ' '),
     ])));
+    expect(prompts.preflight_analyst).toMatch(/read.only[\s\S]*preflight_artifact/iu);
+    expect(prompts.preflight_analyst).toMatch(/acceptance[\s\S]*non.goals[\s\S]*baseline/iu);
+    expect(prompts.preflight_analyst).toMatch(/impacted[\s\S]*read[\s\S]*write/iu);
+    expect(prompts.preflight_analyst).toMatch(/compatibility[\s\S]*rollback[\s\S]*question/iu);
+    expect(prompts.preflight_analyst).toMatch(/verification[\s\S]*disposition/iu);
     expect(prompts.plan_checker).toMatch(/Coverage:[\s\S]*Paths:[\s\S]*Checks:[\s\S]*Acceptance:/u);
     expect(prompts.plan_checker).toMatch(/Do not judge feasibility/u);
     expect(prompts.plan_critic).toMatch(/own feasibility review/u);
@@ -116,7 +123,8 @@ describe('public prompt contracts', () => {
     expect(prompts.plan_judge).toMatch(/independently[\s\S]*Do not count votes/u);
     expect(prompts.test_writer).toMatch(/public behavior[\s\S]*mutually consistent[\s\S]*synthetic fixture/iu);
     expect(prompts.test_writer).toMatch(/Red must not depend on a defect remaining in live source/u);
-    expect(prompts.planner).toMatch(/evidence\.candidate_plan[\s\S]*"version": 1[\s\S]*"requirements"[\s\S]*"workstreams"[\s\S]*"risks"[\s\S]*"non_goals"/u);
+    expect(prompts.planner).toMatch(/evidence\.candidate_plan[\s\S]*"version": 2[\s\S]*preflight_hash[\s\S]*verification_profiles/iu);
+    expect(prompts.planner).toMatch(/untrusted[\s\S]*preflight/iu);
     expect(prompts.implementer).toMatch(/approved_plan[\s\S]*smallest complete change[\s\S]*plan_deviation[\s\S]*test-contradiction/u);
     expect(prompts.implementer).toMatch(/test\s+path and location[\s\S]*reproducing command and result[\s\S]*no conforming implementation can pass/u);
     for (const risk of ['injection', 'secret', 'supply-chain', 'integrity', 'availability']) {
@@ -136,7 +144,10 @@ describe('public prompt contracts', () => {
     expect(block).not.toBeNull();
     const example = JSON.parse(block[1]);
     expect(PlanContractSchema.safeParse(example)).toMatchObject({ success: true });
-    expect(Object.keys(example).sort()).toEqual(['non_goals', 'requirements', 'risks', 'version', 'workstreams']);
+    expect(example.version).toBe(2);
+    expect(Object.keys(example).sort()).toEqual([
+      'non_goals', 'preflight_hash', 'requirements', 'risks', 'version', 'workstreams',
+    ]);
   });
 
   it('contains no private run exemplars or historical incident identifiers', async () => {
@@ -200,9 +211,10 @@ describe('canonical skill sources', () => {
     expect(override).toMatch(/call[\s\S]*`ape_status` first/u);
     expect(run).toMatch(/Host invocation policy is the human-intent boundary/u);
     expect(run).toMatch(/`?explicit_invocation: true`?[\s\S]*caller-attested defense-in-depth[\s\S]*not proof of human intent/u);
-    expect(run).toMatch(/plan_contract_version: 1[\s\S]*every newly started `phase` run[\s\S]*lane is `auto` or[\s\S]*`full`/u);
-    expect(run).toMatch(/runtime uses it only when planning exists/u);
-    expect(run).toMatch(/Omit it for explicit `fast` or `mechanical`[\s\S]*non-phase modes[\s\S]*every resume/u);
+    expect(run).toMatch(/plan_contract_version: 2[\s\S]*new(?:ly)? started[\s\S]*(?:fast[\s\S]*full|full[\s\S]*fast)/iu);
+    expect(run).toMatch(/input_required[\s\S]*answer-preflight/iu);
+    expect(run).toMatch(/complete exact answers[\s\S]*additive/iu);
+    expect(run).toMatch(/Omit it for[\s\S]*mechanical[\s\S]*non-phase modes[\s\S]*every resume/iu);
   });
 
   it('shares one synchronized run/resume protocol reference', async () => {

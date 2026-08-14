@@ -592,3 +592,42 @@ describe('MCP 2026-07-28: documented handshake surface', () => {
     ).toBe(true);
   });
 });
+
+describe('structured preflight MCP surface', () => {
+  it('publishes the aimed answer-preflight input without adding a second mutation tool', async () => {
+    const responses = await session([toolsList(1, modern(MODERN))]);
+    const tools = byId(responses, 1).result.tools;
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'ape_run', 'ape_status', 'ape_history', 'ape_config',
+    ]);
+    const runTool = tools.find((tool) => tool.name === 'ape_run');
+    const schemaText = JSON.stringify(runTool.inputSchema);
+    expect(schemaText).toContain('answer-preflight');
+    for (const field of [
+      'run_id', 'reason', 'preflight_hash', 'answers', 'claimed_paths', 'test_paths', 'risk_triggers',
+    ]) {
+      expect(schemaText, field).toContain(field);
+    }
+    expect(schemaText).not.toContain('add_claimed_paths');
+    expect(schemaText).not.toContain('add_test_paths');
+    expect(schemaText).not.toContain('add_risk_triggers');
+    expect(schemaText).not.toContain('remove_claimed_paths');
+    expect(schemaText).not.toContain('remove_test_paths');
+
+    const source = readFileSync(path.join(root, 'bin', 'ape-mcp.mjs'), 'utf8');
+    for (const forwarding of [
+      'reason: input.reason',
+      'claimed_paths: input.claimed_paths',
+      'test_paths: input.test_paths',
+      'risk_triggers: input.risk_triggers',
+    ]) {
+      expect(source, `answer-preflight must forward ${forwarding}`).toContain(forwarding);
+    }
+  }, 20_000);
+
+  it('defaults newly started full MCP runs to plan contract v2 while retaining explicit v1', () => {
+    const source = readFileSync(path.join(root, 'bin', 'ape-mcp.mjs'), 'utf8');
+    expect(source).toMatch(/lane[\s\S]*full[\s\S]*plan_contract_version[\s\S]*2/iu);
+    expect(source).toMatch(/plan_contract_version[\s\S]*(?:1|2)/u);
+  });
+});

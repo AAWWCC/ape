@@ -15,7 +15,7 @@ const OWNER_MANIFEST = [
     symbols: [
       'prepareNativeBindingProbe', 'nativeBindingProbeStatus', 'ackNativeBindingProbe',
       'shouldTaskWrapApeRun', 'cleanupAttributedTaskGate', 'startRun', 'nextRun',
-      'executeApeRunTaskOperation', 'resumeRun', 'abortRun', 'regateRun', 'shipRun',
+      'executeApeRunTaskOperation', 'answerPreflight', 'resumeRun', 'abortRun', 'regateRun', 'shipRun',
       'expireDispatch', 'overrideRun',
     ],
     consumes: ['lib/runtime/receipt-service.js', 'lib/runtime/status-service.js'],
@@ -127,7 +127,7 @@ const REQUIRED_OWNER_FILES = OWNER_MANIFEST
   .map((entry) => entry.owner);
 
 const FACADE_EXPORT_COUNTS = Object.freeze({
-  'lib/runtime/service.js': 21,
+  'lib/runtime/service.js': 22,
   'lib/runtime/hooks.js': 33,
   'lib/runtime/gates.js': 12,
   'lib/runtime/scheduler.js': 3,

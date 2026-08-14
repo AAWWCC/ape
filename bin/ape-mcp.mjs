@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import {
   abortRun,
+  answerPreflight,
   ackNativeBindingProbe,
   compactStatus,
   configAction,
@@ -66,7 +67,7 @@ const TOOLS = Object.freeze([
       type: 'object',
       required: ['action'],
       properties: {
-        action: { type: 'string', enum: ['probe', 'probe-status', 'probe-ack', 'start', 'next', 'record', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'] },
+        action: { type: 'string', enum: ['probe', 'probe-status', 'probe-ack', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'] },
         project_dir: { type: 'string' },
         objective: { type: 'string' },
         mode: { type: 'string', enum: [...START_MODES] },
@@ -107,8 +108,16 @@ const TOOLS = Object.freeze([
         },
         plan_contract_version: {
           type: 'integer',
-          enum: [1],
-          description: 'Structured planning contract version. New MCP starts default to 1; omission is retained only for legacy/direct runtime compatibility.',
+          enum: [1, 2],
+          description: 'Structured planning contract version. New behavioral fast/full phase runs default to 2; explicit 1 retains the legacy planner-first contract.',
+        },
+        preflight_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
+        answers: {
+          type: 'array',
+          items: {
+            type: 'object', additionalProperties: false, required: ['id', 'answer'],
+            properties: { id: { type: 'string' }, answer: { type: 'string' } },
+          },
         },
         risk_triggers: { type: 'array', items: { type: 'string' } },
         behavioral: {
@@ -384,6 +393,17 @@ function taskWireProjection(task) {
 
 async function dispatchApeRun(projectDir, input) {
   const action = input.action;
+  if (action === 'answer-preflight') {
+    return projectRunResponse(await answerPreflight(projectDir, {
+      run_id: input.run_id,
+      reason: input.reason,
+      preflight_hash: input.preflight_hash,
+      answers: input.answers,
+      claimed_paths: input.claimed_paths,
+      test_paths: input.test_paths,
+      risk_triggers: input.risk_triggers,
+    }));
+  }
   // Misroute guard (C4, roadmap id abort-cannot-be-aimed): run_id confirms
   // the abort/override levers only. Every arm below (start, next, record,
   // status, resume, regate, ship, expire-dispatch) RETURNS from inside its
@@ -426,7 +446,12 @@ async function dispatchApeRun(projectDir, input) {
       // and the cross-run supersession marker only when the caller sent them.
       ...(input.completes !== undefined ? { completes: input.completes } : {}),
       ...(input.supersedes_run !== undefined ? { supersedes_run: input.supersedes_run } : {}),
-      plan_contract_version: input.plan_contract_version ?? 1,
+      plan_contract_version: input.plan_contract_version ?? (
+        (input.mode ?? 'phase') === 'phase' &&
+        (input.behavioral ?? true) === true
+          ? 2
+          : 1
+      ),
       risk_triggers: input.risk_triggers ?? [],
       behavioral: input.behavioral ?? true,
       hooks_trusted: input.hooks_trusted ?? false,

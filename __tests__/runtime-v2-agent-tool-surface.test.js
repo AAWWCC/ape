@@ -32,8 +32,8 @@ function parseTools(file) {
 describe('APE v2 agent tool-surface allowlists', () => {
   const files = readdirSync(agentsDir).filter((file) => file.endsWith('.md'));
 
-  it('covers all ten agent manifests', () => {
-    expect(files.length).toBe(10);
+  it('covers all eleven agent manifests', () => {
+    expect(files.length).toBe(11);
   });
 
   it.each(readdirSync(agentsDir).filter((file) => file.endsWith('.md')))(

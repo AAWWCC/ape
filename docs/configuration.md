@@ -43,6 +43,7 @@ checked byte-for-byte by `npm run docs:check`.
 | `models.codex.deep.model` | string | `"gpt-5.5"` | Codex deep-tier model. |
 | `models.codex.deep.reasoning_effort` | string | `"high"` | Codex deep-tier reasoning effort. |
 | `role_models.security_reviewer.claude.model` | string | `"opus"` | Per-role override, evaluated before the tier mapping. |
+| `verification.profiles` | object array | `[]` | Unique exact shell-free profile commands snapshotted at start and assigned as fail-closed merge gates. |
 | `test_commands.targeted` | string or null | `null` | Runtime-owned targeted merge-gate command. |
 | `test_commands.targeted_template` | string or null | `null` | Red-admission template; `{paths}` expands to authored test files. |
 | `test_commands.targeted_shuffle_template` | string or null | `null` | Optional full template for the second, order-varied red-admission run. |
@@ -187,3 +188,10 @@ a documented host precondition, so do not put it in configured commands or paths
 This preserves a deliberate value even when it equals today's default. `doctor` reports old
 materialized defaults whose intent is ambiguous; re-set the value to claim it or set the current
 default to drop it. `version` and `explicit_keys` cannot be set directly.
+
+# Verification profiles
+
+`verification.profiles` is a bounded list of unique profile ids with a description, exact shell-free
+command argv, optional contained project-relative root, and timeout. The runtime snapshots profiles
+at run start; later live config changes cannot alter that run's obligations. Every required profile
+must be assigned by the v2 plan and executes as a fail-closed merge gate.

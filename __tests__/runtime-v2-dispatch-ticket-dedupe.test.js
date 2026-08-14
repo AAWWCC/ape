@@ -41,6 +41,7 @@ import { RECEIPT_INPUT_SCHEMA } from '../lib/runtime/receipt-input.js';
 import { classifyApeRunOutcome } from '../lib/runtime/larp.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
+import { finalizeTicket, validateTicket } from '../lib/runtime/schemas.js';
 import { bindCodexDispatch, completeCodexBindingProbe } from './codex-native-test-helper.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -187,6 +188,68 @@ function countOccurrences(haystack, needle) {
 }
 
 const wireSize = (response) => JSON.stringify(response).length;
+
+describe('APE v2 immutable ticket planning context', () => {
+  it('hashes bounded contract version and snapshotted verification profiles without changing legacy tickets', () => {
+    const schemaTicket = (stageId, role, id, overrides = {}) => makeTicket(
+      stageId,
+      role,
+      id,
+      SMALL_OBJECTIVE,
+      {
+        model_tier: 'balanced',
+        model: { model: 'gpt-5.6-sol', reasoning_effort: 'high' },
+        base_tree_sha: '0'.repeat(40),
+        ...overrides,
+      },
+    );
+    const legacy = finalizeTicket(schemaTicket('plan', 'planner', 'tik-legacy-planner'));
+    expect(legacy).not.toHaveProperty('plan_contract_version');
+    expect(legacy).not.toHaveProperty('verification_profiles');
+    expect(validateTicket(legacy)).toMatchObject({ valid: true });
+    expect(finalizeTicket(legacy).ticket_hash).toBe(legacy.ticket_hash);
+
+    const verificationProfiles = [{
+      id: 'api-contract',
+      description: 'Verify the public API contract.',
+      command: 'npm run test:api',
+      root: 'packages/api',
+      timeout_ms: 30_000,
+    }];
+    const ticket = finalizeTicket({
+      ...schemaTicket('preflight', 'preflight_analyst', 'tik-preflight', {
+        writable: false,
+      }),
+      plan_contract_version: 2,
+      verification_profiles: verificationProfiles,
+    });
+    expect(ticket).toMatchObject({
+      plan_contract_version: 2,
+      verification_profiles: verificationProfiles,
+    });
+    expect(validateTicket(ticket)).toMatchObject({ valid: true });
+
+    const tampered = structuredClone(ticket);
+    tampered.verification_profiles[0].command = 'npm run test:other';
+    expect(validateTicket(tampered)).toMatchObject({
+      valid: false,
+      errors: expect.arrayContaining([expect.objectContaining({ message: 'ticket hash mismatch' })]),
+    });
+
+    expect(() => finalizeTicket({
+      ...schemaTicket('preflight', 'preflight_analyst', 'tik-too-many-profiles', {
+        writable: false,
+      }),
+      plan_contract_version: 2,
+      verification_profiles: Array.from({ length: 65 }, (_, index) => ({
+        id: `profile-${index}`,
+        description: 'A bounded profile.',
+        command: 'npm test',
+        timeout_ms: 1_000,
+      })),
+    })).toThrow();
+  });
+});
 
 // Compare a possibly-30,000-char field against a SHORT expected string without
 // dumping the whole objective into the assertion diff. Exactly equivalent to
@@ -584,6 +647,7 @@ async function startLongRun(dir) {
     hooks_trusted: true,
     subagents_available: true,
     explicit_invocation: true,
+    plan_contract_version: 1,
   });
   expect(started.value.ok).toBe(true);
   expect(started.value.run.lane).toBe('full');
@@ -629,6 +693,33 @@ function planReceipt(ticket, receiptCapability) {
 }
 
 describe('APE v2 ape_run response size cap over the live MCP wire', () => {
+  it.each([
+    ['explicit behavioral fast', 'fast', ['src/value.js']],
+    ['auto-classified full', 'auto', []],
+  ])('new %s starts default to contract v2 and dispatch preflight first', async (_label, lane, claimedPaths) => {
+    const dir = await project();
+    await completeCodexBindingProbe(root, dir);
+    const started = await apeRun({
+      action: 'start',
+      project_dir: dir,
+      objective: 'Exercise the default structured-preflight route.',
+      mode: 'phase',
+      lane,
+      host: 'codex',
+      claimed_paths: claimedPaths,
+      test_paths: ['tests/value.test.js'],
+      requirements: ['R1'],
+      behavioral: true,
+      hooks_trusted: true,
+      subagents_available: true,
+      explicit_invocation: true,
+    });
+    expect(started.value.ok).toBe(true);
+    expect(started.value.run.plan_contract_version).toBe(2);
+    expect(started.value.actions.find((action) => action.type === 'dispatch_agent')?.ticket)
+      .toMatchObject({ stage_id: 'preflight', role: 'preflight_analyst', writable: false });
+  }, 30_000);
+
   it('A1 acceptance: no ape_run response exceeds the cap, including the two-member plan-review dispatch', async () => {
     const dir = await project();
     // START issues the read-only planner ticket for a full-lane phase run.

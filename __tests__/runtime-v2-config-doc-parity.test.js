@@ -144,4 +144,13 @@ describe('APE v2 config docs parity (DEFAULT_CONFIG <-> docs/configuration.md)',
       ...RISK_TRIGGERS,
     ]);
   });
+
+  it('documents verification profiles as exact shell-free snapshotted merge gates', async () => {
+    const doc = await readDoc();
+    expect(doc).toContain('`verification.profiles`');
+    expect(doc).toMatch(/verification\.profiles[\s\S]*unique[\s\S]*description/iu);
+    expect(doc).toMatch(/exact[\s\S]*(?:argv|shell-free)[\s\S]*root[\s\S]*timeout/iu);
+    expect(doc).toMatch(/snapshot[\s\S]*start[\s\S]*live config/iu);
+    expect(doc).toMatch(/required[\s\S]*fail.closed[\s\S]*merge gate/iu);
+  });
 });
