@@ -1,16 +1,8 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 function read(relative) {
   return readFile(new URL(`../${relative}`, import.meta.url), 'utf8');
-}
-
-async function sourceFiles(dirRelative, extensions) {
-  const dir = new URL(`../${dirRelative}/`, import.meta.url);
-  const names = (await readdir(dir, { recursive: true })).sort();
-  return Promise.all(names
-    .filter((name) => extensions.some((extension) => name.endsWith(extension)))
-    .map(async (name) => [`${dirRelative}/${name}`, await readFile(new URL(name, dir), 'utf8')]));
 }
 
 describe('APE roadmap registration contract', () => {
@@ -39,16 +31,19 @@ describe('APE roadmap registration contract', () => {
   });
 });
 
-describe('roadmap registration stays a skill convention', () => {
-  it('adds no registration-bar enforcement to runtime or bin', async () => {
-    const files = [
-      ...(await sourceFiles('lib/runtime', ['.js'])),
-      ...(await sourceFiles('bin', ['.mjs'])),
-    ];
-    const offenders = files
-      .filter(([, text]) => /documentation nits remain advisory|behavioral or operator consequence/i.test(text))
-      .map(([name]) => name);
-    expect(offenders).toEqual([]);
+describe('roadmap registration runtime enforcement', () => {
+  it('documents graph, lifecycle, recovery, and accepted-receipt provenance enforcement', async () => {
+    const [skill, tools, architecture, bin] = await Promise.all([
+      read('plugin-src/skills/roadmap/body.md'),
+      read('docs/mcp-tools.md'),
+      read('docs/architecture.md'),
+      read('bin/ape-mcp.mjs'),
+    ]);
+    expect(skill).toMatch(/forward references[\s\S]*duplicate edges[\s\S]*cycles/i);
+    expect(skill).toMatch(/evidence\.roadmap_followups[\s\S]*accepted receipt[\s\S]*exact declaration/i);
+    expect(tools).toMatch(/unapplied, applied-but-unaudited, and committed[\s\S]*divergent/i);
+    expect(architecture).toMatch(/start and completed archival[\s\S]*satisfied/i);
+    expect(bin).toMatch(/accepted receipt with an exact normalized evidence\.roadmap_followups declaration/i);
   });
 
   it('does not make reviewers operate the roadmap control plane', async () => {

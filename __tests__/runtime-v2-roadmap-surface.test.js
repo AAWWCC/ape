@@ -8,6 +8,7 @@ import { historyAction, startRun, statusRun } from '../lib/runtime/service.js';
 import { renderStatusDoc } from '../lib/runtime/status-doc.js';
 import { archiveRun } from '../lib/runtime/history.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
+import { finalizeReceipt, validateReceipt } from '../lib/runtime/schemas.js';
 
 // Behavioral tests for the runtime service surfaces of the roadmap: the audited
 // historyAction verbs (roadmap-register/supersede/status), statusRun's roadmap
@@ -26,7 +27,7 @@ async function plainDir() {
 }
 
 function git(cwd, ...args) {
-  execFileSync('git', args, { cwd, encoding: 'utf8' });
+  return execFileSync('git', args, { cwd, encoding: 'utf8' });
 }
 
 async function gitProject() {
@@ -131,6 +132,30 @@ function archivedRun(runId, { requirements, completes, status = 'completed', ...
     tickets: [],
     receipts: [],
     ...rest,
+  };
+}
+
+function receiptWithFollowups(roadmap_followups) {
+  return {
+    schema_version: '2.0.0',
+    receipt_id: 'receipt-roadmap-followups',
+    run_id: 'run-roadmap-followups',
+    ticket_id: 'ticket-roadmap-followups',
+    ticket_hash: 'a'.repeat(64),
+    agent: { host: 'codex', role: 'implementer', identity: 'agent', model: null },
+    status: 'passed',
+    base_tree_sha: 'a'.repeat(40),
+    head_tree_sha: 'b'.repeat(40),
+    changed_files: [],
+    tests: [],
+    findings: [],
+    evidence: { roadmap_followups },
+    timing: {
+      started_at: '2026-07-01T00:00:00.000Z',
+      completed_at: '2026-07-01T00:00:01.000Z',
+      duration_ms: 1000,
+    },
+    previous_receipt_hash: null,
   };
 }
 
@@ -287,6 +312,75 @@ describe('APE v2 roadmap advances-vs-completes wiring (RM2)', () => {
     const none = await archiveRun(runtimePaths(await plainDir()), archivedRun('run-y', { requirements: ['R1'] }));
     const withCompletes = await archiveRun(runtimePaths(await plainDir()), archivedRun('run-y', { requirements: ['R1'], completes: ['R1'] }));
     expect(withCompletes.record_hash).not.toBe(none.record_hash);
+  });
+});
+
+describe('APE v2 roadmap prerequisite admission', () => {
+  it('rejects a roadmap target whose dependency is pending before branch or lock mutation', async () => {
+    const dir = await gitProject();
+    const paths = runtimePaths(dir);
+    await seedRoadmap(paths, [storedEntry('parent'), storedEntry('child', { depends_on: ['parent'] })]);
+    const branch = git(dir, 'branch', '--show-current');
+    await expect(startRun(dir, mechanicalStart({ requirements: ['child'], completes: ['child'] })))
+      .rejects.toThrow(/child.*parent.*ready.*satisfied/);
+    expect(git(dir, 'branch', '--show-current')).toBe(branch);
+    await expect(readJson(paths.active, null)).resolves.toBeNull();
+  });
+
+  it('rejects stale roadmap targets with the exact target id', async () => {
+    const dir = await gitProject();
+    const paths = runtimePaths(dir);
+    await seedRoadmap(paths, [storedEntry('old', {
+      superseded: { at: '2026-07-01T00:00:00.000Z', reason: 'obsolete', replaced_by: [] },
+    })]);
+    await expect(startRun(dir, mechanicalStart({ requirements: ['old'] })))
+      .rejects.toThrow(/stale target old/);
+  });
+
+  it('allows a target only after its dependency has an effective completed run that declared completes', async () => {
+    const dir = await gitProject();
+    const paths = runtimePaths(dir);
+    await seedRoadmap(paths, [storedEntry('parent'), storedEntry('child', { depends_on: ['parent'] })]);
+    await archiveRun(paths, archivedRun('run-parent', {
+      requirements: ['parent'], completes: ['parent'], status: 'completed',
+    }));
+    const started = await startRun(dir, mechanicalStart({ requirements: ['child'], completes: ['child'] }));
+    expect(started.ok).toBe(true);
+    expect(started.run.requirements).toEqual(['child']);
+  });
+
+  it('continues allowing ordinary requirement ids when a roadmap exists', async () => {
+    const dir = await gitProject();
+    const paths = runtimePaths(dir);
+    await seedRoadmap(paths, [storedEntry('roadmap-only')]);
+    const started = await startRun(dir, mechanicalStart({ requirements: ['ordinary-ticket'] }));
+    expect(started.ok).toBe(true);
+  });
+});
+
+describe('APE v2 receipt roadmap follow-up declarations', () => {
+  it('normalizes omitted depends_on into the hash-chained receipt', () => {
+    const receipt = finalizeReceipt(receiptWithFollowups([{
+      id: 'follow-up',
+      title: 'Follow up',
+      description: 'Do the follow-up',
+      acceptance: 'It is complete',
+    }]));
+    expect(receipt.evidence.roadmap_followups[0].depends_on).toEqual([]);
+    expect(validateReceipt(receipt).valid).toBe(true);
+  });
+
+  it.each([
+    [{ ...inputEntry('bad'), status: 'ready' }, /unrecognized key|status/i],
+    [{ ...inputEntry('bad'), discovered_by: 'run-forged' }, /unrecognized key|discovered_by/i],
+  ])('rejects forbidden proposal fields before receipt acceptance', (proposal, message) => {
+    expect(() => finalizeReceipt(receiptWithFollowups([proposal]))).toThrow(message);
+  });
+
+  it('bounds the proposal array', () => {
+    expect(() => finalizeReceipt(receiptWithFollowups(
+      Array.from({ length: 65 }, (_, index) => inputEntry(`follow-${index}`)),
+    ))).toThrow(/too_big|64|array/i);
   });
 });
 

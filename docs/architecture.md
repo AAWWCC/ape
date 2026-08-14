@@ -32,12 +32,20 @@ Project state lives under `.ape/runtime/`:
 | `artifact-archives/` | Verified gzip archives of redundant old artifacts. |
 | `requirement-index.json` | Requirement-to-run completion index. |
 | `roadmap.json` | Optional audited project roadmap; statuses are derived, not stored. |
+| `roadmap-mutation.json` | Bounded exact-once journal for the latest roadmap mutation. |
 | `suite-cache.json` | Passing suite results keyed by tree and resolved command. |
 | `status.md` | Human-readable projection of the active run. |
 | `overrides.ndjson` | Append-only audit log for override-class operations. |
 
 Writes use same-directory temporary files, `fsync`, and rename. Lock and receipt-effect mutations
-are serialized. Tickets and receipts are run-, tree-, role-, and capability-bound.
+are serialized. Roadmap mutations persist a before/after-hash journal, then the store, then a
+mutation-ID-deduplicated override audit; recovery refuses divergent durable state. Tickets and
+receipts are run-, tree-, role-, and capability-bound.
+
+The roadmap remains optional. When present, registration validates the complete prospective live
+dependency graph and accepted-receipt provenance. Run start and completed archival recheck that
+every dependency of a roadmap-backed requirement is currently `satisfied`; ordinary requirement
+IDs and roadmap-less projects retain their existing path.
 
 ## Terminal state and retention
 

@@ -353,15 +353,16 @@ describe('APE v2 native Codex dispatch handshake', () => {
     });
     expect(explicitMismatch.decision).toBe('deny');
 
-    // Real Multi-Agent V2 lifecycle payloads may omit agent_type. The unique
-    // launched intent already pins the expected role; child session + agent id
-    // are the host-attested identity used for binding and later tool calls.
+    // Multi-Agent V2 does not accept a requested agent_type on spawn_agent,
+    // and reports its effective default role on the lifecycle event. APE keeps
+    // the logical ticket role separate from that host-attested binding role.
     const start = await invokeHook({
       hook_event_name: 'SubagentStart',
       project_dir: dir,
       session_id: 'codex-child-session',
       turn_id: 'turn-1',
       agent_id: agentId,
+      agent_type: 'default',
     });
     expect(start.decision).toBe('allow');
     expect(start.hookSpecificOutput?.additionalContext).toMatch(

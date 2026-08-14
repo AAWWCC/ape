@@ -180,7 +180,7 @@ describe('APE v2 MCP public surface', () => {
     expect(responses[1].result.tools).toHaveLength(4);
   });
 
-  it.each(['claude', 'codex'])('starts a %s-native run without a synthetic binding probe', async (host) => {
+  it.each(['claude', 'codex'])('applies the correct native binding precondition for %s', async (host) => {
     const scratch = await mkdtemp(path.join(os.tmpdir(), `ape-mcp-${host}-start-`));
     try {
       await writeFile(path.join(scratch, 'README.md'), '# fixture\n');
@@ -212,10 +212,21 @@ describe('APE v2 MCP public surface', () => {
           },
         },
       ]);
-      expect(responses[0].result.isError).not.toBe(true);
       const started = JSON.parse(responses[0].result.content[0].text);
-      expect(started.run.plan_contract_version).toBe(1);
-      expect(started).not.toHaveProperty('binding_probe');
+      if (host === 'claude') {
+        expect(responses[0].result.isError).not.toBe(true);
+        expect(started.run.plan_contract_version).toBe(1);
+        expect(started).not.toHaveProperty('binding_probe');
+      } else {
+        expect(responses[0].result.isError).toBe(true);
+        expect(started).toMatchObject({
+          ok: false,
+          blocked: true,
+          infrastructure_failure: true,
+          attempts_consumed: 0,
+          probe: { status: 'missing', infrastructure_status: 'required' },
+        });
+      }
     } finally {
       await rm(scratch, { recursive: true, force: true });
     }

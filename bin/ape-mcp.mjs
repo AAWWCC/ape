@@ -61,7 +61,7 @@ const resolveMcpRoot = (explicitDir = null) => resolveGovernedRoot({ explicitDir
 const TOOLS = Object.freeze([
   {
     name: 'ape_run',
-    description: 'Start and advance the deterministic APE runtime.',
+    description: 'Start and advance the deterministic APE runtime. Codex start is fail-closed until probe, native canary launch, probe-status, and probe-ack prove live child binding; the completed proof is consumed exactly once before Git mutation.',
     inputSchema: {
       type: 'object',
       required: ['action'],
@@ -91,11 +91,15 @@ const TOOLS = Object.freeze([
           items: { type: 'string' },
           description: 'Test files the independent test writer will author (its write allowlist). Required for behavioral lanes (fast/full); leave empty only for mechanical/debug/spike scopes with behavioral:false.',
         },
-        requirements: { type: 'array', items: { type: 'string' } },
+        requirements: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Requirements this run advances. When an id names a live roadmap entry, every transitive roadmap dependency must currently be satisfied and the target must not be stale; ordinary non-roadmap ids remain allowed.',
+        },
         completes: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional on start: the subset of requirements this run FINISHES (not just advances). Must be a subset of requirements. A roadmap requirement auto-satisfies only when a run that declared it complete reaches archived completed status.',
+          description: 'Optional on start: the subset of requirements this run FINISHES (not just advances). Must be a subset of requirements. Roadmap prerequisites are rechecked immediately before completed archival; satisfaction is derived only after a declaring run is archived completed.',
         },
         supersedes_run: {
           type: 'string',
@@ -149,7 +153,7 @@ const TOOLS = Object.freeze([
   {
     name: 'ape_history',
     description:
-      'Query, explain, or import APE machine history; inspect latest retention maintenance status; explicitly compact redundant old run artifacts with a required audit reason; and drive the runtime-owned roadmap: roadmap-status (derived cold-boot picture), roadmap-register (audited batch of plan entries), roadmap-supersede (mark entries stale with a reason). Inputs are bounded at 64 KB.',
+      'Query, explain, or import APE machine history; inspect latest retention maintenance status; explicitly compact redundant old run artifacts with a required audit reason; and drive the runtime-owned roadmap: roadmap-status (derived cold-boot picture), roadmap-register (validated, receipt-provenanced, journaled batch), roadmap-supersede (validated journaled staleness mutation). Inputs are bounded at 64 KB.',
     inputSchema: {
       type: 'object',
       required: ['action'],
@@ -180,24 +184,26 @@ const TOOLS = Object.freeze([
         // Never supply a status: status is derived, never stored.
         entries: {
           type: 'array',
+          maxItems: 64,
           items: {
             type: 'object',
+            additionalProperties: false,
             required: ['id', 'title', 'description', 'acceptance'],
             properties: {
-              id: { type: 'string' },
-              title: { type: 'string' },
-              description: { type: 'string' },
-              acceptance: { type: 'string' },
-              depends_on: { type: 'array', items: { type: 'string' } },
-              discovered_by: { type: 'string' },
+              id: { type: 'string', minLength: 1, maxLength: 128 },
+              title: { type: 'string', minLength: 1, maxLength: 200 },
+              description: { type: 'string', minLength: 1, maxLength: 4000 },
+              acceptance: { type: 'string', minLength: 1, maxLength: 2000 },
+              depends_on: { type: 'array', maxItems: 32, items: { type: 'string', minLength: 1, maxLength: 128 } },
+              discovered_by: { type: 'string', minLength: 1, maxLength: 128, description: "Omit for operator provenance. A non-operator run id is accepted only when that active or archived run contains an accepted receipt with an exact normalized evidence.roadmap_followups declaration." },
             },
           },
         },
         // roadmap-supersede: the entry ids to mark stale, plus optional
         // replacement ids. reason is required for register, supersede, and
         // the explicit compact-artifacts maintenance action.
-        ids: { type: 'array', items: { type: 'string' } },
-        replaced_by: { type: 'array', items: { type: 'string' } },
+        ids: { type: 'array', maxItems: 64, items: { type: 'string', minLength: 1, maxLength: 128 } },
+        replaced_by: { type: 'array', maxItems: 32, items: { type: 'string', minLength: 1, maxLength: 128 } },
         reason: {
           type: 'string',
           description: 'Required non-empty audit reason for compact-artifacts, roadmap-register, and roadmap-supersede.',
@@ -280,7 +286,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.17.3' };
+    return { name: 'ape', version: '2.17.4' };
   }
 }
 
@@ -427,6 +433,10 @@ async function dispatchApeRun(projectDir, input) {
       subagents_available: input.subagents_available ?? false,
       explicit_invocation: input.explicit_invocation ?? false,
       binding_protocol: 'native-v1',
+      // Codex must prove the live host actually delivers APE's launch and
+      // child-binding lifecycle before a real run may mutate Git or state.
+      // Claude uses its separately attested native binding path.
+      ...(input.host === 'codex' ? { binding_probe: 'required-v1' } : {}),
     });
   }
   if (action === 'next') return nextRun(projectDir, { wait_ms: input.wait_ms });

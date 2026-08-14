@@ -58,7 +58,7 @@ async function smoke(host, pluginRoot) {
       { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
     ].map((message) => JSON.stringify(message)).join('\n') + '\n');
   });
-  if (responses[0]?.result?.serverInfo?.version !== '2.17.3') {
+  if (responses[0]?.result?.serverInfo?.version !== '2.17.4') {
     throw new Error(`${host} package MCP returned the wrong server version`);
   }
   const tools = responses[1]?.result?.tools?.map((tool) => tool.name);

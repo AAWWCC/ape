@@ -66,17 +66,23 @@ to `ape_run next`, which is the action that advances those states. A gate-blocke
 explicitly null aim refuses before any effect. Other actions reject `run_id`. If `active.json` is
 unreadable, use an unaimed `override reset`; the runtime cannot safely confirm an aimed recovery.
 
-### Native agent binding
+### Codex binding preflight
 
-Codex and Claude both bind each real `dispatch_agent`; `start` does not launch a synthetic canary.
-The host-native launch reserves the runtime-created intent, and `SubagentStart` binds the host child
-before injecting its one-time receipt capability. Codex uses the randomized generated task name as
-the launch capability because Multi-Agent V2 omits `agent_type`; when lifecycle events omit that
-redundant field too, the unique launched intent supplies the expected role while the host-issued
-child session and agent IDs remain the identity boundary. An explicit mismatched type is rejected.
+Codex `start` requires a fresh live capability proof:
 
-The legacy `probe`, `probe-status`, and `probe-ack` actions remain available as optional diagnostics,
-but a probe is neither required nor consumed by `start`.
+1. `probe` returns `dispatch_probe` after ordinary doctor checks.
+2. Spawn it with the returned task name, model, reasoning effort, and message unchanged. The
+   returned type is APE's logical probe role, not a Multi-Agent V2 native argument.
+3. PreToolUse consumes the visible task-name capability; `SubagentStart` must bind the host child and
+   inject a probe capability.
+4. `probe-status` must show a bound canary awaiting acknowledgement.
+5. Send its `probe_id` and `probe_capability` to `probe-ack`; `start` atomically consumes the
+   completed, single-use proof before its first Git mutation.
+
+Manifest wiring is only a static package check; it does not prove that the current Codex session
+delivers lifecycle events. Missing, expired, replayed, or observed-but-unbound probes fail as
+infrastructure without creating a run or consuming a stage attempt. Claude uses its existing native
+binding path and does not run this preflight.
 
 ### External-tool claims
 
@@ -140,18 +146,34 @@ stopping later candidates.
 ## Roadmap verbs
 
 The optional roadmap is stored at `.ape/runtime/roadmap.json`. Its statuses are derived from the
-store, requirements/history, and the active run; dependencies inform the view but do not schedule
-runs.
+store, requirements/history, and the active run. It does not schedule runs, but a live roadmap
+target may start or complete only while every transitive dependency is `satisfied`; stale targets
+and stale, pending, ready, in-progress, or unknown dependencies fail closed with their IDs.
 
 - `roadmap-status` is read-only and returns `roadmap: null` when no roadmap exists.
 - `roadmap-register` atomically adds up to 64 entries with `id`, `title`, `description`,
-  `acceptance`, optional `depends_on`/`discovered_by`, and a required audit reason. Do not send
+  `acceptance`, optional `depends_on`/`discovered_by`, and a required audit reason. The complete
+  prospective live graph is validated before mutation: same-batch forward references work, while
+  unknown/stale dependencies, duplicate edges, self-reference, and cycles reject the whole batch.
+  Do not send
   `status`. Each entry must name a behavioral consequence if it is never done. This bar applies to
   entries, not findings: reviewers still report all findings in durable receipts. A prose-only nit
   is folded into `doc-and-comment-accuracy-sweep` or dropped with reasoning rather than promoted to
   its own roadmap item.
-- `roadmap-supersede` marks known entries stale with a reason and optional `replaced_by`; it does
-  not delete them.
+- `roadmap-supersede` marks known live entries stale with a reason and optional `replaced_by`; it
+  does not delete them. Targets and replacements must be unique, known, live, and disjoint, and the
+  remaining live dependency graph must still be valid.
+
+Both mutations use a bounded single-operation journal. The roadmap store lands before the override
+audit line, and the same mutation ID appears in the entry audit, journal, and override record.
+Retries recover unapplied, applied-but-unaudited, and committed operations exactly once; a store
+matching neither recorded hash is divergent and is never overwritten.
+
+`receipt.evidence.roadmap_followups` is the enforceable proposal channel: at most 64 normalized
+entry declarations, with no `status` or `discovered_by`. A non-operator `discovered_by` on
+registration must name an active or archived run containing an accepted receipt with an exact
+declaration match. Receipt acceptance never auto-registers an entry; explicit approval and a
+separate `roadmap-register` call remain required.
 
 Derived entries are `satisfied`, `in_progress`, `ready`, `pending`, or `stale`. `status_filter`
 limits returned entries without changing whole-roadmap counts.

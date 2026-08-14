@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   acknowledgeBindingProbe,
   bindingProbeStatus,
+  consumeBindingProbe,
   prepareBindingProbe,
 } from '../lib/runtime/binding-probe.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
@@ -62,6 +63,7 @@ function startInput() {
     lane: 'mechanical',
     host: 'codex',
     binding_protocol: 'native-v1',
+    binding_probe: 'required-v1',
     claimed_paths: ['docs/note.md'],
     test_paths: [],
     requirements: ['R-BINDING-PROBE'],
@@ -73,7 +75,7 @@ function startInput() {
   };
 }
 
-describe('APE v2 optional native binding diagnostic', () => {
+describe('APE v2 mandatory pre-run native binding proof', () => {
   it('rejects a forged visible task-name capability without advancing the probe', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
@@ -129,9 +131,21 @@ describe('APE v2 optional native binding diagnostic', () => {
     expect(await bindingProbeStatus(paths)).toMatchObject({ status: 'prepared', launch_observations: 0 });
   });
 
-  it('proves prepared → launched → bound → acknowledged as an optional diagnostic independent of start', async () => {
+  it('blocks before mutation, then consumes prepared → launched → bound → acknowledged proof exactly once', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
+    const branchBefore = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
+
+    const blocked = await startRun(dir, startInput());
+    expect(blocked).toMatchObject({
+      ok: false,
+      blocked: true,
+      infrastructure_failure: true,
+      attempts_consumed: 0,
+      probe: { status: 'missing', infrastructure_status: 'required' },
+    });
+    expect(await readJson(paths.active, null)).toBeNull();
+    expect(execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim()).toBe(branchBefore);
 
     const prepared = await prepareNativeBindingProbe(dir, {
       host: 'codex',
@@ -171,6 +185,10 @@ describe('APE v2 optional native binding diagnostic', () => {
       launch_observations: 1,
       attempts_consumed: 0,
     });
+    expect(await readJson(paths.bindingProbe, null)).toMatchObject({
+      agent_type: 'explorer',
+      binding_agent_type: 'default',
+    });
 
     const mismatchedBinding = await invokeHook({
       hook_event_name: 'SubagentStart',
@@ -188,6 +206,7 @@ describe('APE v2 optional native binding diagnostic', () => {
       session_id: 'codex-child-session',
       turn_id: 'turn-1',
       agent_id: 'native-probe-agent',
+      agent_type: 'default',
     });
     expect(binding.systemMessage).toBeUndefined();
     const context = binding.hookSpecificOutput?.additionalContext ?? '';
@@ -226,15 +245,25 @@ describe('APE v2 optional native binding diagnostic', () => {
 
     const started = await startRun(dir, startInput());
     expect(started.ok).toBe(true);
-    expect(started).not.toHaveProperty('binding_probe');
+    expect(started.binding_probe).toMatchObject({
+      probe_id: action.probe.probe_id,
+      status: 'consumed',
+      infrastructure_status: 'consumed',
+      attempts_consumed: 0,
+    });
     expect(started.run.attempts).not.toHaveProperty('probe');
     expect(started.actions.find((entry) => entry.type === 'dispatch_agent')?.ticket.attempt).toBe(1);
-    expect((await bindingProbeStatus(paths)).status).toBe('completed');
+    expect((await bindingProbeStatus(paths)).status).toBe('consumed');
+    await expect(consumeBindingProbe(paths, 'codex')).resolves.toMatchObject({
+      ok: false,
+      probe: { status: 'consumed', infrastructure_status: 'consumed' },
+    });
   });
 
-  it('reports an unbound optional diagnostic without blocking real run creation', async () => {
+  it('reports an observed-but-unbound launch as infrastructure failure and never creates run state', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
+    const branchBefore = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
     const action = await prepareBindingProbe(paths, {
       host: 'codex',
       model: { model: 'gpt-5.6-terra', reasoning_effort: 'medium' },
@@ -255,14 +284,15 @@ describe('APE v2 optional native binding diagnostic', () => {
       },
     });
 
-    const started = await startRun(dir, startInput());
-    expect(started.ok).toBe(true);
-    expect(started).not.toHaveProperty('binding_probe');
-    expect(await readJson(paths.active, null)).toMatchObject({ run_id: started.run.run_id });
-    expect(await bindingProbeStatus(paths)).toMatchObject({
-      status: 'launched',
-      infrastructure_status: 'awaiting_binding',
+    const blocked = await startRun(dir, startInput());
+    expect(blocked).toMatchObject({
+      ok: false,
+      blocked: true,
+      infrastructure_failure: true,
       attempts_consumed: 0,
+      probe: { status: 'launched', infrastructure_status: 'awaiting_binding' },
     });
+    expect(await readJson(paths.active, null)).toBeNull();
+    expect(execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim()).toBe(branchBefore);
   });
 });

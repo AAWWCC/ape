@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+## 2.17.4 — 2026-08-14
+
+Codex run start is fail-closed on a fresh, live native-binding preflight again. APE now requires
+the canary launch and child binding to be acknowledged, consumes that proof exactly once before
+the first Git mutation, and reports missing, expired, replayed, or observed-but-unbound probes as
+infrastructure failures without creating a run or consuming a stage attempt. Static hook-manifest
+coverage remains a package check but is no longer described as proof of live lifecycle delivery.
+Codex Multi-Agent V2 binding now records the host-effective `default` role separately from APE's
+logical worker/explorer role, so production `SubagentStart` events bind instead of being rejected.
+
 ## 2.17.3 — 2026-08-13
 
 Every APE run now starts on a fresh APE-owned branch created from the resolved default-branch tip,

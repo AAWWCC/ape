@@ -31,4 +31,7 @@ the project has no roadmap, it may propose roadmap entries; registration still w
 approval.
 
 The roadmap is an optional audited ledger above the scheduler. It never starts or sequences runs,
-and entry status is derived from active state, requirements, and immutable history.
+but it gates roadmap-backed start and completion on satisfied prerequisites. Entry status is
+derived from active state, requirements, and immutable history. A receipt can declare bounded
+`evidence.roadmap_followups`; exact accepted-receipt provenance is required before a later,
+separately approved registration can name the discovering run.
