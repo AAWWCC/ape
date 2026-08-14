@@ -12,10 +12,25 @@ scheduler (pure state + event → actions)
 Claude Agent tool or Codex native subagent
 ```
 
-`lib/runtime/scheduler.js` decides stages, retries, lane escalation, remediation, and terminal
-state. `lib/runtime/service.js` applies those decisions through storage, git evidence, gates,
-history, and GitHub shipping. Adapters translate only role/model policy and dispatch shape; they do
-not make scheduling decisions.
+The four long-standing runtime entry modules are compatibility facades. They contain direct
+re-exports while the domain modules own the implementations:
+
+- `service.js` exports lifecycle orchestration from `lifecycle-service.js`, receipt admission and
+  finalization from `receipt-service.js`, and service-facing queries from `status-service.js`.
+  `lifecycle-service.js` consumes the receipt and status services; `history.js` remains the
+  lower-level immutable history store.
+- `hooks.js` exports evidence-command rules from `evidence-policy.js`, write and tree rules from
+  `write-policy.js`, lifecycle/binding rules from `lifecycle-policy.js`, and test-path classifiers
+  directly from `path-scope.js`.
+- `gates.js` exports pure gate decisions from `gate-evaluation.js`, detached-suite observation
+  from `gate-watch.js`, and guarded GitHub operations from `github-shipping.js`.
+  Watch and shipping code may consume gate evaluation; gate evaluation does not depend on either.
+- `scheduler.js` exports the deterministic reducer from `reducer.js` and bounded review evidence
+  from `review-evidence.js`. The reducer consumes that one review-evidence API.
+
+Service code continues to import `gates.js` intentionally. That facade is the established test and
+host substitution seam even though the physical gate implementations live behind it. Adapters
+translate only role/model policy and dispatch shape; they do not make scheduling decisions.
 
 ## State
 
@@ -91,6 +106,10 @@ npm run bundle:reach -- lib/runtime/runner.js
 
 The command uses esbuild metadata. For example, `lib/runtime/runner.js` contributes to the MCP and
 LARP bundles, not the hooks bundle.
+
+Release validation checks all eleven domain owners through this metadata, then copies the three
+root bundles into both plugin distributions. This proves that the owners required by an entry
+point are actually reachable without relying on symbol names surviving tree-shaking.
 
 ## Trust boundary
 
