@@ -404,6 +404,65 @@ describe('APE v2 scheduler reducer properties (seeded, deterministic replay)', (
   });
 });
 
+describe('APE v2 preflight answer reducer properties (seeded)', () => {
+  const additionsArb = fc.record({
+    claimed_paths: fc.uniqueArray(
+      fc.constantFrom('src/compat.js', 'src/public.js', 'docs/contract.md'),
+      { maxLength: 3 },
+    ),
+    test_paths: fc.uniqueArray(
+      fc.constantFrom('tests/compat.test.js', 'tests/public.test.js'),
+      { maxLength: 2 },
+    ),
+    risk_triggers: fc.uniqueArray(
+      fc.constantFrom('public-api', 'schema', 'migration'),
+      { maxLength: 3 },
+    ),
+  });
+
+  it('is deterministic and monotone for every accepted additive answer payload', () => {
+    fc.assert(
+      fc.property(additionsArb, (additions) => {
+        const before = deepFreeze({
+          ...runTemplate('fast'),
+          status: 'input_required',
+          stage: 'preflight',
+          plan_contract_version: 2,
+          claimed_paths: ['src/example.js'],
+          test_paths: ['tests/example.test.js'],
+          risk_triggers: [],
+          preflight: {
+            version: 1,
+            artifact_hash: 'a'.repeat(64),
+            questions: [{ id: 'api', question: 'Which API?', rationale: 'compatibility' }],
+          },
+          input_required: { preflight_hash: 'a'.repeat(64), question_ids: ['api'] },
+        });
+        const event = {
+          type: 'PREFLIGHT_ANSWERED',
+          preflight_hash: 'a'.repeat(64),
+          answers: [{ id: 'api', answer: 'Keep the existing API.' }],
+          additions,
+        };
+        const actions = reduceRun(before, event);
+        expect(reduceRun(before, event)).toEqual(actions);
+        const transition = actions.find((entry) => entry.type === 'transition');
+        expect(transition?.patch?.claimed_paths).toEqual([
+          'src/example.js', ...additions.claimed_paths,
+        ]);
+        expect(transition?.patch?.test_paths).toEqual([
+          'tests/example.test.js', ...additions.test_paths,
+        ]);
+        expect(transition?.patch?.risk_triggers).toEqual(additions.risk_triggers);
+        expect(transition?.patch?.status).toBe('running');
+        expect(transition?.patch).not.toHaveProperty('input_required');
+        if (additions.risk_triggers.length > 0) expect(transition?.patch?.lane).toBe('full');
+      }),
+      { seed: SEED, numRuns: 80, verbose: 2 },
+    );
+  });
+});
+
 // --- invariant 8: terminal states are absorbing ---------------------------
 
 const terminalStateArb = fc

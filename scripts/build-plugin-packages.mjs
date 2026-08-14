@@ -34,6 +34,7 @@ const DIST_FILES = Object.freeze([
 const RUNTIME_FILES = Object.freeze(['runner.js', 'spawn.js']);
 const SKILL_NAMES = Object.freeze(['config', 'history', 'override', 'resume', 'roadmap', 'run', 'status']);
 const ROLE_NAMES = Object.freeze([
+  'preflight_analyst',
   'planner',
   'plan_checker',
   'plan_critic',

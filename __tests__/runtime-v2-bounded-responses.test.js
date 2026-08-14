@@ -391,6 +391,46 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
     expect(projected.run).toEqual(minimal);
     expect(projected.run.run_id).toBe('run-project-root');
   });
+
+  it('compacts untrusted preflight evidence to bounded hashes, counts, and ids', () => {
+    const state = unitState();
+    state.status = 'input_required';
+    state.stage = 'preflight';
+    state.preflight = {
+      version: 1,
+      artifact_hash: 'a'.repeat(64),
+      receipt_hash: 'b'.repeat(64),
+      artifact: {
+        version: 1,
+        objective: 'Untrusted objective prose must not cross the compact wire.',
+        acceptance: ['A1', 'A2'],
+        non_goals: ['N1'],
+        baseline: [],
+        impacted_paths: { read: [], write: ['src/value.js'] },
+        compatibility: 'Untrusted compatibility prose.',
+        rollback: 'Untrusted rollback prose.',
+        verification_profiles: [
+          { id: 'unit', disposition: 'required', reason: 'Untrusted reason.' },
+          { id: 'docs', disposition: 'not-applicable', reason: 'Untrusted reason.' },
+        ],
+        questions: [{ id: 'api', question: 'Untrusted question?', rationale: 'Untrusted rationale.' }],
+      },
+    };
+    state.input_required = { preflight_hash: 'a'.repeat(64), question_ids: ['api'] };
+
+    const projected = projectRunState(state);
+    expect(projected.preflight).toEqual({
+      version: 1,
+      artifact_hash: 'a'.repeat(64),
+      receipt_hash: 'b'.repeat(64),
+      acceptance_count: 2,
+      non_goal_count: 1,
+      required_profile_ids: ['unit'],
+      question_ids: ['api'],
+    });
+    expect(JSON.stringify(projected)).not.toContain('Untrusted objective prose');
+    expect(JSON.stringify(projected)).not.toContain('Untrusted question');
+  });
 });
 
 const cleanups = [];
@@ -542,6 +582,31 @@ describe('APE v2 bounded ape_history responses at the MCP wire', () => {
 });
 
 describe('APE v2 bounded MCP responses over a live run', () => {
+  it('defaults omitted mode and version for behavioral fast Codex starts before selecting v2 preflight', async () => {
+    const dir = await project();
+    await completeCodexBindingProbe(root, dir);
+    const started = await apeRun({
+      action: 'start',
+      project_dir: dir,
+      objective: 'Change behavior through structured preflight',
+      lane: 'fast',
+      host: 'codex',
+      claimed_paths: ['src/value.js'],
+      test_paths: ['tests/value.test.js'],
+      requirements: ['R1'],
+      behavioral: true,
+      hooks_trusted: true,
+      subagents_available: true,
+      explicit_invocation: true,
+    });
+
+    expect(started.ok).toBe(true);
+    expect(started.run.mode).toBe('phase');
+    expect(started.run.plan_contract_version).toBe(2);
+    expect(started.actions.find((action) => action.type === 'dispatch_agent')?.ticket)
+      .toMatchObject({ stage_id: 'preflight', role: 'preflight_analyst', writable: false });
+  }, 30_000);
+
   it('bounds the wire while the persisted state and ticket files stay complete', async () => {
     const dir = await project();
     await completeCodexBindingProbe(root, dir);
@@ -559,6 +624,7 @@ describe('APE v2 bounded MCP responses over a live run', () => {
       hooks_trusted: true,
       subagents_available: true,
       explicit_invocation: true,
+      plan_contract_version: 1,
     });
     expect(started.ok).toBe(true);
     expect(started.run.objective).toBe('Change behavior');

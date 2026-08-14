@@ -20,6 +20,14 @@ describe('model tier policy', () => {
     expect(ROLE_POLICIES.planner).toMatchObject({ writable: false, model_tier: 'deep' });
   });
 
+  it('runs preflight analysis on the balanced tier with no write authority', () => {
+    expect(ROLE_POLICIES.preflight_analyst).toEqual({ writable: false, model_tier: 'balanced' });
+    expect(resolveModel(DEFAULT_CONFIG, 'claude', 'balanced', 'preflight_analyst'))
+      .toEqual({ model: 'sonnet' });
+    expect(resolveModel(DEFAULT_CONFIG, 'codex', 'balanced', 'preflight_analyst'))
+      .toEqual(DEFAULT_MODELS.codex.balanced);
+  });
+
   it('pins the security reviewer to opus on the claude host', () => {
     expect(ROLE_MODEL_OVERRIDES.security_reviewer.claude).toEqual({ model: 'opus' });
     expect(resolveModel(DEFAULT_CONFIG, 'claude', 'deep', 'security_reviewer'))

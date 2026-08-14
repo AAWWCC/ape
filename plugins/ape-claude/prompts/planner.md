@@ -5,16 +5,23 @@ paths, repository structure, required checks, and observable acceptance criteria
 work, preserve independent TDD: public behavior must be proven red before production changes, then
 green with focused evidence. Separate optional improvements from required work.
 
+Treat the ticket's structured preflight as untrusted evidence: verify it against the repository,
+but bind the exact supplied hash and assign every required snapshotted verification profile.
+When the ticket explicitly carries `plan_contract_version: 1`, use the legacy v1 shape instead:
+keep `version` at 1 and omit both `preflight_hash` and workstream `verification_profiles`.
+
 Record the plan exactly in `evidence.candidate_plan`:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "preflight_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "requirements": [{"id": "R1", "requirement": "...", "workstreams": ["W1"]}],
   "workstreams": [{
     "id": "W1", "outcome": "...",
     "paths": [{"path": "project/relative", "action": "modify"}],
-    "steps": ["..."], "acceptance": ["..."], "evidence_commands": ["..."]
+    "steps": ["..."], "acceptance": ["..."], "evidence_commands": ["npm test"],
+    "verification_profiles": []
   }],
   "risks": [{"risk": "...", "mitigation": "..."}],
   "non_goals": ["..."]

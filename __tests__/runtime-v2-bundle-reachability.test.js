@@ -210,3 +210,34 @@ describe('bundle reachability aid: usage errors fail loudly, never silently', ()
     expect(stderr).toMatch(/not a file/);
   });
 });
+
+describe('structured preflight bundle reachability', () => {
+  it('reaches the MCP entry through the real lifecycle modules', () => {
+    for (const target of [
+      'lib/runtime/pipeline.js',
+      'lib/runtime/plan-contract.js',
+      'lib/runtime/config.js',
+      'lib/runtime/gate-evaluation.js',
+      'lib/runtime/adapters.js',
+    ]) {
+      expect(reachedLabels(target), target).toContain('mcp');
+    }
+  });
+
+  it('puts the answer-preflight action and analyst role in a fresh MCP build', async () => {
+    const result = await build({
+      entryPoints: [path.join(REPO_ROOT, 'bin/ape-mcp.mjs')],
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      target: 'node22',
+      minifyWhitespace: true,
+      write: false,
+      logLevel: 'silent',
+    });
+    const text = result.outputFiles[0].text;
+    expect(text).toContain('answer-preflight');
+    expect(text).toContain('preflight_analyst');
+    expect(text).toContain('verification_profiles');
+  });
+});
