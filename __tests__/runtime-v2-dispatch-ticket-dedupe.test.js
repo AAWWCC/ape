@@ -41,7 +41,7 @@ import { RECEIPT_INPUT_SCHEMA } from '../lib/runtime/receipt-input.js';
 import { classifyApeRunOutcome } from '../lib/runtime/larp.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
-import { bindCodexDispatch } from './codex-native-test-helper.js';
+import { bindCodexDispatch, completeCodexBindingProbe } from './codex-native-test-helper.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -569,6 +569,7 @@ async function apeRun(args) {
 const LONG_OBJECTIVE = `Close the ape_run response size cap. ${'y'.repeat(24_000)}`;
 
 async function startLongRun(dir) {
+  await completeCodexBindingProbe(root, dir);
   const started = await apeRun({
     action: 'start',
     project_dir: dir,

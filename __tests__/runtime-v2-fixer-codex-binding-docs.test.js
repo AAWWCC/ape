@@ -15,8 +15,8 @@ describe('APE v2 Codex ticket-binding docs', () => {
     expect(protocol).not.toContain('dispatch.env');
     expect(protocol).not.toMatch(/launch the\s+subagent with that environment/i);
     expect(protocol).toMatch(/host-native tool[\s\S]*generated\s+name[\s\S]*dispatch intent/i);
-    expect(protocol).toMatch(/start` directly[\s\S]*no synthetic pre-run canary/i);
-    expect(protocol).not.toMatch(/probe-status|probe-ack/i);
+    expect(protocol).toMatch(/binding probe[\s\S]*probe-status[\s\S]*probe-ack/i);
+    expect(protocol).toMatch(/fresh, single-use proof/i);
     expect(protocol).toMatch(/receipt_capability[\s\S]*action: "record"/i);
   });
 
@@ -26,6 +26,7 @@ describe('APE v2 Codex ticket-binding docs', () => {
     expect(workflows).toContain('spawn_agent.message');
     expect(workflows).toContain('collaborationspawn_agent');
     expect(workflows).toContain('SubagentStart');
+    expect(workflows).toMatch(/shipped hook manifest alone is not treated as operational proof/i);
     expect(workflows).toMatch(/child `session_id`/i);
     expect(workflows).toMatch(/host-issued child `session_id`, `agent_id`/i);
     expect(workflows).toMatch(/No ambient environment\s+binding/i);

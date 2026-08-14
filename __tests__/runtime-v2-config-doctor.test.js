@@ -69,7 +69,7 @@ describe('ape v2 config doctor diagnosis mode', () => {
     expect(report.healthy).toBe(true);
   });
 
-  it('reports the live Codex task-name and SubagentStart binding channel', async () => {
+  it('reports static Codex hook coverage without claiming live lifecycle delivery', async () => {
     const dir = gitProject();
     const report = await doctor(dir, {
       explicit_invocation: true,
@@ -85,6 +85,7 @@ describe('ape v2 config doctor diagnosis mode', () => {
     expect(entry.warning).toBeUndefined();
     expect(entry.detail).toMatch(/spawn_agent/i);
     expect(entry.detail).toMatch(/SubagentStart/i);
+    expect(entry.detail).toMatch(/mandatory live binding preflight/i);
   });
 
   it('fails the Codex wiring proof when spawn_agent is absent from the shipped matcher', () => {
