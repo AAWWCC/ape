@@ -140,7 +140,13 @@ describe('APE v2 compact status and resume liveness contract', () => {
     state.status = 'blocked';
     state.stage = 'merge';
     state.block_reason = AUTO_MERGE_HOLD_REASON;
+    state.checkout_cleanup = {
+      status: 'returned', base_branch: state.base_branch, run_branch: state.branch, retained: true, deleted: false,
+    };
     state.gates = { passed: true };
+    state.checkout_cleanup = {
+      status: 'returned', base_branch: state.base_branch, run_branch: state.branch, retained: true, deleted: false,
+    };
     state.receipts = [{
       receipt_id: 'receipt-status-summary',
       ticket_id: state.tickets[0].ticket_id,
@@ -204,6 +210,9 @@ describe('APE v2 compact status and resume liveness contract', () => {
     state.status = 'completed';
     state.stage = 'completed';
     state.gates = { passed: true };
+    state.checkout_cleanup = {
+      status: 'returned', base_branch: state.base_branch, run_branch: state.branch, retained: false, deleted: true,
+    };
     state.receipts = [{
       receipt_id: 'receipt-complete',
       ticket_id: state.tickets[0].ticket_id,
@@ -230,6 +239,9 @@ describe('APE v2 compact status and resume liveness contract', () => {
     state.stage = 'gates';
     state.gates = { passed: false };
     state.block_reason = 'one or more deterministic merge gates failed';
+    state.checkout_cleanup = {
+      status: 'returned', base_branch: state.base_branch, run_branch: state.branch, retained: true, deleted: false,
+    };
     state.expired_tickets = state.tickets.map((ticket) => ticket.ticket_id);
     await atomicWriteJson(paths.active, state);
     expect(await compactStatus(dir)).toMatchObject({

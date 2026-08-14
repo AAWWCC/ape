@@ -108,7 +108,7 @@ describe('APE v2 blocked runs are exitable and reach history (F7, reducer)', () 
       reason: 'operator override abort',
     });
     const types = actions.map((entry) => entry.type);
-    expect(types).toEqual(['audit_override', 'apply_override', 'archive_history', 'persist_state']);
+    expect(types).toEqual(['audit_override', 'apply_override', 'archive_history', 'release_lock', 'persist_state']);
     // The archive runs after apply_override so the record carries the aborted
     // status, and before persist_state so a crash cannot lose the record.
     expect(types.indexOf('archive_history')).toBeGreaterThan(types.indexOf('apply_override'));

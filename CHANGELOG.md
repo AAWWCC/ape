@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.17.3 — 2026-08-13
+
+Every APE run now starts on a fresh APE-owned branch created from the resolved default-branch tip,
+regardless of the caller's current branch. Terminal runs reconcile the checkout back to that
+persisted base branch: completed branches are deleted after clean reconciliation, while blocked and
+aborted branches are retained. Dirty or failed cleanup preserves the run branch and exact recovery
+details, and `ape_run resume` safely retries cleanup after the operator resolves the working tree.
+
+`land` now refuses to start unless HEAD matches the resolved default tip, preventing feature-only
+commits from leaking into a landing run. Shipping and cleanup use the persisted base branch, with a
+compatibility fallback for older run state, and never delete a branch APE does not own.
+
 ## 2.17.2 — 2026-08-12
 
 Codex runs now start directly and prove native binding on each real stage agent, matching Claude's

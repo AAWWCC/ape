@@ -489,6 +489,7 @@ function assertTerminalAbsorbing(state, event, actions) {
             'audit_override',
             'apply_override',
             'archive_history',
+            'release_lock',
             'persist_state',
           ]);
           expect(actions[1].operation).toBe('abort');

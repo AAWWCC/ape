@@ -282,6 +282,13 @@ describe('APE v2 service integration', () => {
     const state = await readJson(paths.active);
     state.status = 'completed';
     state.stage = 'complete';
+    state.checkout_cleanup = {
+      status: 'returned',
+      base_branch: state.base_branch,
+      run_branch: state.branch,
+      retained: false,
+      deleted: true,
+    };
     await atomicWriteJson(paths.active, state);
     const before = await readJson(paths.active);
 
