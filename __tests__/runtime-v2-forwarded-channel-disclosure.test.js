@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +17,7 @@ import { EVIDENCE_COMMAND_FAMILIES } from '../lib/runtime/hooks.js';
 // STATE-DERIVED in the runtime and armed by the describe blocks at the end of
 // this file: a genuinely two-member group whose growth is proposed by a
 // receipt other than the one completing the group (groupScopeExpansion,
-// scheduler.js), the remediation-test route (the `carried` flag, service.js),
+// reducer.js), the remediation-test route (the `carried` flag, lifecycle-service.js),
 // and a remediation-build retry (both retry arms forward ticket.scope_expansion
 // unchanged). This header states the suite's actual coverage rather than the
 // entry's status, so it stays true independent of when that entry closes.
@@ -32,13 +32,13 @@ import { EVIDENCE_COMMAND_FAMILIES } from '../lib/runtime/hooks.js';
 // any receipt-derived, agent-authored evidence a review or plan-review
 // receipt can place onto a LATER ticket. Re-derived against the tree at
 // authoring time, not merely cited: review_findings (reviewFindings /
-// boundReviewFinding / boundReviewFindingsBlock, scheduler.js), prior_attempts
-// (attemptSummaryList, scheduler.js), plan_artifact (planArtifact,
-// service.js), the test_remediation reason (testRemediationNotice,
-// service.js), the expired-predecessor notice (expiredPredecessorNotice,
-// service.js), the planner's own `findings` array (SEVERED — forwarded to no
+// boundReviewFinding / boundReviewFindingsBlock, review-evidence.js), prior_attempts
+// (attemptSummaryList, review-evidence.js), plan_artifact (planArtifact,
+// receipt-service.js), the test_remediation reason (testRemediationNotice,
+// lifecycle-service.js), the expired-predecessor notice (expiredPredecessorNotice,
+// lifecycle-service.js), the planner's own `findings` array (SEVERED — forwarded to no
 // reviewer by any route), and scope_expansion (extractScopeExpansion,
-// service.js, applied by the SCOPE_EXPANDED reducer arm in scheduler.js).
+// receipt-service.js, applied by the SCOPE_EXPANDED reducer arm in reducer.js).
 //
 // ONE STRUCTURAL SIBLING IS DELIBERATELY EXCLUDED, on the record, by
 // mechanism rather than left as an unexplained gap in the count: the
@@ -290,6 +290,13 @@ function readRepoFile(...segments) {
   return readFileSync(path.join(REPO_ROOT, ...segments), 'utf8');
 }
 
+function readOwnerFile(owner) {
+  const relative = path.posix.join('lib/runtime', owner);
+  const absolute = path.join(REPO_ROOT, relative);
+  expect(existsSync(absolute), `genuine owner ${relative} exists`).toBe(true);
+  return readFileSync(absolute, 'utf8');
+}
+
 // Derive a numeric constant from a source FILE'S OWN TEXT at test-execution
 // time, rather than pinning a copy of it in this file: a retune of the real
 // constant moves this test's expectation with it instead of leaving a stale
@@ -297,8 +304,8 @@ function readRepoFile(...segments) {
 // against pinning a count that can go stale). Tolerant of the numeric-
 // separator underscores this codebase's constants use (`1_000`, `10_000`).
 function deriveIntConst(sourceText, constName) {
-  const match = sourceText.match(new RegExp(`const ${constName}\\s*=\\s*([0-9_]+)`));
-  if (!match) throw new Error(`could not derive ${constName} from its own source text`);
+  const match = sourceText.match(new RegExp(`^export const ${constName}\\s*=\\s*([0-9_]+)`, 'm'));
+  expect(match, `genuine owner directly declares ${constName}`).not.toBeNull();
   return Number(match[1].replaceAll('_', ''));
 }
 
@@ -461,10 +468,10 @@ describe('a reviewer-proposed scope expansion is carried structurally to the nex
     // The write allowlist really did grow by all 60 — this arm is not about
     // that; scope_expansion's own admission is exercised elsewhere.
     for (const claimedPath of addedPaths) expect(remediationB.claimed_paths).toContain(claimedPath);
-    const serviceSource = readRepoFile('lib', 'runtime', 'service.js');
-    const pathMax = deriveIntConst(serviceSource, 'SCOPE_EXPANSION_PATHS_MAX');
-    const pathChars = deriveIntConst(serviceSource, 'SCOPE_EXPANSION_PATH_MAX_CHARS');
-    const reasonChars = deriveIntConst(serviceSource, 'SCOPE_EXPANSION_REASON_MAX_CHARS');
+    const receiptSource = readOwnerFile('receipt-service.js');
+    const pathMax = deriveIntConst(receiptSource, 'SCOPE_EXPANSION_PATHS_MAX');
+    const pathChars = deriveIntConst(receiptSource, 'SCOPE_EXPANSION_PATH_MAX_CHARS');
+    const reasonChars = deriveIntConst(receiptSource, 'SCOPE_EXPANSION_REASON_MAX_CHARS');
     expect(remediationB.objective).toBe(FLOW_RUN_OBJECTIVE);
     expect(remediationB.scope_expansion.claimed_paths.length).toBeLessThanOrEqual(pathMax);
     expect(remediationB.scope_expansion.claimed_paths.every((entry) => entry.length <= pathChars)).toBe(true);
@@ -476,9 +483,9 @@ describe('a reviewer-proposed scope expansion is carried structurally to the nex
 
 describe('the structured review_findings field stays within the scheduler bounds', () => {
   it('carries bounded findings without embedding transport prose in the objective', async () => {
-    const schedulerSource = readRepoFile('lib', 'runtime', 'scheduler.js');
-    const maxEntries = deriveIntConst(schedulerSource, 'REVIEW_FINDINGS_MAX');
-    const maxBlockChars = deriveIntConst(schedulerSource, 'REVIEW_FINDINGS_BLOCK_LIMIT');
+    const reviewEvidenceSource = readOwnerFile('review-evidence.js');
+    const maxEntries = deriveIntConst(reviewEvidenceSource, 'REVIEW_FINDINGS_MAX');
+    const maxBlockChars = deriveIntConst(reviewEvidenceSource, 'REVIEW_FINDINGS_BLOCK_LIMIT');
     expect(maxBlockChars).toBeGreaterThan(maxEntries);
 
     const dir = await reviewFlowProject();
@@ -501,8 +508,10 @@ describe('the structured review_findings field stays within the scheduler bounds
 
 describe('test remediation uses structured review evidence with an immutable objective', () => {
   it('routes to remediation-test without objective decoration', async () => {
-    const serviceSource = readRepoFile('lib', 'runtime', 'service.js');
-    const cutMatch = serviceSource.match(/boundedGateSummary\(declaration\.reason,\s*(\d+)\)/);
+    const lifecycleSource = readOwnerFile('lifecycle-service.js');
+    const cutMatch = lifecycleSource.match(
+      /^function testRemediationNotice\s*\([^)]*\)\s*\{[\s\S]*?boundedGateSummary\(declaration\.reason,\s*(\d+)\)/m,
+    );
     expect(cutMatch, 'expected to find the reason-bounding call inside testRemediationNotice').not.toBeNull();
     const cutLength = Number(cutMatch[1]);
     expect(cutLength).toBeGreaterThan(0);
@@ -687,13 +696,8 @@ describe('a scope expansion proposed by the FIRST-arriving receipt of a genuinel
     const dir = await securityGroupProject();
     const { reviewTicket, securityTicket } = await walkToSecurityGroup(dir);
 
-    const serviceSource = readFileSync(
-      fileURLToPath(new URL('../lib/runtime/service.js', import.meta.url)),
-      'utf8',
-    );
-    const reasonCut = Number(
-      /SCOPE_EXPANSION_REASON_MAX_CHARS\s*=\s*(\d+)/.exec(serviceSource)?.[1],
-    );
+    const receiptSource = readOwnerFile('receipt-service.js');
+    const reasonCut = deriveIntConst(receiptSource, 'SCOPE_EXPANSION_REASON_MAX_CHARS');
     expect(Number.isInteger(reasonCut) && reasonCut > 0).toBe(true);
 
     const reviewPath = 'src/scope-both-members-review-module.js';

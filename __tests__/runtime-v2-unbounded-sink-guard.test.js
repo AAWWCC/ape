@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 // Roadmap entry sink-guard-coverage-and-detection-completeness (follow-up to
@@ -118,15 +119,12 @@ import { describe, expect, it } from 'vitest';
 // its gaps are named here rather than left for a future round to
 // rediscover.
 //
-// FILE SCOPE. This scan covers exactly CLAIMED_SOURCE_FILES (service.js,
-// scheduler.js, gates.js, pipeline.js) -- the four files this run's claim set
-// (and the two runs before it) actually claims. It is NOT a lib/runtime-wide
-// claim; the emptiness assertion's own failure message says so explicitly and
-// names how many other tracked lib/runtime/*.js files were never scanned, so
-// a reader can never mistake "flags nothing in these four files" for "no
-// unbounded sink exists anywhere in lib/runtime". An unscoped scan surfaces
-// ~40 further dynamic sites in hooks.js, claude-dispatch.js, history.js and
-// projection.js -- not claimed here.
+// FILE SCOPE. This scan preserves the legacy service.js, scheduler.js,
+// gates.js, and pipeline.js inventory and adds the exact eleven domain-owner
+// paths required by this reorganization. It is NOT a lib/runtime-wide claim;
+// the emptiness assertion's own failure message says so explicitly and names
+// how many other tracked lib/runtime/*.js files were never scanned. Required
+// owners are read from direct working-tree paths even while untracked.
 //
 // AUTHORING HAZARD (run objective, stated three times over this task): this
 // file's OWN text must never carry a literal control/bidi/format code point.
@@ -521,15 +519,28 @@ function collectCandidates(file, text, acceptedOut) {
   return flagged;
 }
 
-// SCOPED to this run's own claim set (see FILE SCOPE above). Still computed
-// via `git ls-files`, so a rename or a file this list omits is a visible,
-// re-checked assertion below rather than a silent drift.
+// Exact inventory: the four legacy sink surfaces plus all eleven new owners.
+// A rename, omission, unreadable file, or still-absent owner is a visible,
+// re-checked assertion below rather than silent scan narrowing.
 const CLAIMED_SOURCE_FILES = [
   'lib/runtime/service.js',
   'lib/runtime/scheduler.js',
   'lib/runtime/pipeline.js',
   'lib/runtime/gates.js',
+  'lib/runtime/lifecycle-service.js',
+  'lib/runtime/receipt-service.js',
+  'lib/runtime/status-service.js',
+  'lib/runtime/evidence-policy.js',
+  'lib/runtime/write-policy.js',
+  'lib/runtime/lifecycle-policy.js',
+  'lib/runtime/gate-evaluation.js',
+  'lib/runtime/gate-watch.js',
+  'lib/runtime/github-shipping.js',
+  'lib/runtime/reducer.js',
+  'lib/runtime/review-evidence.js',
 ];
+
+const REQUIRED_OWNER_FILES = CLAIMED_SOURCE_FILES.slice(4);
 
 function trackedRuntimeJsFiles() {
   const listing = execFileSync('git', ['ls-files', 'lib/runtime'], {
@@ -540,8 +551,10 @@ function trackedRuntimeJsFiles() {
 }
 
 function trackedRuntimeSourceFiles() {
-  const tracked = new Set(trackedRuntimeJsFiles());
-  return CLAIMED_SOURCE_FILES.filter((file) => tracked.has(file));
+  // Deliberately read the direct working-tree path inventory. New owner files
+  // are expected to be untracked during RED/GREEN authoring and must never be
+  // made invisible by a git-index-only filter.
+  return CLAIMED_SOURCE_FILES.filter((file) => existsSync(path.join(REPO_ROOT, file)));
 }
 
 function scanTree() {
@@ -571,6 +584,72 @@ function scopePreamble(files) {
     `this is NOT a lib/runtime-wide claim: ${unscanned} other tracked lib/runtime/*.js ` +
     'file(s) were not scanned by this guard.'
   );
+}
+
+function resolveRuntimeImport(fromFile, specifier) {
+  if (!specifier.startsWith('.')) return null;
+  const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), specifier));
+  return path.posix.extname(resolved) ? resolved : `${resolved}.js`;
+}
+
+function runtimeGraph() {
+  const files = [...new Set([...trackedRuntimeJsFiles(), ...REQUIRED_OWNER_FILES])].sort();
+  const present = files.filter((file) => existsSync(path.join(REPO_ROOT, file)));
+  const nodes = new Set(present);
+  const graph = new Map();
+  for (const file of present) {
+    const text = readFileSync(path.join(REPO_ROOT, file), 'utf8');
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    const edges = [];
+    for (const statement of source.statements) {
+      if ((ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) &&
+          statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)) {
+        const dependency = resolveRuntimeImport(file, statement.moduleSpecifier.text);
+        if (dependency && nodes.has(dependency)) edges.push(dependency);
+      }
+    }
+    function visit(node) {
+      if (ts.isCallExpression(node)) {
+        const firstArgument = node.arguments[0];
+        const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+        const isRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require';
+        if ((isDynamicImport || isRequire) && firstArgument && ts.isStringLiteral(firstArgument)) {
+          const dependency = resolveRuntimeImport(file, firstArgument.text);
+          if (dependency && nodes.has(dependency)) edges.push(dependency);
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(source);
+    graph.set(file, [...new Set(edges)].sort());
+  }
+  return { files, present, graph };
+}
+
+function findRuntimeCycle(graph) {
+  const state = new Map();
+  const stack = [];
+  function visit(file) {
+    if (state.get(file) === 'done') return null;
+    if (state.get(file) === 'visiting') {
+      const start = stack.indexOf(file);
+      return [...stack.slice(start), file];
+    }
+    state.set(file, 'visiting');
+    stack.push(file);
+    for (const dependency of graph.get(file) ?? []) {
+      const cycle = visit(dependency);
+      if (cycle) return cycle;
+    }
+    stack.pop();
+    state.set(file, 'done');
+    return null;
+  }
+  for (const file of graph.keys()) {
+    const cycle = visit(file);
+    if (cycle) return cycle;
+  }
+  return null;
 }
 
 describe('unbounded-sink guard: scanner mechanics (synthetic fixtures, never the real tree)', () => {
@@ -796,10 +875,17 @@ describe('unbounded-sink guard: scanner mechanics (synthetic fixtures, never the
   });
 });
 
-describe('unbounded-sink guard: computed scan of the tracked runtime source', () => {
-  it('finds every claimed tracked runtime source file to scan', () => {
+describe('unbounded-sink guard: computed scan of direct working-tree runtime sources', () => {
+  it('finds every exact legacy and required-owner source file to scan', () => {
     const { files } = scanTree();
     expect(files).toEqual(CLAIMED_SOURCE_FILES);
+  });
+
+  it('keeps the tracked runtime plus exact required owner working-tree graph acyclic', () => {
+    const { files, present, graph } = runtimeGraph();
+    const missing = files.filter((file) => !present.includes(file));
+    if (missing.length > 0) return;
+    expect(findRuntimeCycle(graph)).toBeNull();
   });
 
   // RED (run objective): the two shorthand-shaped override-reset audit sinks

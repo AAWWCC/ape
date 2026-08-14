@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -234,20 +235,35 @@ function verdict(tail, ticket = readOnlyTicket) {
 // fold arms RANGE over whatever is shipped, so a future `s`-bearing entry is
 // covered the day it lands instead of the day someone remembers this file.
 function shippedSetLiteral(source, name) {
-  const marker = `const ${name} = new Set([`;
-  const start = source.indexOf(marker);
-  expect(start, `lib/runtime/hooks.js declares ${name}`).toBeGreaterThanOrEqual(0);
+  const declaration = new RegExp(`^const ${name} = new Set\\(\\[`, 'm').exec(source);
+  expect(
+    declaration,
+    `lib/runtime/write-policy.js genuinely declares ${name}`,
+  ).not.toBeNull();
+  const start = declaration.index + declaration[0].length;
   const end = source.indexOf(']);', start);
-  expect(end, `lib/runtime/hooks.js closes ${name}`).toBeGreaterThan(start);
+  expect(end, `lib/runtime/write-policy.js closes ${name}`).toBeGreaterThan(start);
   return source
-    .slice(start + marker.length, end)
+    .slice(start, end)
     .split('\n')
     .filter((line) => !line.trimStart().startsWith('//'))
     .flatMap((line) => [...line.matchAll(/'([^']+)'/g)].map((match) => match[1]));
 }
 
 async function shippedTails() {
-  const source = await readFile(path.join(root, 'lib', 'runtime', 'hooks.js'), 'utf8');
+  const ownerFiles = {
+    evidence: path.join(root, 'lib', 'runtime', 'evidence-policy.js'),
+    write: path.join(root, 'lib', 'runtime', 'write-policy.js'),
+    lifecycle: path.join(root, 'lib', 'runtime', 'lifecycle-policy.js'),
+  };
+  for (const [domain, ownerFile] of Object.entries(ownerFiles)) {
+    expect(existsSync(ownerFile), `${domain} policy owner exists`).toBe(true);
+  }
+  const evidenceSource = await readFile(ownerFiles.evidence, 'utf8');
+  const lifecycleSource = await readFile(ownerFiles.lifecycle, 'utf8');
+  expect(evidenceSource).toMatch(/^export function gitEvidenceArgsSafe\s*\(/m);
+  expect(lifecycleSource).toMatch(/^export function evaluateLifecyclePolicy\s*\(/m);
+  const source = await readFile(ownerFiles.write, 'utf8');
   return [
     ...shippedSetLiteral(source, 'EXECUTION_CONFIG_TAIL'),
     ...shippedSetLiteral(source, 'EXECUTION_CONFIG_TAIL_PAIR'),

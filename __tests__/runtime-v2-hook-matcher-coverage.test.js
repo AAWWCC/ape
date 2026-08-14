@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -32,6 +32,10 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
 const read = (rel) => readFileSync(path.join(REPO, rel), 'utf8');
+const ownerSource = (rel) => {
+  const absolute = path.join(REPO, rel);
+  return existsSync(absolute) ? readFileSync(absolute, 'utf8') : null;
+};
 
 const claudeHooks = JSON.parse(read('hooks/claude-hooks.json')).hooks;
 const codexHooks = JSON.parse(read('hooks/hooks.json')).hooks;
@@ -67,18 +71,20 @@ const prePolicyMatchers = policyArms(codexHooks.PreToolUse).map((entry) => entry
 const postPolicyMatchers = policyArms(codexHooks.PostToolUse).map((entry) => entry.matcher);
 
 // §1 — the enforcement tool-name set is derived from the runtime, not copied.
-const hooksSource = read('lib/runtime/hooks.js');
-const writeToolsLiteral = hooksSource.match(/const WRITE_TOOLS = new Set\(\[([\s\S]*?)\]\)/);
+const writePolicySource = ownerSource('lib/runtime/write-policy.js');
+const writeToolsLiteral = writePolicySource?.match(/const WRITE_TOOLS = new Set\(\[([\s\S]*?)\]\)/) ?? null;
 const WRITE_TOOLS = writeToolsLiteral
   ? [...writeToolsLiteral[1].matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1])
   : [];
 
 describe('enforcement tool-name set derived from the runtime (plan §1)', () => {
-  it('extracts WRITE_TOOLS from lib/runtime/hooks.js source and cross-checks every name behaviorally', () => {
+  it('extracts WRITE_TOOLS from its genuine write-policy.js owner and cross-checks every name behaviorally', () => {
     // WRITE_TOOLS is module-private (unexported) and lib/runtime is outside this
     // run's claims, so source extraction is a deliberate tripwire: a future
     // WRITE_TOOLS addition or a declaration reshape fails extraction loudly.
-    expect(writeToolsLiteral, 'const WRITE_TOOLS = new Set([...]) literal not found in lib/runtime/hooks.js').not.toBeNull();
+    expect(writePolicySource, 'missing required owner: lib/runtime/write-policy.js').not.toBeNull();
+    if (writePolicySource === null) return;
+    expect(writeToolsLiteral, 'const WRITE_TOOLS = new Set([...]) literal not found in lib/runtime/write-policy.js').not.toBeNull();
     expect(WRITE_TOOLS.length).toBeGreaterThan(0);
     expect(WRITE_TOOLS).toContain('Edit');
     expect(WRITE_TOOLS).toContain('Write');
@@ -194,8 +200,18 @@ describe('policy-arm matcher coverage of the enforcement set (plan §2)', () => 
     // a new predicate added beside the existing literals — or a first predicate
     // added to claude-dispatch.js — fails this test until the matcher grows.
     // This supplements, not replaces, the §1 behavioral groundings.
+    const ownerFiles = [
+      'lib/runtime/evidence-policy.js',
+      'lib/runtime/write-policy.js',
+      'lib/runtime/lifecycle-policy.js',
+    ];
+    const ownerSources = ownerFiles.map((file) => [file, ownerSource(file)]);
+    for (const [file, source] of ownerSources) {
+      expect(source, `missing required owner: ${file}`).not.toBeNull();
+    }
+    if (ownerSources.some(([, source]) => source === null)) return;
     const sources = [
-      read('lib/runtime/hooks.js'),
+      ...ownerSources.map(([, source]) => source),
       read('bin/ape-hook.mjs'),
       read('lib/runtime/claude-dispatch.js'),
     ];

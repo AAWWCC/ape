@@ -36,7 +36,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 //       EVIDENCE — never that no plan was made. A planner that records its plan
 //       only in findings produces no field at all, so today's sentences assert
 //       the planner recorded nothing when it recorded a great deal.
-//   (D) THE SOURCE TEXT. lib/runtime/service.js's own comments describe the same
+//   (D) THE SOURCE TEXT. lib/runtime/receipt-service.js's own comments describe the same
 //       thing the prose does, and the forwarded value is named for what it is
 //       (`forwardedPlanEvidence`, not `forwardedPlan`). Nothing else in the tree
 //       reads that file as source text, so without this arm those corrections
@@ -290,13 +290,13 @@ function assertedMatches(text, pattern) {
   return found;
 }
 
-// ─── lib/runtime/service.js AS SOURCE TEXT (arm (f)) ────────────────────────
+// ─── lib/runtime/receipt-service.js AS SOURCE TEXT (arm (f)) ────────────────
 //
 // The one claimed production file read here, named explicitly. No other suite in
 // the tree reads it as text, so without these arms the header comment, the two
 // inline comments, the labeling sentence and the identifier rename would land
 // with no acceptance evidence at all.
-const SERVICE_COMMENT_CLAIMS = [
+const RECEIPT_SERVICE_COMMENT_CLAIMS = [
   {
     id: 'the plan-review stages "never received the plan"',
     pattern: new RegExp(`never received the ${PLAN}`, 'i'),
@@ -638,16 +638,18 @@ describe('APE v2 plan artifact is the planner\'s recorded EVIDENCE, not its whol
   });
 });
 
-describe('APE v2 plan artifact source text in lib/runtime/service.js', () => {
+describe('APE v2 plan artifact source text in lib/runtime/receipt-service.js', () => {
   it('(f) the planArtifact comments and the forwarded identifier name the recorded EVIDENCE', async () => {
-    const source = await read('lib/runtime/service.js');
+    const source = await read('lib/runtime/receipt-service.js').catch(() => null);
+    expect(source, 'missing required owner: lib/runtime/receipt-service.js').not.toBeNull();
+    if (source === null) return;
     const comments = commentProse(source);
-    expect(comments.length, 'no comment prose was extracted from service.js').toBeGreaterThan(1000);
+    expect(comments.length, 'no comment prose was extracted from receipt-service.js').toBeGreaterThan(1000);
 
-    for (const claim of SERVICE_COMMENT_CLAIMS) {
+    for (const claim of RECEIPT_SERVICE_COMMENT_CLAIMS) {
       expect.soft(
         matchesOf(comments, claim.pattern),
-        `lib/runtime/service.js: ${claim.id} still frames the artifact as the plan`,
+        `lib/runtime/receipt-service.js: ${claim.id} still frames the artifact as the plan`,
       ).toEqual([]);
     }
 
@@ -655,7 +657,7 @@ describe('APE v2 plan artifact source text in lib/runtime/service.js', () => {
     // from. A correction that simply removed the header would fail here.
     expect.soft(
       /free-form evidence/i.test(comments),
-      'service.js no longer records what the artifact is derived from',
+      'receipt-service.js no longer records what the artifact is derived from',
     ).toBe(true);
 
     // The identifier at the use site names the value for what it is. Note the

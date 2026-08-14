@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -61,6 +61,12 @@ function readRepoFile(...segments) {
   return readFileSync(path.join(ROOT, ...segments), 'utf8');
 }
 
+function readRequiredOwner(file) {
+  const absolute = path.join(ROOT, 'lib', 'runtime', file);
+  expect(existsSync(absolute), `missing required owner: lib/runtime/${file}`).toBe(true);
+  return existsSync(absolute) ? readFileSync(absolute, 'utf8') : '';
+}
+
 // This repo hand-wraps `//` line comments at a fixed column (the same
 // technique __tests__/runtime-v2-shipped-surface-truthfulness.test.js's own
 // flattenWhitespace note describes for docs/ prose), so a literal phrase
@@ -79,9 +85,9 @@ function flattenCommentProse(text) {
     .replace(/\s+/g, ' ');
 }
 
-describe('service.js and pipeline.js no longer misdescribe their character-policy registries as identical to the hooks.js write-content gate', () => {
-  it('service.js does not claim its SCOPE_EXPANSION_CONTROL_CHARS registry carries "the identical code points" as hooks.js, minus U+200C/U+200D', () => {
-    const text = flattenCommentProse(readRepoFile('lib', 'runtime', 'service.js'));
+describe('receipt-service.js and pipeline.js no longer misdescribe their character-policy registries as identical to the write-policy.js write-content gate', () => {
+  it('receipt-service.js does not claim its SCOPE_EXPANSION_CONTROL_CHARS registry carries "the identical code points" as write-policy.js, minus U+200C/U+200D', () => {
+    const text = flattenCommentProse(readRequiredOwner('receipt-service.js'));
     expect(text).not.toMatch(/identical code points MINUS U\+200C\/U\+200D/);
   });
 
@@ -90,28 +96,28 @@ describe('service.js and pipeline.js no longer misdescribe their character-polic
     expect(text).not.toMatch(/keep (the two|all three) in lockstep by hand/i);
   });
 
-  it('both files instead record that the hooks.js write-content gate is deliberately WIDER than its two siblings', () => {
+  it('both files instead record that the write-policy.js write-content gate is deliberately WIDER than its two siblings', () => {
     for (const [label, segments] of [
-      ['service.js', ['lib', 'runtime', 'service.js']],
+      ['receipt-service.js', null],
       ['pipeline.js', ['lib', 'runtime', 'pipeline.js']],
     ]) {
-      const text = flattenCommentProse(readRepoFile(...segments));
-      expect(text, `${label} must describe the hooks.js copy as deliberately wider than this file's own registry`).toMatch(
-        /hooks\.js[^\n]{0,400}\bwider\b|\bwider\b[^\n]{0,400}hooks\.js/i,
+      const text = flattenCommentProse(segments ? readRepoFile(...segments) : readRequiredOwner(label));
+      expect(text, `${label} must describe the write-policy.js copy as deliberately wider than this file's own registry`).toMatch(
+        /write-policy\.js[^\n]{0,400}\bwider\b|\bwider\b[^\n]{0,400}write-policy\.js/i,
       );
     }
   });
 
-  it('both files warn against re-narrowing (re-syncing downward) the hooks.js copy to match its siblings', () => {
+  it('both files warn against re-narrowing (re-syncing downward) the write-policy.js copy to match its siblings', () => {
     for (const [label, segments] of [
-      ['service.js', ['lib', 'runtime', 'service.js']],
+      ['receipt-service.js', null],
       ['pipeline.js', ['lib', 'runtime', 'pipeline.js']],
     ]) {
-      const text = flattenCommentProse(readRepoFile(...segments));
+      const text = flattenCommentProse(segments ? readRepoFile(...segments) : readRequiredOwner(label));
       expect(
         text,
-        `${label} must warn a future maintainer against re-narrowing/re-syncing the hooks.js copy downward`,
-      ).toMatch(/re-sync\w*[^\n]{0,120}down|must not be re-synced downward|never (re-)?narrow\w*[^\n]{0,120}hooks\.js/i);
+        `${label} must warn a future maintainer against re-narrowing/re-syncing the write-policy.js copy downward`,
+      ).toMatch(/re-sync\w*[^\n]{0,120}down|must not be re-synced downward|never (re-)?narrow\w*[^\n]{0,120}write-policy\.js/i);
     }
   });
 });
@@ -137,38 +143,38 @@ const POLICY_COUNT_WORDS = Object.freeze({
 // POLICIES" comment alone (never the whole multi-thousand-line file), so an
 // unrelated numbered list elsewhere in the file can never be mistaken for
 // this enumeration.
-function countServiceEnumeratedPolicies(serviceText) {
-  const block = serviceText.match(/DISTINCT CHARACTER POLICIES[\s\S]*?RESIDUALS RECORDED/);
+function countReceiptServiceEnumeratedPolicies(receiptServiceText) {
+  const block = receiptServiceText.match(/DISTINCT CHARACTER POLICIES[\s\S]*?RESIDUALS RECORDED/);
   if (!block) return 0;
   const numbered = [...block[0].matchAll(/\/\/\s*(\d+)\.\s/g)].map((entry) => Number(entry[1]));
   return numbered.length ? Math.max(...numbered) : 0;
 }
 
-describe("hooks.js's own registry-count prose does not under-enumerate service.js's character-policy count, and still records its own wider/do-not-re-sync-down instruction", () => {
-  it("names a policy count at least as large as service.js's own numbered enumeration (derived, never a pinned literal)", () => {
-    const serviceText = readRepoFile('lib', 'runtime', 'service.js');
-    const trueCount = countServiceEnumeratedPolicies(serviceText);
-    expect(trueCount, "service.js's own numbered policy list was not found").toBeGreaterThan(0);
+describe("write-policy.js's own registry-count prose does not under-enumerate receipt-service.js's character-policy count, and still records its own wider/do-not-re-sync-down instruction", () => {
+  it("names a policy count at least as large as receipt-service.js's own numbered enumeration (derived, never a pinned literal)", () => {
+    const receiptServiceText = readRequiredOwner('receipt-service.js');
+    const trueCount = countReceiptServiceEnumeratedPolicies(receiptServiceText);
+    expect(trueCount, "receipt-service.js's own numbered policy list was not found").toBeGreaterThan(0);
 
-    const hooksText = flattenCommentProse(readRepoFile('lib', 'runtime', 'hooks.js'));
-    const claim = hooksText.match(/\bpolicy 2 of the (\w+)\b/i);
-    expect(claim, 'hooks.js no longer names how many character policies service.js enumerates').not.toBeNull();
+    const writePolicyText = flattenCommentProse(readRequiredOwner('write-policy.js'));
+    const claim = writePolicyText.match(/\bpolicy 2 of the (\w+)\b/i);
+    expect(claim, 'write-policy.js no longer names how many character policies receipt-service.js enumerates').not.toBeNull();
     const claimedCount = POLICY_COUNT_WORDS[claim[1].toLowerCase()];
-    expect(claimedCount, `hooks.js names an unrecognized count word "${claim[1]}"`).toBeDefined();
+    expect(claimedCount, `write-policy.js names an unrecognized count word "${claim[1]}"`).toBeDefined();
     expect(
       claimedCount,
-      `hooks.js under-enumerates: it names ${claim[1]} but service.js's own list now enumerates ${trueCount}`,
+      `write-policy.js under-enumerates: it names ${claim[1]} but receipt-service.js's own list now enumerates ${trueCount}`,
     ).toBeGreaterThanOrEqual(trueCount);
   });
 
-  it('still records that its own WRITE_CONTENT_HAZARD_CHARS set is deliberately wider than policy 2 (a hooks.js-specific pattern: the shared "wider" regex below requires a nearby "hooks.js" literal that hooks.js\'s own self-description has no reason to carry)', () => {
-    const hooksText = flattenCommentProse(readRepoFile('lib', 'runtime', 'hooks.js'));
-    expect(hooksText).toMatch(/\bwider\b.{0,300}\bpolicy 2\b|\bpolicy 2\b.{0,300}\bwider\b/i);
+  it('still records that its own WRITE_CONTENT_HAZARD_CHARS set is deliberately wider than policy 2 at the genuine write-policy.js owner', () => {
+    const writePolicyText = flattenCommentProse(readRequiredOwner('write-policy.js'));
+    expect(writePolicyText).toMatch(/\bwider\b.{0,300}\bpolicy 2\b|\bpolicy 2\b.{0,300}\bwider\b/i);
   });
 
-  it("still warns against re-narrowing (re-syncing downward) its own set to policy 2's (the shared re-sync regex below already holds for hooks.js's own text, unmodified)", () => {
-    const hooksText = flattenCommentProse(readRepoFile('lib', 'runtime', 'hooks.js'));
-    expect(hooksText).toMatch(/re-sync\w*[^\n]{0,120}down|must not be re-synced downward|never (re-)?narrow\w*[^\n]{0,120}hooks\.js/i);
+  it("still warns against re-narrowing (re-syncing downward) its own set to policy 2's at the genuine write-policy.js owner", () => {
+    const writePolicyText = flattenCommentProse(readRequiredOwner('write-policy.js'));
+    expect(writePolicyText).toMatch(/re-sync\w*[^\n]{0,120}down|must not be re-synced downward|never (re-)?narrow\w*[^\n]{0,120}write-policy\.js/i);
   });
 });
 

@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -402,7 +402,7 @@ describe('evaluateWriteContentPolicy: apply_patch shapes F and G harden (unit-le
 // This arm follows the SAME idiom
 // __tests__/runtime-v2-hook-matcher-coverage.test.js:70-74 already uses for
 // the identical `const WRITE_TOOLS = new Set([...])` literal: extract the
-// population out of lib/runtime/hooks.js's own source text (module-private,
+// population out of lib/runtime/write-policy.js's own source text (module-private,
 // unexported — source extraction is a deliberate tripwire on a declaration
 // reshape too), then require every member to be EITHER named by a `tool:`
 // entry of the also-source-extracted WRITE_CONTENT_ROUTES table OR a member
@@ -420,7 +420,10 @@ describe('evaluateWriteContentPolicy: apply_patch shapes F and G harden (unit-le
 // WRITE_CONTENT_UNREACHABLE_TOOLS reddens here by naming itself, the day it
 // appears — never today's five.
 // ===========================================================================
-const hooksSourceText = readFileSync(path.join(root, 'lib', 'runtime', 'hooks.js'), 'utf8');
+const WRITE_POLICY_FILE = path.join(root, 'lib', 'runtime', 'write-policy.js');
+const writePolicySourceText = existsSync(WRITE_POLICY_FILE)
+  ? readFileSync(WRITE_POLICY_FILE, 'utf8')
+  : null;
 
 function extractQuotedNames(source, pattern) {
   const match = source.match(pattern);
@@ -429,13 +432,13 @@ function extractQuotedNames(source, pattern) {
 }
 
 const DERIVED_WRITE_TOOLS = extractQuotedNames(
-  hooksSourceText,
+  writePolicySourceText ?? '',
   /const WRITE_TOOLS = new Set\(\[([\s\S]*?)\]\)/,
 );
 // Scoped to the WRITE_CONTENT_ROUTES declaration alone (never the whole
 // 2,000+ line module) so a `tool:` key belonging to some unrelated object
 // elsewhere in the file can never be mistaken for a route.
-const writeContentRoutesBlock = hooksSourceText.match(
+const writeContentRoutesBlock = writePolicySourceText?.match(
   /const WRITE_CONTENT_ROUTES = Object\.freeze\(\[([\s\S]*?)\n\]\);/,
 );
 const DERIVED_ROUTED_TOOLS = writeContentRoutesBlock
@@ -443,10 +446,18 @@ const DERIVED_ROUTED_TOOLS = writeContentRoutesBlock
   : null;
 
 describe('write-content route population is derived from WRITE_TOOLS source, with no silent gap (review findings 2 and 3)', () => {
-  it('extracts a non-empty WRITE_TOOLS population from lib/runtime/hooks.js source', () => {
+  it('reads the genuine write-policy.js owner directly from the working tree', () => {
+    expect(
+      writePolicySourceText,
+      'missing required owner: lib/runtime/write-policy.js',
+    ).not.toBeNull();
+  });
+
+  it('extracts a non-empty WRITE_TOOLS population from lib/runtime/write-policy.js source', () => {
+    if (writePolicySourceText === null) return;
     expect(
       DERIVED_WRITE_TOOLS,
-      'const WRITE_TOOLS = new Set([...]) literal not found in lib/runtime/hooks.js',
+      'const WRITE_TOOLS = new Set([...]) literal not found in lib/runtime/write-policy.js',
     ).not.toBeNull();
     expect(DERIVED_WRITE_TOOLS.length).toBeGreaterThan(0);
     expect(DERIVED_WRITE_TOOLS).toContain('Write');
@@ -456,15 +467,17 @@ describe('write-content route population is derived from WRITE_TOOLS source, wit
     expect(DERIVED_WRITE_TOOLS).toContain('apply_patch');
   });
 
-  it('extracts a non-empty WRITE_CONTENT_ROUTES tool population from lib/runtime/hooks.js source', () => {
+  it('extracts a non-empty WRITE_CONTENT_ROUTES tool population from lib/runtime/write-policy.js source', () => {
+    if (writePolicySourceText === null) return;
     expect(
       DERIVED_ROUTED_TOOLS,
-      'const WRITE_CONTENT_ROUTES = Object.freeze([...]) literal not found in lib/runtime/hooks.js',
+      'const WRITE_CONTENT_ROUTES = Object.freeze([...]) literal not found in lib/runtime/write-policy.js',
     ).not.toBeNull();
     expect(DERIVED_ROUTED_TOOLS.length).toBeGreaterThan(0);
   });
 
   it('every WRITE_TOOLS member is either routed through WRITE_CONTENT_ROUTES or a member of the exported WRITE_CONTENT_UNREACHABLE_TOOLS Set, so a NEW member reddens here instead of shipping silently', () => {
+    if (writePolicySourceText === null) return;
     const routed = DERIVED_ROUTED_TOOLS ?? [];
     const uncovered = (DERIVED_WRITE_TOOLS ?? []).filter(
       (tool) => !routed.includes(tool) && !WRITE_CONTENT_UNREACHABLE_TOOLS.has(tool),
@@ -566,14 +579,15 @@ function extractBetween(text, startMarker, endMarker) {
   return text.slice(start, end);
 }
 
-describe('hooks.js and docs/hooks.md no longer claim the apply_patch route is unreachable/dead (R1 source text)', () => {
-  it('hooks.js\'s REACH comment on the apply_patch route no longer claims it is denied earlier, before the extractor ever runs, for want of a recognized path field', () => {
+describe('write-policy.js and docs/hooks.md no longer claim the apply_patch route is unreachable/dead (R1 source text)', () => {
+  it('write-policy.js\'s REACH comment on the apply_patch route no longer claims it is denied earlier, before the extractor ever runs, for want of a recognized path field', () => {
+    if (writePolicySourceText === null) return;
     const reachComment = extractBetween(
-      hooksSourceText,
+      writePolicySourceText,
       '// REACH, recorded rather than implied:',
       'Object.freeze({',
     );
-    expect(reachComment, "hooks.js's REACH comment on the apply_patch route was not found").not.toBeNull();
+    expect(reachComment, "write-policy.js's REACH comment on the apply_patch route was not found").not.toBeNull();
     const text = flattenProse(reachComment);
     expect(text).not.toMatch(/before this extractor ever runs/);
     expect(text).not.toMatch(/for want of a recognized path field/);
@@ -617,6 +631,19 @@ describe('hooks.js and docs/hooks.md no longer claim the apply_patch route is un
 // file provides is the write-side hook gate above.
 // ===========================================================================
 const SCAN_DIRS = ['lib', 'bin', 'scripts', '__tests__'];
+const REQUIRED_OWNER_SOURCE_FILES = [
+  'lib/runtime/lifecycle-service.js',
+  'lib/runtime/receipt-service.js',
+  'lib/runtime/status-service.js',
+  'lib/runtime/evidence-policy.js',
+  'lib/runtime/write-policy.js',
+  'lib/runtime/lifecycle-policy.js',
+  'lib/runtime/gate-evaluation.js',
+  'lib/runtime/gate-watch.js',
+  'lib/runtime/github-shipping.js',
+  'lib/runtime/reducer.js',
+  'lib/runtime/review-evidence.js',
+];
 
 // Never tab (0x09), newline (0x0a) or CR (0x0d): every other C0 control
 // character, DEL/C1 (0x7f-0x9f), and the bidi/format ranges this task's other
@@ -689,6 +716,14 @@ function trackedSourceFiles(rootDir) {
     .filter((entry) => /\.(js|mjs|cjs)$/.test(entry) && !SCAN_FILE_EXEMPTIONS.has(entry));
 }
 
+function authoredSourceFiles(rootDir) {
+  const files = new Set(trackedSourceFiles(rootDir));
+  for (const file of REQUIRED_OWNER_SOURCE_FILES) {
+    if (existsSync(path.join(rootDir, file))) files.add(file);
+  }
+  return [...files].sort();
+}
+
 function describeFlagged(flagged) {
   return flagged.map((entry) => `${entry.file}[${entry.index}] U+${entry.code.toUpperCase()}`).join('\n');
 }
@@ -730,8 +765,13 @@ describe('tracked-source control/bidi byte guard', () => {
     expect(scanTextForHazards('fixture.js', clean)).toEqual([]);
   });
 
-  it('finds no decoded control/bidi/format byte in this project\'s own tracked lib/, bin/, scripts/, __tests__/ source (post-fix invariant, GREEN on the live tree)', () => {
-    const files = trackedSourceFiles(root);
+  it('finds no decoded control/bidi/format byte in tracked source or any exact owner read directly from the working tree', () => {
+    const missingOwners = REQUIRED_OWNER_SOURCE_FILES.filter(
+      (file) => !existsSync(path.join(root, file)),
+    );
+    expect(missingOwners, 'missing required authored owner source').toEqual([]);
+    if (missingOwners.length > 0) return;
+    const files = authoredSourceFiles(root);
     expect(files.length).toBeGreaterThan(50);
     const flagged = files.flatMap((file) => scanTextForHazards(file, readFileSync(path.join(root, file), 'utf8')));
     expect(flagged, describeFlagged(flagged)).toEqual([]);

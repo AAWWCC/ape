@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -130,6 +131,23 @@ import { atomicWriteJson } from '../lib/runtime/storage.js';
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const hookBinary = path.join(root, 'bin', 'ape-hook.mjs');
 const cleanups = [];
+
+function requiredOwnerPath(file) {
+  const absolute = path.join(root, 'lib', 'runtime', file);
+  expect(existsSync(absolute), `missing required owner: lib/runtime/${file}`).toBe(true);
+  return absolute;
+}
+
+describe('execution-config policy source ownership', () => {
+  it('keeps configuration tables in write-policy and lifecycle admission in lifecycle-policy', async () => {
+    const writePolicy = await readFile(requiredOwnerPath('write-policy.js'), 'utf8');
+    const lifecyclePolicy = await readFile(requiredOwnerPath('lifecycle-policy.js'), 'utf8');
+    expect(writePolicy).toMatch(/const EXECUTION_CONFIG_TAIL = new Set\(/);
+    expect(writePolicy).toMatch(/const EXECUTION_CONFIG_TAIL_PAIR = new Set\(/);
+    expect(lifecyclePolicy).toMatch(/export function evaluateLifecyclePolicy\s*\(/);
+    expect(lifecyclePolicy).toMatch(/out_of_project/);
+  });
+});
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -564,8 +582,8 @@ function publishedDocTails(markdown) {
 }
 
 describe('PARITY — the pinned list, the shipped tables and the published docs list are one set', () => {
-  it('pins exactly the tails lib/runtime/hooks.js ships, in both directions', async () => {
-    const source = await readFile(path.join(root, 'lib', 'runtime', 'hooks.js'), 'utf8');
+  it('pins exactly the tails lib/runtime/write-policy.js owns, in both directions', async () => {
+    const source = await readFile(requiredOwnerPath('write-policy.js'), 'utf8');
     const shipped = [
       ...shippedSetLiteral(source, 'EXECUTION_CONFIG_TAIL'),
       ...shippedSetLiteral(source, 'EXECUTION_CONFIG_TAIL_PAIR'),
@@ -1365,16 +1383,16 @@ const MCP_RESIDUAL = {
 // this suite's own source.
 const NARROWING_SITES = [
   {
-    label: 'lib/runtime/hooks.js — the deliberately-NOT-covered enumeration',
-    relative: ['lib', 'runtime', 'hooks.js'],
+    label: 'lib/runtime/write-policy.js — the deliberately-NOT-covered enumeration',
+    relative: ['lib', 'runtime', 'write-policy.js'],
     opens: 'the FILES a plugin manifest names',
     closes: 'AND THE PROMISE THAT LIST MAKES IS BOUNDED',
     identity: [/mcpServers/, /manifest/i],
     uniqueOpening: true,
   },
   {
-    label: 'lib/runtime/hooks.js — the EXECUTION_CONFIG_TAIL_PAIR manifest rationale',
-    relative: ['lib', 'runtime', 'hooks.js'],
+    label: 'lib/runtime/write-policy.js — the EXECUTION_CONFIG_TAIL_PAIR manifest rationale',
+    relative: ['lib', 'runtime', 'write-policy.js'],
     opens: 'The FILES a manifest points at',
     closes: "'.claude-plugin/plugin.json',",
     identity: [/manifest/i, /enumerat/i],
@@ -1507,7 +1525,11 @@ describe('RED — A1: `.mcp.json` is RECORDED, and every arbitrary-naming site e
   for (const site of NARROWING_SITES) {
     it(`${site.label} narrows the claim to exclude the fixed-name companion`, async () => {
       const source = await readFile(
-        site.relative === null ? SELF : path.join(root, ...site.relative),
+        site.relative === null
+          ? SELF
+          : site.relative[0] === 'lib' && site.relative[1] === 'runtime'
+            ? requiredOwnerPath(site.relative[2])
+            : path.join(root, ...site.relative),
         'utf8',
       );
       const siteText = narrowingWindow(
@@ -1547,7 +1569,7 @@ describe('GREEN GUARD — NAME did not quietly become COVER (green before AND af
     // obvious ones are in:", so the residual naming MUST land outside that
     // window and an arm requiring it inside would be unsatisfiable by any
     // correct build.
-    const source = await readFile(path.join(root, 'lib', 'runtime', 'hooks.js'), 'utf8');
+    const source = await readFile(requiredOwnerPath('write-policy.js'), 'utf8');
     expect(shippedSetLiteral(source, 'EXECUTION_CONFIG_TAIL')).not.toContain('.mcp.json');
     expect(shippedSetLiteral(source, 'EXECUTION_CONFIG_TAIL_PAIR')).not.toContain('.mcp.json');
     const markdown = await readFile(path.join(root, 'docs', 'hooks.md'), 'utf8');
@@ -1562,7 +1584,7 @@ describe('GREEN GUARD — NAME did not quietly become COVER (green before AND af
     expect(COVERED_TAILS.length * 2, 'pinned (tail, ticket-kind) pairs').toBeGreaterThanOrEqual(
       128,
     );
-    const source = await readFile(path.join(root, 'lib', 'runtime', 'hooks.js'), 'utf8');
+    const source = await readFile(requiredOwnerPath('write-policy.js'), 'utf8');
     const shipped = [
       ...shippedSetLiteral(source, 'EXECUTION_CONFIG_TAIL'),
       ...shippedSetLiteral(source, 'EXECUTION_CONFIG_TAIL_PAIR'),
