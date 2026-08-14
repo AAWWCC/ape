@@ -284,7 +284,13 @@ describe('autoMergeGithub', () => {
       expect(create[create.indexOf('--base') + 1]).toBe('release/stable');
       // The truncated 'stable' would strand the local repo post-merge too.
       expect(gitCalls).toContainEqual(['fetch', 'origin', 'release/stable']);
-      expect(gitCalls).toContainEqual(['switch', 'release/stable']);
+      expect(gitCalls).toContainEqual([
+        'switch',
+        '-c',
+        'release/stable',
+        'refs/remotes/origin/release/stable',
+        '--no-track',
+      ]);
       expect(gitCalls).toContainEqual(['pull', '--ff-only', 'origin', 'release/stable']);
     });
 
