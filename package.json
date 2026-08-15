@@ -1,6 +1,6 @@
 {
   "name": "ape",
-  "version": "2.17.4",
+  "version": "2.18.0",
   "type": "module",
   "private": true,
   "description": "APE — durable, evidence-gated engineering runs for AI coding agents",
@@ -61,6 +61,7 @@
     "smoke:plugins": "node scripts/smoke-plugin-mcp.mjs",
     "smoke:marketplaces": "node scripts/smoke-marketplace-install.mjs",
     "reinstall:codex": "node scripts/reinstall-codex-plugin.mjs",
+    "reinstall:gemini": "node scripts/reinstall-gemini-plugin.mjs",
     "statusline:svg": "node scripts/render-statusline-svg.mjs",
     "benchmark:verify": "node scripts/benchmark-v2.mjs",
     "validate:claude": "claude plugin validate ./plugins/ape-claude && claude plugin validate ./plugins/ape-claude --strict",

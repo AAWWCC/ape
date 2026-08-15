@@ -42,6 +42,9 @@ checked byte-for-byte by `npm run docs:check`.
 | `models.codex.balanced.reasoning_effort` | string | `"medium"` | Codex balanced-tier reasoning effort. |
 | `models.codex.deep.model` | string | `"gpt-5.5"` | Codex deep-tier model. |
 | `models.codex.deep.reasoning_effort` | string | `"high"` | Codex deep-tier reasoning effort. |
+| `models.gemini.fast.model` | string | `"flash"` | Gemini fast-tier model. |
+| `models.gemini.balanced.model` | string | `"flash"` | Gemini balanced-tier model. |
+| `models.gemini.deep.model` | string | `"pro"` | Gemini deep-tier model. |
 | `role_models.security_reviewer.claude.model` | string | `"opus"` | Per-role override, evaluated before the tier mapping. |
 | `verification.profiles` | object array | `[]` | Unique exact shell-free profile commands snapshotted at start and assigned as fail-closed merge gates. |
 | `test_commands.targeted` | string or null | `null` | Runtime-owned targeted merge-gate command. |
