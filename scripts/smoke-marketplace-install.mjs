@@ -127,7 +127,7 @@ async function initializeInstalled(host, pluginRoot) {
       params: { protocolVersion: '2025-06-18' },
     })}\n`);
   });
-  if (response?.result?.serverInfo?.version !== '2.17.4') {
+  if (response?.result?.serverInfo?.version !== VERSION) {
     throw new Error(`${host} installed MCP returned the wrong server version`);
   }
 }
