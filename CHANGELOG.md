@@ -4,6 +4,16 @@
 
 ## 2.18.0 — 2026-08-15
 
+The runtime implementation is now split behind thin, stable service, hook, gate, and scheduler
+facades. Exact named exports and persisted behavior remain compatible, while focused internal
+modules and an acyclic import graph make lifecycle, evidence, gate, and scheduling changes easier
+to isolate and verify.
+
+Behavioral runs now support a structured, read-only preflight analysis before writers start. The
+result is hash-bound into the plan, material questions pause for audited operator answers, and
+immutable verification profiles snapshot exact commands, roots, and timeouts as named merge gates.
+Legacy plan contracts and persisted run data remain compatible.
+
 First-class support for Google Antigravity / Gemini agents (`agy` CLI and Antigravity IDE). APE
 now coordinates native subagent dispatches via `invoke_subagent` (mapping writable tickets to
 `self` and read-only tickets to `research`), governs Antigravity tool mutations (`write_to_file`,
