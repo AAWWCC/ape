@@ -97,6 +97,18 @@ describe('versioned preflight artifact contract', () => {
     expect(planner.preflight).toEqual({ artifact_hash: sha256(value), artifact: value, trust: 'untrusted-evidence' });
   });
 
+  it('accepts an exact run objective longer than the general preflight prose limit', async () => {
+    const dir = await project();
+    const objective = `Complete the requested change with exact acceptance details: ${'x'.repeat(3_000)}`;
+    const started = await startRun(dir, input({ objective }));
+    const value = artifact({ objective });
+
+    const recorded = await recordReceipt(dir, receipt(started.run.tickets[0], value));
+
+    expect(recorded.ok, JSON.stringify(recorded.errors)).toBe(true);
+    expect(recorded.run.preflight.artifact.objective).toBe(objective);
+  });
+
   it('snapshots verification profiles at run start and ignores later config drift', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
@@ -161,4 +173,3 @@ describe('versioned preflight artifact contract', () => {
     expect(await readJson(runtimePaths(dir).active)).toEqual(before);
   });
 });
-

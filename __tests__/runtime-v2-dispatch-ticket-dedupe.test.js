@@ -39,6 +39,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OUTPUT_SCHEMA_REFERENCE, projectRunResponse } from '../lib/runtime/projection.js';
 import { RECEIPT_INPUT_SCHEMA } from '../lib/runtime/receipt-input.js';
 import { classifyApeRunOutcome } from '../lib/runtime/larp.js';
+import { sha256 } from '../lib/runtime/canonical.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { finalizeTicket, validateTicket } from '../lib/runtime/schemas.js';
@@ -189,6 +190,29 @@ function countOccurrences(haystack, needle) {
 
 const wireSize = (response) => JSON.stringify(response).length;
 
+function largeCandidatePlan() {
+  const plan = {
+    version: 2,
+    preflight_hash: 'b'.repeat(64),
+    requirements: [{ id: 'R1', requirement: 'Forward the complete plan', workstreams: ['wire'] }],
+    workstreams: [{
+      id: 'wire',
+      outcome: 'Every plan reviewer receives the admitted plan',
+      paths: [{ path: 'src/value.js', action: 'modify' }],
+      steps: ['Forward the validated envelope without recomputing it'],
+      acceptance: ['Review tickets retain the complete authoritative candidate'],
+      evidence_commands: ['npm test'],
+      verification_profiles: ['unit'],
+    }],
+    risks: Array.from({ length: 8 }, (_, index) => ({
+      risk: `risk-${index}-${'r'.repeat(380)}`,
+      mitigation: `mitigation-${index}-${'m'.repeat(380)}`,
+    })),
+    non_goals: Array.from({ length: 16 }, (_, index) => `non-goal-${index}-${'n'.repeat(380)}`),
+  };
+  return { plan_hash: sha256(plan), plan };
+}
+
 describe('APE v2 immutable ticket planning context', () => {
   it('hashes bounded contract version and snapshotted verification profiles without changing legacy tickets', () => {
     const schemaTicket = (stageId, role, id, overrides = {}) => makeTicket(
@@ -248,6 +272,45 @@ describe('APE v2 immutable ticket planning context', () => {
         timeout_ms: 1_000,
       })),
     })).toThrow();
+  });
+
+  it('dedupes repeated complete v2 candidates on the wire while keeping one resolvable authority', () => {
+    const candidate = largeCandidatePlan();
+    const state = runState(SMALL_OBJECTIVE, {
+      stage: 'plan-review',
+      receipts: [],
+      tickets: [
+        makeTicket('plan-check', 'plan_checker', 'tik-plan-check', SMALL_OBJECTIVE, {
+          plan_contract_version: 2,
+          candidate_plan: candidate,
+        }),
+        makeTicket('plan-critic', 'plan_critic', 'tik-plan-critic', SMALL_OBJECTIVE, {
+          plan_contract_version: 2,
+          candidate_plan: candidate,
+        }),
+      ],
+    });
+    const response = {
+      ok: true,
+      run: state,
+      actions: state.tickets.map((ticket) => dispatchAction(ticket)),
+    };
+    expect(wireSize(response)).toBeGreaterThan(BUDGET_CHARS);
+    const snapshot = structuredClone(response);
+
+    const projected = projectRunResponse(response);
+    const copies = [
+      ...projected.run.tickets.map((ticket) => ticket.candidate_plan),
+      ...projected.actions.map((action) => action.ticket.candidate_plan),
+    ];
+    expect(copies.filter((value) => value?.plan)).toHaveLength(1);
+    expect(copies.every((value) => value?.plan_hash === candidate.plan_hash)).toBe(true);
+    expect(copies.filter((value) => value?.plan_ref)).toHaveLength(3);
+    expect(copies.filter((value) => value?.plan_ref).every(
+      (value) => value.plan_ref.includes('.ape/runtime/tickets/'),
+    )).toBe(true);
+    expect(wireSize(projected)).toBeLessThan(BUDGET_CHARS);
+    expect(response).toEqual(snapshot);
   });
 });
 

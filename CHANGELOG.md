@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.18.2 — 2026-08-15
+
+Versioned plan reviewers now receive the complete validated candidate plan instead of a truncated
+legacy projection, including deterministic forwarding across concurrent review dispatches.
+
+Preflight artifacts can now preserve accepted run objectives longer than 2,000 characters exactly,
+while the existing 64 KiB whole-artifact bound and the per-field limits for all other preflight
+prose remain enforced. This removes an impossible receipt contract where a valid long run objective
+could neither be echoed exactly nor recorded.
+
 ## 2.18.1 — 2026-08-15
 
 Fixed Google Antigravity app and `agy` compatibility against the current shared plugin contract.
