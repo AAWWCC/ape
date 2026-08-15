@@ -7,6 +7,8 @@ description: "Read, update, diagnose, or wire the APE host-neutral runtime confi
 
 Use only when the user explicitly requests APE configuration work. Call `ape_config` with one of:
 
+On Google Antigravity / Gemini, pass the exact open project root as `project_dir`.
+
 - `get`: read configuration, optionally at a dot-path key.
 - `set`: write the requested dot-path value. Preserve unrelated sparse overrides.
 - `doctor`: diagnose runtime, git, hook, bundle, lock, and statusline readiness. Supply run-start

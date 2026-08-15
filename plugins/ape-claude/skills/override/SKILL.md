@@ -9,6 +9,8 @@ disable-model-invocation: true
 
 Use only when the user explicitly requests an abort or reset. Require a non-empty audit reason; ask
 for it before calling when absent.
+On Google Antigravity / Gemini, pass the exact open project root as `project_dir` on both the status
+check and the override call.
 
 Call `ape_run` with `action: "override"`, operation `abort` or `reset`, the reason, and an optional
 run-ID confirmation. After a conversational gap or when the user names a run, call

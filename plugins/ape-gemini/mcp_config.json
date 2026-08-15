@@ -6,7 +6,8 @@
         "./dist/ape-mcp.bundle.mjs",
         "--host",
         "gemini"
-      ]
+      ],
+      "cwd": "."
     }
   }
 }

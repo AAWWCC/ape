@@ -9,6 +9,8 @@ disable-model-invocation: true
 Use only when the user explicitly asks to resume APE. Call `ape_run` with `action: "resume"` and
 continue from the returned machine state; never reconstruct completed work or pending tickets from
 conversation memory.
+On Google Antigravity / Gemini, pass the exact open project root as `project_dir` on every APE MCP
+call.
 
 Follow [`references/run-resume-protocol.md`](references/run-resume-protocol.md) for dispatch,
 receipt recording, waiting, and advancement. Never spawn a replacement for an already-bound ticket.

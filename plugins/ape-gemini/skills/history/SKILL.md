@@ -7,6 +7,8 @@ description: "Query, explain, import, inspect, or explicitly maintain APE machin
 
 Use only when the user explicitly requests APE history work. Call `ape_history` with:
 
+On Google Antigravity / Gemini, pass the exact open project root as `project_dir`.
+
 - `query` for a run or requirement ID.
 - `explain` for a human-readable rendering of one record.
 - `import` for an explicitly requested legacy planning import.

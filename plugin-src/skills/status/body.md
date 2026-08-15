@@ -2,6 +2,7 @@
 
 Call the dedicated read-only `ape_status` tool. This is the only APE skill that may be selected
 implicitly. Do not dispatch agents, advance the run, mutate state, or reinterpret a blocked result.
+On Google Antigravity / Gemini, pass the exact open project root as `project_dir`.
 
 Render the current run, pending tickets or dispatches, lane, stage, gates, and next machine action
 compactly. When roadmap data is present, show counts only; direct users who need entries to the

@@ -68,7 +68,10 @@ const TOOLS = Object.freeze([
       required: ['action'],
       properties: {
         action: { type: 'string', enum: ['probe', 'probe-status', 'probe-ack', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'] },
-        project_dir: { type: 'string' },
+        project_dir: {
+          type: 'string',
+          description: 'Exact governed project root. Required on Google Antigravity / Gemini because its plugin MCP process runs from the installed plugin directory.',
+        },
         objective: { type: 'string' },
         mode: { type: 'string', enum: [...START_MODES] },
         lane: {
@@ -154,7 +157,10 @@ const TOOLS = Object.freeze([
     inputSchema: {
       type: 'object',
       properties: {
-        project_dir: { type: 'string' },
+        project_dir: {
+          type: 'string',
+          description: 'Exact governed project root. Required on Google Antigravity / Gemini because its plugin MCP process runs from the installed plugin directory.',
+        },
       },
       additionalProperties: false,
     },
@@ -171,7 +177,10 @@ const TOOLS = Object.freeze([
           type: 'string',
           enum: ['query', 'explain', 'import', 'maintenance-status', 'compact-artifacts', 'roadmap-status', 'roadmap-register', 'roadmap-supersede'],
         },
-        project_dir: { type: 'string' },
+        project_dir: {
+          type: 'string',
+          description: 'Exact governed project root. Required on Google Antigravity / Gemini because its plugin MCP process runs from the installed plugin directory.',
+        },
         run_id: { type: 'string' },
         requirement: { type: 'string' },
         delete_legacy: { type: 'boolean' },
@@ -233,7 +242,10 @@ const TOOLS = Object.freeze([
       required: ['action'],
       properties: {
         action: { type: 'string', enum: ['get', 'set', 'doctor', 'wire', 'unwire', 'init'] },
-        project_dir: { type: 'string' },
+        project_dir: {
+          type: 'string',
+          description: 'Exact governed project root. Required on Google Antigravity / Gemini because its plugin MCP process runs from the installed plugin directory.',
+        },
         key: { type: 'string' },
         value: {},
         apply: { type: 'boolean' },

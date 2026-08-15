@@ -66,6 +66,7 @@
     "benchmark:verify": "node scripts/benchmark-v2.mjs",
     "validate:claude": "claude plugin validate ./plugins/ape-claude && claude plugin validate ./plugins/ape-claude --strict",
     "validate:codex": "node scripts/smoke-marketplace-install.mjs --host codex",
+    "validate:gemini": "agy plugin validate ./plugins/ape-gemini",
     "validate": "npm run validate:claude && npm run validate:codex"
   },
   "devDependencies": {

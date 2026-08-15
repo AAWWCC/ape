@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+Fixed Google Antigravity app and `agy` compatibility against the current shared plugin contract.
+Gemini hooks now use only supported lifecycle events, normalize Antigravity's camel-case nested
+tool payloads, return event-specific response shapes, and resolve bundles from the installed plugin
+directory. Native `invoke_subagent` launches now bind the child conversation during
+`PreInvocation`, inject receipt capability context before its first model turn, preserve dispatch
+liveness in status output, and carry an explicit encoded project root. Generated MCP declarations
+and every Gemini skill now require the exact `project_dir`, preventing plugin-install cwd from being
+mistaken for the governed checkout.
+
 ## 2.18.0 — 2026-08-15
 
 The runtime implementation is now split behind thin, stable service, hook, gate, and scheduler

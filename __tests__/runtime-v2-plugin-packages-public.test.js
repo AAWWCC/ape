@@ -95,6 +95,9 @@ describe('2.17 public plugin packages', () => {
     expect(await json('plugins/ape-claude/.mcp.json')).toEqual({
       mcpServers: { ape: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/dist/ape-mcp.bundle.mjs', '--host', 'claude'] } },
     });
+    expect(await json('plugins/ape-gemini/mcp_config.json')).toEqual({
+      mcpServers: { ape: { command: 'node', args: ['./dist/ape-mcp.bundle.mjs', '--host', 'gemini'], cwd: '.' } },
+    });
   });
 
   it('renders host-neutral skill bodies with host-specific invocation controls', async () => {
