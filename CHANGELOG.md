@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.18.1 — 2026-08-15
+
 Fixed Google Antigravity app and `agy` compatibility against the current shared plugin contract.
 Gemini hooks now use only supported lifecycle events, normalize Antigravity's camel-case nested
 tool payloads, return event-specific response shapes, and resolve bundles from the installed plugin
