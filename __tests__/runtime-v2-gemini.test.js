@@ -1,8 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_MODELS } from '../lib/runtime/constants.js';
-import { runtimeHost, resolveGovernedRoot } from '../lib/runtime/paths.js';
+import { runtimeHost, resolveGovernedRoot, runtimePaths } from '../lib/runtime/paths.js';
 import { nativeDispatch } from '../lib/runtime/adapters.js';
 import { statuslineState, wireStatusline, unwireStatusline } from '../lib/runtime/statusline.js';
+import {
+  bindGeminiInvocation,
+  launchGeminiIntent,
+  prepareGeminiIntent,
+} from '../lib/runtime/claude-dispatch.js';
+import {
+  encodeGeminiProjectDir,
+  extractGeminiPromptContext,
+  normalizeGeminiHookInput,
+} from '../lib/runtime/gemini-host.js';
 import {
   SAFE_SUBAGENT_TOOLS,
   isAgentDispatchTool,
@@ -10,6 +23,12 @@ import {
   evaluateLifecyclePolicy,
 } from '../lib/runtime/hooks.js';
 import { WRITE_TOOLS } from '../lib/runtime/write-policy.js';
+
+const cleanups = [];
+
+afterEach(async () => {
+  await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 describe('Gemini / Antigravity runtime integration', () => {
   describe('environment and host detection', () => {
@@ -96,6 +115,66 @@ describe('Gemini / Antigravity runtime integration', () => {
       expect(dispatch.dispatch_intent).toBe(intent);
       expect(dispatch.agent_name).toBe('ape_implementer_abc');
     });
+
+    it('binds a real Antigravity child conversation during PreInvocation', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-gemini-binding-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      const ticket = {
+        run_id: 'run-gemini-binding',
+        ticket_id: 'ticket-gemini-binding',
+        ticket_hash: 'a'.repeat(64),
+        role: 'implementer',
+        model: { model: 'flash' },
+        deadline_at: new Date(Date.now() + 60_000).toISOString(),
+      };
+      const state = {
+        run_id: ticket.run_id,
+        status: 'running',
+        tickets: [ticket],
+        receipts: [],
+      };
+      const intent = await prepareGeminiIntent(paths, ticket, 'self');
+      expect(extractGeminiPromptContext(intent.prompt)).toEqual({
+        nonce: intent.nonce,
+        project_dir: dir,
+      });
+
+      const parentInput = await normalizeGeminiHookInput({
+        conversationId: 'gemini-parent-conversation',
+        stepIdx: 7,
+        workspacePaths: [dir],
+        toolCall: {
+          name: 'invoke_subagent',
+          args: {
+            Subagents: [{ TypeName: 'self', Model: 'flash', Prompt: intent.prompt }],
+          },
+        },
+      }, { APE_HOST: 'gemini', APE_HOOK_EVENT: 'PreToolUse' });
+      expect(await launchGeminiIntent(paths, state, parentInput)).toMatchObject({ valid: true });
+
+      const artifactDir = path.join(dir, 'artifacts');
+      const transcriptPath = path.join(artifactDir, 'child.jsonl');
+      await mkdir(artifactDir, { recursive: true });
+      await writeFile(transcriptPath, `${JSON.stringify({ content: intent.prompt })}\n`);
+      const childInput = await normalizeGeminiHookInput({
+        conversationId: 'gemini-child-conversation',
+        transcriptPath,
+        artifactDirectoryPath: artifactDir,
+        invocationNum: 0,
+        modelName: 'gemini-3.7-flash-tiered',
+        workspacePaths: [],
+      }, { APE_HOST: 'gemini', APE_HOOK_EVENT: 'PreInvocation' });
+      expect(childInput).toMatchObject({
+        hook_event_name: 'PreInvocation',
+        session_id: 'gemini-child-conversation',
+        project_dir: dir,
+        gemini_dispatch_nonce: intent.nonce,
+      });
+      const bound = await bindGeminiInvocation(paths, state, childInput);
+      expect(bound).toMatchObject({ matched: true, valid: true, ticket_id: ticket.ticket_id });
+      expect(bound.additional_context).toMatch(/APE_RECEIPT_CAPABILITY=[A-Za-z0-9_-]{32,256}/);
+    });
   });
 
   describe('statusline support', () => {
@@ -119,6 +198,36 @@ describe('Gemini / Antigravity runtime integration', () => {
   });
 
   describe('tools and lifecycle policy normalization', () => {
+    it('normalizes the current nested Antigravity tool payload and environment event', async () => {
+      const input = await normalizeGeminiHookInput({
+        conversationId: 'gemini-conversation',
+        stepIdx: 3,
+        workspacePaths: ['/tmp/ape-gemini-project'],
+        toolCall: {
+          name: 'replace_file_content',
+          args: { TargetFile: '/tmp/ape-gemini-project/src/index.js' },
+        },
+      }, { APE_HOST: 'gemini', APE_HOOK_EVENT: 'PreToolUse' });
+      expect(input).toMatchObject({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'replace_file_content',
+        session_id: 'gemini-conversation',
+        tool_use_id: '3',
+        project_dir: '/tmp/ape-gemini-project',
+      });
+      expect(input.tool_input).toEqual({ TargetFile: '/tmp/ape-gemini-project/src/index.js' });
+    });
+
+    it('round-trips an encoded absolute project root and rejects duplicate authority', () => {
+      const encoded = encodeGeminiProjectDir('/tmp/ape-gemini-project');
+      expect(extractGeminiPromptContext(
+        `APE_PROJECT_DIR_B64=${encoded}\nAPE_DISPATCH_NONCE=${'n'.repeat(32)}`,
+      )).toEqual({ nonce: 'n'.repeat(32), project_dir: '/tmp/ape-gemini-project' });
+      expect(extractGeminiPromptContext(
+        `APE_PROJECT_DIR_B64=${encoded}\nAPE_PROJECT_DIR_B64=${encoded}\nAPE_DISPATCH_NONCE=${'n'.repeat(32)}`,
+      ).project_dir).toBeNull();
+    });
+
     it('recognizes invoke_subagent as an agent dispatch tool', () => {
       expect(isAgentDispatchTool('invoke_subagent')).toBe(true);
     });

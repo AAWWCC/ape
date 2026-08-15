@@ -82,9 +82,9 @@ describe('2.17 public plugin packages', () => {
     const codexManifest = await json('plugins/ape/.codex-plugin/plugin.json');
     const claudeManifest = await json('plugins/ape-claude/.claude-plugin/plugin.json');
     const geminiManifest = await json('plugins/ape-gemini/plugin.json');
-    expect(codexManifest).toMatchObject({ version: '2.18.0', mcpServers: './.mcp.json' });
-    expect(claudeManifest).toMatchObject({ version: '2.18.0', hooks: './hooks/claude-hooks.json' });
-    expect(geminiManifest).toMatchObject({ version: '2.18.0' });
+    expect(codexManifest).toMatchObject({ version: '2.18.1', mcpServers: './.mcp.json' });
+    expect(claudeManifest).toMatchObject({ version: '2.18.1', hooks: './hooks/claude-hooks.json' });
+    expect(geminiManifest).toMatchObject({ version: '2.18.1' });
     for (const manifest of [codexManifest, claudeManifest, geminiManifest]) {
       expect(manifest.author).toEqual({ name: 'AAWWCC', url: 'https://github.com/AAWWCC' });
       expect(manifest.author).not.toHaveProperty('email');
@@ -94,6 +94,9 @@ describe('2.17 public plugin packages', () => {
     });
     expect(await json('plugins/ape-claude/.mcp.json')).toEqual({
       mcpServers: { ape: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/dist/ape-mcp.bundle.mjs', '--host', 'claude'] } },
+    });
+    expect(await json('plugins/ape-gemini/mcp_config.json')).toEqual({
+      mcpServers: { ape: { command: 'node', args: ['./dist/ape-mcp.bundle.mjs', '--host', 'gemini'], cwd: '.' } },
     });
   });
 

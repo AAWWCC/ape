@@ -2,6 +2,12 @@
 
 The parent orchestrator owns every APE control call. It never performs stage work itself.
 
+On Google Antigravity / Gemini, pass the exact open project root as `project_dir` on every APE MCP
+call. The plugin process runs from its installed package directory, so its process working directory
+is never project authority. Use one native `invoke_subagent` call per returned ticket with the exact
+`TypeName`, `Model`, and prompt; keep `Workspace` as `inherit`. The child's supported
+`PreInvocation` hook binds its conversation before the first model turn.
+
 1. Before a Codex `start`, complete the runtime's binding probe: call `ape_run probe`, launch the
    returned `dispatch_probe` with its exact native agent name, model, reasoning effort, and message,
    confirm `probe-status` is bound, then acknowledge the returned probe capability with `probe-ack`.
@@ -9,14 +15,15 @@ The parent orchestrator owns every APE control call. It never performs stage wor
    mismatch. `start` consumes this fresh, single-use proof. Claude does not use this probe.
 2. For each `dispatch_agent`, use the host-native tool and pass the generated name, model, optional
    reasoning effort, and dispatch intent exactly. On Claude, also pass the action's agent type; on
-   Codex Multi-Agent V2, that field is APE's logical policy role and is not a native tool argument.
+   Codex Multi-Agent V2, that field is APE's logical policy role and is not a native tool argument;
+   on Antigravity, pass it as `TypeName` and pass the ticket model as `Model`.
    Never substitute a model, semantic task name, SDK, nested CLI, or API call.
 3. Compose the child's context from the complete common prompt, the complete role prompt, and the
    action's immutable ticket. On Codex, inline them after the dispatch-intent prompt in that order,
    labeled `APE common contract`, `APE <role> contract`, and `Immutable StageTicket`. On Claude,
    use the returned plugin agent wrapper, which loads the same prompt files, and append the ticket.
-4. Launch distinct tickets as returned. On Codex, finish each spawn call and confirm its dispatch
-   is bound before launching the next; bound agents may then run concurrently. Never launch two
+4. Launch distinct tickets as returned. On Codex and Antigravity, finish each spawn call and confirm
+   its dispatch is bound before launching the next; bound agents may then run concurrently. Never launch two
    physical agents for one ticket. Wait through the host's native primitive; do not poll unchanged
    status.
 5. Require exactly one receipt JSON matching the ticket's `output_schema`, including the exact

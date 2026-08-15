@@ -33,6 +33,7 @@ import {
   bindClaudeSubagent,
   bindCodexSubagent,
   bindGeminiSubagent,
+  bindGeminiInvocation,
   isCodexDispatchTaskName,
   launchClaudeIntent,
   launchCodexIntent,
@@ -47,6 +48,7 @@ import {
   observeCodexSubagentStop,
   observeGeminiSubagentStop,
 } from '../lib/runtime/claude-dispatch.js';
+import { normalizeGeminiHookInput } from '../lib/runtime/gemini-host.js';
 import {
   bindBindingProbe,
   isBindingProbeTaskName,
@@ -116,6 +118,9 @@ try {
       throw parseCause;
     }
   }
+  if (process.env.APE_HOST === 'gemini') {
+    input = await normalizeGeminiHookInput(input);
+  }
   if (typeof input.project_dir === 'string' && input.project_dir) {
     salvagedProjectDir = input.project_dir;
   }
@@ -167,6 +172,23 @@ try {
   const paths = runtimePaths(event.project_dir);
   const state = await readJson(paths.active, null);
 
+  if (
+    state &&
+    event.host === 'gemini' &&
+    event.event === 'PreInvocation' &&
+    input.gemini_dispatch_nonce
+  ) {
+    const binding = await bindGeminiInvocation(paths, state, input);
+    if (binding.matched) {
+      process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+        decision: binding.valid ? 'allow' : 'deny',
+        reason: binding.reason,
+        additional_context: binding.additional_context,
+      }))}\n`);
+      process.exit(0);
+    }
+  }
+
   let ticket = null;
   // Third container matches extractPath's own priority order (lib/runtime/
   // hooks.js normalizeLifecycleEvent): a payload shaped {tool_name, input:
@@ -176,7 +198,7 @@ try {
   // just below AND the write-content byte gate; missing `input.input` would
   // leave the byte gate closed for that spelling even though the path check
   // right below it is fully governed for the same event.
-  const toolInput = input.tool_input ?? input.toolInput ?? input.input ?? {};
+  const toolInput = input.tool_input ?? input.toolInput ?? input.input ?? input.toolCall?.args ?? {};
   const requestedAgentType =
     toolInput.subagent_type ?? toolInput.subagentType ?? toolInput.agent_type ?? toolInput.agentType ?? '';
   const requestedTaskName = toolInput.task_name ?? toolInput.taskName ?? '';
@@ -280,11 +302,23 @@ try {
   // deny, so it is left posture-unchanged and reports no cause.
   let dispatchBindingDenialCause = null;
   let stoppedBinding = null;
-  if (state && event.event === 'SubagentStop' && event.agent_identity) {
+  const geminiConversationInput = event.host === 'gemini' && input.conversationId
+    ? {
+        ...input,
+        session_id: input.conversationId,
+        agent_id: input.conversationId,
+        agent_type: null,
+      }
+    : input;
+  if (
+    state &&
+    ((event.event === 'SubagentStop' && event.agent_identity) ||
+      (event.host === 'gemini' && event.event === 'Stop' && input.conversationId))
+  ) {
     const observation = event.host === 'codex'
       ? await observeCodexSubagentStop(paths, state, input)
       : event.host === 'gemini'
-        ? await observeGeminiSubagentStop(paths, state, input)
+        ? await observeGeminiSubagentStop(paths, state, geminiConversationInput)
         : await observeClaudeSubagentStop(paths, state, input);
     stoppedBinding = observation.record;
   }
@@ -295,7 +329,7 @@ try {
   } else if (state && (event.host === 'codex' || event.host === 'gemini') && event.ticket_id) {
     ticket = state.tickets.find((entry) => entry.ticket_id === event.ticket_id) ?? null;
     event.ape_managed = true;
-  } else if (state && event.agent_identity) {
+  } else if (state && (event.agent_identity || (event.host === 'gemini' && input.conversationId))) {
     let binding;
     if (SEALED_STATUSES.has(state.status)) {
       // A sealed run's orphaned subagent must still resolve its binding — the
@@ -306,18 +340,22 @@ try {
       binding = event.host === 'codex'
         ? await resolveSealedCodexBinding(paths, state, input)
         : event.host === 'gemini'
-          ? await resolveSealedGeminiBinding(paths, state, input)
+          ? await resolveSealedGeminiBinding(paths, state, geminiConversationInput)
           : await resolveSealedClaudeBinding(paths, state, input);
     } else {
       const outcome = event.host === 'codex'
         ? await resolveCodexBindingOutcome(paths, state, input)
         : event.host === 'gemini'
-          ? await resolveGeminiBindingOutcome(paths, state, input)
+          ? await resolveGeminiBindingOutcome(paths, state, geminiConversationInput)
           : await resolveClaudeBindingOutcome(paths, state, input);
       binding = outcome.record;
       dispatchBindingDenialCause = outcome.cause;
     }
     if (binding) {
+      if (event.host === 'gemini') {
+        event.agent_identity = input.conversationId;
+        event.is_subagent = true;
+      }
       ticket = state.tickets.find((entry) => entry.ticket_id === binding.ticket_id) ?? null;
       event.ticket_id = binding.ticket_id;
       event.ape_managed = true;
@@ -372,7 +410,7 @@ try {
   // claims selection and realpath semantics as the edit gate, plus the role
   // rules — and the synchronous policy consumes only event.deletion. Safe is
   // true only if EVERY target passes; the first failure carries the reason.
-  if (ticket && event.tool_name === 'Bash') {
+  if (ticket && (event.tool_name === 'Bash' || event.tool_name === 'run_command')) {
     const parsed = parseDeletionCommand(event.command ?? '');
     if (parsed) {
       let safe = true;
@@ -446,7 +484,11 @@ try {
   // EVERY SUBSEQUENT TOOL EVENT and bricks the session until dist/ is reverted
   // by hand. The catch therefore records an explicit unsafe verdict the policy
   // acts on, and the assignment happens on BOTH paths.
-  if (ticket && event.tool_name === 'Bash' && typeof event.command === 'string') {
+  if (
+    ticket &&
+    (event.tool_name === 'Bash' || event.tool_name === 'run_command') &&
+    typeof event.command === 'string'
+  ) {
     try {
       const sessionCwd =
         typeof input.cwd === 'string' && input.cwd.length > 0 ? input.cwd : paths.root;
@@ -580,6 +622,7 @@ try {
     'PostToolUse',
     'PostToolUseFailure',
     'SubagentStop',
+    ...(event.host === 'gemini' ? ['Stop'] : []),
   ]);
   // The drift lockdown engages only while a run is actually writing: a
   // terminal run left behind in active.json must not police the repo. And it

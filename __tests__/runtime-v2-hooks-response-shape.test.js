@@ -95,4 +95,26 @@ describe('APE v2 host-compatible hook response shapes', () => {
       reason: 'fine',
     })).toEqual({});
   });
+
+  it('uses Antigravity event-specific top-level response shapes', () => {
+    expect(formatHookResponse({ host: 'gemini', event: 'PreToolUse' }, {
+      decision: 'deny',
+      reason: 'outside ticket scope',
+    })).toEqual({ decision: 'deny', reason: 'outside ticket scope' });
+    expect(formatHookResponse({ host: 'gemini', event: 'PreInvocation' }, {
+      decision: 'allow',
+      additional_context: 'APE_RECEIPT_CAPABILITY=abc',
+    })).toEqual({ injectSteps: [{ ephemeralMessage: 'APE_RECEIPT_CAPABILITY=abc' }] });
+    expect(formatHookResponse({ host: 'gemini', event: 'PostToolUse' }, {
+      decision: 'deny',
+      reason: 'observational event',
+    })).toEqual({});
+    expect(formatHookResponse({ host: 'gemini', event: 'Stop' }, {
+      decision: 'deny',
+      reason: 'run is incomplete',
+    })).toEqual({ decision: 'continue', reason: 'run is incomplete' });
+    expect(formatHookResponse({ host: 'gemini', event: 'Stop' }, {
+      decision: 'allow',
+    })).toEqual({ decision: 'stop' });
+  });
 });

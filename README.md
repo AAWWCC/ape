@@ -46,7 +46,9 @@ codex plugin add ape@ape
 
 ### Google Antigravity / Gemini
 
-From a source checkout, build and install the local package for the `agy` CLI or Antigravity IDE:
+The Antigravity desktop app and `agy` CLI use the same plugin package and shared Gemini
+configuration, although they are separate binaries and may report different versions. From a
+source checkout, build and install the local package for either host surface:
 
 ```bash
 npm ci
@@ -65,6 +67,10 @@ to an APE-operated service.
 | Claude Code | `plugins/ape-claude` | Local stdio | Claude Agent tool and supplemental hooks | Core policy is shared, but Codex-only connectors and live provider parity are not claimed. |
 | Google Antigravity / Gemini | `plugins/ape-gemini` | Local stdio | Native `invoke_subagent` dispatch and lifecycle hooks | Core policy is shared, but Codex-only connectors and live provider parity are not claimed. |
 
+APE uses Antigravity's supported `PreInvocation`, `PreToolUse`, `PostToolUse`, and `Stop` hook
+contract. Every Gemini APE tool call carries the exact open project as `project_dir`; this is
+required because the app and CLI start the plugin MCP server from the installed package directory.
+
 Node.js 22 and 24 are exercised on Windows, Linux, and macOS. Provider availability, host plugin
 discovery, and external editor connections remain host/version/environment dependent.
 
@@ -80,7 +86,8 @@ npm run reinstall:codex
 
 The Codex wrapper validates a small allowlisted package, promotes it under a new immutable cache
 version, and leaves both the source manifest and versions used by open tasks unchanged. The Gemini
-helper refreshes the local Antigravity package. Start a new host task after reinstalling.
+helper refreshes the shared local package used by the Antigravity app and `agy`. Start a new host
+task after reinstalling.
 
 ## Use
 

@@ -319,7 +319,10 @@ function mcpConfig(host) {
     command: 'node',
     args: [bundle, '--host', host],
   };
-  if (host === 'codex') server.cwd = '.';
+  // Codex and Antigravity launch relative bundles from the installed plugin
+  // directory. Pinning cwd makes that contract explicit for both the desktop
+  // app and `agy`; Claude resolves its bundle through CLAUDE_PLUGIN_ROOT.
+  if (host === 'codex' || host === 'gemini') server.cwd = '.';
   return { mcpServers: { ape: server } };
 }
 

@@ -12,6 +12,9 @@ request or from plugin availability.
 
 Before `ape_run start`, inspect the repository and compose bounded, cold-reader-complete inputs:
 
+When the host is Google Antigravity / Gemini, pass the exact open project root as `project_dir` on
+this and every later APE MCP call.
+
 - `objective`: the observable outcome and acceptance criteria.
 - `mode`: `phase`, `debug`, `spike`, or `land` for an already-finished diff.
 - `lane`: normally `auto`; `mechanical` is non-behavioral docs/config/generated work, `fast` is a
