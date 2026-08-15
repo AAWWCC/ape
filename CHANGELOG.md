@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 2.18.0 — 2026-08-15
+
+First-class support for Google Antigravity / Gemini agents (`agy` CLI and Antigravity IDE). APE
+now coordinates native subagent dispatches via `invoke_subagent` (mapping writable tickets to
+`self` and read-only tickets to `research`), governs Antigravity tool mutations (`write_to_file`,
+`replace_file_content`, `multi_replace_file_content`, `run_command`), provides `plugins/ape-gemini/`
+packaging with `plugin.json`, `mcp_config.json`, and `hooks/gemini-hooks.json`, and supports model
+tier mappings for `flash` (fast/balanced) and `pro` (deep).
+
 ## 2.17.4 — 2026-08-14
 
 Codex run start is fail-closed on a fresh, live native-binding preflight again. APE now requires

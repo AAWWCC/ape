@@ -6,9 +6,13 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const pkg = JSON.parse(await readFile(join(REPO_ROOT, 'package.json'), 'utf8'));
+const VERSION = pkg.version;
+
 const PACKAGES = Object.freeze([
   ['codex', join(REPO_ROOT, 'plugins', 'ape')],
   ['claude', join(REPO_ROOT, 'plugins', 'ape-claude')],
+  ['gemini', join(REPO_ROOT, 'plugins', 'ape-gemini')],
 ]);
 
 function expandRoot(value, host, pluginRoot) {
@@ -28,7 +32,9 @@ async function smoke(host, pluginRoot) {
   const env = { ...process.env };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
+  delete env.GEMINI_PROJECT_DIR;
   if (host === 'claude') env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+  else if (host === 'gemini') env.GEMINI_PLUGIN_ROOT = pluginRoot;
   else env.PLUGIN_ROOT = pluginRoot;
 
   const responses = await new Promise((resolvePromise, reject) => {
@@ -58,7 +64,7 @@ async function smoke(host, pluginRoot) {
       { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
     ].map((message) => JSON.stringify(message)).join('\n') + '\n');
   });
-  if (responses[0]?.result?.serverInfo?.version !== '2.17.4') {
+  if (responses[0]?.result?.serverInfo?.version !== VERSION) {
     throw new Error(`${host} package MCP returned the wrong server version`);
   }
   const tools = responses[1]?.result?.tools?.map((tool) => tool.name);

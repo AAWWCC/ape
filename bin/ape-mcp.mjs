@@ -50,8 +50,8 @@ function configuredMcpHost(argv = process.argv.slice(2)) {
   const index = argv.indexOf('--host');
   if (index === -1) return null;
   const host = argv[index + 1];
-  if (host !== 'claude' && host !== 'codex') {
-    throw new Error(`APE MCP --host must be 'claude' or 'codex'; got '${host ?? ''}'`);
+  if (host !== 'claude' && host !== 'codex' && host !== 'gemini') {
+    throw new Error(`APE MCP --host must be 'claude', 'codex', or 'gemini'; got '${host ?? ''}'`);
   }
   return host;
 }
@@ -76,7 +76,7 @@ const TOOLS = Object.freeze([
           enum: [...LANES],
           description: 'Requested lane; the runtime validates and may escalate with explicit reasons. mechanical: behavioral:false and every claimed path is docs/config/generated — ANY production code path (even a pure deletion) escalates as non-mechanical-scope, because mechanical means "no runtime surface", not "low effort". fast: behavioral, bounded claim set (default ≤6 files), requires test_paths. full: everything else. auto: let the runtime classify.',
         },
-        host: { type: 'string', enum: ['claude', 'codex'] },
+        host: { type: 'string', enum: ['claude', 'codex', 'gemini'] },
         claimed_paths: {
           type: 'array',
           items: { type: 'string' },
@@ -238,7 +238,7 @@ const TOOLS = Object.freeze([
         value: {},
         apply: { type: 'boolean' },
         values: { type: 'object' },
-        host: { type: 'string', enum: ['claude', 'codex'] },
+        host: { type: 'string', enum: ['claude', 'codex', 'gemini'] },
         hooks_trusted: { type: 'boolean' },
         subagents_available: { type: 'boolean' },
         explicit_invocation: { type: 'boolean' },
@@ -295,7 +295,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.17.4' };
+    return { name: 'ape', version: '2.18.0' };
   }
 }
 

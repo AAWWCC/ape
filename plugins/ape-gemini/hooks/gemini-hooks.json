@@ -1,0 +1,115 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|mcp__.*|ape_(run|config|history)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p)throw new Error('APE hook could not resolve its plugin root');process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-hooks.bundle.mjs')))\"",
+            "commandWindows": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p)throw new Error('APE hook could not resolve its plugin root');process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-hooks.bundle.mjs')))\"",
+            "timeout": 30,
+            "statusMessage": "Checking APE stage ticket"
+          }
+        ]
+      },
+      {
+        "matcher": "ask_question",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};throw new Error('APE LARP hook could not resolve its plugin root')}else{process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-larp.bundle.mjs')))}\"",
+            "commandWindows": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};throw new Error('APE LARP hook could not resolve its plugin root')}else{process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-larp.bundle.mjs')))}\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p)throw new Error('APE hook could not resolve its plugin root');process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-hooks.bundle.mjs')))\"",
+            "commandWindows": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p)throw new Error('APE hook could not resolve its plugin root');process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-hooks.bundle.mjs')))\"",
+            "timeout": 30,
+            "statusMessage": "Binding APE stage ticket"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|mcp__.*|ape_(run|config|history)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p)throw new Error('APE hook could not resolve its plugin root');process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-hooks.bundle.mjs')))\"",
+            "commandWindows": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p)throw new Error('APE hook could not resolve its plugin root');process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-hooks.bundle.mjs')))\"",
+            "timeout": 30,
+            "statusMessage": "Verifying APE tree ownership"
+          }
+        ]
+      },
+      {
+        "matcher": "(?:^|__)ape_run$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};throw new Error('APE LARP hook could not resolve its plugin root')}else{process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-larp.bundle.mjs')))}\"",
+            "commandWindows": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};throw new Error('APE LARP hook could not resolve its plugin root')}else{process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-larp.bundle.mjs')))}\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p)throw new Error('APE hook could not resolve its plugin root');process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-hooks.bundle.mjs')))\"",
+            "commandWindows": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p)throw new Error('APE hook could not resolve its plugin root');process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-hooks.bundle.mjs')))\"",
+            "timeout": 30,
+            "statusMessage": "Verifying APE subagent result"
+          }
+        ]
+      },
+      {
+        "matcher": "(?:^|__)ape_run$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};throw new Error('APE LARP hook could not resolve its plugin root')}else{process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-larp.bundle.mjs')))}\"",
+            "commandWindows": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};throw new Error('APE LARP hook could not resolve its plugin root')}else{process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-larp.bundle.mjs')))}\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};throw new Error('APE LARP hook could not resolve its plugin root')}else{process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-larp.bundle.mjs')))}\"",
+            "commandWindows": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};throw new Error('APE LARP hook could not resolve its plugin root')}else{process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-larp.bundle.mjs')))}\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};throw new Error('APE LARP hook could not resolve its plugin root')}else{process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-larp.bundle.mjs')))}\"",
+            "commandWindows": "node --input-type=module -e \"import{join}from'node:path';import{pathToFileURL}from'node:url';const p=process.env.GEMINI_PLUGIN_ROOT||process.env.PLUGIN_ROOT||process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};throw new Error('APE LARP hook could not resolve its plugin root')}else{process.env.APE_HOST='gemini';delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;await import(pathToFileURL(join(p,'dist','ape-larp.bundle.mjs')))}\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -32,15 +32,20 @@ import { resolveClaimedPluginRead } from '../lib/runtime/external-tools.js';
 import {
   bindClaudeSubagent,
   bindCodexSubagent,
+  bindGeminiSubagent,
   isCodexDispatchTaskName,
   launchClaudeIntent,
   launchCodexIntent,
+  launchGeminiIntent,
   resolveCodexBindingOutcome,
   resolveClaudeBindingOutcome,
+  resolveGeminiBindingOutcome,
   resolveSealedCodexBinding,
   resolveSealedClaudeBinding,
+  resolveSealedGeminiBinding,
   observeClaudeSubagentStop,
   observeCodexSubagentStop,
+  observeGeminiSubagentStop,
 } from '../lib/runtime/claude-dispatch.js';
 import {
   bindBindingProbe,
@@ -175,7 +180,8 @@ try {
   const requestedAgentType =
     toolInput.subagent_type ?? toolInput.subagentType ?? toolInput.agent_type ?? toolInput.agentType ?? '';
   const requestedTaskName = toolInput.task_name ?? toolInput.taskName ?? '';
-  const prompt = toolInput.prompt ?? toolInput.message ?? '';
+  const subagentPrompt = Array.isArray(toolInput.Subagents) ? toolInput.Subagents[0]?.Prompt : null;
+  const prompt = toolInput.prompt ?? toolInput.message ?? subagentPrompt ?? '';
   const isApeLaunch =
     requestedAgentType.startsWith('ape:') ||
     /(?:^|\n)APE_DISPATCH_NONCE=/.test(prompt) ||
@@ -201,7 +207,9 @@ try {
   ) {
     const launch = event.host === 'codex'
       ? await launchCodexIntent(paths, state, input)
-      : await launchClaudeIntent(paths, state, input);
+      : event.host === 'gemini'
+        ? await launchGeminiIntent(paths, state, input)
+        : await launchClaudeIntent(paths, state, input);
     process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
       decision: launch.valid ? 'allow' : 'deny',
       reason: launch.reason,
@@ -244,14 +252,18 @@ try {
   }
   const codexHasLaunchedIntent =
     event.host === 'codex' && event.event === 'SubagentStart';
+  const geminiHasLaunchedIntent =
+    event.host === 'gemini' && event.event === 'SubagentStart';
   if (
     state &&
     event.event === 'SubagentStart' &&
-    (lifecycleAgentType.startsWith('ape:') || codexHasLaunchedIntent)
+    (lifecycleAgentType.startsWith('ape:') || codexHasLaunchedIntent || geminiHasLaunchedIntent)
   ) {
     const binding = event.host === 'codex'
       ? await bindCodexSubagent(paths, state, input)
-      : await bindClaudeSubagent(paths, state, input);
+      : event.host === 'gemini'
+        ? await bindGeminiSubagent(paths, state, input)
+        : await bindClaudeSubagent(paths, state, input);
     process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
       decision: binding.valid ? 'allow' : 'deny',
       reason: binding.reason,
@@ -271,14 +283,16 @@ try {
   if (state && event.event === 'SubagentStop' && event.agent_identity) {
     const observation = event.host === 'codex'
       ? await observeCodexSubagentStop(paths, state, input)
-      : await observeClaudeSubagentStop(paths, state, input);
+      : event.host === 'gemini'
+        ? await observeGeminiSubagentStop(paths, state, input)
+        : await observeClaudeSubagentStop(paths, state, input);
     stoppedBinding = observation.record;
   }
   if (stoppedBinding) {
     ticket = state.tickets.find((entry) => entry.ticket_id === stoppedBinding.ticket_id) ?? null;
     event.ticket_id = stoppedBinding.ticket_id;
     event.ape_managed = true;
-  } else if (state && event.host === 'codex' && event.ticket_id) {
+  } else if (state && (event.host === 'codex' || event.host === 'gemini') && event.ticket_id) {
     ticket = state.tickets.find((entry) => entry.ticket_id === event.ticket_id) ?? null;
     event.ape_managed = true;
   } else if (state && event.agent_identity) {
@@ -291,11 +305,15 @@ try {
       // lifecycle policy's sealed branch denies the orphan's writes.
       binding = event.host === 'codex'
         ? await resolveSealedCodexBinding(paths, state, input)
-        : await resolveSealedClaudeBinding(paths, state, input);
+        : event.host === 'gemini'
+          ? await resolveSealedGeminiBinding(paths, state, input)
+          : await resolveSealedClaudeBinding(paths, state, input);
     } else {
       const outcome = event.host === 'codex'
         ? await resolveCodexBindingOutcome(paths, state, input)
-        : await resolveClaudeBindingOutcome(paths, state, input);
+        : event.host === 'gemini'
+          ? await resolveGeminiBindingOutcome(paths, state, input)
+          : await resolveClaudeBindingOutcome(paths, state, input);
       binding = outcome.record;
       dispatchBindingDenialCause = outcome.cause;
     }
@@ -304,7 +322,7 @@ try {
       event.ticket_id = binding.ticket_id;
       event.ape_managed = true;
     } else {
-      event.ape_managed = lifecycleAgentType.startsWith('ape:') || event.host === 'codex';
+      event.ape_managed = lifecycleAgentType.startsWith('ape:') || event.host === 'codex' || event.host === 'gemini';
     }
   } else if (state && event.ticket_id) {
     ticket = state.tickets.find((entry) => entry.ticket_id === event.ticket_id) ?? null;

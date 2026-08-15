@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
+const pkg = JSON.parse(await readFile(join(REPO_ROOT, 'package.json'), 'utf8'));
+const VERSION = pkg.version;
+
 async function exists(path) {
   try {
     await access(path);
@@ -51,7 +54,7 @@ async function findPackage(root, manifestDirectory) {
           const manifestPath = join(target, 'plugin.json');
           if (await exists(manifestPath)) {
             const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-            if (manifest.name === 'ape' && manifest.version === '2.17.4') {
+            if (manifest.name === 'ape' && manifest.version === VERSION) {
               matches.push(dirname(target));
             }
           }
@@ -124,7 +127,7 @@ async function initializeInstalled(host, pluginRoot) {
       params: { protocolVersion: '2025-06-18' },
     })}\n`);
   });
-  if (response?.result?.serverInfo?.version !== '2.17.4') {
+  if (response?.result?.serverInfo?.version !== VERSION) {
     throw new Error(`${host} installed MCP returned the wrong server version`);
   }
 }

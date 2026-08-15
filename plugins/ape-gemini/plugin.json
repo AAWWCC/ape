@@ -1,0 +1,12 @@
+{
+  "name": "ape",
+  "version": "2.18.0",
+  "description": "APE — durable, evidence-gated engineering runs for AI coding agents.",
+  "author": {
+    "name": "AAWWCC",
+    "url": "https://github.com/AAWWCC"
+  },
+  "repository": "https://github.com/AAWWCC/ape",
+  "homepage": "https://github.com/AAWWCC/ape#readme",
+  "license": "MIT"
+}
