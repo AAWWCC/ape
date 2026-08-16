@@ -64,11 +64,14 @@ const INPUT_CAP_BYTES = 8 * 1024 * 1024;
 
 // The claims a ticket's targets resolve against — identical for the host edit
 // tool (event.path_safe) and the deletion channel (event.deletion): a test
-// writer resolves against its test_paths (widenedTestClaims: a file-shaped
-// claim widens to its directory so a not-yet-existing test file still
-// resolves), everyone else against claimed_paths.
+// writer resolves against its test_paths. Legacy file-shaped claims widen to
+// their directory so a not-yet-existing sibling still resolves; versioned
+// exact remediation claims remain literal. Everyone else uses claimed_paths.
 function ticketPathClaims(ticket) {
-  return ticket.role === 'test_writer' ? widenedTestClaims(ticket.test_paths) : ticket.claimed_paths;
+  if (ticket.role !== 'test_writer') return ticket.claimed_paths;
+  return ticket.test_scope === 'exact'
+    ? ticket.test_paths
+    : widenedTestClaims(ticket.test_paths);
 }
 // Accumulate raw stdin Buffers and decode EXACTLY ONCE below: appending each
 // chunk to a string (`body += chunk`) re-decodes every Buffer independently, so
@@ -439,7 +442,10 @@ try {
           reason = 'implementers may not delete authored tests';
           break;
         }
-        if (ticket.role === 'test_writer' && !withinTestScope(relative, ticket.test_paths)) {
+        if (
+          ticket.role === 'test_writer'
+          && !withinTestScope(relative, ticket.test_paths, ticket.test_scope === 'exact')
+        ) {
           safe = false;
           reason = 'test writers may delete only claimed test paths';
           break;

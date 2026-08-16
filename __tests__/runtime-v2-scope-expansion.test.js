@@ -148,6 +148,17 @@ function blockingExpansion(paths, reason = 'the fix requires these modules') {
   };
 }
 
+function productionScopeFinding(file = 'lib/helper.js') {
+  return {
+    file,
+    line: 1,
+    title: 'expand production scope',
+    detail: 'the fix requires this production module',
+    blocking: true,
+    remediation: { owner: 'production' },
+  };
+}
+
 describe('out-of-claims review finding expands remediation (D3)', () => {
   it('audits the expansion, the remediation ticket inherits it, the drift guard admits it, and the run converges to green gates', async () => {
     const dir = await project();
@@ -163,7 +174,7 @@ describe('out-of-claims review finding expands remediation (D3)', () => {
 
     const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
       tests: greenTest,
-      findings: [{ note: 'the fix must also touch lib/helper.js' }],
+      findings: [productionScopeFinding()],
       evidence: blockingExpansion(['lib/helper.js']),
     }));
     expect(reviewed.ok).toBe(true);
@@ -237,7 +248,11 @@ describe('malformed or out-of-contract proposals reject loudly (D3)', () => {
       [{ verdict: 'fail', scope_expansion: 'lib/helper.js' }, /must be an object/],
     ];
     for (const [evidence, expected] of attempts) {
-      const rejected = await recordReceipt(dir, receipt(reviewTicket, { tests: greenTest, evidence }));
+      const rejected = await recordReceipt(dir, receipt(reviewTicket, {
+        tests: greenTest,
+        findings: [productionScopeFinding()],
+        evidence,
+      }));
       expect(rejected.ok, JSON.stringify(evidence)).toBe(false);
       expect(rejected.rejected).toBe(true);
       expect(rejected.errors.some((error) => expected.test(error)), rejected.errors.join('; ')).toBe(true);
@@ -249,6 +264,7 @@ describe('malformed or out-of-contract proposals reject loudly (D3)', () => {
     // The same ticket still records a corrected proposal.
     const accepted = await recordReceipt(dir, receipt(reviewTicket, {
       tests: greenTest,
+      findings: [productionScopeFinding()],
       evidence: blockingExpansion(['lib/helper.js'], 'corrected proposal'),
     }));
     expect(accepted.ok).toBe(true);

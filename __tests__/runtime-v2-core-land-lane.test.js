@@ -181,7 +181,17 @@ describe('land review outcomes', () => {
     const started = await startRun(dir, startInput());
     const review = started.run.tickets[0];
 
-    const result = await recordReceipt(dir, receipt(review, { evidence: { verdict: 'disagree' } }));
+    const result = await recordReceipt(dir, receipt(review, {
+      findings: [{
+        file: 'src/value.js',
+        line: 1,
+        title: 'landed diff still needs correction',
+        detail: 'the finished diff remains behaviorally incorrect',
+        blocking: true,
+        remediation: { owner: 'production' },
+      }],
+      evidence: { verdict: 'disagree' },
+    }));
     expect(result.ok).toBe(true);
     expect(result.run.status).toBe('blocked');
     expect(result.run.block_reason).toMatch(/no writing stage/);

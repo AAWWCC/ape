@@ -256,11 +256,21 @@ describe('review_findings whole-field prefix does not starve a later dissenting 
     const bulkFindings = Array.from({ length: 20 }, (_, index) => ({
       file: 'src/value.js',
       line: index + 1,
-      note: `bulk finding ${index}: ${FILLER}`,
+      title: `bulk finding ${index}`,
+      detail: FILLER,
+      blocking: true,
+      remediation: { owner: 'production' },
     }));
     const marker = 'FAIRNESSMARKERSECURITY';
     const securityFindings = [
-      { file: 'src/other.js', line: 7, note: `${marker} the security reviewer's own dissent must not be starved` },
+      {
+        file: 'src/other.js',
+        line: 7,
+        title: 'security dissent',
+        detail: `${marker} the security reviewer's own dissent must not be starved`,
+        blocking: true,
+        remediation: { owner: 'production' },
+      },
     ];
 
     const firstOutcome = await recordReceipt(dir, receipt(reviewTicket, {
@@ -308,32 +318,25 @@ describe('review_findings whole-field prefix does not starve a later dissenting 
 // disclosed "X of Y" undercounts Y (and so also X) by exactly the number of
 // unrenderable findings, understating the true drop.
 // ===========================================================================
-describe('the review_findings drop-disclosure accounts for every recorded finding, including ones the extractor could not render (omission accounting)', () => {
-  it('a receipt whose findings mix renderable and unrenderable shapes discloses the TRUE total, not merely the rendered subset', async () => {
+describe('the review_findings drop-disclosure accounts for every versioned structured finding (omission accounting)', () => {
+  it('a receipt whose findings exceed the count cap discloses the true structured total', async () => {
     const dir = await project('ape-findings-accounting-');
     const { reviewTicket } = await walkToReview(
       dir,
       'Exercise drop-disclosure accounting across unrenderable findings',
     );
 
-    // 42 RENDERABLE findings (each carries a recognized body key, `note`) —
-    // enough past REVIEW_FINDINGS_MAX (40) to force the count-cap drop, each
-    // individually tiny so the CHARACTER budget never enters into it.
-    const renderable = Array.from({ length: 42 }, (_, index) => ({
+    // Forty-seven valid versioned findings exceed REVIEW_FINDINGS_MAX (40)
+    // while staying individually tiny enough that the character budget does
+    // not enter into this count-cap scenario.
+    const allFindings = Array.from({ length: 47 }, (_, index) => ({
       file: 'src/value.js',
       line: index + 1,
-      note: `defect ${index}`,
+      title: `defect ${index}`,
+      detail: `bounded production correction ${index}`,
+      blocking: true,
+      remediation: { owner: 'production' },
     }));
-    // 5 UNRENDERABLE findings — no key in either FINDING_TITLE_KEYS or
-    // FINDING_BODY_KEYS (scheduler.js), so findingText(finding) is undefined
-    // and reviewFindings `continue`s past every one of them without ever
-    // adding them to `rendered`.
-    const unrenderable = Array.from({ length: 5 }, (_, index) => ({
-      file: 'src/value.js',
-      line: 100 + index,
-      unrecognized_key: `no renderer reads this (${index})`,
-    }));
-    const allFindings = [...renderable, ...unrenderable];
     const trueTotal = allFindings.length; // 47
 
     const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
@@ -360,12 +363,10 @@ describe('the review_findings drop-disclosure accounts for every recorded findin
 
     // THE DEFECT THIS ARM PINS: the disclosed total must be every finding the
     // receipt actually recorded (47), never merely the ones that happened to
-    // render (42) — an implementation that counts only `rendered.length`
-    // fails this exact assertion.
+    // render — an implementation that counts only the retained prefix fails
+    // this exact assertion.
     expect(Number(totalStr)).toBe(trueTotal);
-    // And the dropped count must reflect AT LEAST the cap overflow (2) plus
-    // every unrenderable finding (5): the unrenderable ones were dropped too,
-    // just earlier and more silently than the ones the count cap caught.
+    // The dropped count reflects the seven entries beyond the count cap.
     expect(Number(droppedStr)).toBeGreaterThanOrEqual(7);
   }, 60_000);
 });
@@ -404,12 +405,15 @@ describe('review findings stay structured while ticket objectives remain immutab
     const { reviewTicket } = await walkToReview(dir, objective);
     const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
       tests: greenTest,
-      findings: [{ file: 'src/value.js', line: 1, note: 'a defect the authored test should catch' }],
-      evidence: {
-        verdict: 'fail',
-        summary: 'the correction belongs in the authored test',
-        test_remediation: { test_paths: ['tests/value.test.js'], reason: 'the assertion pins the wrong boundary' },
-      },
+      findings: [{
+        file: 'tests/value.test.js',
+        line: 1,
+        title: 'incorrect asserted boundary',
+        detail: 'a defect the authored test should catch',
+        blocking: true,
+        remediation: { owner: 'test', test_paths: ['tests/value.test.js'] },
+      }],
+      evidence: { verdict: 'fail', summary: 'the correction belongs in the authored test' },
     }));
     expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
     const remediationTest = reviewed.run.tickets.at(-1);
@@ -421,28 +425,29 @@ describe('review findings stay structured while ticket objectives remain immutab
     expect(remediationTest.review_findings.some((entry) => /review|defect|assertion/i.test(entry))).toBe(true);
   }, 60_000);
 
-  it('the notice does not claim every review_findings entry is a file:line finding, when this ticket\'s own entries prove otherwise', async () => {
-    const objective = 'Prove a review_findings entry can carry no file:line anchor at all';
+  it('the notice preserves file:line anchors required by the versioned review contract', async () => {
+    const objective = 'Prove every versioned review finding carries a file and integer line';
     const dir = await project('ape-findings-notice-anchor-');
     const { reviewTicket } = await walkToReview(dir, objective);
-    // NO findings array at all: reviewFindings's fallback arm fires and
-    // contributes a bare `stage: <summary>` entry with no file, no line and
-    // no anchor of any kind.
     const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
       tests: greenTest,
-      evidence: { verdict: 'fail', summary: 'a defect reported only as prose, never as a structured finding' },
+      findings: [{
+        file: 'src/value.js',
+        line: 1,
+        title: 'structured production defect',
+        detail: 'a bounded contractual finding with an exact anchor',
+        blocking: true,
+        remediation: { owner: 'production' },
+      }],
+      evidence: { verdict: 'fail' },
     }));
     expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
     const remediation = reviewed.run.tickets.at(-1);
     expect(remediation.stage_id).toBe('remediation-build');
     expect(Array.isArray(remediation.review_findings)).toBe(true);
     expect(remediation.review_findings.length).toBeGreaterThan(0);
-    // Sanity: this ticket really does carry a non-file:line-shaped entry, so
-    // the assertion below is not vacuously true of every ticket.
-    expect(remediation.review_findings.some((entry) => !/:\d/.test(entry))).toBe(true);
-
     expect(remediation.objective).toBe(objective);
-    expect(remediation.review_findings.some((entry) => !/:\d/.test(entry))).toBe(true);
+    expect(remediation.review_findings.every((entry) => /:\d/.test(entry))).toBe(true);
   }, 60_000);
 });
 

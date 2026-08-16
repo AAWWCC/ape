@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { evaluateLifecyclePolicy } from '../lib/runtime/hooks.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
+import { finalizeTicket } from '../lib/runtime/schemas.js';
 import { reduceRun } from '../lib/runtime/scheduler.js';
 import { recordReceipt, startRun, statusRun } from '../lib/runtime/service.js';
 import { renderStatusDoc } from '../lib/runtime/status-doc.js';
@@ -105,6 +106,9 @@ function issue(state, stage, extra = {}) {
     parallel_group: stage.parallel_group ?? null,
     writable: stage.writable,
     required_checks: stage.required_checks ?? [],
+    ...(stage.role === 'reviewer' || stage.role === 'security_reviewer'
+      ? { review_contract_version: 1 }
+      : {}),
     ...extra,
   };
   state.tickets.push(ticket);
@@ -164,7 +168,17 @@ function testRemediation(testPaths, reason = DECLARATION_REASON) {
 }
 
 function blockingDeclaration(testPaths = ['tests/value.test.js'], extra = {}) {
-  return { verdict: 'fail', test_remediation: testRemediation(testPaths), ...extra };
+  return {
+    findings: [{
+      file: testPaths[0] ?? 'tests/value.test.js',
+      line: 1,
+      title: 'authored assertion correction',
+      detail: DECLARATION_REASON,
+      blocking: true,
+      remediation: { owner: 'test', test_paths: testPaths },
+    }],
+    evidence: { verdict: 'fail', ...extra },
+  };
 }
 
 describe('remediation-test routing shape (pure reducer)', () => {
@@ -173,18 +187,18 @@ describe('remediation-test routing shape (pure reducer)', () => {
   it('spends exactly ONE remediation cycle on test -> build -> review, then blocks with no second remediation-test', () => {
     const state = baseRun();
     const reviewTicket = walkToReviewPure(state);
+    delete reviewTicket.review_contract_version;
 
-    const routed = record(state, reviewTicket, { evidence: blockingDeclaration() });
+    const routed = record(state, reviewTicket, {
+      evidence: { verdict: 'fail', test_remediation: testRemediation(['tests/value.test.js']) },
+    });
     expect(state.remediation_cycles).toBe(1);
     const first = issuedStages(routed);
     expect(first.map((action) => action.stage.id)).toEqual(['remediation-test']);
     expect(first[0].stage.role).toBe('test_writer');
     expect(first[0].stage.writable).toBe(true);
-    // P4: neither 'red-test' nor 'targeted-tests' is satisfiable for a
-    // correction that may make the suite green or keep it red, so the stage
-    // carries no required check; the cycle still ends on remediation-build's
-    // targeted-tests check.
-    expect(first[0].stage.required_checks).toEqual([]);
+    // A test-only correction must prove the configured targeted command green.
+    expect(first[0].stage.required_checks).toEqual(['targeted-tests']);
 
     const remediationTest = state.tickets.at(-1);
     expect(remediationTest.stage_id).toBe('remediation-test');
@@ -201,9 +215,12 @@ describe('remediation-test routing shape (pure reducer)', () => {
     record(state, remediationBuild);
     const remediationReview = state.tickets.at(-1);
     expect(remediationReview.stage_id).toBe('remediation-review');
+    delete remediationReview.review_contract_version;
 
     // A second declaration cannot buy a second cycle.
-    const blocked = record(state, remediationReview, { evidence: blockingDeclaration() });
+    const blocked = record(state, remediationReview, {
+      evidence: { verdict: 'fail', test_remediation: testRemediation(['tests/value.test.js']) },
+    });
     expect(blocked.some((action) => action.type === 'issue_ticket')).toBe(false);
     expect(state.status).toBe('blocked');
     expect(state.block_reason).toBe('review disagreement persists after the single remediation cycle');
@@ -211,13 +228,11 @@ describe('remediation-test routing shape (pure reducer)', () => {
     expect(state.tickets.filter((ticket) => ticket.stage_id === 'remediation-test')).toHaveLength(1);
   });
 
-  // A4 — findings[] is NOT the routing input, and the recorded residual: a
-  // reviewer who simply OMITS the declaration gets today's behavior and the
-  // test-path finding lands unremediated exactly as before. This design makes
-  // the correct action available; it does not eliminate that case.
-  it('routes to remediation-build when a blocking review only NAMES a test file:line in findings', () => {
+  // A4 — explicit omitted-version tickets retain the legacy production route.
+  it('routes an explicitly unversioned legacy finding to remediation-build', () => {
     const state = baseRun();
     const reviewTicket = walkToReviewPure(state);
+    delete reviewTicket.review_contract_version;
 
     const routed = record(state, reviewTicket, {
       evidence: { verdict: 'fail', summary: 'the authored test asserts the wrong boundary' },
@@ -238,11 +253,11 @@ describe('remediation-test routing shape (pure reducer)', () => {
     const reviewTicket = walkToReviewPure(state);
 
     const routed = record(state, reviewTicket, {
-      evidence: blockingDeclaration(),
       findings: [
-        { file: 'src/value.js', line: 3, summary: 'the boundary is off by one' },
-        { file: 'tests/value.test.js', line: 12, summary: 'the authored assertion pins the wrong boundary' },
+        { file: 'src/value.js', line: 3, title: 'production correction', detail: 'the boundary is off by one', blocking: true, remediation: { owner: 'production' } },
+        { file: 'tests/value.test.js', line: 12, title: 'test correction', detail: 'the authored assertion pins the wrong boundary', blocking: true, remediation: { owner: 'test', test_paths: ['tests/value.test.js'] } },
       ],
+      evidence: { verdict: 'fail' },
     });
     const issued = issuedStages(routed);
     expect(issued.map((action) => action.stage.id)).toEqual(['remediation-test']);
@@ -271,7 +286,7 @@ describe('remediation-test routing shape (pure reducer)', () => {
     expect(securityReview.stage_id).toBe('security-review');
 
     // The declaring reviewer disagrees first; the group is still outstanding.
-    const held = record(state, review, { evidence: blockingDeclaration() });
+    const held = record(state, review, blockingDeclaration());
     expect(held.some((action) => action.type === 'issue_ticket')).toBe(false);
 
     // The AGREEING security review closes the group. Its own receipt carries no
@@ -291,7 +306,7 @@ describe('remediation-test routing shape (pure reducer)', () => {
     const state = baseRun({ mode: 'land' });
     const review = issue(state, { id: 'review', role: 'reviewer', parallel_group: 'code-review' });
 
-    const routed = record(state, review, { evidence: blockingDeclaration() });
+    const routed = record(state, review, blockingDeclaration());
     const issued = issuedStages(routed);
     expect(issued.length).toBeGreaterThan(0);
     expect(issued.every((action) => action.stage.writable === true)).toBe(true);
@@ -311,13 +326,13 @@ function git(cwd, ...args) {
 // (the runtime's own red-test observation executes it).
 const VALUE_V1 = 'module.exports = { value: 1 };\n';
 const VALUE_V2 = 'module.exports = { value: 2 };\n';
-const VALUE_V3 = 'module.exports = { value: 3 };\n';
+const VALUE_V2_REMEDIATED = 'const value = 2;\nmodule.exports = { value };\n';
 const AUTHORED_TEST =
   "const { value } = require('../src/value.js');\n" +
   "if (value !== 2) { throw new Error('red: value is ' + value); }\n";
 const CORRECTED_TEST =
-  "const { value } = require('../src/value.js');\n" +
-  "if (value !== 3) { throw new Error('red: value is ' + value); }\n";
+  "const subject = require('../src/value.js');\n" +
+  "if (subject.value !== 2) { throw new Error('expected value 2, received ' + subject.value); }\n";
 
 async function project(config = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-remediation-test-'));
@@ -398,6 +413,30 @@ async function overrideLogLines(dir) {
   return raw.split('\n').filter(Boolean);
 }
 
+async function omitReviewContractVersion(dir, ticket) {
+  const paths = runtimePaths(dir);
+  const ticketFiles = await readdir(paths.tickets);
+  let legacyTicket = null;
+
+  for (const file of ticketFiles) {
+    const filePath = path.join(paths.tickets, file);
+    const candidate = JSON.parse(await readFile(filePath, 'utf8'));
+    if (candidate.ticket_id !== ticket.ticket_id) continue;
+    const { ticket_hash: _ticketHash, review_contract_version: _version, ...body } = candidate;
+    legacyTicket = finalizeTicket(body);
+    await atomicWriteJson(filePath, legacyTicket);
+    break;
+  }
+
+  expect(legacyTicket, `ticket ${ticket.ticket_id} exists on disk`).not.toBeNull();
+  const active = JSON.parse(await readFile(paths.active, 'utf8'));
+  active.tickets = active.tickets.map((candidate) =>
+    candidate.ticket_id === ticket.ticket_id ? legacyTicket : candidate);
+  await atomicWriteJson(paths.active, active);
+  expect(legacyTicket).not.toHaveProperty('review_contract_version');
+  return legacyTicket;
+}
+
 // Drive a fast-lane run to its review stage: authored red test, green build.
 async function walkToReview(dir, overrides = {}) {
   const started = await startRun(dir, startInput(overrides));
@@ -430,10 +469,24 @@ describe('a review finding in an authored TEST path is remediable within the cyc
     const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
       tests: greenTest,
       findings: [
-        { file: 'src/value.js', line: 3, summary: 'the boundary is off by one' },
-        { file: 'tests/value.test.js', line: 2, summary: 'the authored assertion pins the wrong boundary' },
+        {
+          file: 'src/value.js',
+          line: 3,
+          title: 'production boundary correction',
+          detail: 'the boundary is off by one',
+          blocking: true,
+          remediation: { owner: 'production' },
+        },
+        {
+          file: 'tests/value.test.js',
+          line: 2,
+          title: 'authored assertion correction',
+          detail: 'the authored assertion pins the wrong boundary',
+          blocking: true,
+          remediation: { owner: 'test', test_paths: ['tests/value.test.js'] },
+        },
       ],
-      evidence: blockingDeclaration(['tests/value.test.js']),
+      evidence: { verdict: 'fail' },
     }));
     expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
     expect(reviewed.run.remediation_cycles).toBe(1);
@@ -442,13 +495,12 @@ describe('a review finding in an authored TEST path is remediable within the cyc
     expect(remediationTest.stage_id).toBe('remediation-test');
     expect(remediationTest.role).toBe('test_writer');
     expect(remediationTest.writable).toBe(true);
-    // P4: no stage check — neither 'red-test' nor 'targeted-tests' is
-    // satisfiable for a correction that may leave the suite red or green.
     expect(remediationTest.required_checks).toEqual([]);
     // J1/J1a: narrowed in BOTH fields. test_paths alone does not enforce —
     // receipt-validator.js:137 falls back to ticket.claimed_paths.
     expect(remediationTest.test_paths).toEqual(['tests/value.test.js']);
     expect(remediationTest.claimed_paths).toEqual(['tests/value.test.js']);
+    expect(remediationTest.test_scope).toBe('exact');
     // A9 (service half): the grounded findings ride the test stage.
     expect(remediationTest.review_findings).toEqual(expect.arrayContaining([
       expect.stringContaining('src/value.js:3'),
@@ -461,7 +513,10 @@ describe('a review finding in an authored TEST path is remediable within the cyc
     expect(writePolicy(remediationTest, 'tests/value.test.js').decision).toBe('allow');
 
     await writeFile(path.join(dir, 'tests', 'value.test.js'), CORRECTED_TEST);
+    expect(CORRECTED_TEST).not.toBe(AUTHORED_TEST);
+    expect(() => execFileSync('node', ['tests/value.test.js'], { cwd: dir })).not.toThrow();
     const corrected = await recordReceipt(dir, receipt(remediationTest, {
+      tests: greenTest,
       evidence: { verdict: 'pass', summary: 'corrected the asserted boundary' },
     }));
     expect(corrected.ok, JSON.stringify(corrected.errors ?? [])).toBe(true);
@@ -485,7 +540,8 @@ describe('a review finding in an authored TEST path is remediable within the cyc
     expect(denied.decision).toBe('deny');
     expect(denied.reason).toMatch(/implementers may not modify authored tests/);
 
-    await writeFile(path.join(dir, 'src', 'value.js'), VALUE_V3);
+    await writeFile(path.join(dir, 'src', 'value.js'), VALUE_V2_REMEDIATED);
+    expect(() => execFileSync('node', ['tests/value.test.js'], { cwd: dir })).not.toThrow();
     const rebuilt = await recordReceipt(dir, receipt(remediationBuild, { tests: greenTest }));
     expect(rebuilt.ok, JSON.stringify(rebuilt.errors ?? [])).toBe(true);
     expect(rebuilt.receipt.changed_files).toEqual(['src/value.js']);
@@ -540,7 +596,8 @@ describe('the declaration is validated pre-durably and refused loudly (A2/A7/A8)
     // dropped — there is no blocking finding for the correction to answer.
     const agreeing = await recordReceipt(dir, receipt(reviewTicket, {
       tests: greenTest,
-      evidence: { verdict: 'pass', test_remediation: testRemediation(['tests/value.test.js']) },
+      ...blockingDeclaration(['tests/value.test.js']),
+      evidence: { verdict: 'pass' },
     }));
     expect(agreeing.ok).toBe(false);
     expect(agreeing.errors.join('; ')).toMatch(/blocking/);
@@ -556,13 +613,13 @@ describe('the declaration is validated pre-durably and refused loudly (A2/A7/A8)
       [blockingDeclaration(['/etc/passwd.test.js']), /\/etc\/passwd\.test\.js/],
       [blockingDeclaration(['.ape/runtime/hack.test.js']), /\.ape/],
       [blockingDeclaration([]), /test_paths/],
-      [{ verdict: 'fail', test_remediation: { test_paths: ['tests/other.test.js'] } }, /reason/],
-      [{ verdict: 'fail', test_remediation: { test_paths: 'tests/other.test.js', reason: 'r' } }, /test_paths/],
-      [{ verdict: 'fail', test_remediation: 'tests/other.test.js' }, /object/],
+      [{ findings: [{ file: 'tests/value.test.js', line: 1, title: 'missing paths', detail: 'missing paths', blocking: true, remediation: { owner: 'test' } }], evidence: { verdict: 'fail' } }, /test_paths/],
+      [{ findings: [{ file: 'tests/value.test.js', line: 1, title: 'bad paths', detail: 'bad paths', blocking: true, remediation: { owner: 'test', test_paths: 'tests/other.test.js' } }], evidence: { verdict: 'fail' } }, /test_paths/],
+      [{ findings: [{ file: 'tests/value.test.js', line: 1, title: 'bad remediation', detail: 'bad remediation', blocking: true, remediation: 'tests/other.test.js' }], evidence: { verdict: 'fail' } }, /remediation/],
     ];
-    for (const [evidence, expected] of attempts) {
-      const rejected = await recordReceipt(dir, receipt(reviewTicket, { tests: greenTest, evidence }));
-      expect(rejected.ok, JSON.stringify(evidence)).toBe(false);
+    for (const [payload, expected] of attempts) {
+      const rejected = await recordReceipt(dir, receipt(reviewTicket, { tests: greenTest, ...payload }));
+      expect(rejected.ok, JSON.stringify(payload)).toBe(false);
       expect(rejected.rejected).toBe(true);
       expect(rejected.errors.some((error) => expected.test(error)), rejected.errors.join('; ')).toBe(true);
     }
@@ -578,9 +635,13 @@ describe('the declaration is validated pre-durably and refused loudly (A2/A7/A8)
     // The positive control: the SAME review ticket still records a corrected
     // declaration, and a same-directory sibling of the file-shaped claim is
     // accepted (the pinned directory widening).
-    const accepted = await recordReceipt(dir, receipt(reviewTicket, {
+    const legacyReviewTicket = await omitReviewContractVersion(dir, reviewTicket);
+    const accepted = await recordReceipt(dir, receipt(legacyReviewTicket, {
       tests: greenTest,
-      evidence: blockingDeclaration(['tests/other.test.js']),
+      evidence: {
+        verdict: 'fail',
+        test_remediation: testRemediation(['tests/other.test.js']),
+      },
     }));
     expect(accepted.ok, JSON.stringify(accepted.errors ?? [])).toBe(true);
     expect(accepted.run.remediation_cycles).toBe(1);
@@ -607,6 +668,82 @@ describe('the declaration is validated pre-durably and refused loudly (A2/A7/A8)
 });
 
 describe('the narrowed ticket is enforced at BOTH layers (J1f)', () => {
+  it('uses exact scope for a versioned remediation-test route and denies a same-directory sibling at lifecycle and receipt validation', async () => {
+    const dir = await project();
+    const { reviewTicket } = await walkToReview(dir);
+    const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
+      tests: greenTest,
+      ...blockingDeclaration(['tests/value.test.js']),
+    }));
+    expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
+    const remediationTest = reviewed.run.tickets.at(-1);
+    expect(remediationTest.stage_id).toBe('remediation-test');
+    expect(remediationTest.test_scope).toBe('exact');
+    expect(remediationTest.required_checks).toEqual(['targeted-tests']);
+
+    const denied = writePolicy(remediationTest, 'tests/sibling.test.js');
+    expect(denied.decision).toBe('deny');
+    expect(denied.reason).toMatch(/test writers may modify only claimed test paths/);
+    expect(writePolicy(remediationTest, 'tests/value.test.js').decision).toBe('allow');
+
+    await writeFile(path.join(dir, 'tests', 'sibling.test.js'), 'process.exit(0);\n');
+    const rejected = await recordReceipt(dir, receipt(remediationTest, {
+      tests: greenTest,
+      evidence: { verdict: 'pass', summary: 'attempted a sibling write' },
+    }));
+    expect(rejected.ok).toBe(false);
+    expect(rejected.rejected).toBe(true);
+    expect(rejected.errors).toContain('unclaimed write: tests/sibling.test.js');
+
+    await rm(path.join(dir, 'tests', 'sibling.test.js'));
+    await writeFile(path.join(dir, 'tests', 'value.test.js'), CORRECTED_TEST);
+    expect(CORRECTED_TEST).not.toBe(AUTHORED_TEST);
+    expect(() => execFileSync('node', ['tests/value.test.js'], { cwd: dir })).not.toThrow();
+    const admitted = await recordReceipt(dir, receipt(remediationTest, {
+      tests: greenTest,
+      evidence: { verdict: 'pass', summary: 'corrected only the declared path' },
+    }));
+    expect(admitted.ok, JSON.stringify(admitted.errors ?? [])).toBe(true);
+    expect(admitted.receipt.changed_files).toEqual(['tests/value.test.js']);
+    expect(admitted.run.tickets.at(-1).stage_id).toBe('remediation-review');
+    expect(admitted.run.tickets.some((ticket) => ticket.stage_id === 'remediation-build')).toBe(false);
+  }, 30_000);
+
+  it('rejects replacing an exact authorized file with a directory containing an unauthorized descendant', async () => {
+    const dir = await project();
+    const { reviewTicket } = await walkToReview(dir);
+    expect(reviewTicket.review_contract_version).toBe(1);
+
+    const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
+      tests: greenTest,
+      ...blockingDeclaration(['tests/value.test.js']),
+    }));
+    expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
+    const remediationTest = reviewed.run.tickets.at(-1);
+    expect(remediationTest.stage_id).toBe('remediation-test');
+    expect(remediationTest.test_scope).toBe('exact');
+    expect(remediationTest.test_paths).toEqual(['tests/value.test.js']);
+    expect(remediationTest.claimed_paths).toEqual(['tests/value.test.js']);
+
+    const authorizedFile = path.join(dir, 'tests', 'value.test.js');
+    await rm(authorizedFile);
+    await mkdir(authorizedFile);
+    await writeFile(
+      path.join(authorizedFile, 'unauthorized.test.js'),
+      'process.exit(0);\n',
+    );
+
+    const rejected = await recordReceipt(dir, receipt(remediationTest, {
+      tests: greenTest,
+      evidence: { verdict: 'pass', summary: 'replaced the file with a directory' },
+    }));
+    expect(rejected.ok).toBe(false);
+    expect(rejected.rejected).toBe(true);
+    expect(rejected.errors).toContain(
+      'unclaimed write: tests/value.test.js/unauthorized.test.js',
+    );
+  }, 30_000);
+
   it('refuses an authored test in a different directory at the write hook and at receipt admission', async () => {
     const dir = await project();
     const { testTicket, reviewTicket } = await walkToReview(dir, {
@@ -616,14 +753,19 @@ describe('the narrowed ticket is enforced at BOTH layers (J1f)', () => {
     // Contrast pin: the un-narrowed test ticket authorizes both directories.
     expect(writePolicy(testTicket, 'spec/other.test.js').decision).toBe('allow');
 
-    const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
+    const legacyReviewTicket = await omitReviewContractVersion(dir, reviewTicket);
+    const reviewed = await recordReceipt(dir, receipt(legacyReviewTicket, {
       tests: greenTest,
       findings: [{ file: 'tests/value.test.js', line: 2, summary: 'the authored assertion is inverted' }],
-      evidence: blockingDeclaration(['tests/value.test.js']),
+      evidence: {
+        verdict: 'fail',
+        test_remediation: testRemediation(['tests/value.test.js']),
+      },
     }));
     expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
     const remediationTest = reviewed.run.tickets.at(-1);
     expect(remediationTest.stage_id).toBe('remediation-test');
+    expect(remediationTest).not.toHaveProperty('test_scope');
 
     // Layer 1 — the write-time hook (hooks.js:584).
     const denied = writePolicy(remediationTest, 'spec/other.test.js');
@@ -681,7 +823,7 @@ describe('mode land opens no writer for a declared test remediation (A5)', () =>
     const review = started.run.tickets[0];
 
     const reviewed = await recordReceipt(dir, receipt(review, {
-      evidence: blockingDeclaration(['tests/value.test.js']),
+      ...blockingDeclaration(['tests/value.test.js']),
     }));
     expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
     expect(reviewed.run.status).toBe('blocked');

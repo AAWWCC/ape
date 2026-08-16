@@ -196,13 +196,24 @@ function expectBounded(entries) {
 }
 
 const BLOCKING_FINDINGS = [
-  { file: 'src/value.js', line: 3, summary: 'freeze the exported value' },
-  { file: 'src/value.js', summary: 'guard against negative inputs' },
+  { file: 'src/value.js', line: 3, title: 'freeze the exported value', detail: 'freeze the exported value', blocking: true, remediation: { owner: 'production' } },
+  { file: 'src/value.js', line: 4, title: 'guard against negative inputs', detail: 'guard against negative inputs', blocking: true, remediation: { owner: 'production' } },
 ];
 const EXPECTED_REVIEW_FINDINGS = [
   'review: src/value.js:3 — freeze the exported value',
-  'review: src/value.js — guard against negative inputs',
+  'review: src/value.js:4 — guard against negative inputs',
 ];
+
+function productionFinding(detail, line = 1) {
+  return {
+    file: 'src/value.js',
+    line,
+    title: detail.slice(0, 200),
+    detail,
+    blocking: true,
+    remediation: { owner: 'production' },
+  };
+}
 
 describe('APE v2 retry evidence threading (prior_attempts)', () => {
   it('(a) a failed build receipt with a summary threads prior_attempts onto the attempt-2 ticket, in state and on disk', async () => {
@@ -272,7 +283,7 @@ describe('APE v2 remediation evidence threading (review_findings)', () => {
     expect(validateTicket(disk).valid).toBe(true);
   }, 30_000);
 
-  it('(d) a disagreeing review with zero renderable findings emits exactly one (no summary) entry', async () => {
+  it('(d) a disagreeing versioned review with no blocking finding rejects before remediation', async () => {
     const dir = await project();
     const { reviewTicket } = await walkToReview(dir);
 
@@ -281,15 +292,9 @@ describe('APE v2 remediation evidence threading (review_findings)', () => {
       findings: [],
       evidence: { verdict: 'fail' },
     }));
-    expect(reviewed.ok).toBe(true);
-
-    const remediation = reviewed.run.tickets.at(-1);
-    expect(remediation.stage_id).toBe('remediation-build');
-    expect(remediation.review_findings).toEqual(['review: (no summary)']);
-
-    const disk = await readDiskTicket(dir, remediation);
-    expect(disk.review_findings).toEqual(['review: (no summary)']);
-    expect(validateTicket(disk).valid).toBe(true);
+    expect(reviewed.ok).toBe(false);
+    expect(reviewed.rejected).toBe(true);
+    expect(reviewed.errors.join('; ')).toMatch(/blocking finding/);
   }, 30_000);
 
   it('(e) failing the remediation-build once forwards review_findings unchanged and adds its own prior_attempts', async () => {
@@ -342,18 +347,14 @@ describe('APE v2 remediation evidence threading (review_findings)', () => {
       'SIERRA', 'TANGO', 'UNIFORM', 'VICTOR', 'WHISKEY', 'XRAY', 'YANKEE',
     ];
     const survivors = await remediationFindings(await project(), markers.map((marker) => ({
-      file: 'src/value.js',
-      summary: `${marker} ${'x'.repeat(300)}`,
+      ...productionFinding(`${marker} ${'x'.repeat(300)}`),
     })));
     expectBounded(survivors);
     expect(survivors).toHaveLength(markers.length);
     const survivorBlock = survivors.join('\n');
     // Deterministic and receipt-derived: the reviewer's own findings order, whole.
     expect(markers.filter((marker) => survivorBlock.includes(marker))).toEqual(markers);
-    expect(
-      /\d/.test(survivorBlock),
-      'nothing was cut or dropped, so the ticket must disclose no count',
-    ).toBe(false);
+    expect(survivorBlock).not.toMatch(/chars cut|review findings were dropped/);
 
     // (ii) PAST THE PER-ENTRY WIDTH CEILING — two findings far wider than any
     // single entry may carry. What the old form of this arm pinned as "exactly
@@ -364,23 +365,19 @@ describe('APE v2 remediation evidence threading (review_findings)', () => {
     const WIDE_FILLER =
       'the same clause repeats until this entry runs far past any per-entry ceiling. ';
     const wideSummaries = ['WIDEALPHA', 'WIDEBRAVO'].map(
-      (marker) => `${marker} ${WIDE_FILLER.repeat(60)}WIDETAILMARKER`);
-    const wide = await remediationFindings(await project(), wideSummaries.map((summary) => ({
-      file: 'src/value.js',
-      summary,
-    })));
+      (marker) => `${marker} ${WIDE_FILLER.repeat(45)}WIDETAILMARKER`);
+    const wide = await remediationFindings(await project(), wideSummaries.map((summary) =>
+      productionFinding(summary)));
     expectBounded(wide);
     // A width cut is not a drop: both findings still have an entry of their own.
     expect(wide).toHaveLength(wideSummaries.length);
     wide.forEach((entry, index) => {
       const summary = wideSummaries[index];
       expect(entry.length).toBeLessThan(summary.length);
-      expect(entry.startsWith(`review: src/value.js — ${summary.slice(0, 200)}`)).toBe(true);
+      expect(entry.startsWith(`review: src/value.js:1 — ${summary.slice(0, 200)}`)).toBe(true);
       expect(entry).not.toContain('WIDETAILMARKER');
-      expect(
-        /\d/.test(entry),
-        'an entry that dropped part of the reviewer\'s text must say how much',
-      ).toBe(true);
+      expect(entry, 'an entry that dropped part of the reviewer\'s text must say how much')
+        .toMatch(/\(\+\d+ chars cut\)/);
     });
 
     // (iii) PAST THE ENTRY-COUNT CEILING — many findings, each comfortably
@@ -392,8 +389,7 @@ describe('APE v2 remediation evidence threading (review_findings)', () => {
     const many = Array.from({ length: 45 }, (_, index) =>
       `MARK${LETTERS[Math.floor(index / LETTERS.length)]}${LETTERS[index % LETTERS.length]}`);
     const capped = await remediationFindings(await project(), many.map((marker) => ({
-      file: 'src/value.js',
-      summary: `${marker} one short finding`,
+      ...productionFinding(`${marker} one short finding`),
     })));
     expectBounded(capped);
 

@@ -285,12 +285,18 @@ const BLOCKING_FINDINGS = [
   {
     file: 'src/value.js',
     line: 3,
-    summary: `${ALPHA_MARKER} the exported record is mutable across the module boundary`,
+    title: `${ALPHA_MARKER} mutable export`,
+    detail: `${ALPHA_MARKER} the exported record is mutable across the module boundary`,
+    blocking: true,
+    remediation: { owner: 'production' },
   },
   {
     file: 'docs/value.md',
-    line: '13-15',
-    summary: `${BRAVO_MARKER} the documented default contradicts the exported value`,
+    line: 13,
+    title: `${BRAVO_MARKER} stale documentation`,
+    detail: `${BRAVO_MARKER} the documented default contradicts the exported value`,
+    blocking: true,
+    remediation: { owner: 'production' },
   },
 ];
 
@@ -300,7 +306,10 @@ const OTHER_FINDINGS = [
   {
     file: 'src/other.js',
     line: 91,
-    note: `${CHARLIE_MARKER} the accessor hands every caller the same shared reference`,
+    title: `${CHARLIE_MARKER} shared reference`,
+    detail: `${CHARLIE_MARKER} the accessor hands every caller the same shared reference`,
+    blocking: true,
+    remediation: { owner: 'production' },
   },
 ];
 
@@ -351,12 +360,18 @@ describe('APE v2 structured review_findings transport', () => {
 
     const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
       tests: greenTest,
-      findings: BLOCKING_FINDINGS,
-      evidence: {
-        verdict: 'fail',
-        summary: REVIEW_PROSE,
-        test_remediation: { test_paths: ['tests/value.test.js'], reason: DECLARATION_REASON },
-      },
+      findings: [
+        ...BLOCKING_FINDINGS,
+        {
+          file: 'tests/value.test.js',
+          line: 1,
+          title: 'authored assertion correction',
+          detail: DECLARATION_REASON,
+          blocking: true,
+          remediation: { owner: 'test', test_paths: ['tests/value.test.js'] },
+        },
+      ],
+      evidence: { verdict: 'fail', summary: REVIEW_PROSE },
     }));
     expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
 
@@ -482,8 +497,11 @@ describe('APE v2 review_findings omission, determinism and non-co-occurrence', (
     const FILLER = 'the same clause repeats so this finding fills the per-entry ceiling on its own. ';
     const wide = Array.from({ length: 30 }, (_, index) => ({
       file: 'src/value.js',
-      line: 3,
-      note: `WIDEMARK${LETTERS[index % LETTERS.length]} ${FILLER.repeat(20)}`,
+      line: index + 1,
+      title: `WIDEMARK${index} bounded finding`,
+      detail: `WIDEMARK${index} ${LETTERS[index % LETTERS.length]} ${FILLER.repeat(20)}`,
+      blocking: true,
+      remediation: { owner: 'production' },
     }));
 
     const { reviewed, remediation } = await remediateWith(dir, wide);

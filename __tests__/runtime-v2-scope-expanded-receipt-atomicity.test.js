@@ -286,7 +286,14 @@ describe('APE v2 SCOPE_EXPANDED receipt atomicity across a crash (audit 1.3, inv
     // remediation-build ticket inheriting the expanded allowlist.
     const payload = receipt(reviewTicket, {
       tests: greenTest,
-      findings: [{ file: 'lib/helper.js', note: 'the fix must also touch lib/helper.js' }],
+      findings: [{
+        file: 'lib/helper.js',
+        line: 1,
+        title: 'expand production scope',
+        detail: 'the fix must also touch lib/helper.js',
+        blocking: true,
+        remediation: { owner: 'production' },
+      }],
       evidence: {
         verdict: 'fail',
         scope_expansion: { claimed_paths: ['lib/helper.js'], reason: 'the fix requires this module' },
