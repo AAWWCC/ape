@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2.18.3 — 2026-08-15
+
+Review and security findings now use bounded, versioned structures that route remediation to the
+production writer, test writer, or a serialized mixed path while preserving advisory and legacy
+behavior. Exact test scopes now reject unauthorized descendants before generic path claims can
+admit them, including when an authorized file path is replaced by a directory.
+
+Diagnostics and forwarded findings are character-safe, deterministic, atomically validated, and
+bounded to their wire budgets. Public documentation, prompts, generated bundles, and all packaged
+host variants carry the same structured-remediation contract.
+
 ## 2.18.2 — 2026-08-15
 
 Versioned plan reviewers now receive the complete validated candidate plan instead of a truncated

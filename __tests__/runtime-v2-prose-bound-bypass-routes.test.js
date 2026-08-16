@@ -201,13 +201,15 @@ describe('route (a): pipeline.js extractTestRemediation admits a raw control/bid
 
       const malformed = await recordReceipt(dir, receipt(reviewTicket, {
         tests: greenTest,
-        evidence: {
-          verdict: 'fail',
-          test_remediation: {
-            test_paths: [`tests/mal${RLO}formed.test.js`],
-            reason: 'the assertion needs a bidi-safe title comparison',
-          },
-        },
+        findings: [{
+          file: 'tests/value.test.js',
+          line: 1,
+          title: 'bidi-safe assertion correction',
+          detail: 'the assertion needs a bidi-safe title comparison',
+          blocking: true,
+          remediation: { owner: 'test', test_paths: [`tests/mal${RLO}formed.test.js`] },
+        }],
+        evidence: { verdict: 'fail' },
       }));
       // NEW refusal on already-invalid input: extractTestRemediation admits
       // this exact path today (file-shaped, under the widened test-scope
@@ -223,26 +225,31 @@ describe('route (a): pipeline.js extractTestRemediation admits a raw control/bid
       expect(malformed.errors.length).toBeGreaterThan(0);
       expect(malformed.errors.some((message) => message.includes(RLO))).toBe(false);
       // The readable prose around the neutralized byte must survive intact.
-      expect(malformed.errors.some((message) => message.includes('bidi/format character'))).toBe(true);
+      expect(malformed.errors.some((message) => message.includes('bidi/format'))).toBe(true);
 
       // Do NOT record a probe here (the hazard that blocked the superseded
       // run): the rejected attempt above is pre-durable, so the corrected
       // declaration below is recorded directly against the same ticket_id.
+      const safeReason = `caf${String.fromCharCode(0x00e9)} ${String.fromCodePoint(0x65e5, 0x672c, 0x8a9e)} title comparison`;
       const corrected = await recordReceipt(dir, receipt(reviewTicket, {
         tests: greenTest,
-        evidence: {
-          verdict: 'fail',
-          test_remediation: {
-            test_paths: ['tests/value.test.js'],
-            reason: 'the assertion needs a bidi-safe title comparison',
-          },
-        },
+        findings: [{
+          file: 'tests/value.test.js',
+          line: 1,
+          title: 'bidi-safe assertion correction',
+          detail: safeReason,
+          blocking: true,
+          remediation: { owner: 'test', test_paths: ['tests/value.test.js'] },
+        }],
+        evidence: { verdict: 'fail' },
       }));
       expect(corrected.ok).toBe(true);
       const remediation = corrected.run.tickets.at(-1);
       expect(remediation.stage_id).toBe('remediation-test');
       expect(remediation.test_paths).toEqual(['tests/value.test.js']);
       expect(remediation.claimed_paths).toEqual(['tests/value.test.js']);
+      expect(remediation.review_findings.some((entry) => entry.includes(safeReason))).toBe(true);
+      expect(JSON.stringify(remediation)).not.toContain(RLO);
     },
     30_000,
   );
@@ -256,6 +263,14 @@ describe('self-referential defect: extractScopeExpansion interpolates the offend
       const { reviewTicket } = await walkToReview(dir);
       const attempt = await recordReceipt(dir, receipt(reviewTicket, {
         tests: greenTest,
+        findings: [{
+          file: 'lib/helper.js',
+          line: 1,
+          title: 'scope correction',
+          detail: 'the fix requires this module',
+          blocking: true,
+          remediation: { owner: 'production' },
+        }],
         evidence: {
           verdict: 'fail',
           scope_expansion: { claimed_paths: [`lib/help${RLO}er.js`], reason: 'the fix requires this module' },
@@ -277,6 +292,14 @@ describe('self-referential defect: extractScopeExpansion interpolates the offend
       const { reviewTicket } = await walkToReview(dir);
       const attempt = await recordReceipt(dir, receipt(reviewTicket, {
         tests: greenTest,
+        findings: [{
+          file: 'lib/evil.js',
+          line: 1,
+          title: 'scope correction',
+          detail: 'the fix requires this module',
+          blocking: true,
+          remediation: { owner: 'production' },
+        }],
         evidence: {
           verdict: 'fail',
           scope_expansion: { claimed_paths: [`lib${ZWNJ}/../evil.js`], reason: 'x' },

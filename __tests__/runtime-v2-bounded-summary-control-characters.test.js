@@ -253,15 +253,36 @@ describe('bounded-summary control-character passthrough (roadmap: bounded-summar
     it('does not create an objective-injection channel; remediation stays structured', async () => {
       const dir = await reviewProject();
       const reviewTicket = await walkToReview(dir);
+      const hostile = await recordReceipt(dir, receipt(reviewTicket, {
+        tests: greenTest,
+        findings: [{
+          file: 'tests/value.test.js',
+          line: 1,
+          title: 'normalize the title field',
+          detail: `normalize the ${RLO}title field before comparing values`,
+          blocking: true,
+          remediation: { owner: 'test', test_paths: ['tests/value.test.js'] },
+        }],
+        evidence: { verdict: 'fail' },
+      }));
+      expect(hostile.ok).toBe(false);
+      expect(hostile.rejected).toBe(true);
+      expect(JSON.stringify(hostile.errors ?? [])).not.toContain(RLO);
+
+      const accented = String.fromCharCode(0x00e9);
+      const cjk = String.fromCodePoint(0x65e5, 0x672c, 0x8a9e);
+      const safeDetail = `caf${accented} ${cjk} title comparison`;
       const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
         tests: greenTest,
-        evidence: {
-          verdict: 'fail',
-          test_remediation: {
-            test_paths: ['tests/value.test.js'],
-            reason: `normalize the ${RLO}title field before comparing values`,
-          },
-        },
+        findings: [{
+          file: 'tests/value.test.js',
+          line: 1,
+          title: 'normalize the title field',
+          detail: safeDetail,
+          blocking: true,
+          remediation: { owner: 'test', test_paths: ['tests/value.test.js'] },
+        }],
+        evidence: { verdict: 'fail' },
       }));
       expect(reviewed.ok).toBe(true);
       const remediation = reviewed.run.tickets.at(-1);
@@ -270,10 +291,16 @@ describe('bounded-summary control-character passthrough (roadmap: bounded-summar
       expect(remediation.objective).not.toContain(RLO);
       expect(remediation).toMatchObject({
         test_paths: ['tests/value.test.js'],
-        required_checks: [],
+        required_checks: ['targeted-tests'],
       });
       expect(remediation.output_schema.required).toContain('evidence');
       expect(JSON.stringify(remediation)).not.toContain(RLO);
+      expect(remediation.review_findings.some((entry) => entry.includes(safeDetail))).toBe(true);
+
+      const remediated = await recordReceipt(dir, receipt(remediation, { tests: greenTest }));
+      expect(remediated.ok, JSON.stringify(remediated.errors ?? [])).toBe(true);
+      expect(remediated.run.tickets.at(-1).stage_id).toBe('remediation-review');
+      expect(remediated.run.tickets.some((ticket) => ticket.stage_id === 'remediation-build')).toBe(false);
     }, 30_000);
   });
 
@@ -299,14 +326,15 @@ describe('bounded-summary control-character passthrough (roadmap: bounded-summar
       const reasonText = `caf${accented} r${accented}sum${accented} ${cjk} needs coverage`;
       const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
         tests: greenTest,
-        findings: [{ file: 'tests/value.test.js', line: 1, note: reasonText }],
-        evidence: {
-          verdict: 'fail',
-          test_remediation: {
-            test_paths: ['tests/value.test.js'],
-            reason: reasonText,
-          },
-        },
+        findings: [{
+          file: 'tests/value.test.js',
+          line: 1,
+          title: 'internationalized assertion correction',
+          detail: reasonText,
+          blocking: true,
+          remediation: { owner: 'test', test_paths: ['tests/value.test.js'] },
+        }],
+        evidence: { verdict: 'fail' },
       }));
       expect(reviewed.ok).toBe(true);
       const remediation = reviewed.run.tickets.at(-1);
@@ -343,6 +371,14 @@ describe('bounded-summary control-character passthrough (roadmap: bounded-summar
       const reviewTicket = await walkToReview(dir);
       const attempt = await recordReceipt(dir, receipt(reviewTicket, {
         tests: greenTest,
+        findings: [{
+          file: 'lib/helper.js',
+          line: 1,
+          title: 'expand production scope',
+          detail: 'the fix requires this module',
+          blocking: true,
+          remediation: { owner: 'production' },
+        }],
         evidence: {
           verdict: 'fail',
           scope_expansion: { claimed_paths: [`lib/help${ESC}er.js`], reason: 'the fix requires this module' },

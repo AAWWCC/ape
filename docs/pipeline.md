@@ -44,8 +44,18 @@ blocks the run. It is not a writing or remediation stage.
 - A reviewer may request exact additional production paths through `evidence.scope_expansion`.
   The runtime audits the expansion, reclassifies lane/risk, and gives the remediation ticket the
   expanded scope.
-- A reviewer may request test correction through `evidence.test_remediation`. The cycle becomes
-  `remediation test → remediation build → review`; only the test writer may edit authored tests.
+- Every new code/security review ticket carries `review_contract_version: 1` and a bounded finding
+  schema. Advisory findings set `blocking: false` and omit remediation. Blocking findings name an
+  owner (`production`, `test`, or `both`); `test`/`both` also name exact authorized `test_paths`.
+  Fail verdicts require a blocking finding. The legacy `evidence.test_remediation` channel remains
+  valid only for unversioned persisted tickets.
+- The complete review group is aggregated in ticket order into compact route metadata. Production
+  findings route to `remediation build → review`; test findings route to
+  `remediation test → review`; mixed or `both` findings route to
+  `remediation test → remediation build → review`. Writers remain serialized, the security review
+  remains in the final group when armed, and all three paths spend the same single cycle. Versioned
+  remediation-test tickets carry `test_scope: "exact"`; lifecycle and receipt/tree validation deny
+  sibling writes, while unversioned legacy remediation tickets retain their historical widening.
 - `failure_kind: capability` blocks immediately because the same ticket would face the same policy
   denial.
 - `failure_kind: test-contradiction` also blocks immediately. The marker is an implementer claim,

@@ -276,20 +276,20 @@ const BRAVO_DETAIL =
 
 const BLOCKING_FINDINGS = [
   {
-    id: 'V-alpha',
-    severity: 'blocking',
     file: 'src/value.js',
-    line: '13-15',
+    line: 13,
     title: ALPHA_DEFECT,
     detail: ALPHA_DETAIL,
+    blocking: true,
+    remediation: { owner: 'production' },
   },
   {
-    id: 'V-bravo',
-    severity: 'blocking',
     file: 'docs/value.md',
     line: 42,
     title: BRAVO_DEFECT,
     detail: BRAVO_DETAIL,
+    blocking: true,
+    remediation: { owner: 'production' },
   },
 ];
 
@@ -311,7 +311,7 @@ describe('APE v2 remediation review_findings: the blocking findings are recovera
 
     const alpha = entriesNaming(entries, {
       file: 'src/value.js',
-      line: '13-15',
+      line: '13',
       defect: ALPHA_DEFECT,
     });
     expect(alpha).toHaveLength(1);
@@ -333,53 +333,57 @@ describe('APE v2 remediation review_findings: the blocking findings are recovera
     expect(disk.review_findings).toEqual(remediation.review_findings);
   }, 30_000);
 
-  it('(b) every text key the archived receipt corpus uses renders — note, summary, detail, title, description', async () => {
+  it('(b) versioned title and detail text are both recoverable and bounded', async () => {
     const dir = await project();
     // One finding per key, each with a unique digit-free marker. The receipt
     // schema's findings record is free-form and hash-chained history keeps every
     // one of these shapes, so the extractor must read all of them.
-    const shapes = [
-      ['note', 'NOTEKEYDEFECT'],
-      ['summary', 'SUMMARYKEYDEFECT'],
-      ['detail', 'DETAILKEYDEFECT'],
-      ['title', 'TITLEKEYDEFECT'],
-      ['description', 'DESCRIPTIONKEYDEFECT'],
-    ];
-    const findings = shapes.map(([key, marker]) => ({
+    const markers = ['TITLEKEYDEFECT', 'DETAILKEYDEFECT'];
+    const findings = markers.map((marker, index) => ({
       file: 'src/value.js',
-      [key]: `${marker} names the defect this finding reports`,
+      line: index + 1,
+      title: `${marker} title`,
+      detail: `${marker} names the defect this finding reports`,
+      blocking: true,
+      remediation: { owner: 'production' },
     }));
 
     const { entries, block } = await remediateWith(dir, findings);
-    expect(entries.length).toBeGreaterThanOrEqual(shapes.length);
-    for (const [key, marker] of shapes) {
-      expect(block, `finding text under the ${key} key was dropped`).toContain(marker);
+    expect(entries.length).toBeGreaterThanOrEqual(markers.length);
+    for (const marker of markers) {
+      expect(block, `structured finding text for ${marker} was dropped`).toContain(marker);
     }
     expectBounded(entries);
   }, 30_000);
 
-  it('(c) a line RANGE anchor survives, and a crafted non-scalar line stays bounded', async () => {
+  it('(c) distinct integer line anchors survive the versioned contract', async () => {
     const dir = await project();
     const findings = [
-      { file: 'src/range.js', line: '202-203', note: 'RANGEONE the guard clause spans both lines' },
-      { file: 'src/range.js', line: '778-879', note: 'RANGETWO the extracted helper spans the whole block' },
       {
         file: 'src/range.js',
-        line: { start: 'x'.repeat(400) },
-        note: 'ODDLINE a crafted non-scalar line must never escape the bound',
+        line: 202,
+        title: 'RANGEONE guard clause',
+        detail: 'RANGEONE the guard clause begins at this line',
+        blocking: true,
+        remediation: { owner: 'production' },
+      },
+      {
+        file: 'src/range.js',
+        line: 778,
+        title: 'RANGETWO extracted helper',
+        detail: 'RANGETWO the extracted helper begins at this line',
+        blocking: true,
+        remediation: { owner: 'production' },
       },
     ];
 
     const { entries } = await remediateWith(dir, findings);
     const one = entries.filter((entry) => entry.includes('RANGEONE'));
     expect(one).toHaveLength(1);
-    expect(one[0]).toContain('202-203');
+    expect(one[0]).toContain('202');
     const two = entries.filter((entry) => entry.includes('RANGETWO'));
     expect(two).toHaveLength(1);
-    expect(two[0]).toContain('778-879');
-    // The hostile line is inert: the finding's text still reaches the reader and
-    // nothing it carries widens the entry.
-    expect(entries.filter((entry) => entry.includes('ODDLINE'))).toHaveLength(1);
+    expect(two[0]).toContain('778');
     expectBounded(entries);
   }, 30_000);
 
@@ -390,7 +394,14 @@ describe('APE v2 remediation review_findings: the blocking findings are recovera
     // line field here, so the block is digit-free unless the runtime disclosed
     // a count.
     const findings = [
-      { severity: 'blocking', file: 'src/value.js', title: ALPHA_DEFECT, detail: ALPHA_DETAIL },
+      {
+        file: 'src/value.js',
+        line: 13,
+        title: ALPHA_DEFECT,
+        detail: ALPHA_DETAIL,
+        blocking: true,
+        remediation: { owner: 'production' },
+      },
     ];
     expect(ALPHA_DETAIL.length).toBeGreaterThan(1_300);
 
@@ -411,10 +422,17 @@ describe('APE v2 remediation review_findings: the blocking findings are recovera
 describe('APE v2 remediation review_findings: bounds, wire budget and forwarding', () => {
   it('(e) a single enormous finding stays bounded, discloses its loss, and fits the wire budget', async () => {
     const dir = await project();
-    const huge = `HUGEHEADMARKER ${'the same crafted sentence repeats to stress the bound. '.repeat(700)}HUGETAILMARKER`;
-    expect(huge.length).toBeGreaterThan(30_000);
+    const huge = `HUGEHEADMARKER ${'the same crafted sentence repeats to stress the bound. '.repeat(70)}HUGETAILMARKER`;
+    expect(huge.length).toBeGreaterThan(3_000);
     const { reviewed, remediation, entries, block } = await remediateWith(dir, [
-      { file: 'src/value.js', note: huge },
+      {
+        file: 'src/value.js',
+        line: 1,
+        title: 'large bounded finding',
+        detail: huge,
+        blocking: true,
+        remediation: { owner: 'production' },
+      },
     ]);
 
     expectBounded(entries);
@@ -439,8 +457,11 @@ describe('APE v2 remediation review_findings: bounds, wire budget and forwarding
     ];
     const findings = markers.map((marker) => ({
       file: 'src/value.js',
-      line: '13-15',
-      note: `${marker} ${'stress '.repeat(214)}`,
+      line: 13,
+      title: `${marker} bounded finding`,
+      detail: `${marker} ${'stress '.repeat(214)}`,
+      blocking: true,
+      remediation: { owner: 'production' },
     }));
 
     const { reviewed, remediation, entries, block } = await remediateWith(dir, findings);
@@ -518,7 +539,7 @@ describe('APE v2 remediation review_findings: bounds, wire budget and forwarding
     // evidence the first attempt did.
     expect(entriesNaming(disk.review_findings, {
       file: 'src/value.js',
-      line: '13-15',
+      line: '13',
       defect: ALPHA_DEFECT,
     })).toHaveLength(1);
     expect(entriesNaming(disk.review_findings, {
@@ -552,12 +573,43 @@ describe('APE v2 remediation review_findings: bounds, wire budget and forwarding
       'CTRLALPHA', 'CTRLBRAVO', 'CTRLCHARLIE', 'CTRLDELTA', 'CTRLECHO',
       'CTRLFOXTROT', 'CTRLGOLF', 'CTRLHOTEL', 'CTRLINDIA', 'CTRLJULIETT',
     ];
-    const findings = markers.map((marker) => ({
+    const { reviewTicket } = await walkToReview(dir);
+    const hostileFindings = markers.map((marker, index) => ({
       file: 'src/value.js',
-      note: `${marker} ${CONTROLS}${'padding '.repeat(60)}`,
+      line: index + 1,
+      title: `${marker} control finding`,
+      detail: `${marker} ${CONTROLS}${'padding '.repeat(300)}`,
+      blocking: true,
+      remediation: { owner: 'production' },
+    }));
+    const rejected = await recordReceipt(dir, receipt(reviewTicket, {
+      tests: greenTest,
+      findings: hostileFindings,
+      evidence: { verdict: 'fail', summary: REVIEW_PROSE },
+    }));
+    expect(rejected.ok).toBe(false);
+    expect(rejected.rejected).toBe(true);
+    const diagnostics = JSON.stringify(rejected.errors ?? []);
+    for (const character of CONTROLS) expect(diagnostics).not.toContain(character);
+
+    const findings = markers.map((marker, index) => ({
+      file: 'src/value.js',
+      line: index + 1,
+      title: `${marker} safe bounded finding`,
+      detail: `${marker} ${'safe padding '.repeat(300)}`,
+      blocking: true,
+      remediation: { owner: 'production' },
     }));
 
-    const { reviewed, remediation, entries, block } = await remediateWith(dir, findings);
+    const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
+      tests: greenTest,
+      findings,
+      evidence: { verdict: 'fail', summary: REVIEW_PROSE },
+    }));
+    expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
+    const remediation = reviewed.run.tickets.at(-1);
+    const entries = remediation.review_findings;
+    const block = entries.join('\n');
 
     // The reviewer's own words still reach the reader, in the reviewer's order:
     // neutralizing hostile characters is not the same as dropping the finding.

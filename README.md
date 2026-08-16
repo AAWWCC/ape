@@ -147,6 +147,12 @@ protocol does not describe mechanical work, read-only `debug`/`spike`, or `land`
 ships an existing diff without editing it. High-risk runs add a security review. Each failed stage
 can be retried once; a blocking review gets one remediation cycle.
 
+New code and security reviews classify each blocking finding as production-, test-, or both-owned.
+APE serializes the matching remediation writers: production goes to the implementer, test goes to
+the test writer, and mixed/both goes to the test writer then implementer before the applicable
+review group reconvenes. Versioned remediation-test tickets mark their test scope exact; authored
+tests remain test-writer-owned, while unversioned legacy tickets retain sibling widening.
+
 ## Gates and shipping
 
 APE verifies receipt integrity, path scope, tree identity, targeted tests, plugin validity when

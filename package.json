@@ -1,6 +1,6 @@
 {
   "name": "ape",
-  "version": "2.18.2",
+  "version": "2.18.3",
   "type": "module",
   "private": true,
   "description": "APE — durable, evidence-gated engineering runs for AI coding agents",
@@ -40,6 +40,7 @@
     "test:agent": "vitest run --maxWorkers=3",
     "test:watch": "vitest",
     "test:v2": "vitest run runtime-v2-",
+    "test:structured-remediation": "vitest run __tests__/runtime-v2-bounded-summary-control-characters.test.js __tests__/runtime-v2-core-land-lane.test.js __tests__/runtime-v2-evidence-channel-residuals.test.js __tests__/runtime-v2-evidence-character-allowlist.test.js __tests__/runtime-v2-forwarded-channel-disclosure.test.js __tests__/runtime-v2-prose-bound-bypass-routes.test.js __tests__/runtime-v2-remediation-review-findings.test.js __tests__/runtime-v2-remediation-test-path-routing.test.js __tests__/runtime-v2-retry-remediation-evidence.test.js __tests__/runtime-v2-review-findings-ticket-notice.test.js __tests__/runtime-v2-root-test-claim-widening.test.js __tests__/runtime-v2-scope-expanded-receipt-atomicity.test.js __tests__/runtime-v2-scope-expansion.test.js __tests__/runtime-v2-structured-remediation-routing.test.js __tests__/runtime-v2-test-scope-directory-widening.test.js",
     "test:claude-schema": "node scripts/run-claude-schema-calibration.mjs",
     "test:timings": "node scripts/update-test-durations.mjs",
     "eval:prompts:check": "node evals/prompt-evals.mjs check",

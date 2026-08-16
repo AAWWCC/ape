@@ -411,9 +411,15 @@ function apeSegments(run) {
   };
   const color = runColor(run);
   const mark = run.status === 'blocked' ? G.block : run.status === 'completed' ? G.check : '';
-  const label = run.status === 'blocked' ? 'BLOCK'
+  const baseLabel = run.status === 'blocked' ? 'BLOCK'
     : run.status === 'aborted' ? 'ABORT'
       : milestoneOf(run.stage);
+  const routeLabel = run.remediation_route?.route === 'test-production'
+    ? 'test→build'
+    : run.remediation_route?.route;
+  const label = routeLabel && run.stage?.startsWith('remediation-')
+    ? `${baseLabel} ${routeLabel}`
+    : baseLabel;
   const stage = {
     text: `${mark ? `${mark} ` : ''}${label}`,
     fg: CHARSET === 'nerdfont' ? 'bg' : color, bg: color,

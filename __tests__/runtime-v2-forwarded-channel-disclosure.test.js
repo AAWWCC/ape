@@ -349,6 +349,28 @@ const FLOW_AUTHORED_TEST =
 const flowRedTest = [{ command: 'node tests/value.test.js', passed: false, exit_code: 1, duration_ms: 1 }];
 const flowGreenTest = [{ command: 'node tests/value.test.js', passed: true, exit_code: 0, duration_ms: 1 }];
 
+function flowProductionFinding(file = 'src/value.js', detail = 'apply the bounded production correction') {
+  return {
+    file,
+    line: 1,
+    title: 'bounded production correction',
+    detail,
+    blocking: true,
+    remediation: { owner: 'production' },
+  };
+}
+
+function flowTestFinding(detail = 'correct the authored assertion') {
+  return {
+    file: 'tests/value.test.js',
+    line: 1,
+    title: 'authored assertion correction',
+    detail,
+    blocking: true,
+    remediation: { owner: 'test', test_paths: ['tests/value.test.js'] },
+  };
+}
+
 async function reviewFlowProject() {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-channel-flow-'));
   cleanups.push(dir);
@@ -415,6 +437,7 @@ describe('a reviewer-proposed scope expansion is carried structurally to the nex
     const { reviewTicket: reviewTicket0 } = await walkToReviewFlow(dir0);
     const reviewed0 = await recordReceipt(dir0, receipt(reviewTicket0, {
       tests: flowGreenTest,
+      findings: [flowProductionFinding('src/value.js', 'the change is incomplete')],
       evidence: { verdict: 'fail', summary: 'the change is incomplete' },
     }));
     expect(reviewed0.ok, JSON.stringify(reviewed0.errors ?? [])).toBe(true);
@@ -431,6 +454,7 @@ describe('a reviewer-proposed scope expansion is carried structurally to the nex
       'SCOPEREASONMARKER the fix cannot land without also touching the shared helper module named above';
     const reviewedA = await recordReceipt(dirA, receipt(reviewTicketA, {
       tests: flowGreenTest,
+      findings: [flowProductionFinding(addedPath, 'the change is incomplete without an out-of-claims file')],
       evidence: {
         verdict: 'fail',
         summary: 'the change is incomplete without an out-of-claims file',
@@ -456,6 +480,7 @@ describe('a reviewer-proposed scope expansion is carried structurally to the nex
     const longReason = 'SCOPEREASONBULK-UNIQUE-TAIL '.repeat(150);
     const reviewedB = await recordReceipt(dirB, receipt(reviewTicketB, {
       tests: flowGreenTest,
+      findings: [flowProductionFinding(addedPaths[0], 'the change needs a large, out-of-claims rename set')],
       evidence: {
         verdict: 'fail',
         summary: 'the change needs a large, out-of-claims rename set',
@@ -492,6 +517,7 @@ describe('the structured review_findings field stays within the scheduler bounds
     const { reviewTicket } = await walkToReviewFlow(dir);
     const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
       tests: flowGreenTest,
+      findings: [flowProductionFinding('src/value.js', 'a defect worth remediating')],
       evidence: { verdict: 'fail', summary: 'a defect worth remediating' },
     }));
     expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
@@ -520,11 +546,8 @@ describe('test remediation uses structured review evidence with an immutable obj
     const { reviewTicket } = await walkToReviewFlow(dir);
     const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
       tests: flowGreenTest,
-      evidence: {
-        verdict: 'fail',
-        summary: 'the correction belongs in the authored test',
-        test_remediation: { test_paths: ['tests/value.test.js'], reason: 'short reason' },
-      },
+      findings: [flowTestFinding('the correction belongs in the authored test')],
+      evidence: { verdict: 'fail', summary: 'the correction belongs in the authored test' },
     }));
     expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
     const remediationTest = reviewed.run.tickets.at(-1);
@@ -657,6 +680,7 @@ describe('a scope expansion proposed by the FIRST-arriving receipt of a genuinel
     // reduction issues no ticket at all.
     const first = await recordReceipt(dir, receipt(reviewTicket, {
       tests: flowGreenTest,
+      findings: [flowProductionFinding(addedPath, 'the change is incomplete without an out-of-claims file')],
       evidence: {
         verdict: 'fail',
         summary: 'the change is incomplete without an out-of-claims file',
@@ -709,6 +733,7 @@ describe('a scope expansion proposed by the FIRST-arriving receipt of a genuinel
 
     const first = await recordReceipt(dir, receipt(reviewTicket, {
       tests: flowGreenTest,
+      findings: [flowProductionFinding(reviewPath, 'the correctness fix needs an out-of-claims file')],
       evidence: {
         verdict: 'fail',
         summary: 'the correctness fix needs an out-of-claims file',
@@ -719,6 +744,7 @@ describe('a scope expansion proposed by the FIRST-arriving receipt of a genuinel
 
     const second = await recordReceipt(dir, receipt(securityTicket, {
       tests: flowGreenTest,
+      findings: [flowProductionFinding(securityPath, 'the security fix needs a different out-of-claims file')],
       evidence: {
         verdict: 'fail',
         summary: 'the security fix needs a different out-of-claims file',
@@ -753,16 +779,23 @@ describe('a receipt declaring scope_expansion together with test_remediation rou
     const addedPath = 'src/scope-test-route-added-module.js';
     const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
       tests: flowGreenTest,
+      findings: [
+        flowProductionFinding(addedPath, 'the fix needs an out-of-claims module'),
+        {
+          file: 'tests/value.test.js',
+          line: 1,
+          title: 'authored assertion correction',
+          detail: 'the assertion itself is wrong, not just the implementation',
+          blocking: true,
+          remediation: { owner: 'test', test_paths: ['tests/value.test.js'] },
+        },
+      ],
       evidence: {
         verdict: 'fail',
         summary: 'the fix needs an out-of-claims module and the correction belongs in the authored test',
         scope_expansion: {
           claimed_paths: [addedPath],
           reason: 'SCOPETESTROUTEREASON the production fix needs the module named above',
-        },
-        test_remediation: {
-          test_paths: ['tests/value.test.js'],
-          reason: 'the assertion itself is wrong, not just the implementation',
         },
       },
     }));
@@ -789,6 +822,7 @@ describe('a scope expansion survives a remediation-build RETRY, not just the fir
     const reason = 'RETRYSCOPEREASON the retry must still know the scope grew, not just the first issue';
     const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
       tests: flowGreenTest,
+      findings: [flowProductionFinding(addedPath, 'the change is incomplete without an out-of-claims file')],
       evidence: {
         verdict: 'fail',
         summary: 'the change is incomplete without an out-of-claims file',
