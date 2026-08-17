@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.19.0 — 2026-08-17
+
+Added the `ape_run preview` action for pure, zero-write pipeline forecasting, lane classification rationale, and deterministic worst-case dispatch bounds without modifying git branches or writing runtime state.
+
+Added schema-guided receipt validation before subagent retirement across Claude, Codex, and Gemini, preventing malformed common, planning, preflight, and structured-review receipts from failing stage handoffs.
+
 ## 2.18.3 — 2026-08-15
 
 Review and security findings now use bounded, versioned structures that route remediation to the
