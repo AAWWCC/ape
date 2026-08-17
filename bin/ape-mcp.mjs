@@ -26,6 +26,7 @@ import {
   startRun,
   statusRun,
 } from '../lib/runtime/service.js';
+import { previewRun } from '../lib/runtime/lifecycle-service.js';
 import {
   acknowledgeTaskUpdate,
   appendTaskGeneration,
@@ -67,7 +68,7 @@ const TOOLS = Object.freeze([
       type: 'object',
       required: ['action'],
       properties: {
-        action: { type: 'string', enum: ['probe', 'probe-status', 'probe-ack', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'] },
+        action: { type: 'string', enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'] },
         project_dir: {
           type: 'string',
           description: 'Exact governed project root. Required on Google Antigravity / Gemini because its plugin MCP process runs from the installed plugin directory.',
@@ -442,6 +443,31 @@ async function dispatchApeRun(projectDir, input) {
     return ackNativeBindingProbe(projectDir, {
       probe_id: input.probe_id,
       probe_capability: input.probe_capability,
+    });
+  }
+  if (action === 'preview') {
+    return previewRun(projectDir, {
+      objective: input.objective,
+      mode: input.mode ?? 'phase',
+      lane: input.lane ?? 'auto',
+      host: input.host,
+      claimed_paths: input.claimed_paths ?? [],
+      tool_claims: input.tool_claims ?? [],
+      test_paths: input.test_paths ?? [],
+      requirements: input.requirements ?? [],
+      ...(input.completes !== undefined ? { completes: input.completes } : {}),
+      ...(input.supersedes_run !== undefined ? { supersedes_run: input.supersedes_run } : {}),
+      plan_contract_version: input.plan_contract_version ?? (
+        (input.mode ?? 'phase') === 'phase' &&
+        (input.behavioral ?? true) === true
+          ? 2
+          : 1
+      ),
+      risk_triggers: input.risk_triggers ?? [],
+      behavioral: input.behavioral ?? true,
+      hooks_trusted: input.hooks_trusted ?? false,
+      subagents_available: input.subagents_available ?? false,
+      explicit_invocation: input.explicit_invocation ?? false,
     });
   }
   if (action === 'start') {
