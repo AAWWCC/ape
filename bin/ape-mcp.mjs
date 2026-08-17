@@ -408,13 +408,13 @@ async function dispatchApeRun(projectDir, input) {
   const action = input.action;
   if (action === 'answer-preflight') {
     return projectRunResponse(await answerPreflight(projectDir, {
-      run_id: input.run_id,
+      ...(input.run_id !== undefined ? { run_id: input.run_id } : {}),
       reason: input.reason,
       preflight_hash: input.preflight_hash,
       answers: input.answers,
-      claimed_paths: input.claimed_paths,
-      test_paths: input.test_paths,
-      risk_triggers: input.risk_triggers,
+      ...(input.claimed_paths !== undefined ? { claimed_paths: input.claimed_paths } : {}),
+      ...(input.test_paths !== undefined ? { test_paths: input.test_paths } : {}),
+      ...(input.risk_triggers !== undefined ? { risk_triggers: input.risk_triggers } : {}),
     }));
   }
   // Misroute guard (C4, roadmap id abort-cannot-be-aimed): run_id confirms

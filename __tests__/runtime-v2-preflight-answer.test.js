@@ -141,6 +141,25 @@ describe('audited preflight answers', () => {
     expect(successor.claimed_paths).not.toContain('src/unclaimed.js');
   });
 
+  it('accepts answer-preflight with all optional fields omitted', async () => {
+    const dir = await heldProject();
+    const minimal = {
+      preflight_hash: 'a'.repeat(64),
+      reason: 'Resolve the compatibility questions with minimal payload.',
+      answers: [
+        { id: 'api-name', answer: 'Keep value.' },
+        { id: 'migration', answer: 'No migration.' },
+      ],
+    };
+    const result = await service.answerPreflight(dir, minimal);
+    expect(result.ok).toBe(true);
+    expect(result.run.status).toBe('running');
+    expect(result.run.lane).toBe('fast');
+    expect(result.run.stage).toBe('test');
+    expect(result.run.claimed_paths).toEqual(['src/value.js']);
+    expect(result.run.test_paths).toEqual(['tests/value.test.js']);
+  });
+
   it.each([
     ['partial answers', () => ({ ...valid(), answers: valid().answers.slice(0, 1) })],
     ['duplicate answers', () => ({ ...valid(), answers: [valid().answers[0], valid().answers[0], valid().answers[1]] })],
