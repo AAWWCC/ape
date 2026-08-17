@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.20.0 — 2026-08-17
+
+Derived bounded per-run summaries from durable tickets, receipts, and history projections.
+
+Added safe control character stripping and bounding across per-run summary projections.
+
+Aligned Gemini subagent detection and session start hook handling.
+
 ## 2.19.1 — 2026-08-17
 
 Fixed the `answer-preflight` action MCP input deserialization bug where valid tool calls omitting optional scope fields (`claimed_paths`, `test_paths`, `risk_triggers`) or `run_id` were rejected with `input contains unsupported undefined data`.
