@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.19.1 — 2026-08-17
+
+Fixed the `answer-preflight` action MCP input deserialization bug where valid tool calls omitting optional scope fields (`claimed_paths`, `test_paths`, `risk_triggers`) or `run_id` were rejected with `input contains unsupported undefined data`.
+
+Added support for optional `run_id` aim confirmation on `answer-preflight` actions.
+
+Added explicit Gemini host dispatch adapter routing for stage ticket execution in the receipt service.
+
 ## 2.19.0 — 2026-08-17
 
 Added the `ape_run preview` action for pure, zero-write pipeline forecasting, lane classification rationale, and deterministic worst-case dispatch bounds without modifying git branches or writing runtime state.
