@@ -62,7 +62,7 @@ const OWNER_MANIFEST = [
     symbols: [
       'SAFE_SUBAGENT_TOOLS', 'SAFE_CLAUDE_SUBAGENT_TOOLS', 'CONTROL_PLANE_TOOLS',
       'isAgentDispatchTool', 'normalizeLifecycleEvent', 'evaluateLifecyclePolicy',
-      'evaluateStartBinding', 'formatHookResponse',
+      'evaluateStartBinding', 'evaluateStopValidation', 'formatHookResponse',
     ],
     consumes: ['lib/runtime/evidence-policy.js', 'lib/runtime/write-policy.js'],
   },
@@ -128,7 +128,7 @@ const REQUIRED_OWNER_FILES = OWNER_MANIFEST
 
 const FACADE_EXPORT_COUNTS = Object.freeze({
   'lib/runtime/service.js': 22,
-  'lib/runtime/hooks.js': 33,
+  'lib/runtime/hooks.js': 34,
   'lib/runtime/gates.js': 12,
   'lib/runtime/scheduler.js': 3,
 });
