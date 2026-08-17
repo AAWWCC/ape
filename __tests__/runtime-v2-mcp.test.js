@@ -431,4 +431,74 @@ describe('APE v2 MCP public surface', () => {
       await rm(scratch, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it('accepts answer-preflight without optional fields over the MCP wire', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-answer-'));
+    try {
+      await mkdir(path.join(scratch, '.ape', 'runtime'), { recursive: true });
+      await writeFile(path.join(scratch, '.ape', 'runtime', 'config.json'), JSON.stringify({
+        shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
+        test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
+      }));
+      await writeFile(path.join(scratch, 'value.js'), 'export const value = 1;\n');
+      await writeFile(path.join(scratch, 'value.test.js'), 'import "./value.js";\n');
+      execFileSync('git', ['init', '-q'], { cwd: scratch });
+      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: scratch });
+      execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
+      execFileSync('git', ['add', '.'], { cwd: scratch });
+      execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
+      const branch = execFileSync('git', ['branch', '--show-current'], { cwd: scratch, encoding: 'utf8' }).trim();
+      const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: scratch, encoding: 'utf8' }).trim();
+      const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: scratch, encoding: 'utf8' }).trim();
+
+      const preflightHash = 'a'.repeat(64);
+      await writeFile(path.join(scratch, '.ape', 'runtime', 'active.json'), JSON.stringify({
+        schema_version: '2.0.0', run_id: 'run-mcp-answer', status: 'input_required', stage: 'preflight',
+        mode: 'phase', lane: 'fast', behavioral: true, plan_contract_version: 2,
+        objective: 'Answer the material preflight questions over MCP', host: 'claude',
+        branch, base_commit_sha: commit, tree_sha: tree,
+        policy: { high_risk_security_review: true },
+        claimed_paths: ['value.js'], test_paths: ['value.test.js'], risk_triggers: [],
+        tickets: [], receipts: [], expired_tickets: [], audit: [],
+        preflight: {
+          version: 1, artifact_hash: preflightHash,
+          questions: [
+            { id: 'api-name', question: 'Which API name stays stable?', rationale: 'Compatibility' },
+          ],
+          artifact: {
+            questions: [
+              { id: 'api-name', question: 'Which API name stays stable?', rationale: 'Compatibility' },
+            ],
+          },
+        },
+        input_required: { preflight_hash: preflightHash, question_ids: ['api-name'] },
+      }));
+
+      const responses = await session([{
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'ape_run',
+          arguments: {
+            action: 'answer-preflight',
+            project_dir: scratch,
+            preflight_hash: preflightHash,
+            reason: 'Operator answering question over MCP wire without optional fields',
+            answers: [
+              { id: 'api-name', answer: 'Keep value export unchanged.' },
+            ],
+          },
+        },
+      }]);
+      expect(responses[0].result.isError).not.toBe(true);
+      const result = JSON.parse(responses[0].result.content[0].text);
+      expect(result.run.status).toBe('running');
+      expect(result.run.lane).toBe('fast');
+      expect(result.run.stage).toBe('test');
+      expect(result.run.claimed_paths).toEqual(['value.js']);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
