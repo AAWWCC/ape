@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.20.1 — 2026-08-17
+
+Made archived lifecycle explanations derive dispatch, retry, expiry, remediation, input-hold, and
+recovery facts from durable records plus minimal terminal provenance.
+
+Added strict project-metrics filter validation and bounded processing with explicit coverage and
+truncation disclosure.
+
+Completed metrics and history-calibrated statusline documentation across public host packages.
+
 ## 2.20.0 — 2026-08-17
 
 Derived bounded per-run summaries from durable tickets, receipts, and history projections.
