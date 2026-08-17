@@ -7,7 +7,7 @@ machine contract behind them.
 | --- | --- |
 | `ape_run` | `probe`, `probe-status`, `probe-ack`, `start`, `next`, `record`, `status`, `resume`, `regate`, `ship`, `expire-dispatch`, `abort`, `override` |
 | `ape_status` | Dedicated read-only current-run, pending-ticket, lane, and gate snapshot. |
-| `ape_history` | `query`, `explain`, `import`, `maintenance-status`, `compact-artifacts`, `roadmap-status`, `roadmap-register`, `roadmap-supersede` |
+| `ape_history` | `query`, `explain`, `metrics`, `import`, `maintenance-status`, `compact-artifacts`, `roadmap-status`, `roadmap-register`, `roadmap-supersede` |
 | `ape_config` | `get`, `set`, `doctor`, `wire`, `unwire`, `init` |
 
 Inputs are bounded at 64 KiB UTF-8. Responses use bounded summaries; full tickets, receipts, and

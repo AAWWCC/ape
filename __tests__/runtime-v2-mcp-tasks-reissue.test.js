@@ -97,7 +97,7 @@ describe('APE v2 MCP task reissue and crash reconciliation', () => {
       expected_run_id: null,
       status: 'prepared',
       prepared_at: '2026-08-10T12:00:00.000Z',
-      expires_at: '2026-08-17T12:00:00.000Z',
+      expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
       record_hash: '0'.repeat(64),
     };
     prepared.record_hash = hashRecord(prepared, ['record_hash']);

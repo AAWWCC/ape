@@ -169,14 +169,14 @@ const TOOLS = Object.freeze([
   {
     name: 'ape_history',
     description:
-      'Query, explain, or import APE machine history; inspect latest retention maintenance status; explicitly compact redundant old run artifacts with a required audit reason; and drive the runtime-owned roadmap: roadmap-status (derived cold-boot picture), roadmap-register (validated, receipt-provenanced, journaled batch), roadmap-supersede (validated journaled staleness mutation). Inputs are bounded at 64 KB.',
+      'Query, explain, aggregate project metrics, or import APE machine history; inspect latest retention maintenance status; explicitly compact redundant old run artifacts with a required audit reason; and drive the runtime-owned roadmap: roadmap-status (derived cold-boot picture), roadmap-register (validated, receipt-provenanced, journaled batch), roadmap-supersede (validated journaled staleness mutation). Inputs are bounded at 64 KB.',
     inputSchema: {
       type: 'object',
       required: ['action'],
       properties: {
         action: {
           type: 'string',
-          enum: ['query', 'explain', 'import', 'maintenance-status', 'compact-artifacts', 'roadmap-status', 'roadmap-register', 'roadmap-supersede'],
+          enum: ['query', 'explain', 'metrics', 'import', 'maintenance-status', 'compact-artifacts', 'roadmap-status', 'roadmap-register', 'roadmap-supersede'],
         },
         project_dir: {
           type: 'string',
@@ -184,6 +184,12 @@ const TOOLS = Object.freeze([
         },
         run_id: { type: 'string' },
         requirement: { type: 'string' },
+        since: { type: 'string', description: 'metrics only: ISO timestamp start of date range filter.' },
+        until: { type: 'string', description: 'metrics only: ISO timestamp end of date range filter.' },
+        lane: { type: 'string', description: 'metrics only: filter by lane.' },
+        mode: { type: 'string', description: 'metrics only: filter by mode.' },
+        host: { type: 'string', description: 'metrics only: filter by host.' },
+        status: { type: 'string', description: 'metrics only: filter by run status.' },
         delete_legacy: { type: 'boolean' },
         keep_recent_runs: {
           type: 'integer',
