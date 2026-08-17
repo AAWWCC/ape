@@ -67,9 +67,18 @@ try {
     if (process.env.APE_HOOK_EVENT === 'SessionStart' && input.invocationNum !== 0) {
       input.hook_event_name = 'unknown';
     }
-    if (normalized.gemini_dispatch_nonce) {
+    if (
+      normalized.gemini_dispatch_nonce
+      || input.is_subagent
+      || input.isSubagent
+      || input.subagent_id
+      || input.subagentId
+      || (typeof input.agent_id === 'string' && input.agent_id.length > 0)
+      || (typeof input.agentId === 'string' && input.agentId.length > 0)
+    ) {
       input.is_subagent = true;
       if (process.env.APE_HOOK_EVENT === 'Stop') input.hook_event_name = 'SubagentStop';
+      if (process.env.APE_HOOK_EVENT === 'SessionStart') input.hook_event_name = 'unknown';
     }
   }
 
