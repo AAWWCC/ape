@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { archiveRun, calculateProjectMetrics } from '../lib/runtime/history.js';
 import { historyAction } from '../lib/runtime/service.js';
+import { atomicWriteJson } from '../lib/runtime/storage.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const cleanups = [];
@@ -231,6 +232,45 @@ describe('APE v2 Project Metrics Aggregation & Telemetry', () => {
       expect(res.metrics.total_runs).toBe(2);
       expect(res.metrics.outcomes.completed).toBe(1);
       expect(res.metrics.outcomes.blocked).toBe(1);
+    });
+
+    it('refuses invalid timestamps, reversed ranges, and unknown enum filters', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-validation-'));
+      cleanups.push(dir);
+
+      await expect(historyAction(dir, 'metrics', { since: 'not-a-date' }))
+        .rejects.toThrow('metrics since must be a valid ISO timestamp');
+      await expect(historyAction(dir, 'metrics', {
+        since: '2026-08-02T00:00:00.000Z',
+        until: '2026-08-01T00:00:00.000Z',
+      })).rejects.toThrow('metrics since must be earlier than or equal to until');
+      await expect(historyAction(dir, 'metrics', { lane: 'warp-speed' }))
+        .rejects.toThrow('metrics lane must be one of');
+      await expect(historyAction(dir, 'metrics', { host: 'remote-cloud' }))
+        .rejects.toThrow('metrics host must be one of');
+    });
+
+    it('caps work at 256 newest runs and discloses truncated coverage', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-cap-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      await mkdir(paths.history, { recursive: true });
+      await Promise.all(Array.from({ length: 260 }, (_, index) => {
+        const runId = `run-cap-${String(index).padStart(3, '0')}`;
+        return atomicWriteJson(
+          path.join(paths.history, `${runId}.json`),
+          makeRunRecord(runId),
+        );
+      }));
+
+      const result = await historyAction(dir, 'metrics', {});
+      expect(result.metrics.total_runs).toBe(256);
+      expect(result.metrics.coverage).toEqual({
+        available_runs: 260,
+        processed_runs: 256,
+        limit: 256,
+        truncated: true,
+      });
     });
   });
 });

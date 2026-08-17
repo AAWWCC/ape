@@ -74,6 +74,12 @@ checked byte-for-byte by `npm run docs:check`.
 | `runners` | object array | `[]` | Optional polyglot runner ownership and command profiles. |
 <!-- END GENERATED CONFIG REFERENCE -->
 
+The statusline's progress estimate is local and history-calibrated: it samples receipt timings from
+at most the newest 20 immutable history files, combines them with the active run, and caches only
+validated numeric samples under `.ape/runtime/statusline-cache.json`. This behavior requires no
+telemetry endpoint and is independent of `ape_history metrics`, whose bounded coverage is described
+in [MCP tools](mcp-tools.md#history-observability-and-metrics).
+
 ## Test commands
 
 Run `ape_config init` first. It recognizes common JavaScript, Python, Go, Rust, Ruby, Maven,

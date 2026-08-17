@@ -192,5 +192,65 @@ describe('APE v2 History Explain & Lifecycle Telemetry Output', () => {
       expect(res.text).toContain('Status: completed');
       expect(res.text).toMatch(/Timing|Duration/i);
     });
+
+    it('archives and explains real lifecycle provenance instead of fixture-only fields', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-history-provenance-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      const runId = 'run-explain-provenance';
+      const firstTicket = {
+        ticket_id: `${runId}:remediation-test:1`,
+        stage_id: 'remediation-test',
+        role: 'test_writer',
+        model_tier: 'balanced',
+        attempt: 1,
+      };
+      const retryTicket = {
+        ...firstTicket,
+        ticket_id: `${runId}:remediation-test:2`,
+        attempt: 2,
+      };
+      await archiveRun(paths, createHistoryRecord({
+        run_id: runId,
+        tickets: [firstTicket, retryTicket],
+        receipts: [{
+          receipt_id: 'r-remediation-retry',
+          ticket_id: retryTicket.ticket_id,
+          status: 'passed',
+        }],
+        expired_tickets: [firstTicket.ticket_id],
+        remediation_route: {
+          route: 'test',
+          test_paths: ['tests/calc.test.js'],
+          cycle: 1,
+        },
+        remediation_cycles: 1,
+        regate_attempts: 1,
+        preflight: {
+          answers: [
+            { id: 'Q1', answer: 'yes' },
+            { id: 'Q2', answer: 'Node 24' },
+          ],
+        },
+      }));
+
+      const res = await historyAction(dir, 'explain', { run_id: runId });
+      expect(res.record).toMatchObject({
+        expired_tickets: [firstTicket.ticket_id],
+        regate_attempts: 1,
+        input_hold: {
+          occurred: true,
+          question_count: 2,
+          question_ids: ['Q1', 'Q2'],
+        },
+      });
+      expect(res.record.input_hold).not.toHaveProperty('answers');
+      expect(res.text).toContain('Dispatch: 2 tickets; 1 receipted; 1 expired; 0 pending.');
+      expect(res.text).toContain('Retries: 1');
+      expect(res.text).toContain('Expired tickets: 1');
+      expect(res.text).toContain('Remediation route: test (cycle 1)');
+      expect(res.text).toContain('Recovery: regate; regate attempts: 1');
+      expect(res.text).toContain('Input-hold: answered 2 questions');
+    });
   });
 });

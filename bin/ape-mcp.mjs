@@ -184,12 +184,12 @@ const TOOLS = Object.freeze([
         },
         run_id: { type: 'string' },
         requirement: { type: 'string' },
-        since: { type: 'string', description: 'metrics only: ISO timestamp start of date range filter.' },
-        until: { type: 'string', description: 'metrics only: ISO timestamp end of date range filter.' },
-        lane: { type: 'string', description: 'metrics only: filter by lane.' },
-        mode: { type: 'string', description: 'metrics only: filter by mode.' },
-        host: { type: 'string', description: 'metrics only: filter by host.' },
-        status: { type: 'string', description: 'metrics only: filter by run status.' },
+        since: { type: 'string', format: 'date-time', description: 'metrics only: inclusive ISO timestamp start of date range filter.' },
+        until: { type: 'string', format: 'date-time', description: 'metrics only: inclusive ISO timestamp end of date range filter; must not precede since.' },
+        lane: { type: 'string', enum: [...LANES], description: 'metrics only: filter by lane.' },
+        mode: { type: 'string', enum: [...START_MODES, 'patch'], description: 'metrics only: filter by current or legacy run mode.' },
+        host: { type: 'string', enum: ['claude', 'codex', 'gemini'], description: 'metrics only: filter by host.' },
+        status: { type: 'string', enum: ['completed', 'blocked', 'aborted'], description: 'metrics only: filter by terminal run status.' },
         delete_legacy: { type: 'boolean' },
         keep_recent_runs: {
           type: 'integer',
@@ -314,7 +314,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.20.0' };
+    return { name: 'ape', version: '2.20.1' };
   }
 }
 

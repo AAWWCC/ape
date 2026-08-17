@@ -13,6 +13,25 @@ machine contract behind them.
 Inputs are bounded at 64 KiB UTF-8. Responses use bounded summaries; full tickets, receipts, and
 run records remain under `.ape/runtime/`.
 
+## History observability and metrics
+
+`ape_history explain` returns the effective immutable record plus a deterministic lifecycle
+summary. Dispatch totals, retry counts, remediation routing, and recovery are derived from durable
+tickets, receipts, supersession, and the minimal terminal provenance archived by the runtime.
+Preflight input holds retain question IDs/counts only; operator answer text is not copied into the
+summary provenance.
+
+`ape_history metrics` aggregates effective terminal records with optional inclusive `since` and
+`until` ISO timestamps and exact `lane`, `mode`, `host`, and `status` filters. Invalid timestamps,
+unknown enum values, and reversed ranges are refused. Each call processes the newest 256 runs and
+returns `coverage.available_runs`, `processed_runs`, `limit`, and `truncated` so a bounded sample is
+never presented as complete project history. Outcomes, rates, p50/p90/p95/p99 duration values, and
+legacy-unknown counts are computed only over the processed records matching the filters.
+
+The statusline already uses recent immutable receipt timings to calibrate its stage-duration bar.
+It reads at most the newest 20 history files and caches validated samples under `.ape/runtime/`;
+metrics calls do not mutate that cache or send telemetry anywhere.
+
 ## `ape_run`
 
 ### Start and advance
