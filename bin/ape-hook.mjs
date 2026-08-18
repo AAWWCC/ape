@@ -121,8 +121,28 @@ try {
       throw parseCause;
     }
   }
-  if (process.env.APE_HOST === 'gemini') {
-    input = await normalizeGeminiHookInput(input);
+  const cliEvent = process.argv.slice(2).find((arg) => !arg.startsWith('-'));
+  const isGeminiHost =
+    process.env.APE_HOST === 'gemini' ||
+    Boolean(cliEvent) ||
+    input?.toolCall !== undefined ||
+    input?.conversationId !== undefined ||
+    input?.stepIdx !== undefined ||
+    input?.artifactDirectoryPath !== undefined ||
+    input?.transcriptPath !== undefined ||
+    input?.workspacePaths !== undefined ||
+    input?.invocationNum !== undefined;
+  if (isGeminiHost) {
+    input = await normalizeGeminiHookInput(input, {
+      ...process.env,
+      APE_HOST: 'gemini',
+      APE_HOOK_EVENT:
+        cliEvent ||
+        process.env.APE_HOOK_EVENT ||
+        input.hook_event_name ||
+        input.hookEventName ||
+        input.event,
+    });
   }
   if (typeof input.project_dir === 'string' && input.project_dir) {
     salvagedProjectDir = input.project_dir;

@@ -359,5 +359,21 @@ describe('Gemini / Antigravity runtime integration', () => {
       });
       expect(decision.decision).toBe('deny');
     });
+
+    it('normalizes hook event from CLI argument and auto-detects Antigravity payload', async () => {
+      const payload = {
+        toolCall: {
+          name: 'run_command',
+          args: { CommandLine: 'npm test' },
+        },
+        conversationId: 'conv-123',
+        workspacePaths: ['/tmp/proj'],
+      };
+      const normalized = await normalizeGeminiHookInput(payload, { APE_HOOK_EVENT: 'PreToolUse' });
+      expect(normalized.hook_event_name).toBe('PreToolUse');
+      expect(normalized.tool_name).toBe('run_command');
+      expect(normalized.session_id).toBe('conv-123');
+      expect(normalized.cwd).toBe('/tmp/proj');
+    });
   });
 });

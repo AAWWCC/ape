@@ -82,9 +82,9 @@ describe('2.17 public plugin packages', () => {
     const codexManifest = await json('plugins/ape/.codex-plugin/plugin.json');
     const claudeManifest = await json('plugins/ape-claude/.claude-plugin/plugin.json');
     const geminiManifest = await json('plugins/ape-gemini/plugin.json');
-    expect(codexManifest).toMatchObject({ version: '2.21.1', mcpServers: './.mcp.json' });
-    expect(claudeManifest).toMatchObject({ version: '2.21.1', hooks: './hooks/claude-hooks.json' });
-    expect(geminiManifest).toMatchObject({ version: '2.21.1' });
+    expect(codexManifest).toMatchObject({ version: '2.21.2', mcpServers: './.mcp.json' });
+    expect(claudeManifest).toMatchObject({ version: '2.21.2', hooks: './hooks/claude-hooks.json' });
+    expect(geminiManifest).toMatchObject({ version: '2.21.2' });
     for (const manifest of [codexManifest, claudeManifest, geminiManifest]) {
       expect(manifest.author).toEqual({ name: 'AAWWCC', url: 'https://github.com/AAWWCC' });
       expect(manifest.author).not.toHaveProperty('email');

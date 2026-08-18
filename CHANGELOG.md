@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.21.2 — 2026-08-18
+
+Direct hook script execution on Antigravity: replaced inline `node -e` command wrappers in `hooks.json`
+with direct CLI bundle invocations (`node ./dist/ape-hooks.bundle.mjs <event>`). Eliminates shell eval
+quoting syntax errors where Windows Antigravity host processes passed literal double quotes to Node's
+eval parser.
+
 ## 2.21.1 — 2026-08-18
 
 Fixed Antigravity / Gemini subagent dispatch failure on Windows caused by CRLF (`\r\n`) line endings
