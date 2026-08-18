@@ -185,6 +185,12 @@ install a provider or upgrade an unavailable/unverified host capability. Wildcar
 write/execute claims cannot upgrade an unknown tool, and admitted unknown reads retain conservative
 post-call drift reconciliation.
 
+Claude agent manifests include `mcp__*` in their role-specific tool allowlists so parent-session MCP
+providers remain visible to bound subagents. A manifest-level `disallowedTools` backstop removes both
+supported namespace forms of `ape_run`, `ape_config`, and `ape_history`; the lifecycle hook separately
+enforces that orchestrator-only boundary. `ape_status` remains available as a compact read, while every
+external MCP operation still needs the exact ticket claim described above.
+
 Raw Playwright, Blender, or Unity code execution uses `server-rce` and requires a writable,
 high-risk ticket plus an exact non-wildcard provider claim. File inputs are separate resources.
 PostToolUse records runtime-observed effects in `external-tool-effects.ndjson`; receipt admission

@@ -41,6 +41,12 @@ function words(text) {
   return text.trim().split(/\s+/u).filter(Boolean).length;
 }
 
+function agentPromptBody(text) {
+  const match = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/u);
+  if (!match) throw new Error('invalid agent frontmatter');
+  return match[1];
+}
+
 function splitSkill(text) {
   const match = text.match(/^---\n([\s\S]*?)\n---\n\n([\s\S]*)$/u);
   if (!match) throw new Error('invalid skill frontmatter');
@@ -73,7 +79,7 @@ describe('public prompt contracts', () => {
       expect(common, role).toBeGreaterThan(-1);
       expect(specific, role).toBeGreaterThan(common);
       expect(wrapper).toMatch(/model: inherit/u);
-      expect(words(wrapper), role).toBeLessThanOrEqual(40);
+      expect(words(agentPromptBody(wrapper)), role).toBeLessThanOrEqual(40);
     }
   });
 
