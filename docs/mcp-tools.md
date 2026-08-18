@@ -7,7 +7,7 @@ machine contract behind them.
 | --- | --- |
 | `ape_run` | `probe`, `probe-status`, `probe-ack`, `start`, `next`, `record`, `status`, `resume`, `regate`, `ship`, `expire-dispatch`, `abort`, `override` |
 | `ape_status` | Dedicated read-only current-run, pending-ticket, lane, and gate snapshot. |
-| `ape_history` | `query`, `explain`, `metrics`, `import`, `maintenance-status`, `compact-artifacts`, `roadmap-status`, `roadmap-register`, `roadmap-supersede` |
+| `ape_history` | `query`, `explain`, `metrics`, `import`, `maintenance-status`, `compact-artifacts`, `roadmap-status`, `roadmap-register`, `roadmap-supersede`, `roadmap-attest` |
 | `ape_config` | `get`, `set`, `doctor`, `wire`, `unwire`, `init` |
 
 Inputs are bounded at 64 KiB UTF-8. Responses use bounded summaries; full tickets, receipts, and
@@ -182,8 +182,14 @@ and stale, pending, ready, in-progress, or unknown dependencies fail closed with
 - `roadmap-supersede` marks known live entries stale with a reason and optional `replaced_by`; it
   does not delete them. Targets and replacements must be unique, known, live, and disjoint, and the
   remaining live dependency graph must still be valid.
+- `roadmap-attest` closes live requirements against an archived completed run without modifying the
+  run's immutable record. Pass `requirement_ids`, `run_id`, and a non-empty audit `reason`. The
+  run must exist and be completed; each requirement must be known and live (not superseded).
+  Attestations are idempotent and stored in a separate overlay (`roadmap-attestations.json`) that
+  the derivation reads alongside `completes`. The requirement-index is updated so `query` can find
+  the relationship.
 
-Both mutations use a bounded single-operation journal. The roadmap store lands before the override
+Register and supersede mutations use a bounded single-operation journal. The roadmap store lands before the override
 audit line, and the same mutation ID appears in the entry audit, journal, and override record.
 Retries recover unapplied, applied-but-unaudited, and committed operations exactly once; a store
 matching neither recorded hash is divergent and is never overwritten.
