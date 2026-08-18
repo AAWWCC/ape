@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.20.2 — 2026-08-17
+
+Claude subagents now inherit the parent session's MCP tools. Their manifests continue to restrict
+built-in capabilities by role and deny both supported namespace forms of the orchestrator-owned
+`ape_run`, `ape_config`, and `ape_history` tools; APE's ticket `tool_claims` still authorize each
+external MCP call at the lifecycle hook.
+
 ## 2.20.1 — 2026-08-17
 
 Made archived lifecycle explanations derive dispatch, retry, expiry, remediation, input-hold, and
