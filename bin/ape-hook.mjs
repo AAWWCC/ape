@@ -209,7 +209,7 @@ try {
   const prompt = toolInput.prompt ?? toolInput.message ?? subagentPrompt ?? '';
   const isApeLaunch =
     requestedAgentType.startsWith('ape:') ||
-    /(?:^|\n)APE_DISPATCH_NONCE=/.test(prompt) ||
+    /(?:^|\r?\n)APE_DISPATCH_NONCE=/.test(prompt) ||
     (event.host === 'codex' && isCodexDispatchTaskName(requestedTaskName));
   if (
     event.host === 'codex' &&

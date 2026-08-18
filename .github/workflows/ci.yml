@@ -46,8 +46,8 @@ jobs:
       - run: npm run package:reproducible
       - run: npm run public:check
       - run: npm run smoke:plugins
-      - name: Focused package and MCP tests
-        run: npm run test:agent -- __tests__/runtime-v2-plugin-packages-public.test.js __tests__/runtime-v2-public-surface.test.js __tests__/runtime-v2-plugin-validation.test.js __tests__/runtime-v2-mcp.test.js
+      - name: Focused package, MCP, and host integration tests
+        run: npm run test:agent -- __tests__/runtime-v2-plugin-packages-public.test.js __tests__/runtime-v2-public-surface.test.js __tests__/runtime-v2-plugin-validation.test.js __tests__/runtime-v2-mcp.test.js __tests__/runtime-v2-gemini.test.js
 
   full-suite:
     name: Full suite (Ubuntu, Node 22)
