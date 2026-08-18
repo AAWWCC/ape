@@ -47,7 +47,7 @@ describe('Gemini / Antigravity runtime integration', () => {
         host: 'gemini',
         env: {},
       });
-      expect(root).toBe('/tmp/explicit');
+      expect(root).toBe(path.resolve('/tmp/explicit'));
     });
 
     it('pins GEMINI_PROJECT_DIR in resolveGovernedRoot', () => {
@@ -55,7 +55,7 @@ describe('Gemini / Antigravity runtime integration', () => {
         host: 'gemini',
         env: { GEMINI_PROJECT_DIR: '/tmp/gemini-root' },
       });
-      expect(root).toBe('/tmp/gemini-root');
+      expect(root).toBe(path.resolve('/tmp/gemini-root'));
     });
   });
 
@@ -276,13 +276,14 @@ describe('Gemini / Antigravity runtime integration', () => {
     });
 
     it('round-trips an encoded absolute project root and rejects duplicate authority', () => {
-      const encoded = encodeGeminiProjectDir('/tmp/ape-gemini-project');
+      const targetDir = path.resolve('/tmp/ape-gemini-project');
+      const encoded = encodeGeminiProjectDir(targetDir);
       expect(extractGeminiPromptContext(
         `APE_PROJECT_DIR_B64=${encoded}\nAPE_DISPATCH_NONCE=${'n'.repeat(32)}`,
-      )).toEqual({ nonce: 'n'.repeat(32), project_dir: '/tmp/ape-gemini-project' });
+      )).toEqual({ nonce: 'n'.repeat(32), project_dir: targetDir });
       expect(extractGeminiPromptContext(
         `APE_PROJECT_DIR_B64=${encoded}\r\nAPE_DISPATCH_NONCE=${'n'.repeat(32)}\r\n`,
-      )).toEqual({ nonce: 'n'.repeat(32), project_dir: '/tmp/ape-gemini-project' });
+      )).toEqual({ nonce: 'n'.repeat(32), project_dir: targetDir });
       expect(extractGeminiPromptContext(
         `APE_PROJECT_DIR_B64=${encoded}\nAPE_PROJECT_DIR_B64=${encoded}\nAPE_DISPATCH_NONCE=${'n'.repeat(32)}`,
       ).project_dir).toBeNull();
