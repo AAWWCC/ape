@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.21.1 — 2026-08-18
+
+Fixed Antigravity / Gemini subagent dispatch failure on Windows caused by CRLF (`\r\n`) line endings
+in prompts and JSONL transcripts. Subagent capability extraction and launch checks now handle `\r?\n`
+line boundaries seamlessly, preventing false dispatch capability denial at `PreToolUse`.
+
 ## 2.21.0 — 2026-08-18
 
 Added `roadmap-attest` action to `ape_history`: closes live roadmap requirements against an
