@@ -54,6 +54,10 @@ try {
   }
   const body = Buffer.concat(chunks).toString('utf8');
   const input = bodyBytes <= 256 * 1024 && body.trim() ? JSON.parse(body) : {};
+  const cliEvent = process.argv.slice(2).find((arg) => !arg.startsWith('-'));
+  if (cliEvent && !input.hook_event_name) {
+    input.hook_event_name = cliEvent;
+  }
   if (!input.hook_event_name && process.env.APE_HOOK_EVENT) {
     input.hook_event_name = process.env.APE_HOOK_EVENT;
   }
@@ -61,10 +65,25 @@ try {
     input.tool_name ??= input.toolCall.name;
     input.tool_input ??= input.toolCall.args;
   }
-  if (process.env.APE_HOST === 'gemini') {
-    const normalized = await normalizeGeminiHookInput(input);
+  const isGeminiHost =
+    process.env.APE_HOST === 'gemini' ||
+    Boolean(cliEvent) ||
+    input.toolCall !== undefined ||
+    input.conversationId !== undefined ||
+    input.stepIdx !== undefined ||
+    input.artifactDirectoryPath !== undefined ||
+    input.transcriptPath !== undefined ||
+    input.workspacePaths !== undefined ||
+    input.invocationNum !== undefined;
+  if (isGeminiHost) {
+    const activeHookEvent = cliEvent || process.env.APE_HOOK_EVENT || input.hook_event_name;
+    const normalized = await normalizeGeminiHookInput(input, {
+      ...process.env,
+      APE_HOST: 'gemini',
+      APE_HOOK_EVENT: activeHookEvent,
+    });
     Object.assign(input, normalized);
-    if (process.env.APE_HOOK_EVENT === 'SessionStart' && input.invocationNum !== 0) {
+    if (activeHookEvent === 'SessionStart' && input.invocationNum !== 0) {
       input.hook_event_name = 'unknown';
     }
     if (
@@ -77,8 +96,8 @@ try {
       || (typeof input.agentId === 'string' && input.agentId.length > 0)
     ) {
       input.is_subagent = true;
-      if (process.env.APE_HOOK_EVENT === 'Stop') input.hook_event_name = 'SubagentStop';
-      if (process.env.APE_HOOK_EVENT === 'SessionStart') input.hook_event_name = 'unknown';
+      if (activeHookEvent === 'Stop') input.hook_event_name = 'SubagentStop';
+      if (activeHookEvent === 'SessionStart') input.hook_event_name = 'unknown';
     }
   }
 

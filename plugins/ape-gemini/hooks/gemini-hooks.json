@@ -6,8 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='PreToolUse';await import('./dist/ape-hooks.bundle.mjs')\"",
-            "commandWindows": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='PreToolUse';await import('./dist/ape-hooks.bundle.mjs')\"",
+            "command": "node ./dist/ape-hooks.bundle.mjs PreToolUse",
             "timeout": 30,
             "statusMessage": "Checking APE stage ticket"
           }
@@ -18,8 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='PreToolUse';await import('./dist/ape-larp.bundle.mjs')\"",
-            "commandWindows": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='PreToolUse';await import('./dist/ape-larp.bundle.mjs')\"",
+            "command": "node ./dist/ape-larp.bundle.mjs PreToolUse",
             "timeout": 5
           }
         ]
@@ -28,8 +26,7 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='PreInvocation';await import('./dist/ape-hooks.bundle.mjs')\"",
-        "commandWindows": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='PreInvocation';await import('./dist/ape-hooks.bundle.mjs')\"",
+        "command": "node ./dist/ape-hooks.bundle.mjs PreInvocation",
         "timeout": 30,
         "statusMessage": "Binding APE stage ticket"
       }
@@ -40,8 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='PostToolUse';await import('./dist/ape-hooks.bundle.mjs')\"",
-            "commandWindows": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='PostToolUse';await import('./dist/ape-hooks.bundle.mjs')\"",
+            "command": "node ./dist/ape-hooks.bundle.mjs PostToolUse",
             "timeout": 30,
             "statusMessage": "Verifying APE tree ownership"
           }
@@ -52,8 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='PostToolUse';await import('./dist/ape-larp.bundle.mjs')\"",
-            "commandWindows": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='PostToolUse';await import('./dist/ape-larp.bundle.mjs')\"",
+            "command": "node ./dist/ape-larp.bundle.mjs PostToolUse",
             "timeout": 5
           }
         ]
@@ -62,15 +57,13 @@
     "Stop": [
       {
         "type": "command",
-        "command": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='Stop';await import('./dist/ape-hooks.bundle.mjs')\"",
-        "commandWindows": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='Stop';await import('./dist/ape-hooks.bundle.mjs')\"",
+        "command": "node ./dist/ape-hooks.bundle.mjs Stop",
         "timeout": 30,
         "statusMessage": "Verifying APE run state"
       },
       {
         "type": "command",
-        "command": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='Stop';await import('./dist/ape-larp.bundle.mjs')\"",
-        "commandWindows": "node --input-type=module -e \"process.env.APE_HOST='gemini';process.env.APE_HOOK_EVENT='Stop';await import('./dist/ape-larp.bundle.mjs')\"",
+        "command": "node ./dist/ape-larp.bundle.mjs Stop",
         "timeout": 5
       }
     ]
