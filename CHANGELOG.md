@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2.21.0 — 2026-08-18
+
+Added `roadmap-attest` action to `ape_history`: closes live roadmap requirements against an
+archived completed run without modifying the run's immutable record. Attestations are stored in a
+separate overlay that the derivation reads alongside `completes`, with idempotent writes and
+audit-logged requirement-index updates. Use when work was merged outside APE or a run completed
+before the roadmap existed.
+
+Added `ToolSearch` to all APE subagent manifests so deferred MCP tool schemas can be loaded at
+runtime. The `mcp__*` wildcard already granted permission; this enables the discovery step.
+
 ## 2.20.2 — 2026-08-17
 
 Claude subagents now inherit the parent session's MCP tools. Their manifests continue to restrict

@@ -14,6 +14,10 @@ On Google Antigravity / Gemini, pass the exact open project root as `project_dir
 - `supersede`: only after explicit approval, call `roadmap-supersede` with selected IDs and a
   non-empty reason. Targets and optional replacements must be unique, known, live, and disjoint.
   Supersession marks entries stale; it does not rewrite history.
+- `attest`: close live requirements against an archived completed run. Call `roadmap-attest` with
+  `requirement_ids`, `run_id`, and a non-empty audit `reason`. The run must exist and be completed;
+  requirements must be known and live. Use when work was merged outside APE or a run completed
+  before the roadmap existed.
 
 Never pass a `status` field. Registration is atomic. A proposed entry must describe a behavioral or
 operator consequence if omitted; style notes and isolated documentation nits remain advisory rather

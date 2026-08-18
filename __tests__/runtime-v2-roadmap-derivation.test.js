@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { archiveRun } from '../lib/runtime/history.js';
-import { atomicWriteJson } from '../lib/runtime/storage.js';
+import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 
 // Behavioral tests for RM2 derived status. Status is computed at read time from
 // the roadmap store, the requirement index + history, and any active run — never
@@ -299,5 +299,119 @@ describe('APE v2 roadmap derivation — staleness precedence and shape (RM2)', (
     const paths = await tempPaths();
     const roadmap = await derive(paths);
     expect(roadmap).toBeNull();
+  });
+});
+
+describe('APE v2 roadmap attestation (RM8)', () => {
+  async function attest(paths, input) {
+    const { attestRequirements } = await importRoadmap();
+    return attestRequirements(paths, input);
+  }
+
+  it('satisfies a requirement via attestation against a completed run', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-1')]);
+    await archiveRun(paths, archivedRun('run-att1', { requirements: ['ATT-1'], completes: [] }));
+
+    await attest(paths, { requirement_ids: ['ATT-1'], run_id: 'run-att1', reason: 'merged externally' });
+
+    const roadmap = await derive(paths);
+    expect(statusOf(roadmap, 'ATT-1')).toBe('satisfied');
+  });
+
+  it('satisfies a requirement attested against a run that did not list it in requirements', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-2')]);
+    await archiveRun(paths, archivedRun('run-att2', { requirements: ['other-req'], completes: ['other-req'] }));
+
+    await attest(paths, { requirement_ids: ['ATT-2'], run_id: 'run-att2', reason: 'retroactive' });
+
+    const roadmap = await derive(paths);
+    expect(statusOf(roadmap, 'ATT-2')).toBe('satisfied');
+  });
+
+  it('rejects attestation against a non-completed run', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-3')]);
+    await archiveRun(paths, archivedRun('run-att3', { requirements: ['ATT-3'], status: 'blocked' }));
+
+    await expect(
+      attest(paths, { requirement_ids: ['ATT-3'], run_id: 'run-att3', reason: 'try' }),
+    ).rejects.toThrow(/requires a completed run/);
+  });
+
+  it('rejects attestation against an unknown run', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-4')]);
+
+    await expect(
+      attest(paths, { requirement_ids: ['ATT-4'], run_id: 'run-ghost', reason: 'try' }),
+    ).rejects.toThrow(/unknown run/);
+  });
+
+  it('rejects attestation for an unknown requirement', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-5')]);
+    await archiveRun(paths, archivedRun('run-att5', { requirements: ['ATT-5'], completes: ['ATT-5'] }));
+
+    await expect(
+      attest(paths, { requirement_ids: ['ATT-missing'], run_id: 'run-att5', reason: 'try' }),
+    ).rejects.toThrow(/unknown requirement/);
+  });
+
+  it('rejects attestation for a superseded requirement', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [
+      storedEntry('ATT-6', {
+        superseded: { at: '2026-07-01T00:00:00.000Z', reason: 'obsolete', replaced_by: [] },
+      }),
+    ]);
+    await archiveRun(paths, archivedRun('run-att6', { requirements: ['ATT-6'], completes: [] }));
+
+    await expect(
+      attest(paths, { requirement_ids: ['ATT-6'], run_id: 'run-att6', reason: 'try' }),
+    ).rejects.toThrow(/stale requirement/);
+  });
+
+  it('is idempotent — attesting the same pair twice does not duplicate', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-7')]);
+    await archiveRun(paths, archivedRun('run-att7', { requirements: ['ATT-7'], completes: [] }));
+
+    await attest(paths, { requirement_ids: ['ATT-7'], run_id: 'run-att7', reason: 'first' });
+    await attest(paths, { requirement_ids: ['ATT-7'], run_id: 'run-att7', reason: 'second' });
+
+    const store = await readJson(paths.roadmapAttestations, { schema_version: '2.0.0', attestations: [] });
+    const matches = store.attestations.filter((a) => a.requirement_id === 'ATT-7' && a.run_id === 'run-att7');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('requires a non-empty reason', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-8')]);
+    await archiveRun(paths, archivedRun('run-att8', { requirements: ['ATT-8'], completes: [] }));
+
+    await expect(
+      attest(paths, { requirement_ids: ['ATT-8'], run_id: 'run-att8', reason: '' }),
+    ).rejects.toThrow(/non-empty reason/);
+  });
+
+  it('unlocks a dependent when the attested requirement becomes satisfied', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [
+      storedEntry('ATT-dep'),
+      storedEntry('ATT-child', { depends_on: ['ATT-dep'] }),
+    ]);
+    await archiveRun(paths, archivedRun('run-attdep', { requirements: ['ATT-dep'], completes: [] }));
+
+    const before = await derive(paths);
+    expect(statusOf(before, 'ATT-dep')).toBe('ready');
+    expect(statusOf(before, 'ATT-child')).toBe('pending');
+
+    await attest(paths, { requirement_ids: ['ATT-dep'], run_id: 'run-attdep', reason: 'merged outside APE' });
+
+    const after = await derive(paths);
+    expect(statusOf(after, 'ATT-dep')).toBe('satisfied');
+    expect(statusOf(after, 'ATT-child')).toBe('ready');
   });
 });
