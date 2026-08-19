@@ -25,7 +25,6 @@ const SKILL_SOURCE_ROOT = join(REPO_ROOT, 'plugin-src', 'skills');
 const HOSTS = Object.freeze([
   { directory: 'ape', host: 'codex' },
   { directory: 'ape-claude', host: 'claude' },
-  { directory: 'ape-gemini', host: 'gemini' },
 ]);
 const DIST_FILES = Object.freeze([
   'ape-hooks.bundle.mjs',
@@ -296,21 +295,6 @@ function claudeManifest(version) {
   };
 }
 
-function geminiManifest(version) {
-  return {
-    name: 'ape',
-    version,
-    description: 'APE — durable, evidence-gated engineering runs for AI coding agents.',
-    author: {
-      name: 'AAWWCC',
-      url: 'https://github.com/AAWWCC',
-    },
-    repository: 'https://github.com/AAWWCC/ape',
-    homepage: 'https://github.com/AAWWCC/ape#readme',
-    license: 'MIT',
-  };
-}
-
 function mcpConfig(host) {
   const bundle = host === 'claude'
     ? '${CLAUDE_PLUGIN_ROOT}/dist/ape-mcp.bundle.mjs'
@@ -319,10 +303,9 @@ function mcpConfig(host) {
     command: 'node',
     args: [bundle, '--host', host],
   };
-  // Codex and Antigravity launch relative bundles from the installed plugin
-  // directory. Pinning cwd makes that contract explicit for both the desktop
-  // app and `agy`; Claude resolves its bundle through CLAUDE_PLUGIN_ROOT.
-  if (host === 'codex' || host === 'gemini') server.cwd = '.';
+  // Codex launches relative bundles from the installed plugin directory.
+  // Pinning cwd makes that contract explicit; Claude resolves its bundle through CLAUDE_PLUGIN_ROOT.
+  if (host === 'codex') server.cwd = '.';
   return { mcpServers: { ape: server } };
 }
 
@@ -332,14 +315,6 @@ async function buildHostPackage(root, host, version) {
     await writeJson(join(root, '.codex-plugin', 'plugin.json'), codexManifest(version));
   } else if (host === 'claude') {
     await writeJson(join(root, '.claude-plugin', 'plugin.json'), claudeManifest(version));
-  } else if (host === 'gemini') {
-    await writeJson(join(root, 'plugin.json'), geminiManifest(version));
-    await writeJson(join(root, 'mcp_config.json'), mcpConfig(host));
-    await copyTextFile(join(REPO_ROOT, 'hooks', 'gemini-hooks.json'), join(root, 'hooks.json'));
-    await copyTextFile(
-      join(REPO_ROOT, 'hooks', 'gemini-hooks.json'),
-      join(root, 'hooks', 'gemini-hooks.json'),
-    );
   }
   await writeJson(join(root, '.mcp.json'), mcpConfig(host));
   await buildSkills(join(root, 'skills'), host);

@@ -25,7 +25,6 @@ import {
 } from '../lib/runtime/larp.js';
 import { loadRuntimeConfig } from '../lib/runtime/config.js';
 import { resolveGovernedRoot, runtimePaths } from '../lib/runtime/paths.js';
-import { normalizeGeminiHookInput } from '../lib/runtime/gemini-host.js';
 
 // Works from both homes of this module: bin/ (dev source) and dist/ (bundle).
 const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -37,7 +36,7 @@ const PACKAGE_SOUNDS = loadPackageSoundManifest(
 // advisory result, while Claude's supplemental async hooks must stay silent.
 const CODEX_HOOK = typeof process.env.PLUGIN_ROOT === 'string'
   && process.env.PLUGIN_ROOT.length > 0;
-const JSON_HOOK = CODEX_HOOK || process.env.APE_HOST === 'gemini';
+const JSON_HOOK = CODEX_HOOK;
 
 try {
   // Accumulate raw stdin Buffers and decode EXACTLY ONCE (Buffer.concat then a
@@ -64,41 +63,6 @@ try {
   if (input.toolCall && typeof input.toolCall === 'object') {
     input.tool_name ??= input.toolCall.name;
     input.tool_input ??= input.toolCall.args;
-  }
-  const isGeminiHost =
-    process.env.APE_HOST === 'gemini' ||
-    Boolean(cliEvent) ||
-    input.toolCall !== undefined ||
-    input.conversationId !== undefined ||
-    input.stepIdx !== undefined ||
-    input.artifactDirectoryPath !== undefined ||
-    input.transcriptPath !== undefined ||
-    input.workspacePaths !== undefined ||
-    input.invocationNum !== undefined;
-  if (isGeminiHost) {
-    const activeHookEvent = cliEvent || process.env.APE_HOOK_EVENT || input.hook_event_name;
-    const normalized = await normalizeGeminiHookInput(input, {
-      ...process.env,
-      APE_HOST: 'gemini',
-      APE_HOOK_EVENT: activeHookEvent,
-    });
-    Object.assign(input, normalized);
-    if (activeHookEvent === 'SessionStart' && input.invocationNum !== 0) {
-      input.hook_event_name = 'unknown';
-    }
-    if (
-      normalized.gemini_dispatch_nonce
-      || input.is_subagent
-      || input.isSubagent
-      || input.subagent_id
-      || input.subagentId
-      || (typeof input.agent_id === 'string' && input.agent_id.length > 0)
-      || (typeof input.agentId === 'string' && input.agentId.length > 0)
-    ) {
-      input.is_subagent = true;
-      if (activeHookEvent === 'Stop') input.hook_event_name = 'SubagentStop';
-      if (activeHookEvent === 'SessionStart') input.hook_event_name = 'unknown';
-    }
   }
 
   const event = deriveLarpEvent(input);

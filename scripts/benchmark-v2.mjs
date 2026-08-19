@@ -47,7 +47,7 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { DEFAULT_DEADLINES_MS } from '../lib/runtime/constants.js';
 
 const DEFAULT_FILE = 'benchmarks/reference-runs.json';
-const HOSTS = ['claude', 'codex', 'gemini'];
+const HOSTS = ['claude', 'codex'];
 const CERT_LANES = ['mechanical', 'fast', 'full'];
 // Runs certifiable for latency: the building mode, plus the legacy `patch`
 // label that archived history keeps verbatim from before the mode collapse.

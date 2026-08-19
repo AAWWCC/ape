@@ -13,7 +13,7 @@ import { DEFAULT_DEADLINES_MS } from '../lib/runtime/constants.js';
 const SCRIPT = join(process.cwd(), 'scripts', 'benchmark-v2.mjs');
 
 function records(slowPerGroup = 2) {
-  return ['claude', 'codex', 'gemini'].flatMap((host) =>
+  return ['claude', 'codex'].flatMap((host) =>
     ['mechanical', 'fast', 'full'].flatMap((lane) =>
       Array.from({ length: 20 }, (_, index) => {
         const limit = DEFAULT_DEADLINES_MS[lane];
@@ -43,9 +43,9 @@ describe('APE v2 latency certification', () => {
 
   it('thresholds are the runtime lane deadlines, per host/lane group', () => {
     const report = verifyBenchmarks(records(2));
-    expect(report.groups).toHaveLength(9);
+    expect(report.groups).toHaveLength(6);
     for (const group of report.groups) {
-      expect(['claude', 'codex', 'gemini']).toContain(group.host);
+      expect(['claude', 'codex']).toContain(group.host);
       expect(['mechanical', 'fast', 'full']).toContain(group.lane);
     }
   });
@@ -72,7 +72,7 @@ describe('benchmark record validation', () => {
 
   it('rejects unknown hosts, unknown lanes, and non-positive raw_ms', () => {
     expect(() => validateBenchmarkRecord({ host: 'unsupported_host', lane: 'mechanical', raw_ms: 1 })).toThrow(/host/);
-    expect(validateBenchmarkRecord({ host: 'gemini', lane: 'mechanical', raw_ms: 1000 }).host).toBe('gemini');
+    expect(validateBenchmarkRecord({ host: 'codex', lane: 'mechanical', raw_ms: 1000 }).host).toBe('codex');
     expect(() => validateBenchmarkRecord({ host: 'claude', lane: 'spike', raw_ms: 1 })).toThrow(/lane/);
     expect(() => validateBenchmarkRecord({ host: 'claude', mode: 'phase', raw_ms: 1 })).toThrow(/lane/);
     expect(() => validateBenchmarkRecord({ host: 'claude', lane: 'mechanical', raw_ms: 0 })).toThrow(/raw_ms/);

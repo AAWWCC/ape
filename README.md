@@ -4,21 +4,20 @@ APE turns AI coding from session-driven improvisation into durable, evidence-gat
 runs. It keeps Plan → Build → Ship state outside the chat, resumes across sessions, and accepts
 progress only when the working tree, tests, reviews, and configured gates support it.
 
-Under the hood, APE is a deterministic runtime for Claude Code, Codex, and Google Antigravity /
-Gemini that coordinates each host's native agents. The scheduler—not the model—owns stage order,
+Under the hood, APE is a deterministic runtime for Claude Code and Codex that coordinates
+each host's native agents. The scheduler—not the model—owns stage order,
 retries, lane selection, receipts, recovery, and merge decisions. Agents and tooling can still be
 wrong; APE reduces the chance that an unsupported claim advances by requiring the evidence it knows
 how to verify.
 
 ## Current status
 
-- Claude Code, Codex CLI, and Google Antigravity (`agy` CLI and IDE) are supported end to end.
+- Claude Code and Codex CLI are supported end to end.
 - The public surface is seven skills backed by four MCP tools.
 - Runs are explicit. Installing APE does not start agents or change a repository.
 - GitHub is the only shipping provider.
 - Node.js 22 or newer is required.
-- Claude and Codex install from this repository's marketplace files; the Antigravity package ships
-  under `plugins/ape-gemini/` for local installation. All three launch the bundled MCP server locally
+- Claude and Codex install from this repository's marketplace files. Both launch the bundled MCP server locally
   over stdio. A hosted broker and universal cloud-directory submission are outside the 2.18 release
   scope.
 - Codex IDE integrations and ChatGPT web, mobile, and cloud runtimes are not supported in 2.18.
@@ -44,17 +43,6 @@ codex plugin marketplace add AAWWCC/ape
 codex plugin add ape@ape
 ```
 
-### Google Antigravity / Gemini
-
-The Antigravity desktop app and `agy` CLI use the same plugin package and shared Gemini
-configuration, although they are separate binaries and may report different versions. From a
-source checkout, build and install the local package for either host surface:
-
-```bash
-npm ci
-npm run reinstall:gemini
-```
-
 Each host uses an allowlisted package from `plugins/`. The package starts
 `dist/ape-mcp.bundle.mjs` with local Node and communicates over stdio; it does not send APE state
 to an APE-operated service.
@@ -65,11 +53,6 @@ to an APE-operated service.
 | --- | --- | --- | --- | --- |
 | Codex CLI | `plugins/ape` | Local stdio | Native Codex subagents and lifecycle hooks | Codex-specific GitHub connector and Codex Security reads are covered; other providers depend on the installed server. |
 | Claude Code | `plugins/ape-claude` | Local stdio | Claude Agent tool and supplemental hooks | Core policy is shared, but Codex-only connectors and live provider parity are not claimed. |
-| Google Antigravity / Gemini | `plugins/ape-gemini` | Local stdio | Native `invoke_subagent` dispatch and lifecycle hooks | Core policy is shared, but Codex-only connectors and live provider parity are not claimed. |
-
-APE uses Antigravity's supported `PreInvocation`, `PreToolUse`, `PostToolUse`, and `Stop` hook
-contract. Every Gemini APE tool call carries the exact open project as `project_dir`; this is
-required because the app and CLI start the plugin MCP server from the installed package directory.
 
 Node.js 22 and 24 are exercised on Windows, Linux, and macOS. Provider availability, host plugin
 discovery, and external editor connections remain host/version/environment dependent.
@@ -81,12 +64,10 @@ npm ci
 npm run bundle
 npm run package:plugins
 npm run reinstall:codex
-# Or: npm run reinstall:gemini
 ```
 
 The Codex wrapper validates a small allowlisted package, promotes it under a new immutable cache
-version, and leaves both the source manifest and versions used by open tasks unchanged. The Gemini
-helper refreshes the shared local package used by the Antigravity app and `agy`. Start a new host
+version, and leaves both the source manifest and versions used by open tasks unchanged. Start a new host
 task after reinstalling.
 
 ## Use
@@ -174,9 +155,8 @@ Configuration is a sparse overlay at `.ape/runtime/config.json`. Start with:
 ```
 
 `init` detects common test runners and proposes commands; it does not apply them without approval.
-Use `wire` to opt into the full APE statusline on Claude or Codex's closest native footer;
-Antigravity reports its native status surface without installing a custom renderer. LARP MODE
-notifications are available on all three hosts and are off by default. Public packages contain no
+Use `wire` to opt into the full APE statusline on Claude or Codex's closest native footer. LARP MODE
+notifications are available on both hosts and are off by default. Public packages contain no
 sound files; operators may configure their own files, and a private package overlay may provide the
 closed package-local sound manifest described in the configuration guide.
 

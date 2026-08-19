@@ -32,23 +32,16 @@ import { resolveClaimedPluginRead } from '../lib/runtime/external-tools.js';
 import {
   bindClaudeSubagent,
   bindCodexSubagent,
-  bindGeminiSubagent,
-  bindGeminiInvocation,
   isCodexDispatchTaskName,
   launchClaudeIntent,
   launchCodexIntent,
-  launchGeminiIntent,
   resolveCodexBindingOutcome,
   resolveClaudeBindingOutcome,
-  resolveGeminiBindingOutcome,
   resolveSealedCodexBinding,
   resolveSealedClaudeBinding,
-  resolveSealedGeminiBinding,
   observeClaudeSubagentStop,
   observeCodexSubagentStop,
-  observeGeminiSubagentStop,
 } from '../lib/runtime/claude-dispatch.js';
-import { normalizeGeminiHookInput } from '../lib/runtime/gemini-host.js';
 import {
   bindBindingProbe,
   isBindingProbeTaskName,
@@ -121,29 +114,6 @@ try {
       throw parseCause;
     }
   }
-  const cliEvent = process.argv.slice(2).find((arg) => !arg.startsWith('-'));
-  const isGeminiHost =
-    process.env.APE_HOST === 'gemini' ||
-    Boolean(cliEvent) ||
-    input?.toolCall !== undefined ||
-    input?.conversationId !== undefined ||
-    input?.stepIdx !== undefined ||
-    input?.artifactDirectoryPath !== undefined ||
-    input?.transcriptPath !== undefined ||
-    input?.workspacePaths !== undefined ||
-    input?.invocationNum !== undefined;
-  if (isGeminiHost) {
-    input = await normalizeGeminiHookInput(input, {
-      ...process.env,
-      APE_HOST: 'gemini',
-      APE_HOOK_EVENT:
-        cliEvent ||
-        process.env.APE_HOOK_EVENT ||
-        input.hook_event_name ||
-        input.hookEventName ||
-        input.event,
-    });
-  }
   if (typeof input.project_dir === 'string' && input.project_dir) {
     salvagedProjectDir = input.project_dir;
   }
@@ -195,23 +165,6 @@ try {
   const paths = runtimePaths(event.project_dir);
   const state = await readJson(paths.active, null);
 
-  if (
-    state &&
-    event.host === 'gemini' &&
-    event.event === 'PreInvocation' &&
-    input.gemini_dispatch_nonce
-  ) {
-    const binding = await bindGeminiInvocation(paths, state, input);
-    if (binding.matched) {
-      process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
-        decision: binding.valid ? 'allow' : 'deny',
-        reason: binding.reason,
-        additional_context: binding.additional_context,
-      }))}\n`);
-      process.exit(0);
-    }
-  }
-
   let ticket = null;
   // Third container matches extractPath's own priority order (lib/runtime/
   // hooks.js normalizeLifecycleEvent): a payload shaped {tool_name, input:
@@ -252,9 +205,7 @@ try {
   ) {
     const launch = event.host === 'codex'
       ? await launchCodexIntent(paths, state, input)
-      : event.host === 'gemini'
-        ? await launchGeminiIntent(paths, state, input)
-        : await launchClaudeIntent(paths, state, input);
+      : await launchClaudeIntent(paths, state, input);
     process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
       decision: launch.valid ? 'allow' : 'deny',
       reason: launch.reason,
@@ -297,18 +248,14 @@ try {
   }
   const codexHasLaunchedIntent =
     event.host === 'codex' && event.event === 'SubagentStart';
-  const geminiHasLaunchedIntent =
-    event.host === 'gemini' && event.event === 'SubagentStart';
   if (
     state &&
     event.event === 'SubagentStart' &&
-    (lifecycleAgentType.startsWith('ape:') || codexHasLaunchedIntent || geminiHasLaunchedIntent)
+    (lifecycleAgentType.startsWith('ape:') || codexHasLaunchedIntent)
   ) {
     const binding = event.host === 'codex'
       ? await bindCodexSubagent(paths, state, input)
-      : event.host === 'gemini'
-        ? await bindGeminiSubagent(paths, state, input)
-        : await bindClaudeSubagent(paths, state, input);
+      : await bindClaudeSubagent(paths, state, input);
     process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
       decision: binding.valid ? 'allow' : 'deny',
       reason: binding.reason,
@@ -325,34 +272,24 @@ try {
   // deny, so it is left posture-unchanged and reports no cause.
   let dispatchBindingDenialCause = null;
   let stoppedBinding = null;
-  const geminiConversationInput = event.host === 'gemini' && input.conversationId
-    ? {
-        ...input,
-        session_id: input.conversationId,
-        agent_id: input.conversationId,
-        agent_type: null,
-      }
-    : input;
   if (
     state &&
-    ((event.event === 'SubagentStop' && event.agent_identity) ||
-      (event.host === 'gemini' && event.event === 'Stop' && input.conversationId))
+    event.event === 'SubagentStop' &&
+    event.agent_identity
   ) {
     const observation = event.host === 'codex'
       ? await observeCodexSubagentStop(paths, state, input)
-      : event.host === 'gemini'
-        ? await observeGeminiSubagentStop(paths, state, geminiConversationInput)
-        : await observeClaudeSubagentStop(paths, state, input);
+      : await observeClaudeSubagentStop(paths, state, input);
     stoppedBinding = observation.record;
   }
   if (stoppedBinding) {
     ticket = state.tickets.find((entry) => entry.ticket_id === stoppedBinding.ticket_id) ?? null;
     event.ticket_id = stoppedBinding.ticket_id;
     event.ape_managed = true;
-  } else if (state && (event.host === 'codex' || event.host === 'gemini') && event.ticket_id) {
+  } else if (state && event.host === 'codex' && event.ticket_id) {
     ticket = state.tickets.find((entry) => entry.ticket_id === event.ticket_id) ?? null;
     event.ape_managed = true;
-  } else if (state && (event.agent_identity || (event.host === 'gemini' && input.conversationId))) {
+  } else if (state && event.agent_identity) {
     let binding;
     if (SEALED_STATUSES.has(state.status)) {
       // A sealed run's orphaned subagent must still resolve its binding — the
@@ -362,28 +299,20 @@ try {
       // lifecycle policy's sealed branch denies the orphan's writes.
       binding = event.host === 'codex'
         ? await resolveSealedCodexBinding(paths, state, input)
-        : event.host === 'gemini'
-          ? await resolveSealedGeminiBinding(paths, state, geminiConversationInput)
-          : await resolveSealedClaudeBinding(paths, state, input);
+        : await resolveSealedClaudeBinding(paths, state, input);
     } else {
       const outcome = event.host === 'codex'
         ? await resolveCodexBindingOutcome(paths, state, input)
-        : event.host === 'gemini'
-          ? await resolveGeminiBindingOutcome(paths, state, geminiConversationInput)
-          : await resolveClaudeBindingOutcome(paths, state, input);
+        : await resolveClaudeBindingOutcome(paths, state, input);
       binding = outcome.record;
       dispatchBindingDenialCause = outcome.cause;
     }
     if (binding) {
-      if (event.host === 'gemini') {
-        event.agent_identity = input.conversationId;
-        event.is_subagent = true;
-      }
       ticket = state.tickets.find((entry) => entry.ticket_id === binding.ticket_id) ?? null;
       event.ticket_id = binding.ticket_id;
       event.ape_managed = true;
     } else {
-      event.ape_managed = lifecycleAgentType.startsWith('ape:') || event.host === 'codex' || event.host === 'gemini';
+      event.ape_managed = lifecycleAgentType.startsWith('ape:') || event.host === 'codex';
     }
   } else if (state && event.ticket_id) {
     ticket = state.tickets.find((entry) => entry.ticket_id === event.ticket_id) ?? null;
@@ -648,7 +577,6 @@ try {
     'PostToolUse',
     'PostToolUseFailure',
     'SubagentStop',
-    ...(event.host === 'gemini' ? ['Stop'] : []),
   ]);
   // The drift lockdown engages only while a run is actually writing: a
   // terminal run left behind in active.json must not police the repo. And it

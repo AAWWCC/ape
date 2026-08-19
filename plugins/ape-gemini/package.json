@@ -1,8 +1,0 @@
-{
-  "name": "ape",
-  "version": "2.21.2",
-  "type": "module",
-  "private": true,
-  "license": "MIT",
-  "repository": "https://github.com/AAWWCC/ape"
-}
