@@ -1,3 +1,5 @@
+DO NOT USE GEMINI MODELS; THEY ARE COMPLETE TRASH. THEY WILL HALLUCINATE, LIE, AND BE UNABLE TO RUN PLUGINS CORRECTLY
+
 # APE
 
 APE turns AI coding from session-driven improvisation into durable, evidence-gated engineering
