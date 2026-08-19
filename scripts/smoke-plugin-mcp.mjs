@@ -12,7 +12,6 @@ const VERSION = pkg.version;
 const PACKAGES = Object.freeze([
   ['codex', join(REPO_ROOT, 'plugins', 'ape')],
   ['claude', join(REPO_ROOT, 'plugins', 'ape-claude')],
-  ['gemini', join(REPO_ROOT, 'plugins', 'ape-gemini')],
 ]);
 
 function expandRoot(value, host, pluginRoot) {
@@ -32,9 +31,7 @@ async function smoke(host, pluginRoot) {
   const env = { ...process.env };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
-  delete env.GEMINI_PROJECT_DIR;
   if (host === 'claude') env.CLAUDE_PLUGIN_ROOT = pluginRoot;
-  else if (host === 'gemini') env.GEMINI_PLUGIN_ROOT = pluginRoot;
   else env.PLUGIN_ROOT = pluginRoot;
 
   const responses = await new Promise((resolvePromise, reject) => {

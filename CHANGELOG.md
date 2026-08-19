@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.22.0 — 2026-08-18
+
+Removed Google Antigravity and Gemini host support across all layers: deleted `plugins/ape-gemini/`,
+`hooks/gemini-hooks.json`, `lib/runtime/gemini-host.js`, and all Gemini runtime adapters, dispatches,
+statusline renderers, intent bindings, and packaging scripts. APE now strictly focuses on Claude Code
+and Codex hosts.
+
 ## 2.21.2 — 2026-08-18
 
 Direct hook script execution on Antigravity: replaced inline `node -e` command wrappers in `hooks.json`

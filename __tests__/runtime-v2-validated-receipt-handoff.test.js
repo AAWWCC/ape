@@ -481,8 +481,8 @@ describe('evaluateStopValidation', () => {
     expect(result.decision).toBe('allow');
   });
 
-  it('works across Claude, Codex, and Gemini hosts', () => {
-    for (const host of ['claude', 'codex', 'gemini']) {
+  it('works across Claude and Codex hosts', () => {
+    for (const host of ['claude', 'codex']) {
       const ticket = makeTicket();
       const event = {
         host,
@@ -859,8 +859,8 @@ describe('VALIDATION_INFRASTRUCTURE_FAILURE reducer event', () => {
 // ---------------------------------------------------------------------------
 
 describe('cross-host consistency', () => {
-  it('validates consistently across Claude, Codex, and Gemini receipt drafts', () => {
-    for (const host of ['claude', 'codex', 'gemini']) {
+  it('validates consistently across Claude and Codex receipt drafts', () => {
+    for (const host of ['claude', 'codex']) {
       const ticket = makeTicket();
       const draft = makeValidDraft(ticket);
       const result = receiptValidator.validateReceiptDraft(ticket, draft);
@@ -870,7 +870,7 @@ describe('cross-host consistency', () => {
   });
 
   it('rejects the same malformed draft uniformly across hosts', () => {
-    for (const host of ['claude', 'codex', 'gemini']) {
+    for (const host of ['claude', 'codex']) {
       const ticket = makeTicket();
       const draft = makeValidDraft(ticket, { status: 'maybe', ticket_id: 'wrong' });
       const result = receiptValidator.validateReceiptDraft(ticket, draft);

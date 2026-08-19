@@ -23,7 +23,6 @@ const DEFAULT_OUTPUT = join(REPO_ROOT, 'release');
 const PACKAGE_NAMES = Object.freeze([
   ['ape', 'codex'],
   ['ape-claude', 'claude'],
-  ['ape-gemini', 'gemini'],
 ]);
 
 class ReleaseError extends Error {}

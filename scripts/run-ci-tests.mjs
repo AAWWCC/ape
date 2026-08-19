@@ -12,7 +12,6 @@ const TEST_ROOT = join(ROOT, '__tests__');
 // shards exclude them, so a green smoke result is never paid for twice.
 export const WINDOWS_SMOKE_TEST_FILES = Object.freeze([
   '__tests__/runtime-v2-codex-windows-launchers.test.js',
-  '__tests__/runtime-v2-gemini.test.js',
   '__tests__/runtime-v2-lock-protocol.test.js',
   '__tests__/runtime-v2-mcp.test.js',
   '__tests__/runtime-v2-mcp-tasks-storage.test.js',

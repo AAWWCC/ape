@@ -713,7 +713,7 @@ function trackedSourceFiles(rootDir) {
   const listing = execFileSync('git', ['ls-files', ...SCAN_DIRS], { cwd: rootDir, encoding: 'utf8' });
   return listing
     .split('\n')
-    .filter((entry) => /\.(js|mjs|cjs)$/.test(entry) && !SCAN_FILE_EXEMPTIONS.has(entry));
+    .filter((entry) => /\.(js|mjs|cjs)$/.test(entry) && !SCAN_FILE_EXEMPTIONS.has(entry) && existsSync(path.join(rootDir, entry)));
 }
 
 function authoredSourceFiles(rootDir) {

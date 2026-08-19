@@ -79,7 +79,7 @@ describe('APE v2 Project Metrics Aggregation & Telemetry', () => {
       await archiveRun(paths, makeRunRecord('run-fast-phase', { lane: 'fast', mode: 'phase', host: 'claude', status: 'completed' }));
       await archiveRun(paths, makeRunRecord('run-full-phase', { lane: 'full', mode: 'phase', host: 'codex', status: 'completed' }));
       await archiveRun(paths, makeRunRecord('run-fast-debug', { lane: 'fast', mode: 'debug', host: 'claude', status: 'blocked' }));
-      await archiveRun(paths, makeRunRecord('run-fast-aborted', { lane: 'fast', mode: 'phase', host: 'gemini', status: 'aborted' }));
+      await archiveRun(paths, makeRunRecord('run-fast-aborted', { lane: 'fast', mode: 'phase', host: 'codex', status: 'aborted' }));
 
       const fastPhaseClaude = await calculateProjectMetrics(paths, {
         lane: 'fast',
