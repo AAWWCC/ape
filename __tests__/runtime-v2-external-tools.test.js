@@ -517,7 +517,6 @@ describe('APE v2 GitHub and Codex plugin MCP adapters', () => {
     for (const claims of [
       ['acme_plugin:*:read'],
       ['acme_plugin:tool:get_*:read'],
-      ['acme_plugin:tool:get_status:write'],
       ['other:tool:get_status:read'],
     ]) {
       expect(resolveClaimedPluginRead(unknown, claims), claims[0]).toBe(unknown);
@@ -552,6 +551,159 @@ describe('APE v2 GitHub and Codex plugin MCP adapters', () => {
       claimedTicket.tool_claims,
     );
     expect(driftGuardApplies(event)).toBe(true);
+  });
+});
+
+describe('APE v2 generic plugin write and execute claim resolution', () => {
+  it('resolves write claims for unreviewed providers', () => {
+    const unknown = classifyExternalTool('mcp__acme_plugin__update_config', {});
+    expect(unknown).toMatchObject({ provider: 'acme_plugin', effect: 'unknown', reviewed_provider: false });
+    const resolved = resolveClaimedPluginRead(unknown, ['acme_plugin:tool:update_config:write']);
+    expect(resolved).toMatchObject({
+      provider: 'acme_plugin',
+      effect: 'write',
+      resources: ['tool:update_config'],
+      conservative_drift: true,
+    });
+    expect(resolved).not.toHaveProperty('claimed_plugin_read');
+  });
+
+  it('resolves execute claims for unreviewed providers', () => {
+    const unknown = classifyExternalTool('mcp__acme_plugin__run_task', {});
+    expect(unknown).toMatchObject({ provider: 'acme_plugin', effect: 'unknown', reviewed_provider: false });
+    const resolved = resolveClaimedPluginRead(unknown, ['acme_plugin:tool:run_task:execute']);
+    expect(resolved).toMatchObject({
+      provider: 'acme_plugin',
+      effect: 'execute',
+      resources: ['tool:run_task'],
+      conservative_drift: true,
+    });
+    expect(resolved).not.toHaveProperty('claimed_plugin_read');
+  });
+
+  it('prioritizes the highest access level when multiple claims match', () => {
+    const unknown = classifyExternalTool('mcp__acme_plugin__multi_op', {});
+    // execute > write > read
+    expect(resolveClaimedPluginRead(unknown, [
+      'acme_plugin:tool:multi_op:read',
+      'acme_plugin:tool:multi_op:write',
+      'acme_plugin:tool:multi_op:execute',
+    ])).toMatchObject({ effect: 'execute' });
+    // write > read (no execute claim)
+    expect(resolveClaimedPluginRead(unknown, [
+      'acme_plugin:tool:multi_op:read',
+      'acme_plugin:tool:multi_op:write',
+    ])).toMatchObject({ effect: 'write' });
+    // read only (no write or execute claim)
+    expect(resolveClaimedPluginRead(unknown, [
+      'acme_plugin:tool:multi_op:read',
+    ])).toMatchObject({ effect: 'read', claimed_plugin_read: true });
+  });
+
+  it('does not resolve write or execute claims for reviewed providers', () => {
+    const githubUnknown = classifyExternalTool('mcp__github__future_mutation', {
+      owner: 'org', repo: 'repo',
+    });
+    expect(githubUnknown.reviewed_provider).toBe(true);
+    expect(githubUnknown.effect).toBe('unknown');
+    expect(resolveClaimedPluginRead(githubUnknown, ['github:tool:future_mutation:write'])).toBe(githubUnknown);
+    expect(resolveClaimedPluginRead(githubUnknown, ['github:tool:future_mutation:execute'])).toBe(githubUnknown);
+  });
+
+  it('does not resolve wildcard or prefix write/execute claims', () => {
+    const unknown = classifyExternalTool('mcp__acme_plugin__do_action', {});
+    for (const claim of [
+      'acme_plugin:*:write',
+      'acme_plugin:tool:do_*:write',
+      'acme_plugin:*:execute',
+      'acme_plugin:tool:do_*:execute',
+    ]) {
+      expect(resolveClaimedPluginRead(unknown, [claim]), claim).toBe(unknown);
+    }
+  });
+
+  it('sets conservative_drift true for resolved read, write, and execute effects', () => {
+    const readTarget = classifyExternalTool('mcp__acme_plugin__get_info', {});
+    const writeTarget = classifyExternalTool('mcp__acme_plugin__set_value', {});
+    const execTarget = classifyExternalTool('mcp__acme_plugin__run_job', {});
+    expect(resolveClaimedPluginRead(readTarget, ['acme_plugin:tool:get_info:read']).conservative_drift).toBe(true);
+    expect(resolveClaimedPluginRead(writeTarget, ['acme_plugin:tool:set_value:write']).conservative_drift).toBe(true);
+    expect(resolveClaimedPluginRead(execTarget, ['acme_plugin:tool:run_job:execute']).conservative_drift).toBe(true);
+  });
+
+  it('exports resolveClaimedPluginEffect as the canonical name with resolveClaimedPluginRead as backward-compat alias', async () => {
+    const mod = await import('../lib/runtime/external-tools.js');
+    expect(mod.resolveClaimedPluginEffect).toBeDefined();
+    expect(mod.resolveClaimedPluginRead).toBe(mod.resolveClaimedPluginEffect);
+  });
+
+  it.each(['claude', 'codex'])('allows a claimed plugin write on a writable ticket via lifecycle policy on %s', (host) => {
+    const event = normalizeLifecycleEvent({
+      hook_event_name: 'PreToolUse',
+      project_dir: '/tmp/project',
+      tool_name: 'mcp__acme_plugin__update_config',
+      tool_input: {},
+      agent_id: 'native-agent',
+    }, host === 'claude' ? { CLAUDECODE: '1' } : {});
+    const writableTicket = {
+      ...ticket,
+      writable: true,
+      tool_claims: ['acme_plugin:tool:update_config:write'],
+    };
+    expect(evaluateLifecyclePolicy(event, { state, ticket: writableTicket })).toMatchObject({
+      decision: 'allow',
+      reason: expect.stringContaining('authorized'),
+    });
+  });
+
+  it.each(['claude', 'codex'])('denies a claimed plugin write on a read-only ticket via lifecycle policy on %s', (host) => {
+    const event = normalizeLifecycleEvent({
+      hook_event_name: 'PreToolUse',
+      project_dir: '/tmp/project',
+      tool_name: 'mcp__acme_plugin__update_config',
+      tool_input: {},
+      agent_id: 'native-agent',
+    }, host === 'claude' ? { CLAUDECODE: '1' } : {});
+    const readOnlyTicket = {
+      ...ticket,
+      writable: false,
+      role: 'reviewer',
+      tool_claims: ['acme_plugin:tool:update_config:write'],
+    };
+    expect(evaluateLifecyclePolicy(event, { state, ticket: readOnlyTicket })).toMatchObject({
+      decision: 'deny',
+      reason: expect.stringContaining('mutate'),
+    });
+  });
+
+  it.each(['claude', 'codex'])('applies drift guard to resolved write and execute plugin effects on %s', (host) => {
+    const writeEvent = normalizeLifecycleEvent({
+      hook_event_name: 'PreToolUse',
+      project_dir: '/tmp/project',
+      tool_name: 'mcp__acme_plugin__update_config',
+      tool_input: {},
+      agent_id: 'native-agent',
+    }, host === 'claude' ? { CLAUDECODE: '1' } : {});
+    writeEvent.external_tool = resolveClaimedPluginRead(
+      writeEvent.external_tool,
+      ['acme_plugin:tool:update_config:write'],
+    );
+    expect(writeEvent.external_tool.conservative_drift).toBe(true);
+    expect(driftGuardApplies(writeEvent)).toBe(true);
+
+    const execEvent = normalizeLifecycleEvent({
+      hook_event_name: 'PreToolUse',
+      project_dir: '/tmp/project',
+      tool_name: 'mcp__acme_plugin__run_task',
+      tool_input: {},
+      agent_id: 'native-agent',
+    }, host === 'claude' ? { CLAUDECODE: '1' } : {});
+    execEvent.external_tool = resolveClaimedPluginRead(
+      execEvent.external_tool,
+      ['acme_plugin:tool:run_task:execute'],
+    );
+    expect(execEvent.external_tool.conservative_drift).toBe(true);
+    expect(driftGuardApplies(execEvent)).toBe(true);
   });
 });
 
