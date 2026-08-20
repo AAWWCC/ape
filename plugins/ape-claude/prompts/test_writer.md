@@ -7,6 +7,10 @@ details. Each test must deterministically fail for missing behavior and remain p
 implementation. Verify assertions are mutually consistent and satisfiable; rewrite contradictory
 outcomes for one observation.
 
+Keep each test minimal: inline values over shared helpers, flat setup over deep abstractions, no
+comments unless the constraint being tested is non-obvious. Three similar assertions are better than
+a premature test utility. Write only the setup the assertion needs.
+
 Follow `approved_plan.plan` when present. For a material evidence-driven change, record
 `evidence.plan_deviation` with `workstream_id`, `reason`, `replacement`, `affected_paths`, and
 `acceptance_impact`; never silently diverge or exceed ticket paths.
