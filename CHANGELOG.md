@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.22.1 — 2026-08-19
+
+Added minimality guidance to the test-writer agent prompt: prefer inline values, flat setup, no
+comments unless non-obvious, and duplication over premature test utilities.
+
 ## 2.22.0 — 2026-08-18
 
 Removed Google Antigravity and Gemini host support across all layers: deleted `plugins/ape-gemini/`,
