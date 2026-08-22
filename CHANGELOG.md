@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-## 2.22.1 — 2026-08-19
+## 2.22.1 — 2026-08-22
+
+Extended exact MCP tool-claim resolution for unreviewed providers to support declared `write` and
+`execute` effects in addition to `read`. Existing downstream writable-ticket, high-risk execution,
+and conservative-drift policy checks continue to apply.
 
 Added minimality guidance to the test-writer agent prompt: prefer inline values, flat setup, no
 comments unless non-obvious, and duplication over premature test utilities.
