@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,7 @@ import {
 import { RECEIPT_INPUT_SCHEMA } from '../lib/runtime/receipt-input.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
+import { hashRecord } from '../lib/runtime/canonical.js';
 import { bindCodexDispatch, completeCodexBindingProbe } from './codex-native-test-helper.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -284,6 +285,7 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
       objective: OBJECTIVE,
       mode: 'phase',
       lane: 'fast',
+      host: 'codex',
       status: 'blocked',
       block_reason: 'one or more deterministic merge gates failed',
       completed_at: ISSUED_AT,
@@ -532,7 +534,7 @@ const RECEIPT_SUMMARY_KEYS =
 const TOP_LEVEL_RECEIPT_KEYS = [...RECEIPT_SUMMARY_KEYS, 'role'].sort();
 
 describe('APE v2 bounded ape_history responses at the MCP wire', () => {
-  it('summarizes query records, keeps the active stub, and leaves explain full', async () => {
+  it('summarizes query records and returns a bounded explain projection without changing history', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'ape-bounded-history-'));
     cleanups.push(dir);
     const paths = runtimePaths(dir);
@@ -543,8 +545,11 @@ describe('APE v2 bounded ape_history responses at the MCP wire', () => {
       objective: OBJECTIVE,
       mode: 'phase',
       lane: 'fast',
+      host: 'codex',
       requirements: ['R1'],
       status: 'completed',
+      stage: 'completed',
+      dispatch_state: 'none',
       block_reason: null,
       created_at: ISSUED_AT,
       completed_at: ISSUED_AT,
@@ -554,10 +559,25 @@ describe('APE v2 bounded ape_history responses at the MCP wire', () => {
       receipts: [makeReceipt('rec-1', 'tik-1')],
       gates: null,
       merge: null,
-      record_hash: 'record-hash-history',
     };
+    record.record_hash = hashRecord(record, ['record_hash', 'completed_at', 'timing']);
     await atomicWriteJson(path.join(paths.history, `${runId}.json`), record);
-    await atomicWriteJson(paths.active, { run_id: 'run-active', status: 'running' });
+    await atomicWriteJson(paths.active, {
+      schema_version: '2.0.0',
+      run_id: 'run-active',
+      objective: 'Active fixture',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'codex',
+      status: 'running',
+      stage: 'build',
+      dispatch_state: 'none',
+      tickets: [],
+      receipts: [],
+      expired_tickets: [],
+    });
+    const historyFile = path.join(paths.history, `${runId}.json`);
+    const before = await readFile(historyFile, 'utf8');
 
     const queried = await apeHistory({ action: 'query', project_dir: dir });
     expect(queried.ok).toBe(true);
@@ -573,11 +593,18 @@ describe('APE v2 bounded ape_history responses at the MCP wire', () => {
     expect(summary).not.toHaveProperty('receipts');
     expect(JSON.stringify(queried)).not.toContain('One-time receipt capability token');
 
-    // Run-scoped explain stays the full-record channel.
+    // Run-scoped explain intentionally is not a full-record channel.
     const explained = await apeHistory({ action: 'explain', project_dir: dir, run_id: runId });
     expect(explained.ok).toBe(true);
-    expect(explained.record.tickets).toHaveLength(2);
-    expect(explained.record.receipts).toHaveLength(1);
+    expect(explained).not.toHaveProperty('record');
+    expect(explained.run).toMatchObject({ run_id: runId, status: 'completed' });
+    expect(explained.diagnostic).toMatchObject({
+      reason_code: 'completed',
+      next_safe_action: 'ape_run start',
+    });
+    expect(JSON.stringify(explained)).not.toContain(OBJECTIVE);
+    expect(JSON.stringify(explained)).not.toContain('One-time receipt capability token');
+    expect(await readFile(historyFile, 'utf8')).toBe(before);
   });
 });
 

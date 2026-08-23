@@ -22,10 +22,11 @@ describe('ape v2 renderStatusDoc', () => {
     receipts: [{ ticket_id: 't1' }],
   };
 
-  it('returns a Markdown string that surfaces the objective', () => {
+  it('returns a Markdown string without surfacing the objective', () => {
     const doc = renderStatusDoc(runningState);
     expect(typeof doc).toBe('string');
-    expect(doc).toContain('Add a status doc');
+    expect(doc).not.toContain('Add a status doc');
+    expect(doc).not.toContain('**Objective:**');
   });
 
   it('surfaces the mode and lane as phase/fast', () => {
@@ -33,44 +34,40 @@ describe('ape v2 renderStatusDoc', () => {
     expect(doc).toContain('phase/fast');
   });
 
-  it('re-projects an inline (1) … (2) … enumerated objective as a Markdown ordered list', () => {
+  it('does not render an enumerated objective as a side channel', () => {
     const doc = renderStatusDoc({
       ...runningState,
       objective:
         'Two workstreams. (1) Fix the parser so nested markers survive. (2) Release 2.3.3 with a changelog entry.',
     });
-    // The intro stays on the Objective line; each marker becomes its own
-    // numbered item on its own line, so the doc reads as a list, not a blob.
-    expect(doc).toContain('**Objective:** Two workstreams.');
-    expect(doc).toContain('\n1. Fix the parser so nested markers survive.');
-    expect(doc).toContain('\n2. Release 2.3.3 with a changelog entry.');
-    // The inline markers themselves are consumed by the re-projection.
-    expect(doc).not.toContain('(1)');
-    expect(doc).not.toContain('(2)');
+    expect(doc).not.toContain('Two workstreams');
+    expect(doc).not.toContain('Fix the parser');
+    expect(doc).not.toContain('Release 2.3.3');
   });
 
-  it('starts the ordered list at the Objective label when there is no intro text', () => {
+  it('does not render an objective made only of list items', () => {
     const doc = renderStatusDoc({
       ...runningState,
       objective: '(1) First thing. (2) Second thing.',
     });
-    expect(doc).toContain('**Objective:**\n\n1. First thing.\n2. Second thing.');
+    expect(doc).not.toContain('First thing');
+    expect(doc).not.toContain('Second thing');
   });
 
-  it('leaves a lone (1) marker inline — two ascending markers are required', () => {
+  it('does not render a lone objective marker', () => {
     const doc = renderStatusDoc({
       ...runningState,
       objective: 'Honor invariant (1) everywhere it applies.',
     });
-    expect(doc).toContain('**Objective:** Honor invariant (1) everywhere it applies.');
+    expect(doc).not.toContain('Honor invariant');
   });
 
-  it('leaves out-of-order markers inline — (2) must follow (1)', () => {
+  it('does not render out-of-order objective markers', () => {
     const doc = renderStatusDoc({
       ...runningState,
       objective: 'Compare case (2) against case (1) before deciding.',
     });
-    expect(doc).toContain('**Objective:** Compare case (2) against case (1) before deciding.');
+    expect(doc).not.toContain('Compare case');
   });
 
   it('shows stage N of M progress (build is 2 of 3 in the fast lane)', () => {
@@ -93,9 +90,9 @@ describe('ape v2 renderStatusDoc', () => {
     expect(doc).toMatch(/1[^\n]*pending/i);
   });
 
-  it('includes the branch name', () => {
+  it('does not include the repository branch name', () => {
     const doc = renderStatusDoc(runningState);
-    expect(doc).toContain('ape/phase-abc');
+    expect(doc).not.toContain('ape/phase-abc');
   });
 
   it('includes a Next: line', () => {
@@ -103,7 +100,75 @@ describe('ape v2 renderStatusDoc', () => {
     expect(doc).toMatch(/Next:/);
   });
 
-  it('surfaces the block reason for a blocked state', () => {
+  it.each([
+    ['schema_version', 'PRIVATE_STATUS_DOC_SCHEMA'],
+    ['mode', 'PRIVATE_STATUS_DOC_MODE'],
+    ['lane', 'PRIVATE_STATUS_DOC_LANE'],
+    ['status', 'PRIVATE_STATUS_DOC_STATUS'],
+    ['stage', 'PRIVATE_STATUS_DOC_STAGE'],
+    ['host', 'PRIVATE_STATUS_DOC_HOST'],
+    ['dispatch_state', 'PRIVATE_STATUS_DOC_DISPATCH'],
+  ])('validates %s before rendering status.md and never echoes its invalid value', (field, secret) => {
+    const state = {
+      schema_version: '2.0.0',
+      run_id: 'run-status-doc-no-echo',
+      objective: 'PRIVATE_STATUS_DOC_OBJECTIVE',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'codex',
+      status: 'running',
+      stage: 'build',
+      dispatch_state: 'none',
+      tickets: [],
+      receipts: [],
+      expired_tickets: [],
+      [field]: secret,
+    };
+    const doc = renderStatusDoc(state);
+    expect(doc).toContain('corrupt_state');
+    expect(doc).toContain('ape_run override reset');
+    expect(doc).not.toContain(secret);
+    expect(doc).not.toContain('PRIVATE_STATUS_DOC_OBJECTIVE');
+    expect(doc.length).toBeLessThan(8192);
+  });
+
+  it('fails status.md closed on max-plus-one collections before reading a getter-backed tail', () => {
+    let reads = 0;
+    const tickets = Array.from({ length: 257 }, (_, index) => ({
+      ticket_id: `run-status-doc-tail:build:${index}`,
+      stage_id: 'build',
+      role: 'implementer',
+    }));
+    Object.defineProperty(tickets, 256, {
+      enumerable: true,
+      get() {
+        reads += 1;
+        throw new Error('PRIVATE_STATUS_DOC_TAIL_READ');
+      },
+    });
+    const doc = renderStatusDoc({
+      schema_version: '2.0.0',
+      run_id: 'run-status-doc-tail',
+      objective: 'PRIVATE_STATUS_DOC_OBJECTIVE',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'codex',
+      status: 'running',
+      stage: 'build',
+      dispatch_state: 'none',
+      tickets,
+      receipts: [],
+      expired_tickets: [],
+    });
+    expect(reads).toBe(0);
+    expect(doc).toContain('corrupt_state');
+    expect(doc).toContain('ape_run override reset');
+    expect(doc).not.toContain('PRIVATE_STATUS_DOC_TAIL_READ');
+    expect(doc).not.toContain('PRIVATE_STATUS_DOC_OBJECTIVE');
+    expect(doc.length).toBeLessThan(8192);
+  });
+
+  it('surfaces stable recovery semantics without the raw block reason', () => {
     const doc = renderStatusDoc({
       mode: 'phase',
       lane: 'fast',
@@ -115,8 +180,10 @@ describe('ape v2 renderStatusDoc', () => {
       tickets: [{ ticket_id: 't1' }],
       receipts: [],
     });
-    expect(doc).toContain('review gate failed');
+    expect(doc).not.toContain('review gate failed');
     expect(doc.toLowerCase()).toContain('blocked');
+    expect(doc).toContain('Reason code: blocked');
+    expect(doc).toContain('ape_run abort or ape_run override reset');
   });
 
   it('marks earlier milestones done when the stage sits past the displayed list', () => {
@@ -181,9 +248,9 @@ describe('ape v2 renderStatusDoc', () => {
     expect(doc).toMatch(/\[x\][^\n]*build/i);
     expect(doc).toMatch(/\[x\][^\n]*review/i);
     expect(doc.toLowerCase()).toContain('completed');
+    expect(doc).toContain('Reason code: completed');
   });
 });
-
 // The recovery hint is derived at render time, never persisted in
 // block_reason: the archived reason stays immutable evidence (invariant 4)
 // while the guidance can name whichever audited exit fits the block.
@@ -407,7 +474,8 @@ describe('ape v2 status-doc terminal aborted run', () => {
       abort_reason: undefined,
       block_reason: 'one or more deterministic merge gates failed',
     });
-    expect(nextLine(doc)).toContain('resolve block: one or more deterministic merge gates failed');
+    expect(nextLine(doc)).toContain('ape_run regate');
+    expect(nextLine(doc)).not.toContain('one or more deterministic merge gates failed');
     expect(doc).toContain('**Recovery:**');
   });
 });
@@ -467,5 +535,53 @@ describe('ape v2 status-doc / statusline dispatch parity', () => {
     const doc = renderStatusDoc({ ...run, objective: 'Parity', branch: 'ape/phase-abc' });
     // …and the status doc must put the run at exactly that milestone.
     expect(doc).toMatch(new RegExp(`- \\[ \\] ${word}[^\\n]*◀`));
+  });
+
+  it.each([
+    ['pending', 'dispatch_pending', 'ape_run resume'],
+    ['live', 'dispatch_live', 'wait for pending receipt'],
+  ])('renders %s dispatch semantics supplied by the shared projection context', (dispatchState, reason, action) => {
+    const run = {
+      mode: 'phase',
+      lane: 'full',
+      status: 'running',
+      stage: 'dispatch',
+      tickets: [{ ticket_id: 't1' }],
+      receipts: [],
+    };
+    const doc = renderStatusDoc(run, { dispatchState });
+    expect(doc).toContain(`Reason code: ${reason}`);
+    expect(doc).toContain(`Next safe action: ${action}`);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['not returned', {
+      status: 'retained',
+      base_branch: 'main',
+      run_branch: 'ape/phase-terminal-cleanup',
+      retained: true,
+      deleted: false,
+    }],
+  ])('projects ape_run resume when terminal checkout cleanup is %s', (_label, cleanup) => {
+    const run = {
+      schema_version: '2.0.0',
+      run_id: 'run-terminal-cleanup-doc',
+      objective: 'Return the retained checkout',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'codex',
+      status: 'completed',
+      stage: 'completed',
+      dispatch_state: 'none',
+      base_branch: 'main',
+      branch: 'ape/phase-terminal-cleanup',
+      tickets: [],
+      receipts: [],
+      ...(cleanup === undefined ? {} : { checkout_cleanup: cleanup }),
+    };
+    const doc = renderStatusDoc(run);
+    expect(doc).toMatch(/Next:.*ape_run resume/);
+    expect(doc).not.toContain('ape_run start');
   });
 });

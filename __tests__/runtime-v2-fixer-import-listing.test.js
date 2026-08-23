@@ -65,9 +65,15 @@ describe('APE v2 imported history records in the unfiltered listing', () => {
     const importedId = migration.records[0].history_run_id;
 
     const explained = await historyAction(dir, 'explain', { run_id: importedId });
-    expect(explained.record.run_id).toBe(importedId);
+    expect(explained).not.toHaveProperty('record');
+    expect(explained.run.run_id).toBe(importedId);
+    expect(explained.diagnostic).toMatchObject({
+      reason_code: 'legacy_record',
+      next_safe_action: 'inspect immutable history',
+    });
     expect(explained.text).not.toContain('undefined');
     expect(explained.text).toContain('lane: none');
+    expect(explained.text).not.toContain('.planning/1-1-PLAN.md');
   });
 });
 

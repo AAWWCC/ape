@@ -14,7 +14,7 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { candidatePlanForScope, PLAN_CONTRACT_MAX_BYTES } from '../lib/runtime/plan-contract.js';
 import { sha256 } from '../lib/runtime/canonical.js';
-import { projectHistoryResponse, projectRunResponse } from '../lib/runtime/projection.js';
+import { projectRunResponse } from '../lib/runtime/projection.js';
 
 const cleanups = [];
 afterEach(async () => {
@@ -244,11 +244,16 @@ describe('versioned structured plan contract', () => {
     const archived = await readJson(path.join(runtimePaths(dir).history, `${failed.run.run_id}.json`));
     expect(archived.plan_contract_version).toBe(1);
     expect(archived.approved_plan).toEqual(critiqued.run.approved_plan);
-    const explained = projectHistoryResponse(await historyAction(dir, 'explain', {
+    const explained = await historyAction(dir, 'explain', {
       run_id: failed.run.run_id,
-    }));
-    expect(explained.record.approved_plan).toEqual(critiqued.run.approved_plan);
-    expect(fullPlanCount(explained, sha256(PLAN))).toBe(1);
+    });
+    expect(explained).not.toHaveProperty('record');
+    expect(explained.run).toMatchObject({ run_id: failed.run.run_id, status: 'aborted' });
+    expect(explained.diagnostic.reason_code).toBe('aborted');
+    expect(fullPlanCount(explained, sha256(PLAN))).toBe(0);
+    expect(JSON.stringify(explained)).not.toContain('Update the value safely');
+    // The immutable archive remains the plan-record channel.
+    expect(archived.approved_plan).toEqual(critiqued.run.approved_plan);
   }, 30_000);
 
   it('seals checker, critic, and judge hashes on the judge approval route', async () => {

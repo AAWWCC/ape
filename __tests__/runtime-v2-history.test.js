@@ -80,12 +80,16 @@ describe('APE v2 machine history', () => {
 
 function terminalState(overrides = {}) {
   return {
+    schema_version: '2.0.0',
     run_id: 'run-effective',
     objective: 'Recover the gate block',
     mode: 'phase',
     lane: 'mechanical',
+    host: 'codex',
     requirements: ['R-effective'],
     status: 'blocked',
+    stage: 'review',
+    dispatch_state: 'none',
     block_reason: 'one or more deterministic merge gates failed',
     created_at: '2026-07-01T00:00:00.000Z',
     updated_at: '2026-07-01T00:01:00.000Z',
@@ -108,9 +112,16 @@ describe('APE v2 history effective records (superseding completions)', () => {
       paths,
       terminalState({
         status: 'completed',
+        stage: 'completed',
         terminal_at: '2026-07-01T01:00:00.000Z',
         tree_sha: 'c'.repeat(40),
-        merge: { url: 'https://github.com/acme/repo/pull/9' },
+        merge: {
+          provider: 'github',
+          url: 'https://github.com/acme/repo/pull/9',
+          branch: 'ape/phase-effective',
+          base: 'main',
+          merged_at: '2026-07-01T01:00:00.000Z',
+        },
       }),
       { superseding: true },
     );
@@ -145,9 +156,16 @@ describe('APE v2 history effective records (superseding completions)', () => {
       paths,
       terminalState({
         status: 'completed',
+        stage: 'completed',
         terminal_at: '2026-07-01T01:00:00.000Z',
         tree_sha: 'c'.repeat(40),
-        merge: { url: 'https://github.com/acme/repo/pull/9' },
+        merge: {
+          provider: 'github',
+          url: 'https://github.com/acme/repo/pull/9',
+          branch: 'ape/phase-effective',
+          base: 'main',
+          merged_at: '2026-07-01T01:00:00.000Z',
+        },
       }),
       { superseding: true },
     );
@@ -167,19 +185,33 @@ describe('APE v2 history effective records (superseding completions)', () => {
       paths,
       terminalState({
         status: 'completed',
+        stage: 'completed',
         terminal_at: '2026-07-01T01:00:00.000Z',
         tree_sha: 'c'.repeat(40),
-        merge: { url: 'https://github.com/acme/repo/pull/9' },
+        merge: {
+          provider: 'github',
+          url: 'https://github.com/acme/repo/pull/9',
+          branch: 'ape/phase-effective',
+          base: 'main',
+          merged_at: '2026-07-01T01:00:00.000Z',
+        },
       }),
       { superseding: true },
     );
 
     const explained = await historyAction(dir, 'explain', { run_id: 'run-effective' });
-    // Both the rendered text AND the returned record are the effective record:
-    // a merged run must never explain as blocked with no merge (invariant 8).
-    expect(explained.record.status).toBe('completed');
+    // Both the rendered text and bounded run summary identify the effective
+    // record; the immutable full record stays in history rather than crossing
+    // the default explain boundary.
+    expect(explained).not.toHaveProperty('record');
+    expect(explained.run).toMatchObject({ run_id: 'run-effective', status: 'completed' });
+    expect(explained.diagnostic).toMatchObject({
+      reason_code: 'completed',
+      next_safe_action: 'ape_run start',
+    });
     expect(explained.text).toContain('Status: completed');
-    expect(explained.text).toContain('https://github.com/acme/repo/pull/9');
+    expect(explained.text).toContain('Merged:');
+    expect(explained.text).not.toContain('github.com/acme/repo');
     expect(explained.text).toMatch(/supersedes this run's block-time record/i);
     expect(explained.text).not.toContain('Merge: not recorded');
   });
@@ -261,8 +293,13 @@ describe('APE v2 cross-run supersession (friction #10)', () => {
     expect(queried.records[0].run_id).not.toBe(second.run.run_id);
 
     const explained = await historyAction(dir, 'explain', { run_id: first.run.run_id });
-    expect(explained.record.abort_reason).toBe(abortReason);
-    expect(explained.text).toContain(`Abort reason: ${abortReason}`);
+    expect(explained).not.toHaveProperty('record');
+    expect(explained.run).toMatchObject({ run_id: first.run.run_id, status: 'aborted' });
+    expect(explained.diagnostic).toMatchObject({
+      reason_code: 'aborted',
+      next_safe_action: 'ape_run start',
+    });
+    expect(JSON.stringify(explained)).not.toContain(abortReason);
   });
 
   it('rejects a malformed supersedes_run at the start schema', async () => {

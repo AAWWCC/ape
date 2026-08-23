@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const RENDERER = fileURLToPath(new URL('../bin/ape-statusline.mjs', import.meta.url));
+const PACKAGE_BUILDER = fileURLToPath(new URL('../scripts/build-plugin-packages.mjs', import.meta.url));
 
 function render(payload, charset = 'unicode', envOverrides = {}) {
   // Pin the charset so assertions on unicode glyphs (e.g. the ⟳ loading /
@@ -27,12 +29,37 @@ function render(payload, charset = 'unicode', envOverrides = {}) {
   });
 }
 
+function renderProgram(program, payload) {
+  const env = { ...process.env, APE_STATUSLINE_CHARSET: 'unicode', APE_STATUSLINE_GIT_TIMEOUT_MS: '5000' };
+  delete env.CLAUDE_PROJECT_DIR;
+  delete env.CODEX_CWD;
+  return execFileSync('node', [program], {
+    input: JSON.stringify(payload),
+    encoding: 'utf8',
+    env,
+  });
+}
+
 // eslint-disable-next-line no-control-regex
 const stripAnsi = (text) => text.replace(/\x1b\[[0-9;]*m/g, '');
 
 function writeActive(dir, run) {
   mkdirSync(join(dir, '.ape', 'runtime'), { recursive: true });
-  writeFileSync(join(dir, '.ape', 'runtime', 'active.json'), JSON.stringify(run));
+  writeFileSync(join(dir, '.ape', 'runtime', 'active.json'), JSON.stringify({
+    schema_version: '2.0.0',
+    run_id: 'run-statusline-fixture',
+    objective: 'Statusline fixture',
+    mode: 'phase',
+    lane: 'fast',
+    host: 'codex',
+    status: 'running',
+    stage: 'build',
+    dispatch_state: 'none',
+    tickets: [],
+    receipts: [],
+    expired_tickets: [],
+    ...run,
+  }));
 }
 
 describe('ape v2 statusline renderer', () => {
@@ -117,6 +144,37 @@ describe('ape v2 statusline renderer', () => {
     // A completed run pins the bar full regardless of any timing estimate.
     expect(out).toContain('█'.repeat(8));
   });
+
+  it.each([
+    ['absent', undefined],
+    ['not returned', {
+      status: 'retained',
+      base_branch: 'main',
+      run_branch: 'ape/phase-terminal-cleanup',
+      retained: true,
+      deleted: false,
+    }],
+  ])('projects ape_run resume in root and packaged statuslines when terminal cleanup is %s', (_label, cleanup) => {
+    writeActive(dir, {
+      status: 'completed',
+      stage: 'completed',
+      base_branch: 'main',
+      branch: 'ape/phase-terminal-cleanup',
+      ...(cleanup === undefined ? {} : { checkout_cleanup: cleanup }),
+    });
+    const outputRoot = join(dir, 'packages');
+    execFileSync('node', [PACKAGE_BUILDER, '--output-root', outputRoot], { encoding: 'utf8' });
+    const payload = { workspace: { current_dir: dir } };
+    const rootLine = stripAnsi(renderProgram(RENDERER, payload));
+    const packagedLine = stripAnsi(renderProgram(
+      join(outputRoot, 'ape-claude', 'bin', 'ape-statusline.mjs'),
+      payload,
+    ));
+    for (const line of [rootLine, packagedLine]) {
+      expect(line).toContain('ape_run resume');
+      expect(line).not.toContain('ape_run start');
+    }
+  }, 30_000);
 
   it('shows the land pipeline strip (R G M) — mode outranks the classified lane', () => {
     // classifyLane never yields 'land': a land run carries fast/full/
@@ -469,6 +527,243 @@ describe('ape v2 statusline renderer', () => {
     // The reason never renders here — the full text lives in `ape_run action:
     // status` and the .ape/runtime/status.md projection.
     expect(out).not.toContain('security-review failed twice');
+  });
+
+  it('renders the shared failed-gate reason, action, and durable failed identifiers', () => {
+    writeActive(dir, {
+      mode: 'phase',
+      lane: 'fast',
+      status: 'blocked',
+      stage: 'gates',
+      gates: {
+        passed: false,
+        checks: {
+          typecheck: { passed: false },
+          tests: { passed: true },
+        },
+      },
+      tickets: [],
+      receipts: [],
+    });
+    const out = stripAnsi(render({ workspace: { current_dir: dir } }));
+    expect(out).toContain('gate_failed');
+    expect(out).toContain('ape_run regate');
+    expect(out).toContain('typecheck');
+    expect(out.length).toBeLessThan(1024);
+  });
+
+  it('degrades malformed nested runtime collections to a bounded corrupt-state diagnostic', () => {
+    writeActive(dir, {
+      schema_version: '2.0.0',
+      run_id: 'run-malformed-statusline',
+      mode: 'phase',
+      lane: 'fast',
+      status: 'running',
+      stage: 'build',
+      tickets: [],
+      receipts: {},
+    });
+    const out = stripAnsi(render({ workspace: { current_dir: dir } }));
+    expect(out).toContain('corrupt_state');
+    expect(out).toContain('ape_run override reset');
+    expect(out.length).toBeLessThan(1024);
+  });
+
+  it.each([
+    ['schema_version', 'PRIVATE_ROOT_STATUSLINE_SCHEMA'],
+    ['mode', 'PRIVATE_ROOT_STATUSLINE_MODE'],
+    ['lane', 'PRIVATE_ROOT_STATUSLINE_LANE'],
+    ['status', 'PRIVATE_ROOT_STATUSLINE_STATUS'],
+    ['stage', 'PRIVATE_ROOT_STATUSLINE_STAGE'],
+    ['host', 'PRIVATE_ROOT_STATUSLINE_HOST'],
+    ['dispatch_state', 'PRIVATE_ROOT_STATUSLINE_DISPATCH'],
+  ])('validates %s before rendering the root statusline and never echoes its invalid value', (field, secret) => {
+    writeActive(dir, { [field]: secret, objective: 'PRIVATE_ROOT_STATUSLINE_OBJECTIVE' });
+    const out = stripAnsi(render({ workspace: { current_dir: dir } }));
+    expect(out).toContain('corrupt_state');
+    expect(out).toContain('ape_run override reset');
+    expect(out).not.toContain(secret);
+    expect(out).not.toContain('PRIVATE_ROOT_STATUSLINE_OBJECTIVE');
+    expect(out.length).toBeLessThan(1024);
+  });
+
+  it('rejects missing and safe-looking noncanonical run IDs even without a schema marker', () => {
+    const runtime = join(dir, '.ape', 'runtime');
+    mkdirSync(runtime, { recursive: true });
+    for (const state of [
+      { mode: 'phase', lane: 'fast', status: 'running', stage: 'build', tickets: [], receipts: [] },
+      { run_id: 'foo', mode: 'phase', lane: 'fast', status: 'running', stage: 'build', tickets: [], receipts: [] },
+    ]) {
+      writeFileSync(join(runtime, 'active.json'), JSON.stringify(state));
+      const out = stripAnsi(render({ workspace: { current_dir: dir } }));
+      expect(out).toContain('corrupt_state');
+      expect(out).toContain('ape_run override reset');
+      expect(out).not.toContain('stage_active');
+      expect(out.length).toBeLessThan(1024);
+    }
+  });
+
+  it('derives pending, live, and stopped dispatch truth during a later build stage', () => {
+    const ticketId = 'run-later-dispatch:build:ticket';
+    const runtime = join(dir, '.ape', 'runtime');
+    const intents = join(runtime, 'dispatch-intents');
+    const state = {
+      run_id: 'run-later-dispatch',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'claude',
+      status: 'running',
+      stage: 'build',
+      tickets: [{ ticket_id: ticketId, stage_id: 'build', role: 'implementer' }],
+      receipts: [],
+      expired_tickets: [],
+    };
+    writeActive(dir, state);
+    expect(stripAnsi(render({ workspace: { current_dir: dir } }))).toContain('dispatch_pending');
+
+    mkdirSync(intents, { recursive: true });
+    writeFileSync(join(runtime, 'active.lock'), JSON.stringify({
+      version: 1,
+      run_id: state.run_id,
+      host: hostname(),
+      pid: process.pid,
+      acquired_at: new Date().toISOString(),
+      nonce: '12345678-1234-4234-8234-123456789abc',
+    }));
+    const intentFile = join(intents, createHash('sha256').update(ticketId).digest('hex') + '.json');
+    const bound = {
+      version: 2,
+      host: 'claude',
+      run_id: state.run_id,
+      ticket_id: ticketId,
+      ticket_hash: 'a'.repeat(64),
+      agent_type: 'implementer',
+      nonce_hash: 'b'.repeat(64),
+      status: 'bound',
+      prepared_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      launch_attempts: 1,
+      parent_session_id: 'session-statusline',
+      tool_use_id: 'tool-statusline',
+      launched_at: new Date().toISOString(),
+      launch_expires_at: new Date(Date.now() + 30_000).toISOString(),
+      bound_agent_id: 'agent-statusline',
+      capability_hash: 'c'.repeat(64),
+      bound_at: new Date().toISOString(),
+    };
+    writeFileSync(intentFile, JSON.stringify(bound));
+    expect(stripAnsi(render({ workspace: { current_dir: dir } }))).toContain('dispatch_live');
+
+    writeFileSync(intentFile, JSON.stringify({
+      ...bound,
+      agent_stopped_at: new Date().toISOString(),
+    }));
+    expect(stripAnsi(render({ workspace: { current_dir: dir } }))).toContain('dispatch_stopped');
+  });
+
+  it('recognizes a real Codex bound intent carrying launch_name_hash instead of nonce_hash', () => {
+    const ticketId = 'run-codex-bound-statusline:build:ticket';
+    const runtime = join(dir, '.ape', 'runtime');
+    const intents = join(runtime, 'dispatch-intents');
+    writeActive(dir, {
+      run_id: 'run-codex-bound-statusline',
+      host: 'codex',
+      status: 'running',
+      stage: 'build',
+      dispatch_state: 'none',
+      tickets: [{ ticket_id: ticketId, stage_id: 'build', role: 'implementer' }],
+      receipts: [],
+      expired_tickets: [],
+    });
+    mkdirSync(intents, { recursive: true });
+    writeFileSync(join(runtime, 'active.lock'), JSON.stringify({
+      version: 1,
+      run_id: 'run-codex-bound-statusline',
+      host: hostname(),
+      pid: process.pid,
+      acquired_at: new Date().toISOString(),
+      nonce: '12345678-1234-4234-8234-123456789abc',
+    }));
+    const intentFile = join(intents, createHash('sha256').update(ticketId).digest('hex') + '.json');
+    writeFileSync(intentFile, JSON.stringify({
+      version: 2,
+      host: 'codex',
+      run_id: 'run-codex-bound-statusline',
+      ticket_id: ticketId,
+      ticket_hash: 'a'.repeat(64),
+      agent_type: 'implementer',
+      launch_name_hash: 'b'.repeat(64),
+      status: 'bound',
+      prepared_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      launch_attempts: 1,
+      parent_session_id: 'parent-codex-statusline',
+      launched_at: new Date().toISOString(),
+      launch_expires_at: new Date(Date.now() + 30_000).toISOString(),
+      bound_session_id: 'child-codex-statusline',
+      bound_agent_id: 'agent-codex-statusline',
+      capability_hash: 'c'.repeat(64),
+      bound_at: new Date().toISOString(),
+    }));
+
+    const out = stripAnsi(render({ workspace: { current_dir: dir } }));
+    expect(out).toContain('dispatch_live');
+    expect(out).not.toContain('dispatch_pending');
+  });
+
+  it('classifies oversized dispatch collections before probing intent files', () => {
+    writeActive(dir, {
+      run_id: 'run-oversized-dispatch',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'claude',
+      status: 'running',
+      stage: 'build',
+      tickets: Array.from({ length: 2000 }, (_, index) => ({
+        ticket_id: `run-oversized-dispatch:build:${index}`,
+        stage_id: 'build',
+        role: 'implementer',
+      })),
+      receipts: [],
+      expired_tickets: [],
+    });
+    const out = stripAnsi(render({ workspace: { current_dir: dir } }));
+    expect(out).toContain('corrupt_state');
+    expect(out).toContain('ape_run override reset');
+    expect(out).not.toContain('dispatch_pending');
+    expect(out.length).toBeLessThan(1024);
+  });
+
+  it('does not render repository path or branch identity in an APE statusline', () => {
+    const bidi = String.fromCharCode(0x202e);
+    const repoSentinel = `PRIVATE_REPOSITORY_SENTINEL_${bidi}${'r'.repeat(180)}`;
+    const project = join(dir, repoSentinel);
+    mkdirSync(project, { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: project });
+    const branchSentinel = [
+      `PRIVATE_BRANCH_SENTINEL_${bidi}${'a'.repeat(180)}`,
+      'b'.repeat(180),
+      'c'.repeat(180),
+      'd'.repeat(180),
+      'e'.repeat(180),
+    ].join('/');
+    execFileSync('git', ['checkout', '-qb', branchSentinel], { cwd: project });
+    writeActive(project, {
+      schema_version: '2.0.0',
+      run_id: 'run-private-repository-statusline',
+      mode: 'phase',
+      lane: 'fast',
+      status: 'running',
+      stage: 'build',
+      tickets: [],
+      receipts: [],
+    });
+
+    const out = stripAnsi(render({ workspace: { current_dir: project } }));
+    expect(out).not.toContain('PRIVATE_REPOSITORY_SENTINEL');
+    expect(out).not.toContain('PRIVATE_BRANCH_SENTINEL');
+    expect(out).not.toContain(bidi);
+    expect(out.length).toBeLessThan(1024);
   });
 
   it('shows the context-window gauge from the payload', () => {
@@ -908,4 +1203,124 @@ describe('ape v2 statusline renderer', () => {
       rmSync(remote, { recursive: true, force: true });
     }
   }, 20_000);
+
+  it('uses dispatch and lock artifacts only after regular-file, byte, shape, discriminator, number, and timestamp validation', () => {
+    const ticketId = 'run-hostile-dispatch-artifacts:build:ticket';
+    const runtime = join(dir, '.ape', 'runtime');
+    const intents = join(runtime, 'dispatch-intents');
+    const lockFile = join(runtime, 'active.lock');
+    const intentFile = join(intents, createHash('sha256').update(ticketId).digest('hex') + '.json');
+    writeActive(dir, {
+      run_id: 'run-hostile-dispatch-artifacts',
+      host: 'claude',
+      status: 'running',
+      stage: 'build',
+      dispatch_state: 'none',
+      tickets: [{ ticket_id: ticketId, stage_id: 'build', role: 'implementer' }],
+      receipts: [],
+      expired_tickets: [],
+    });
+    mkdirSync(intents, { recursive: true });
+
+    const validLock = {
+      version: 1,
+      run_id: 'run-hostile-dispatch-artifacts',
+      host: hostname(),
+      pid: process.pid,
+      acquired_at: new Date().toISOString(),
+      nonce: '12345678-1234-4234-8234-123456789abc',
+    };
+    const validIntent = {
+      version: 2,
+      host: 'claude',
+      run_id: 'run-hostile-dispatch-artifacts',
+      ticket_id: ticketId,
+      ticket_hash: 'a'.repeat(64),
+      agent_type: 'implementer',
+      nonce_hash: 'b'.repeat(64),
+      status: 'bound',
+      prepared_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      launch_attempts: 1,
+      parent_session_id: 'session-statusline',
+      tool_use_id: 'tool-statusline',
+      launched_at: new Date().toISOString(),
+      launch_expires_at: new Date(Date.now() + 30_000).toISOString(),
+      bound_agent_id: 'agent-statusline',
+      capability_hash: 'c'.repeat(64),
+      bound_at: new Date().toISOString(),
+    };
+    const renderDiagnostic = () => stripAnsi(render({ workspace: { current_dir: dir } }));
+    const reset = () => {
+      rmSync(lockFile, { force: true });
+      rmSync(intentFile, { force: true });
+      writeFileSync(lockFile, JSON.stringify(validLock));
+      writeFileSync(intentFile, JSON.stringify(validIntent));
+    };
+
+    reset();
+    expect(renderDiagnostic()).toContain('dispatch_live');
+
+    const intentCases = [
+      ['array shape', JSON.stringify([validIntent])],
+      ['version discriminator', JSON.stringify({ ...validIntent, version: 3 })],
+      ['host discriminator', JSON.stringify({ ...validIntent, host: 'PRIVATE_INTENT_HOST' })],
+      ['status discriminator', JSON.stringify({ ...validIntent, status: 'PRIVATE_INTENT_STATUS' })],
+      ['negative launch attempts', JSON.stringify({ ...validIntent, launch_attempts: -1 })],
+      ['fractional launch attempts', JSON.stringify({ ...validIntent, launch_attempts: 1.5 })],
+      ['impossible expiry', JSON.stringify({ ...validIntent, expires_at: '2026-02-30T05:00:00.000Z' })],
+      ['invalid stop time', JSON.stringify({ ...validIntent, agent_stopped_at: 'PRIVATE_STOP_TIME' })],
+      ['oversized regular file', JSON.stringify(validIntent) + ' '.repeat(2 * 1024 * 1024)],
+    ];
+    for (const [label, bytes] of intentCases) {
+      reset();
+      writeFileSync(intentFile, bytes);
+      const out = renderDiagnostic();
+      expect(out, label).toContain('dispatch_pending');
+      expect(out, label).not.toContain('dispatch_live');
+      expect(out, label).not.toContain('dispatch_stopped');
+      expect(out, label).not.toContain('PRIVATE_');
+      expect(out.length, label).toBeLessThan(1024);
+    }
+
+    reset();
+    const intentTarget = join(dir, 'intent-target.json');
+    writeFileSync(intentTarget, JSON.stringify(validIntent));
+    rmSync(intentFile);
+    symlinkSync(intentTarget, intentFile);
+    expect(renderDiagnostic()).toContain('dispatch_pending');
+
+    const lockCases = [
+      ['array shape', JSON.stringify([validLock])],
+      ['version discriminator', JSON.stringify({ ...validLock, version: 2 })],
+      ['negative pid', JSON.stringify({ ...validLock, pid: -1 })],
+      ['fractional pid', JSON.stringify({ ...validLock, pid: 1.5 })],
+      ['impossible acquired time', JSON.stringify({ ...validLock, acquired_at: '2026-02-30T05:00:00.000Z' })],
+      ['oversized regular file', JSON.stringify(validLock) + ' '.repeat(2 * 1024 * 1024)],
+    ];
+    for (const [label, bytes] of lockCases) {
+      reset();
+      writeFileSync(lockFile, bytes);
+      const out = renderDiagnostic();
+      expect(out, label).toContain('dispatch_pending');
+      expect(out, label).not.toContain('dispatch_live');
+      expect(out, label).not.toContain('PRIVATE_');
+      expect(out.length, label).toBeLessThan(1024);
+    }
+
+    reset();
+    const lockTarget = join(dir, 'lock-target.json');
+    writeFileSync(lockTarget, JSON.stringify(validLock));
+    rmSync(lockFile);
+    symlinkSync(lockTarget, lockFile);
+    expect(renderDiagnostic()).toContain('dispatch_pending');
+
+    reset();
+    writeFileSync(intentFile, JSON.stringify({
+      ...validIntent,
+      agent_stopped_at: new Date().toISOString(),
+    }));
+    expect(renderDiagnostic()).toContain('dispatch_stopped');
+  });
+
 });

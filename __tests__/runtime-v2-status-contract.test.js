@@ -71,6 +71,10 @@ describe('APE v2 compact status and resume liveness contract', () => {
       gate: { state: 'not_run' },
       last_receipt: null,
       next_safe_action: 'ape_run resume',
+      diagnostic: {
+        reason_code: 'dispatch_pending',
+        next_safe_action: 'ape_run resume',
+      },
     });
 
     const recovered = await resumeRun(dir);
@@ -88,6 +92,10 @@ describe('APE v2 compact status and resume liveness contract', () => {
     expect(await compactStatus(dir)).toMatchObject({
       dispatch_state: 'live',
       next_safe_action: 'wait for pending receipt',
+      diagnostic: {
+        reason_code: 'dispatch_live',
+        next_safe_action: 'wait for pending receipt',
+      },
     });
     const alreadyLive = await resumeRun(dir);
     expect(alreadyLive).toMatchObject({
@@ -106,7 +114,7 @@ describe('APE v2 compact status and resume liveness contract', () => {
 
   it('reports an inactive project without inventing run or ticket detail', async () => {
     const dir = await project();
-    expect(await compactStatus(dir)).toEqual({
+    expect(await compactStatus(dir)).toMatchObject({
       ok: true,
       active: false,
       dispatch_state: 'none',
@@ -115,6 +123,10 @@ describe('APE v2 compact status and resume liveness contract', () => {
       gate: { state: 'inactive' },
       last_receipt: null,
       next_safe_action: 'ape_run start',
+      diagnostic: {
+        reason_code: 'inactive',
+        next_safe_action: 'ape_run start',
+      },
     });
   });
 
@@ -183,7 +195,6 @@ describe('APE v2 compact status and resume liveness contract', () => {
       pending: null,
       gate: {
         state: 'passed_awaiting_ship',
-        blocker: AUTO_MERGE_HOLD_REASON,
       },
       last_receipt: {
         receipt_id: 'receipt-status-summary',
@@ -192,6 +203,10 @@ describe('APE v2 compact status and resume liveness contract', () => {
         status: 'passed',
       },
       next_safe_action: 'ape_run ship',
+      diagnostic: {
+        reason_code: 'shipping_hold',
+        next_safe_action: 'ape_run ship',
+      },
       roadmap: {
         counts: { satisfied: 0, in_progress: 0, ready: 1, pending: 0, stale: 0 },
       },
@@ -199,7 +214,8 @@ describe('APE v2 compact status and resume liveness contract', () => {
     expect(compact.run).not.toHaveProperty('tickets');
     expect(compact.run).not.toHaveProperty('receipts');
     expect(compact.roadmap).not.toHaveProperty('entries');
-    expect(compact.last_receipt.summary).toHaveLength(240);
+    expect(compact.gate).not.toHaveProperty('blocker');
+    expect(compact.last_receipt).not.toHaveProperty('summary');
   }, 30_000);
 
   it('marks a sealed run inactive and points to a fresh start', async () => {
@@ -227,7 +243,38 @@ describe('APE v2 compact status and resume liveness contract', () => {
       dispatch_state: 'none',
       gate: { state: 'passed' },
       next_safe_action: 'ape_run start',
+      diagnostic: {
+        reason_code: 'completed',
+        next_safe_action: 'ape_run start',
+      },
     });
+  }, 30_000);
+
+  it.each([
+    ['absent', undefined],
+    ['not returned', {
+      status: 'retained',
+      base_branch: 'main',
+      run_branch: 'ape/phase-terminal-cleanup',
+      retained: true,
+      deleted: false,
+    }],
+  ])('projects ape_run resume for terminal checkout cleanup that is %s', async (_label, cleanup) => {
+    const dir = await project();
+    await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    const state = await readJson(paths.active, null);
+    state.status = 'completed';
+    state.stage = 'completed';
+    state.gates = { passed: true };
+    if (cleanup === undefined) delete state.checkout_cleanup;
+    else state.checkout_cleanup = cleanup;
+    await atomicWriteJson(paths.active, state);
+
+    const compact = await compactStatus(dir);
+    expect(compact.next_safe_action).toBe('ape_run resume');
+    expect(compact.diagnostic.next_safe_action).toBe('ape_run resume');
+    expect(JSON.stringify(compact)).not.toContain('ape_run start');
   }, 30_000);
 
   it('reports a failed gate blocker and the audited regate action', async () => {
@@ -249,10 +296,14 @@ describe('APE v2 compact status and resume liveness contract', () => {
       pending: null,
       gate: {
         state: 'failed',
-        blocker: 'one or more deterministic merge gates failed',
       },
       next_safe_action: 'ape_run regate',
+      diagnostic: {
+        reason_code: 'gate_failed',
+        next_safe_action: 'ape_run regate',
+      },
     });
+    expect((await compactStatus(dir)).gate).not.toHaveProperty('blocker');
   }, 30_000);
 });
 

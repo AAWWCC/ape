@@ -32,6 +32,11 @@ const DIST_FILES = Object.freeze([
   'ape-mcp.bundle.mjs',
 ]);
 const RUNTIME_FILES = Object.freeze(['runner.js', 'spawn.js']);
+const CLAUDE_STATUSLINE_FILES = Object.freeze([
+  ['bin', 'ape-statusline.mjs'],
+  ['lib/runtime', 'diagnostics.js'],
+  ['lib/runtime', 'paths.js'],
+]);
 const SKILL_NAMES = Object.freeze(['config', 'history', 'override', 'resume', 'roadmap', 'run', 'status']);
 const ROLE_NAMES = Object.freeze([
   'preflight_analyst',
@@ -331,6 +336,12 @@ async function buildHostPackage(root, host, version) {
     for (const role of ROLE_NAMES) {
       const file = `${role.replaceAll('_', '-')}.md`;
       await copyTextFile(join(REPO_ROOT, 'agents', file), join(root, 'agents', file));
+    }
+    for (const [directory, file] of CLAUDE_STATUSLINE_FILES) {
+      await copyTextFile(
+        join(REPO_ROOT, directory, file),
+        join(root, directory, file),
+      );
     }
   }
   for (const file of ['common.md', ...ROLE_NAMES.map((role) => `${role}.md`)]) {

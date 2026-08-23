@@ -153,7 +153,7 @@ const TOOLS = Object.freeze([
   },
   {
     name: 'ape_status',
-    description: 'Read a compact APE run status. Returns no ticket/receipt bodies and only roadmap counts; ape_run action status remains the legacy full-status channel.',
+    description: 'Read compact privacy-safe APE run diagnostics with a stable reason code, next safe action, failed deterministic check identifiers, and validated stage timing. Returns no ticket/receipt bodies or sensitive run prose and only roadmap counts; ape_run action status remains the legacy full-status channel.',
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: 'object',
@@ -169,7 +169,7 @@ const TOOLS = Object.freeze([
   {
     name: 'ape_history',
     description:
-      'Query, explain, aggregate project metrics, or import APE machine history; inspect latest retention maintenance status; explicitly compact redundant old run artifacts with a required audit reason; and drive the runtime-owned roadmap: roadmap-status (derived cold-boot picture), roadmap-register (validated, receipt-provenanced, journaled batch), roadmap-supersede (validated journaled staleness mutation). Inputs are bounded at 64 KB.',
+      'Query, privacy-safely explain with the shared stable diagnostics, aggregate project metrics, or import APE machine history; inspect latest retention maintenance status; explicitly compact redundant old run artifacts with a required audit reason; and drive the runtime-owned roadmap: roadmap-status (derived cold-boot picture), roadmap-register (validated, receipt-provenanced, journaled batch), roadmap-supersede (validated journaled staleness mutation). Explain returns a bounded safe projection rather than the full immutable record. Inputs are bounded at 64 KB.',
     inputSchema: {
       type: 'object',
       required: ['action'],

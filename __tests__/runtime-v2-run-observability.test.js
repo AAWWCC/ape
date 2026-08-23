@@ -255,6 +255,10 @@ describe('APE v2 Run Observability & Per-Run Facts Derivation', () => {
           test_path_count: 1,
         },
       });
+      expect(compact.diagnostic).toMatchObject({
+        reason_code: 'dispatch_pending',
+        next_safe_action: 'ape_run resume',
+      });
     });
 
     it('returns empty/null facts safely when no run is active', async () => {
@@ -275,8 +279,8 @@ describe('APE v2 Run Observability & Per-Run Facts Derivation', () => {
       // Inject large collections and dangerous bidi/control characters
       state.block_reason = `Block reason with \u202Ereversed text\u202C and \u0000control bytes ${'x'.repeat(5000)}`;
       state.tickets = Array.from({ length: 50 }, (_, i) => ({
-        ticket_id: `run-unit:stage-${i}:${i}`,
-        stage_id: `stage-${i}`,
+        ticket_id: `run-unit:implement:${i}`,
+        stage_id: 'implement',
         role: 'implementer',
         model_tier: 'balanced',
         attempt: 1,
@@ -287,8 +291,56 @@ describe('APE v2 Run Observability & Per-Run Facts Derivation', () => {
       const serialized = JSON.stringify(compact);
       expect(serialized.length).toBeLessThan(RESPONSE_BUDGET_CHARS);
       expect(compact.facts).toBeDefined();
-      expect(compact.facts.block?.reason).not.toContain('\u0000');
-      expect(compact.facts.block?.reason).not.toContain('\u202E');
+      expect(compact.facts.block).not.toHaveProperty('reason');
+      expect(compact.gate).not.toHaveProperty('blocker');
+      expect(compact.diagnostic.recovery_rationale).not.toContain('\u0000');
+      expect(compact.diagnostic.recovery_rationale).not.toContain('\u202E');
+      expect(serialized).not.toContain('Block reason with');
+    });
+
+    it('never forwards malformed pending, receipt, retry, or remediation scalars', async () => {
+      const dir = await createProject();
+      await startRun(dir, baseStartInput());
+      const paths = runtimePaths(dir);
+      const state = await readJson(paths.active, null);
+      const bidi = String.fromCharCode(0x202e);
+      const secret = `PRIVATE_SCALAR_SENTINEL_${bidi}${'x'.repeat(5000)}`;
+      state.stage = 'remediation-test';
+      state.tickets = [{
+        ticket_id: secret,
+        stage_id: secret,
+        role: secret,
+        model_tier: secret,
+        attempt: { private: secret },
+        deadline_at: { private: secret },
+      }];
+      state.receipts = [{
+        receipt_id: secret,
+        ticket_id: 'run-safe:completed:ticket',
+        stage_id: secret,
+        role: secret,
+        status: secret,
+      }];
+      state.remediation_route = {
+        route: 'test',
+        cycle: { private: secret },
+        test_paths: [secret],
+      };
+      await atomicWriteJson(paths.active, state);
+
+      const compact = await compactStatus(dir);
+      const serialized = JSON.stringify(compact);
+      expect(serialized.length).toBeLessThan(RESPONSE_BUDGET_CHARS);
+      expect(serialized).not.toContain('PRIVATE_SCALAR_SENTINEL');
+      expect(serialized).not.toContain(bidi);
+      expect(['undefined', 'number']).toContain(typeof compact.facts?.retry?.attempt);
+      expect(['undefined', 'number']).toContain(typeof compact.facts?.remediation?.cycle);
+      if (compact.pending) {
+        expect(JSON.stringify(compact.pending)).not.toContain('PRIVATE_SCALAR_SENTINEL');
+      }
+      if (compact.last_receipt) {
+        expect(JSON.stringify(compact.last_receipt)).not.toContain('PRIVATE_SCALAR_SENTINEL');
+      }
     });
   });
 });

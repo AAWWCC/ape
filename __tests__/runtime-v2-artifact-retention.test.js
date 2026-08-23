@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { archiveRun } from '../lib/runtime/history.js';
-import { projectHistoryResponse } from '../lib/runtime/projection.js';
 import {
   compactArchivedArtifacts,
   recordArtifactRetentionStatus,
@@ -28,12 +27,16 @@ async function fixturePaths() {
 
 function terminalRun(runId, completedAt) {
   return {
+    schema_version: '2.0.0',
     run_id: runId,
     objective: `objective ${runId}`,
     mode: 'phase',
     lane: 'fast',
+    host: 'codex',
     requirements: [],
     status: 'completed',
+    stage: 'completed',
+    dispatch_state: 'none',
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: completedAt,
     terminal_at: completedAt,
@@ -69,7 +72,7 @@ async function redundantArtifacts(paths, runId, suffix) {
 }
 
 describe('archived artifact retention', () => {
-  it('keeps compacted history plan references resolvable through record.approved_plan', async () => {
+  it('keeps compacted plan references in immutable storage while explain stays privacy-safe', async () => {
     const paths = await fixturePaths();
     const runId = 'run-retention-approved-plan';
     const plan = {
@@ -98,6 +101,8 @@ describe('archived artifact retention', () => {
     const ticket = {
       run_id: runId,
       ticket_id: `${runId}:build:plan`,
+      stage_id: 'build',
+      role: 'implementer',
       candidate_plan: candidatePlan,
     };
     const archived = await archiveRun(paths, {
@@ -117,17 +122,19 @@ describe('archived artifact retention', () => {
     expect(compacted).toMatchObject({ compacted_runs: 1, removed_files: 4 });
     await expect(readFile(files.ticket)).rejects.toMatchObject({ code: 'ENOENT' });
 
+    const historyFile = path.join(paths.history, `${runId}.json`);
+    const before = await readFile(historyFile, 'utf8');
+    const stored = JSON.parse(before);
+    expect(stored.approved_plan).toEqual(approvedPlan);
+    expect(stored.tickets[0].candidate_plan).toEqual(candidatePlan);
+
     const explained = await historyAction(paths.root, 'explain', { run_id: runId });
-    const projected = projectHistoryResponse(explained);
-    expect(projected.record.approved_plan).toEqual(approvedPlan);
-    expect(projected.record.tickets[0].candidate_plan).toEqual({
-      plan_hash: planHash,
-      ticket_id: ticket.ticket_id,
-      plan_ref: 'record.approved_plan',
-    });
-    expect(projected.record.tickets[0].candidate_plan).not.toHaveProperty('plan');
-    expect(explained.record.tickets[0].candidate_plan).toEqual(candidatePlan);
-    expect(explained.record.record_hash).toBe(archived.record_hash);
+    expect(explained).not.toHaveProperty('record');
+    expect(explained.run).toMatchObject({ run_id: runId, status: 'completed' });
+    expect(explained.diagnostic.reason_code).toBe('completed');
+    expect(JSON.stringify(explained)).not.toContain('Keep history plan references live');
+    expect(await readFile(historyFile, 'utf8')).toBe(before);
+    expect(JSON.parse(before).record_hash).toBe(archived.record_hash);
   });
 
   it('archives byte-exact redundant artifacts before removing them and preserves history/audit', async () => {
