@@ -1,0 +1,93 @@
+name: Runtime defect report
+description: Report a reproducible APE runtime defect using bounded, privacy-safe diagnostics.
+title: "[Runtime defect]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        APE does not automatically collect or upload telemetry. Before submitting, inspect all evidence locally and share it only by explicit opt-in. Do not submit secrets, private filesystem paths, private prose, or raw `.ape` state. Replace real project data with synthetic, minimized examples.
+  - type: input
+    id: ape-version
+    attributes:
+      label: APE version
+      description: The installed APE version, for example 2.22.1.
+      placeholder: 2.22.1
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Host
+      description: The host running APE, such as Codex CLI or Claude Code.
+      placeholder: Codex CLI
+    validations:
+      required: true
+  - type: input
+    id: host-version
+    attributes:
+      label: Host version
+      description: The version of the host application.
+      placeholder: 1.2.3
+    validations:
+      required: true
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system and version
+      description: The operating system and version, without a user name or private path.
+      placeholder: macOS 15.6
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: The output of node --version, without additional command output.
+      placeholder: v24.0.0
+    validations:
+      required: true
+  - type: input
+    id: lane
+    attributes:
+      label: Lane
+      description: The APE lane shown by the local status diagnostic.
+      placeholder: mechanical, fast, or full
+    validations:
+      required: true
+  - type: input
+    id: stage
+    attributes:
+      label: Stage
+      description: The stage shown by the local status diagnostic.
+      placeholder: test, implement, review, gates, or merge
+    validations:
+      required: true
+  - type: input
+    id: reason-code
+    attributes:
+      label: Stable diagnostic reason code
+      description: Copy only the stable reason_code from the bounded local diagnostic.
+      placeholder: gate_failed
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostic-projection
+    attributes:
+      label: Bounded diagnostic projection
+      description: Paste only the reviewed, bounded diagnostic projection. Do not paste raw state, receipts, prompts, commands, command output, secrets, paths, or private prose.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: minimal-reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest synthetic, privacy-safe steps and fixture that reproduce the defect.
+      placeholder: |
+        1. Create a new temporary repository with ...
+        2. Run APE explicitly with ...
+        3. Observe ...
+    validations:
+      required: true

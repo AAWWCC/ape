@@ -1356,4 +1356,71 @@ describe('unified public run diagnostics', () => {
     expect(explanation).not.toContain('PRIVATE_PATCH_TAMPER');
   });
 
+  it('keeps the default diagnostic payload bounded to stable facts', async () => {
+    const sentinels = [
+      'PRIVATE_INCIDENT_OBJECTIVE',
+      'PRIVATE_CLAIMED_PATH',
+      'PRIVATE_TEST_PATH',
+      'PRIVATE_RECEIPT_PROSE',
+      'PRIVATE_RECEIPT_CAPABILITY',
+      'PRIVATE_PROMPT',
+      'PRIVATE_COMMAND',
+      'PRIVATE_COMMAND_OUTPUT',
+    ];
+    const { status } = await statusFor(runState({
+      objective: sentinels[0],
+      claimed_paths: [`src/${sentinels[1]}.js`],
+      test_paths: [`tests/${sentinels[2]}.test.js`],
+      prompt: sentinels[5],
+      status: 'blocked',
+      stage: 'implement',
+      gates: {
+        passed: false,
+        checks: {
+          'targeted-test': {
+            passed: false,
+            command: `node ${sentinels[6]}`,
+            output: sentinels[7],
+          },
+        },
+      },
+      receipts: [{
+        ticket_id: 'run-fixture-diagnostics:implement:ticket',
+        status: 'failed',
+        findings: [{ summary: sentinels[3] }],
+        evidence: { summary: sentinels[3] },
+        receipt_capability: sentinels[4],
+        timing: {
+          started_at: '2026-08-22T05:00:00.000Z',
+          completed_at: '2026-08-22T05:00:04.000Z',
+        },
+      }],
+    }));
+
+    const diagnostic = status.diagnostic;
+    expect(Object.keys(diagnostic).sort()).toEqual([
+      'failed_checks',
+      'next_safe_action',
+      'reason_code',
+      'recovery_rationale',
+      'stage_timing',
+    ]);
+    expect(diagnostic).toMatchObject({
+      reason_code: 'gate_failed',
+      next_safe_action: 'ape_run regate',
+      recovery_rationale: expect.any(String),
+      failed_checks: ['targeted-test'],
+      stage_timing: {
+        available: true,
+        source: 'receipt_timestamps',
+        stage_id: 'implement',
+        duration_ms: 4000,
+      },
+    });
+    expect(diagnostic.recovery_rationale.length).toBeLessThanOrEqual(240);
+    expect(diagnostic.failed_checks.length).toBeLessThanOrEqual(32);
+    const serialized = JSON.stringify(diagnostic);
+    for (const sentinel of sentinels) expect(serialized).not.toContain(sentinel);
+  });
+
 });

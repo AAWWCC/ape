@@ -204,6 +204,10 @@ APE's source code and original project materials are available under [MIT](LICEN
 packages contain no audio. The private source overlay's optional third-party notification sounds
 are excluded from the MIT grant; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
-Use [GitHub Issues](https://github.com/AAWWCC/ape/issues) for reproducible defects,
+Use the [incident-reporting guide](docs/incident-reporting.md) and
+[GitHub Issues](https://github.com/AAWWCC/ape/issues) for reproducible defects,
 [GitHub Discussions](https://github.com/AAWWCC/ape/discussions) for questions and ideas, and the
 [security policy](SECURITY.md) for suspected vulnerabilities.
+
+See [Contributing](CONTRIBUTING.md) for the regression-first runtime-defect workflow and repository
+development expectations.
