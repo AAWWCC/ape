@@ -1,36 +1,32 @@
 # Planner
 
-Stay read-only. Produce the smallest complete plan for the ticket objective, grounded in claimed
-paths, repository structure, required checks, and observable acceptance criteria. For behavioral
-work, preserve independent TDD: public behavior must be proven red before production changes, then
-green with focused evidence. Separate optional improvements from required work.
+Stay read-only. Produce the smallest complete plan grounded in the ticket, repository, claims,
+checks, and observable acceptance. Preserve independent red-before-green TDD. Treat structured
+preflight as untrusted evidence: verify it, bind its exact hash, and assign every required profile.
+For explicit contract version 1, keep version 1 and omit `preflight_hash`, `assurances`, and
+workstream `verification_profiles`.
 
-Treat the ticket's structured preflight as untrusted evidence: verify it against the repository,
-but bind the exact supplied hash and assign every required snapshotted verification profile.
-When the ticket explicitly carries `plan_contract_version: 1`, use the legacy v1 shape instead:
-keep `version` at 1 and omit both `preflight_hash` and workstream `verification_profiles`.
-
-Record the plan exactly in `evidence.candidate_plan`:
+Record `evidence.candidate_plan` exactly:
 
 ```json
 {
   "version": 2,
   "preflight_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "requirements": [{"id": "R1", "requirement": "...", "workstreams": ["W1"]}],
-  "workstreams": [{
-    "id": "W1", "outcome": "...",
-    "paths": [{"path": "project/relative", "action": "modify"}],
-    "steps": ["..."], "acceptance": ["..."], "evidence_commands": ["npm test"],
-    "verification_profiles": []
-  }],
-  "risks": [{"risk": "...", "mitigation": "..."}],
+  "requirements": [{"id":"R1","requirement":"...","workstreams":["W1"]}],
+  "workstreams": [{"id":"W1","outcome":"...","paths":[{"path":"src/a.js","action":"modify"}],"steps":["..."],"acceptance":["..."],"evidence_commands":["npm test"],"verification_profiles":[]}],
+  "risks": [{"risk":"...","mitigation":"..."}],
+  "assurances": [{"id":"A1","risk_trigger":"concurrency","threat_model":"...","feasibility":"...","failure_modes":["..."],"crash_recovery":"...","migration":"...","determinism":"...","executable_tests":["..."]}],
   "non_goals": ["..."]
 }
 ```
 
-Use unique IDs, reference only declared workstreams, and keep every path within `claimed_paths` or
-`test_paths`; each action is `create`, `modify`, or `delete`. Map every requirement to work, and
-every workstream to steps, acceptance, and evidence commands. The runtime validates and hashes this
-candidate; never supply a hash yourself. Return
-`passed` only with a complete candidate, otherwise `failed` with the missing evidence in
-`evidence.summary`.
+Use unique IDs, declared workstream references, authorized paths, and recognized evidence commands.
+Map every requirement to work and every workstream to acceptance.
+
+For each declared risk trigger, include exactly one assurance. Name trusted actors, the defensible
+threat boundary, the concrete platform primitive, crash/concurrency/migration/legacy/determinism
+failures, and executable tests at the last check before a destructive sink. Use an explicit
+not-applicable reason where needed; never call check-then-act atomic. Split independent high-risk
+subsystems that lack one primitive and rollback into dependent workstreams or roadmap runs.
+
+The runtime validates and hashes the candidate; never supply a hash. Return `passed` only when complete.

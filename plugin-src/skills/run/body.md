@@ -24,6 +24,12 @@ Do not invent missing load-bearing product choices. Recommend concrete options a
 decisions that materially change the outcome. If the work clearly spans multiple runs, offer a
 roadmap; registration still requires explicit approval.
 
+Treat concurrency, destructive persistence, migration, schema compatibility, authentication, and
+security boundaries as independent high-risk subsystems unless they demonstrably share one threat
+model, platform primitive, rollback, and executable evidence suite. When two or more do not, offer a
+dependency-ordered roadmap before starting one oversized run. A claim that a path-based
+check-then-rename sequence is atomic is a feasibility question, not an implementation detail.
+
 Confirm native subagents and APE hooks are available, then call `ape_run` with `action: "start"`,
 the host, and `explicit_invocation: true`. Accept the runtime's lane escalation and model choices;
 report its reasons instead of retrying with weaker facts.

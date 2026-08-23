@@ -12,8 +12,8 @@ body:
     id: ape-version
     attributes:
       label: APE version
-      description: The installed APE version, for example 2.22.1.
-      placeholder: 2.22.1
+      description: The installed APE version, for example 2.22.2.
+      placeholder: 2.22.2
     validations:
       required: true
   - type: input

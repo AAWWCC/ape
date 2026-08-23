@@ -59,6 +59,17 @@ function record(state, ticket, overrides = {}) {
   return actions;
 }
 
+function blocker(file, title) {
+  return {
+    file,
+    line: 1,
+    title,
+    detail: `${title} must be remediated`,
+    blocking: true,
+    remediation: { owner: 'production' },
+  };
+}
+
 function walkToReview(state) {
   const testTicket = issue(state, { id: 'test', role: 'test_writer' });
   record(state, testTicket);
@@ -93,19 +104,54 @@ describe('APE v2 remediation convergence (F1)', () => {
     expect(state.status).toBe('running');
   });
 
-  it('blocks when the remediation review itself disagrees instead of issuing remediation forever', () => {
+  it('continues when a remediation review reports a distinct blocker, then stops a repeated blocker', () => {
     const state = baseRun();
     const reviewTicket = walkToReview(state);
-    record(state, reviewTicket, { evidence: { verdict: 'disagree' } });
+    record(state, reviewTicket, {
+      evidence: { verdict: 'disagree' },
+      findings: [blocker('src/value.js', 'Initial defect')],
+    });
     const remediationBuild = state.tickets.at(-1);
     record(state, remediationBuild);
     const remediationReview = state.tickets.at(-1);
 
-    const blocked = record(state, remediationReview, { evidence: { verdict: 'disagree' } });
+    const continued = record(state, remediationReview, {
+      evidence: { verdict: 'disagree' },
+      findings: [blocker('src/lock.js', 'Newly exposed crash recovery defect')],
+    });
+    expect(continued.some((action) => action.type === 'issue_ticket'
+      && action.stage.id === 'remediation-build')).toBe(true);
+    expect(state.status).toBe('running');
+    expect(state.remediation_cycles).toBe(2);
+
+    const secondBuild = state.tickets.at(-1);
+    record(state, secondBuild);
+    const secondReview = state.tickets.at(-1);
+    const blocked = record(state, secondReview, {
+      evidence: { verdict: 'disagree' },
+      findings: [blocker('src/lock.js', 'Newly exposed crash recovery defect')],
+    });
     expect(blocked.some((action) => action.type === 'issue_ticket')).toBe(false);
     expect(state.status).toBe('blocked');
-    expect(state.block_reason).toMatch(/remediation/);
+    expect(state.block_reason).toMatch(/repeated.*remediation/i);
     expect(blocked.some((action) => action.type === 'release_lock')).toBe(true);
+  });
+
+  it('honors a configured remediation-cycle budget even when the next blocker is distinct', () => {
+    const state = baseRun({ policy: { max_remediation_cycles: 1 } });
+    const reviewTicket = walkToReview(state);
+    record(state, reviewTicket, {
+      evidence: { verdict: 'disagree' },
+      findings: [blocker('src/value.js', 'Initial defect')],
+    });
+    record(state, state.tickets.at(-1));
+    const blocked = record(state, state.tickets.at(-1), {
+      evidence: { verdict: 'disagree' },
+      findings: [blocker('src/other.js', 'Distinct late defect')],
+    });
+    expect(blocked.some((action) => action.type === 'issue_ticket')).toBe(false);
+    expect(state.status).toBe('blocked');
+    expect(state.block_reason).toMatch(/configured remediation budget \(1 cycles\)/);
   });
 
   // friction #23: the retry-then-remediate sequencing this test used to pin was
@@ -132,7 +178,7 @@ describe('APE v2 remediation convergence (F1)', () => {
     const blocked = record(state, remediationReview, { status: 'failed', evidence: {} });
     expect(blocked.some((action) => action.type === 'issue_ticket')).toBe(false);
     expect(state.status).toBe('blocked');
-    expect(state.block_reason).toMatch(/remediation cycle/);
+    expect(state.block_reason).toMatch(/repeated.*remediation|remediation cycle/i);
   });
 
   // friction #23: behavior change is the point — a single failed review record now

@@ -6,9 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { abortRun, recordReceipt, resumeRun, startRun, statusRun } from '../lib/runtime/service.js';
-import { atomicWriteJson } from '../lib/runtime/storage.js';
+import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { existsSync, readFileSync } from 'node:fs';
-import { acquireRunLock } from '../lib/runtime/lock.js';
+import { acquireRunLock, releaseRunLock } from '../lib/runtime/lock.js';
+import { currentTreeSha } from '../lib/runtime/git.js';
 import { bindCodexDispatch } from './codex-native-test-helper.js';
 
 const cleanups = [];
@@ -136,6 +137,51 @@ describe('APE v2 start-time working-tree hygiene', () => {
     expect(second.run.branch).toMatch(/^ape\/phase-/);
     expect(second.run.branch).not.toBe(first.run.branch);
     expect(git(dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(second.run.branch);
+  });
+
+  it('carries an exact blocked tree and unresolved findings into an explicit successor run', async () => {
+    const dir = await project();
+    const first = await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 2;\n');
+
+    const blocked = await readJson(paths.active);
+    blocked.status = 'blocked';
+    blocked.stage = 'remediation';
+    blocked.block_reason = 'review disagreement reached the configured remediation budget';
+    blocked.tree_sha = await currentTreeSha(dir);
+    blocked.tickets.push({
+      ticket_id: `${blocked.run_id}:remediation-review:test`,
+      stage_id: 'remediation-review',
+      role: 'reviewer',
+      parallel_group: 'code-review',
+    });
+    blocked.receipts.push({
+      ticket_id: `${blocked.run_id}:remediation-review:test`,
+      status: 'passed',
+      findings: [{
+        file: 'src/value.js', line: 1, title: 'Unresolved migration defect',
+        detail: 'The successor must preserve and remediate this finding.', blocking: true,
+      }],
+      evidence: { verdict: 'fail' },
+    });
+    await atomicWriteJson(paths.active, blocked);
+    await releaseRunLock(paths.lock, blocked.run_id);
+
+    const second = await startRun(dir, startInput({ supersedes_run: blocked.run_id }));
+    expect(second.ok).toBe(true);
+    expect(second.run.supersedes_run).toBe(blocked.run_id);
+    expect(second.run.branch).not.toBe(first.run.branch);
+    expect(await currentTreeSha(dir)).toBe(blocked.tree_sha);
+    expect(await readFileSync(path.join(dir, 'src', 'value.js'), 'utf8')).toContain('value = 2');
+    expect(second.run.receipts[0]).toMatchObject({
+      ticket_id: `${second.run.run_id}:carry-forward-admission`,
+      changed_files: ['src/value.js'],
+      evidence: { carry_forward_admission: { supersedes_run: blocked.run_id } },
+    });
+    expect(second.run.tickets[0].review_findings).toEqual([
+      expect.stringMatching(/Unresolved migration defect/),
+    ]);
   });
 
   it.each(['claude', 'codex'])('creates an isolated ape/* branch from the default tip for host %s', async (host) => {

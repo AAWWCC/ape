@@ -27,6 +27,8 @@ checked byte-for-byte by `npm run docs:check`.
 | `shipping.required_remote_checks` | boolean | `true` | Require remote CI; set `false` only for repositories intentionally without CI. |
 | `policy.fast_max_files` | number | `6` | Maximum production-file scope for the fast lane. |
 | `policy.high_risk_security_review` | boolean | `true` | Add security review when a risk trigger is armed. |
+| `policy.design_assurance_required` | boolean | `true` | Require one feasibility and executable-evidence assurance per declared risk trigger. |
+| `policy.max_remediation_cycles` | number | `3` | Maximum distinct-progress remediation cycles; repeated blockers stop earlier. |
 | `policy.full_suite_cache` | boolean | `true` | Reuse passing suites for the same tree and resolved command. |
 | `policy.evidence_scripts` | string array | `[]` | Extra exact package scripts a read-only agent may run as evidence. |
 | `policy.command_profiles` | object array | `[]` | Exact operator-attested external-engine commands. |

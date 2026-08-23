@@ -152,7 +152,7 @@ describe('public prompt contracts', () => {
     expect(PlanContractSchema.safeParse(example)).toMatchObject({ success: true });
     expect(example.version).toBe(2);
     expect(Object.keys(example).sort()).toEqual([
-      'non_goals', 'preflight_hash', 'requirements', 'risks', 'version', 'workstreams',
+      'assurances', 'non_goals', 'preflight_hash', 'requirements', 'risks', 'version', 'workstreams',
     ]);
   });
 

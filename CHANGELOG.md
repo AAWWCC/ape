@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 2.22.2 — 2026-08-23
+
+Moved high-risk design validation earlier by requiring structured threat-model, feasibility,
+failure-mode, recovery, migration, determinism, and executable-test assurances in v2 plans. Updated
+the planner, test-writer, implementer, and review prompts to require behavioral and fault-injection
+evidence instead of source-token assertions, and to decompose unrelated high-risk systems.
+
+Made review remediation bounded and convergent: distinct blocker sets can receive up to three cycles
+by default (configurable from one through ten), while repeated findings or absent progress stop
+immediately. Explicit successor runs can now inherit an exact blocked tree and its unresolved review
+findings through runtime-attested carry-forward admission.
+
 ## 2.22.1 — 2026-08-22
 
 Extended exact MCP tool-claim resolution for unreviewed providers to support declared `write` and

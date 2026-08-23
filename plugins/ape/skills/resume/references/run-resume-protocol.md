@@ -37,9 +37,16 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    and additive-only `claimed_paths`, `test_paths`, and canonical `risk_triggers`. Do not dispatch a
    writer while the hold remains.
 7. After all receipts in the returned group are recorded, call `ape_run next` and repeat until the
-   runtime reports `completed` or `blocked`. Poll `next` while a shipping run reports pending remote
-   checks. Remediation routes are scheduler-owned and serialized: production, test, and mixed/both
-   findings select build; test then review; or test then build then review respectively.
+runtime reports `completed` or `blocked`. Poll `next` while a shipping run reports pending remote
+checks. Remediation routes are scheduler-owned and serialized: production, test, and mixed/both
+findings select build; test then review; or test then build then review respectively.
+
+When a blocked run retains a dirty APE branch and the user explicitly asks APE to keep going, start
+one successor with `supersedes_run` set to the exact blocked run id and the same or additive claims.
+The runtime admits this only when the checked-out tree exactly matches the blocked tree, the default
+tip has not moved, and every dirty path is claimed; it then carries that tree and the latest
+unresolved review findings into the successor ticket. Never recreate the diff manually, omit the
+supersession link, or use this path for unrelated dirty work.
 
 If the runtime reports an active bound dispatch, wait. If it reports
 `dispatch_retirement_pending`, wait for the original agent unless the flight is genuinely orphaned

@@ -19,8 +19,8 @@ enforces.
 3. **Behavioral test independence.** Tests assert behavior, not the implementation that produced it.
 4. **Deterministic, tree-bound evidence.** Every receipt is validated against a recomputed tree SHA
    and changed-file set — claims are never trusted as written.
-5. **One retry per failed stage and one remediation cycle.** After the bounds are exhausted the run
-   blocks and escalates; it never silently retries past them.
+5. **One retry per failed stage and bounded, convergent remediation.** A new blocker set may receive
+   another configured cycle; a repeated blocker or exhausted budget blocks immediately.
 6. **Project and host agnosticism.** No host policy in an adapter, no hardcoded project tooling; the
    runtime runs identically under Claude and Codex.
 7. **Serialized writers and atomic state.** Each runtime state domain has one lock-held writer and
@@ -38,7 +38,7 @@ enforces.
 | No main-session production writes | `lib/runtime/hooks.js` ticket / path-claim policy; `prompts/common.md` agent contract |
 | Behavioral test independence | `test_writer` role boundary + `required_checks` (`red-test`); receipt test entries |
 | Deterministic, tree-bound evidence | `lib/runtime/receipt-validator.js` recomputes the tree SHA and changed files |
-| One retry + one remediation | `lib/runtime/constants.js` `MAX_STAGE_ATTEMPTS`, `MAX_REMEDIATION_CYCLES` |
+| One retry + convergent remediation | `lib/runtime/constants.js` bounds plus reducer finding fingerprints |
 | Project / host agnosticism | `lib/runtime/adapters.js` (Claude / Codex); no literal tooling in the core |
 | Serialized writers + atomic state | `lib/runtime/lock.js` + `storage.js` atomic writes; `lib/runtime/task-store.js` owns the MCP-only tasks lock and immutable generation journal, never nested with the receipt-effects lock |
 | Truthful completion | receipt hash chain + independent recompute in `receipt-validator.js` |

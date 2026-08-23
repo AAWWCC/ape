@@ -40,7 +40,8 @@ blocks the run. It is not a writing or remediation stage.
 ## Retries and remediation
 
 - A stage that could not complete may be retried once.
-- A blocking code-review verdict skips a verbatim retry and enters the single remediation cycle.
+- A blocking code-review verdict skips a verbatim retry and enters bounded remediation. A distinct
+  blocker set may continue up to `policy.max_remediation_cycles`; a repeated blocker stops early.
 - A reviewer may request exact additional production paths through `evidence.scope_expansion`.
   The runtime audits the expansion, reclassifies lane/risk, and gives the remediation ticket the
   expanded scope.
@@ -53,7 +54,7 @@ blocks the run. It is not a writing or remediation stage.
   findings route to `remediation build → review`; test findings route to
   `remediation test → review`; mixed or `both` findings route to
   `remediation test → remediation build → review`. Writers remain serialized, the security review
-  remains in the final group when armed, and all three paths spend the same single cycle. Versioned
+  remains in the final group when armed, and all three paths spend one cycle per writer sequence. Versioned
   remediation-test tickets carry `test_scope: "exact"`; lifecycle and receipt/tree validation deny
   sibling writes, while unversioned legacy remediation tickets retain their historical widening.
 - `failure_kind: capability` blocks immediately because the same ticket would face the same policy

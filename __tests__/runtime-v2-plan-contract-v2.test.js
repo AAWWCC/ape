@@ -35,6 +35,20 @@ function plan(overrides = {}) {
   };
 }
 
+function concurrencyAssurance() {
+  return {
+    id: 'A1',
+    risk_trigger: 'concurrency',
+    threat_model: 'Concurrent cooperating writers may crash or race; unrelated directory writers are outside authority.',
+    feasibility: 'An exclusive ownership-checked lock serializes the supported writers on every target platform.',
+    failure_modes: ['Crash after lock acquisition', 'Destination replacement immediately before persistence'],
+    crash_recovery: 'A successor proves the recorded owner is dead before removing a stale lock.',
+    migration: 'Existing unlocked data remains readable and is rewritten only after validation.',
+    determinism: 'Equivalent inputs produce byte-identical output independent of writer order.',
+    executable_tests: ['Terminate a lock owner and prove a successor proceeds without deleting a live lock.'],
+  };
+}
+
 const context = {
   preflight_hash: HASH,
   verification_profiles: [
@@ -153,6 +167,24 @@ describe('plan contract v2 bindings', () => {
     const unknown = plan();
     unknown.workstreams[0].verification_profiles = ['unit', 'missing'];
     expect(candidatePlanForScope(unknown, ['src/value.js'], null, context).errors.join(' ')).toMatch(/unknown.*profile/i);
+  });
+
+  it('requires a feasibility and failure-mode assurance for every declared risk trigger', () => {
+    const riskContext = {
+      ...context,
+      require_design_assurance: true,
+      risk_triggers: ['concurrency'],
+    };
+    expect(candidatePlanForScope(plan(), ['src/value.js'], null, riskContext)).toMatchObject({
+      valid: false,
+      errors: [expect.stringMatching(/design assurance.*concurrency/i)],
+    });
+    expect(candidatePlanForScope(
+      plan({ assurances: [concurrencyAssurance()] }),
+      ['src/value.js'],
+      null,
+      riskContext,
+    )).toMatchObject({ valid: true });
   });
 
   it('keeps v1 admission byte compatible when no v2 context is supplied', () => {

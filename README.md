@@ -126,7 +126,8 @@ assigned failing tests in `test_paths`, then a separate implementer owns product
 available to it; it cannot guarantee that a test is meaningful or a review is correct. This
 protocol does not describe mechanical work, read-only `debug`/`spike`, or `land`, which reviews and
 ships an existing diff without editing it. High-risk runs add a security review. Each failed stage
-can be retried once; a blocking review gets one remediation cycle.
+can be retried once; distinct blocking findings receive a bounded remediation budget, while repeated
+findings stop immediately as no-progress failures.
 
 New code and security reviews classify each blocking finding as production-, test-, or both-owned.
 APE serializes the matching remediation writers: production goes to the implementer, test goes to

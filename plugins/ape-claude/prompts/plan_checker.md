@@ -13,6 +13,8 @@ Check only:
    ticket's `required_checks`.
 4. Acceptance: every workstream has an observable completion signal, including red-before-green
    evidence for behavioral work.
+5. Assurance shape: every declared risk trigger has one complete design assurance and every named
+   executable test maps to an authorized test path and repository runner.
 
 A missing candidate or truncated legacy artifact is not proof that the planner omitted work. State
 what was unseen; return `disagree` only when available evidence shows a material violation or lacks
