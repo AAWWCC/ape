@@ -770,7 +770,7 @@ describe('unified public run diagnostics', () => {
       completed_at: '2026-08-22T05:00:05.000Z',
       merge: {
         provider: 'github',
-        url: 'https://PRIVATE_USER:PRIVATE_PASSWORD@github.com/private/repo/pull/1',
+        url: 'https://PRIVATE_USER:PRIVATE_PASSWORD@github.invalid/private/repo/pull/1',
         branch: 'ape/phase-private-merge',
         base: 'main',
         merged_at: '2026-08-22T05:00:05.000Z',
@@ -916,7 +916,7 @@ describe('unified public run diagnostics', () => {
       }],
       ['credentials', {
         provider: 'github',
-        url: 'https://PRIVATE_USER:PRIVATE_PASSWORD@github.com/acme/repo/pull/1',
+        url: 'https://PRIVATE_USER:PRIVATE_PASSWORD@github.invalid/acme/repo/pull/1',
         branch: 'ape/phase-safe',
         base: 'main',
         merged_at: '2026-08-22T05:00:05.000Z',
@@ -1222,7 +1222,7 @@ describe('unified public run diagnostics', () => {
     const secret = 'PRIVATE_HOSTILE_MERGE_BYTES';
     const merge = {
       provider: 'github',
-      url: `https://${secret}:password@github.com/acme/repo/pull/12`,
+      url: `https://${secret}:password@github.invalid/acme/repo/pull/12`,
       branch: 'ape/phase-safe-objective',
       base: 'main',
       merged_at: '2026-08-22T05:00:05.000Z',
