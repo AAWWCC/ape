@@ -31,11 +31,19 @@ export async function listTestFiles() {
 }
 
 async function loadDurations() {
-  try {
-    return JSON.parse(await readFile(join(ROOT, '.github', 'test-durations.json'), 'utf8'));
-  } catch {
-    return {};
+  const inventory = await listTestFiles();
+  const parsed = JSON.parse(await readFile(join(ROOT, '.github', 'test-durations.json'), 'utf8'));
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('test duration snapshot must be an object');
   }
+  const keys = Object.keys(parsed);
+  if (keys.length !== inventory.length || keys.some((key, index) => key !== inventory[index])) {
+    throw new Error('test duration snapshot must exactly cover the sorted test inventory');
+  }
+  if (keys.some((key) => !Number.isFinite(parsed[key]) || parsed[key] <= 0)) {
+    throw new Error('test duration snapshot values must be finite positive numbers');
+  }
+  return parsed;
 }
 
 // Longest-processing-time scheduling is deterministic and gives each Windows
@@ -60,13 +68,18 @@ export async function balancedShards(files, shardCount, durations = {}) {
 }
 
 export async function selectCiTests(mode, shardNumber = 1, shardCount = 1) {
-  if (mode === 'smoke') return [...WINDOWS_SMOKE_TEST_FILES];
+  const inventory = await listTestFiles();
+  const smoke = new Set(WINDOWS_SMOKE_TEST_FILES);
+  if (smoke.size !== WINDOWS_SMOKE_TEST_FILES.length
+    || WINDOWS_SMOKE_TEST_FILES.some((file) => !inventory.includes(file))) {
+    throw new Error('CI smoke inventory is duplicate, missing, or unsupported');
+  }
+  if (mode === 'smoke') return [...WINDOWS_SMOKE_TEST_FILES].sort();
   if (mode !== 'shard') throw new Error(`unknown mode '${mode}'; expected smoke or shard`);
   if (!Number.isInteger(shardNumber) || shardNumber < 1 || shardNumber > shardCount) {
     throw new Error(`shard number must be between 1 and ${shardCount}`);
   }
-  const smoke = new Set(WINDOWS_SMOKE_TEST_FILES);
-  const files = (await listTestFiles()).filter((file) => !smoke.has(file));
+  const files = inventory.filter((file) => !smoke.has(file));
   const bins = await balancedShards(files, shardCount, await loadDurations());
   return bins[shardNumber - 1].files;
 }

@@ -46,12 +46,62 @@ jobs:
       - run: npm run package:reproducible
       - run: npm run public:check
       - run: npm run smoke:plugins
-      - name: Focused package, MCP, and host integration tests
-        run: npm run test:agent -- __tests__/runtime-v2-plugin-packages-public.test.js __tests__/runtime-v2-public-surface.test.js __tests__/runtime-v2-plugin-validation.test.js __tests__/runtime-v2-mcp.test.js
+
+  smoke:
+    name: Test smoke set (Ubuntu, Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/run-ci-tests.mjs smoke
+
+  shard-1:
+    name: Test shard 1 of 3 (Ubuntu, Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/run-ci-tests.mjs shard 1 3
+
+  shard-2:
+    name: Test shard 2 of 3 (Ubuntu, Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/run-ci-tests.mjs shard 2 3
+
+  shard-3:
+    name: Test shard 3 of 3 (Ubuntu, Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/run-ci-tests.mjs shard 3 3
 
   full-suite:
-    name: Full suite (Ubuntu, Node 22)
-    needs: [package-smoke, marketplace-install-smoke]
+    name: Full suite aggregate
+    needs: [package-smoke, marketplace-install-smoke, smoke, shard-1, shard-2, shard-3]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -64,7 +114,6 @@ jobs:
       - run: npm audit --audit-level=high
       - name: Validate prompt evaluation release gate
         run: npm run eval:prompts:check
-      - run: npm test
 
   marketplace-install-smoke:
     name: Clean marketplace install (both hosts)

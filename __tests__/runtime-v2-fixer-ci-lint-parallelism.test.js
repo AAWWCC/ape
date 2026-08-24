@@ -17,6 +17,45 @@ function jobBlock(yaml, jobName) {
 }
 
 describe('public cross-platform CI and release contract', () => {
+  it('documents qualified reproducible wall-clock and adjusted-p90 methods without claiming empty data certifies', async () => {
+    const readme = await read('README.md');
+    const guide = await read('docs/performance-baselines.md');
+    expect(readme).toMatch(/performance-baselines\.md/u);
+    for (const marker of [
+      /commit/iu,
+      /operating system|\bOS\b/iu,
+      /Node(?:\.js)? version/iu,
+      /lockfile/iu,
+      /worker/iu,
+      /monotonic/iu,
+      /repeat/iu,
+      /nearest.rank p90/iu,
+      /raw_ms/iu,
+      /test_ms/iu,
+      /remote_ci_ms/iu,
+      /adjusted/iu,
+      /20 records/iu,
+      /18 pass/iu,
+    ]) expect(guide).toMatch(marker);
+    expect(guide).toMatch(/empty|insufficient/iu);
+    expect(guide).toMatch(/not (?:a )?certification|does not certify/iu);
+  });
+
+  it('documents the qualified cooperative writer and hybrid crash-recovery boundary', async () => {
+    const guide = await read('docs/performance-baselines.md');
+    for (const marker of [
+      /cooperative.{0,80}(?:writer|lock)|(?:writer|lock).{0,80}cooperative/isu,
+      /observable.{0,80}(?:validation|boundary)|(?:validation|boundary).{0,80}observable/isu,
+      /confirmed.dead.{0,80}(?:PID|owner)|(?:PID|owner).{0,80}confirmed.dead/isu,
+      /(?:live|EPERM|permission.ambiguous).{0,100}(?:retain|not.{0,20}(?:evict|reclaim|steal))/isu,
+      /60.second.{0,100}(?:empty|malformed|pre.metadata|unidentifiable)/isu,
+      /(?:empty|malformed|pre.metadata|unidentifiable).{0,100}60.second/isu,
+      /live.{0,100}pre.metadata.{0,100}(?:lease|not.{0,30}indefinite)/isu,
+      /final.{0,80}(?:validation.to.rename|syscall).{0,100}(?:gap|not protected|outside)/isu,
+      /same.UID.{0,100}(?:gap|not protected|outside)|(?:gap|not protected|outside).{0,100}same.UID/isu,
+    ]) expect(guide).toMatch(marker);
+  });
+
   it('cancels superseded PR runs and exercises the locked OS/Node package matrix', async () => {
     const yaml = await read('.github/workflows/ci.yml');
     expect(yaml).toMatch(/concurrency:[\s\S]*cancel-in-progress:\s*\$\{\{ github\.event_name == 'pull_request' \}\}/);
@@ -44,13 +83,15 @@ describe('public cross-platform CI and release contract', () => {
     expect(packageSmoke).toContain("APE_PUBLIC_REQUIRE_FORBIDDEN_HASHES: '1'");
   });
 
-  it('keeps the credential-free prompt gate and full suite behind package and install smoke', async () => {
+  it('keeps audit and the credential-free prompt gate while the full-suite aggregate depends on every partition', async () => {
     const yaml = await read('.github/workflows/ci.yml');
     const full = jobBlock(yaml, 'full-suite');
-    expect(full).toContain('needs: [package-smoke, marketplace-install-smoke]');
-    expect(full).toContain('npm audit --audit-level=high');
-    expect(full).toContain('npm run eval:prompts:check');
-    expect(full).toContain('npm test');
+    expect(yaml.match(/npm audit --audit-level=high/gu)).toHaveLength(1);
+    expect(yaml.match(/npm run eval:prompts:check/gu)).toHaveLength(1);
+    for (const dependency of ['package-smoke', 'marketplace-install-smoke', 'smoke', 'shard']) {
+      expect(full).toContain(dependency);
+    }
+    expect(full).not.toMatch(/npm test|vitest run/u);
   });
 
   it('installs both pinned host CLIs in an isolated clean-marketplace smoke', async () => {

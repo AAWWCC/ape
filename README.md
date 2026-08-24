@@ -194,7 +194,9 @@ use `npm run test:agent -- <paths...>` for the three-worker profile. Run
 
 Pull-request CI exercises all three packages and local MCP startup on Node 22 and 24 across Linux,
 macOS, and Windows, performs clean isolated marketplace installs for Claude and Codex, and runs the
-full suite on Ubuntu. Once the repository is public, a least-privilege CodeQL workflow runs on
+complete test inventory exactly once as one smoke set plus three duration-balanced Ubuntu shards.
+The committed timing snapshot and the qualified measurement and certification procedure are documented
+in [performance baselines](docs/performance-baselines.md). Once the repository is public, a least-privilege CodeQL workflow runs on
 pushes, pull requests, and weekly analysis. Dependabot alerts and security updates cover npm and
 GitHub Actions; routine version-update pull requests stay disabled for this solo-maintained
 repository. CI and release automation do not perform live paid prompt evaluations.
