@@ -739,9 +739,7 @@ function readHistoryFile(file, expected, openedTotal) {
   const fd = openSync(file, constants.O_RDONLY);
   try {
     const opened = fstatSync(fd);
-    if (!opened.isFile() || !sameIdentity(opened, expected)) {
-      throw new Error('history entry changed while being opened');
-    }
+    if (!opened.isFile()) throw new Error('history entry changed while being opened');
     if (opened.size > BENCHMARK_LIMITS.historyEntryBytes) {
       throw new Error('history entry exceeds byte limit');
     }
@@ -749,7 +747,14 @@ function readHistoryFile(file, expected, openedTotal) {
     if (openedTotal.bytes > BENCHMARK_LIMITS.historyTotalBytes) {
       throw new Error('history total exceeds byte limit');
     }
-    return readHandle(fd, opened.size, 'history entry changed while being read');
+    const changedWhileOpening = !sameSnapshot(expected, opened);
+    const bytes = readHandle(fd, opened.size, 'history entry changed while being read');
+    const after = fstatSync(fd);
+    if (!sameSnapshot(opened, after)) {
+      throw new Error('history entry changed while being read');
+    }
+    if (changedWhileOpening) openedTotal.changedWhileOpening = true;
+    return bytes;
   } finally {
     closeSync(fd);
   }
@@ -811,6 +816,9 @@ function readProjectHistory(projectDir) {
     }
     if (!byRun.has(record.run_id)) byRun.set(record.run_id, []);
     byRun.get(record.run_id).push(record);
+  }
+  if (openedTotal.changedWhileOpening) {
+    throw new Error('history entry changed while being opened');
   }
   const effective = [];
   for (const group of byRun.values()) {

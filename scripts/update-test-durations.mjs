@@ -374,18 +374,22 @@ async function validateStagedBytes(file, owned, expectedBytes) {
 }
 
 async function readBoundedJson(file, byteLimit, label) {
+  const before = await lstat(file);
+  if (!before.isFile()) throw new Error(`${label} must be a regular file`);
+  if (before.size > byteLimit) throw new Error(`${label} exceeds byte limit`);
   const handle = await open(file, constants.O_RDONLY);
   try {
-    const stats = await handle.stat();
-    if (!stats.isFile()) throw new Error(`${label} must be a regular file`);
-    if (stats.size > byteLimit) throw new Error(`${label} exceeds byte limit`);
-    const bytes = Buffer.alloc(stats.size);
+    const opened = await handle.stat();
+    if (!sameSnapshot(before, opened)) throw new Error(`${label} changed while being read`);
+    const bytes = Buffer.alloc(opened.size);
     let offset = 0;
     while (offset < bytes.length) {
       const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
       if (bytesRead === 0) throw new Error(`${label} changed while being read`);
       offset += bytesRead;
     }
+    const after = await handle.stat();
+    if (!sameSnapshot(opened, after)) throw new Error(`${label} changed while being read`);
     return JSON.parse(bytes.toString('utf8'));
   } finally {
     await handle.close();

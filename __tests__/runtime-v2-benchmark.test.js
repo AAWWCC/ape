@@ -1397,4 +1397,82 @@ describe('benchmark import from run history', () => {
     expect(readFileSync(file)).toEqual(before);
     expect(entryCount * limits.historyEntryBytes).toBeGreaterThan(limits.historyTotalBytes);
   });
+
+  it('preserves the ledger when an opened history entry is rewritten in place before it is read', () => {
+    rmSync(historyDir, { recursive: true, force: true });
+    mkdirSync(historyDir, { recursive: true });
+    const historyFile = join(historyDir, 'run-same-size-race.json');
+    const originalRecord = {
+      run_id: 'run-same-size-race',
+      status: 'completed',
+      mode: 'phase',
+      lane: 'mechanical',
+      host: 'claude',
+      created_at: '2026-07-01T00:00:00.000Z',
+      completed_at: '2026-07-01T00:01:00.000Z',
+      timing: { raw_ms: 60_000, test_ms: 10_000, remote_ci_ms: 5_000 },
+      record_hash: 'a'.repeat(64),
+    };
+    const replacementRecord = {
+      ...originalRecord,
+      timing: { ...originalRecord.timing, raw_ms: 90_000 },
+      record_hash: 'b'.repeat(64),
+    };
+    const originalBytes = Buffer.from(`${JSON.stringify(originalRecord, null, 2)}\n`);
+    const replacementBytes = Buffer.from(`${JSON.stringify(replacementRecord, null, 2)}\n`);
+    expect(replacementBytes).toHaveLength(originalBytes.length);
+    writeFileSync(historyFile, originalBytes);
+
+    const injected = join(projectDir, 'history-read-race-injected');
+    const injector = join(projectDir, 'rewrite-open-history-before-read.mjs');
+    writeFileSync(injector, `
+      import fs from 'node:fs';
+      import path from 'node:path';
+      import { syncBuiltinESMExports } from 'node:module';
+      const target = path.resolve(process.env.APE_HISTORY_RACE_TARGET);
+      const originalOpenSync = fs.openSync;
+      const originalReadSync = fs.readSync;
+      const originalWriteSync = fs.writeSync;
+      let targetFd;
+      let triggered = false;
+      fs.openSync = function(file, flags, ...rest) {
+        const fd = originalOpenSync.call(this, file, flags, ...rest);
+        if (path.resolve(String(file)) === target && flags !== 'r+') targetFd = fd;
+        return fd;
+      };
+      fs.readSync = function(fd, ...rest) {
+        if (!triggered && fd === targetFd) {
+          triggered = true;
+          const replacement = Buffer.from(process.env.APE_HISTORY_RACE_BYTES, 'base64');
+          const rewriteFd = originalOpenSync.call(fs, target, 'r+');
+          try {
+            originalWriteSync.call(fs, rewriteFd, replacement, 0, replacement.length, 0);
+            fs.futimesSync(rewriteFd, new Date('2001-01-01T00:00:00.000Z'), new Date('2001-01-01T00:00:00.000Z'));
+            fs.fsyncSync(rewriteFd);
+          } finally {
+            fs.closeSync(rewriteFd);
+          }
+          fs.writeFileSync(process.env.APE_HISTORY_RACE_INJECTED, 'injected\\n');
+        }
+        return originalReadSync.call(this, fd, ...rest);
+      };
+      syncBuiltinESMExports();
+    `);
+    const before = readFileSync(file);
+
+    const result = runCli(['import', '--project', projectDir, '--file', file], {
+      env: {
+        NODE_OPTIONS: `--import=${injector}`,
+        APE_HISTORY_RACE_TARGET: historyFile,
+        APE_HISTORY_RACE_BYTES: replacementBytes.toString('base64'),
+        APE_HISTORY_RACE_INJECTED: injected,
+      },
+    });
+
+    expect(readFileSync(injected, 'utf8')).toBe('injected\n');
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('benchmark-v2: history entry changed while being read\n');
+    expect(readFileSync(file)).toEqual(before);
+  });
 });

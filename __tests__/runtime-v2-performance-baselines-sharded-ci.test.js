@@ -219,6 +219,58 @@ describe('strict complete duration refresh', () => {
     expect(readFileSync(destination)).toEqual(before);
   });
 
+  it('fails closed when the timing report is rewritten after its opened-file snapshot', () => {
+    const root = fixtureProject();
+    const destination = join(root, '.github', 'test-durations.json');
+    const before = readFileSync(destination);
+    const original = {
+      success: true,
+      testResults: [
+        timingResult(root, '__tests__/a.test.js', 10, 20),
+        timingResult(root, '__tests__/b.test.js', 10, 40),
+      ],
+    };
+    const replacement = {
+      success: true,
+      testResults: [
+        timingResult(root, '__tests__/a.test.js', 10, 90),
+        timingResult(root, '__tests__/b.test.js', 10, 40),
+      ],
+    };
+    const injector = join(root, 'rewrite-open-duration-report.mjs');
+    writeFileSync(injector, `
+      import fs from 'node:fs';
+      import path from 'node:path';
+      const originalOpen = fs.promises.open.bind(fs.promises);
+      fs.promises.open = async function(candidate, flags, ...rest) {
+        const handle = await originalOpen(candidate, flags, ...rest);
+        if (path.basename(String(candidate)) === 'vitest.json' && flags === fs.constants.O_RDONLY) {
+          const originalRead = handle.read.bind(handle);
+          let injected = false;
+          handle.read = async function(...readArgs) {
+            if (!injected) {
+              injected = true;
+              fs.writeFileSync(String(candidate), Buffer.from(process.env.APE_REPLACEMENT_REPORT, 'base64'));
+            }
+            return originalRead(...readArgs);
+          };
+        }
+        return handle;
+      };
+    `);
+
+    const originalBytes = Buffer.from(JSON.stringify(original));
+    const replacementBytes = Buffer.from(JSON.stringify(replacement));
+    expect(replacementBytes).toHaveLength(originalBytes.length);
+    const result = runRefresh(root, original, 0, {
+      NODE_OPTIONS: `--import=${injector}`,
+      APE_REPLACEMENT_REPORT: replacementBytes.toString('base64'),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(destination)).toEqual(before);
+  });
+
   it('installs complete results in canonical order with private mode', () => {
     const root = fixtureProject();
     const result = runRefresh(root, {
