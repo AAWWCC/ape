@@ -17,15 +17,17 @@ const SAFE = [...SAFE_CLAUDE_SUBAGENT_TOOLS];
 const MCP_TOOL_PATTERN = 'mcp__*';
 const DENIED = [
   'mcp__plugin_ape_ape__ape_run',
+  'mcp__plugin_ape_ape__ape_status',
   'mcp__plugin_ape_ape__ape_config',
   'mcp__plugin_ape_ape__ape_history',
   'mcp__ape__ape_run',
+  'mcp__ape__ape_status',
   'mcp__ape__ape_config',
   'mcp__ape__ape_history',
 ];
 const WRITER_EXTRA = ['Edit', 'Write', 'MultiEdit'];
 const WRITERS = new Set(['implementer', 'test-writer']);
-const CONTROL_PLANE = /(?:^|__)ape_(run|config|history)$/;
+const CONTROL_PLANE = /(?:^|__)ape_(run|status|config|history)$/;
 
 function parseToolSurface(file) {
   const source = readFileSync(path.join(agentsDir, file), 'utf8');

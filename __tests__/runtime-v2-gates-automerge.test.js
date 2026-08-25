@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { currentTreeSha, runGit } from '../lib/runtime/git.js';
+import { currentTreeSha, remoteBranchTip, runGit } from '../lib/runtime/git.js';
 import { autoMergeGithub } from '../lib/runtime/gates.js';
 // Namespace import so the not-yet-implemented poll export resolves to undefined
 // (a red TypeError when called) instead of a module-link error that would
@@ -15,6 +15,7 @@ vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 vi.mock('../lib/runtime/git.js', () => ({
   runGit: vi.fn(),
   currentTreeSha: vi.fn(),
+  remoteBranchTip: vi.fn(),
   workingTreeStatus: vi.fn(),
 }));
 
@@ -133,6 +134,8 @@ describe('autoMergeGithub', () => {
     };
     currentTreeSha.mockReset();
     currentTreeSha.mockResolvedValue(GATE_TREE);
+    remoteBranchTip.mockReset();
+    remoteBranchTip.mockResolvedValue(HEAD_SHA);
     runGit.mockReset();
     runGit.mockImplementation(async (dir, args) => {
       gitCalls.push(args);
@@ -238,6 +241,19 @@ describe('autoMergeGithub', () => {
     await expect(autoMergeGithub(dir, stateFor(['src/kept.js']), config))
       .rejects.toThrow(/working tree changed after gates passed/);
     // Nothing was staged, committed, or pushed.
+    expect(gitCalls.some((args) => ['add', 'commit', 'push'].includes(args[0]))).toBe(false);
+  });
+
+  it('refuses to mutate shipping state when the remote base advanced after the run started', async () => {
+    const dir = await project(['src/kept.js']);
+    ghResponses.tracked = 'src/kept.js\0';
+    remoteBranchTip.mockResolvedValue('d'.repeat(40));
+    await expect(autoMergeGithub(dir, {
+      ...stateFor(['src/kept.js']),
+      base_branch: 'main',
+      base_commit_sha: HEAD_SHA,
+      auto_merge_authorized: true,
+    }, config)).rejects.toThrow(/origin\/main advanced.*start a successor run/);
     expect(gitCalls.some((args) => ['add', 'commit', 'push'].includes(args[0]))).toBe(false);
   });
 

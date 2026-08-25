@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { evaluateLifecyclePolicy } from '../lib/runtime/hooks.js';
 
 // Main-session-exemption binding hardening. A control-plane tool event
-// (ape_run / ape_config / ape_history, bare or mcp-namespaced) that carries a
+// (ape_run / ape_status / ape_config / ape_history, bare or mcp-namespaced) that carries a
 // host-delivered ticket binding — a payload ticket_id field or the
 // APE_TICKET_ID env channel — is a bound worker call even when the host
 // attaches no agent identity, so it must no longer qualify for the pre-policy
@@ -19,9 +19,11 @@ import { evaluateLifecyclePolicy } from '../lib/runtime/hooks.js';
 
 const CONTROL_TOOLS = [
   'ape_run',
+  'ape_status',
   'ape_config',
   'ape_history',
   'mcp__plugin_ape_ape__ape_run',
+  'mcp__plugin_ape_ape__ape_status',
   'mcp__plugin_ape_ape__ape_config',
   'mcp__plugin_ape_ape__ape_history',
 ];

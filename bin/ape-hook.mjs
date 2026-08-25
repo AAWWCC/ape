@@ -119,7 +119,8 @@ try {
   }
   const event = normalizeLifecycleEvent(input);
 
-  // The APE control-plane MCP tools (ape_run / ape_config / ape_history) are the
+  // The APE control-plane MCP tools (ape_run / ape_status / ape_config /
+  // ape_history) are the
   // runtime's own surface — the sanctioned path to record receipts, abort, and
   // override. They never write production files, and gating them behind the
   // stage/tree guard deadlocks recovery: a failed stage's unattributed tree

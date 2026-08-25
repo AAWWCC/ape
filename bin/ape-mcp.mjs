@@ -110,6 +110,10 @@ const TOOLS = Object.freeze([
           type: 'string',
           description: 'Optional on start: run_id of an abandoned/blocked run this run supersedes; recorded in the immutable history record so one converged task does not read as repeated failures.',
         },
+        auto_merge_authorized: {
+          type: 'boolean',
+          description: 'Required true on each public start when shipping.auto_merge is enabled. Set it only after the operator explicitly authorizes this run to push, open a pull request, and merge; persistent config alone is not consent.',
+        },
         plan_contract_version: {
           type: 'integer',
           enum: [1, 2],
@@ -314,7 +318,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.22.2' };
+    return { name: 'ape', version: '2.22.3' };
   }
 }
 
@@ -463,6 +467,7 @@ async function dispatchApeRun(projectDir, input) {
       requirements: input.requirements ?? [],
       ...(input.completes !== undefined ? { completes: input.completes } : {}),
       ...(input.supersedes_run !== undefined ? { supersedes_run: input.supersedes_run } : {}),
+      ...(input.auto_merge_authorized !== undefined ? { auto_merge_authorized: input.auto_merge_authorized } : {}),
       plan_contract_version: input.plan_contract_version ?? (
         (input.mode ?? 'phase') === 'phase' &&
         (input.behavioral ?? true) === true
@@ -490,6 +495,7 @@ async function dispatchApeRun(projectDir, input) {
       // and the cross-run supersession marker only when the caller sent them.
       ...(input.completes !== undefined ? { completes: input.completes } : {}),
       ...(input.supersedes_run !== undefined ? { supersedes_run: input.supersedes_run } : {}),
+      ...(input.auto_merge_authorized !== undefined ? { auto_merge_authorized: input.auto_merge_authorized } : {}),
       plan_contract_version: input.plan_contract_version ?? (
         (input.mode ?? 'phase') === 'phase' &&
         (input.behavioral ?? true) === true

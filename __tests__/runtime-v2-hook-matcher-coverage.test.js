@@ -17,7 +17,7 @@ import {
 // policy event Codex does not implement. The shared PreToolUse/PostToolUse
 // matchers cover exactly the enforcement tool set:
 //
-//   Edit|Write|MultiEdit|NotebookEdit|apply_patch|Bash|Agent|Task|mcp__.*|ape_(run|config|history)
+//   Edit|Write|MultiEdit|NotebookEdit|apply_patch|Bash|Agent|Task|mcp__.*|ape_(run|status|config|history)
 //
 // This suite is the executable proof that the narrowing keeps zero enforcement
 // gap. The coverage/tripwire assertions (§1, §2 incl. amendments A1/A2, §4, §5)

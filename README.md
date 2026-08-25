@@ -144,7 +144,10 @@ keep one call open for a bounded period.
 
 By default, a green run is held at merge until the audited `ship` action re-proves the gates. With
 `shipping.auto_merge: true`, APE instead pushes the run branch, opens or reuses a GitHub pull
-request, waits for required checks, and squash-merges.
+request, waits for required checks, and squash-merges. Public/native starts require explicit
+per-run authorization (`auto_merge_authorized: true`) when this setting is enabled; the stored
+setting alone cannot authorize a new run. APE also verifies the server-advertised base tip at start
+and again before shipping so stale merge-base evidence cannot be published.
 
 ## Configuration
 

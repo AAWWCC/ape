@@ -71,6 +71,12 @@ duplicate physical agent.
 to `ape_run next`, which is the action that advances those states. A gate-blocked run points to
 `regate`; a green auto-merge hold points to `ship`.
 
+A public/native `start` also treats shipping authority as run-scoped. If
+`shipping.auto_merge` is true, the caller must obtain explicit operator authorization for that run
+and send `auto_merge_authorized: true`; persistent configuration alone is not consent. Authorized
+starts compare the local remote-tracking base with the server-advertised branch tip before creating
+a run branch, and shipping repeats that check before its first Git mutation.
+
 ### Recovery actions
 
 - `regate` re-runs a failed merge gate. The attempt budget is bounded.

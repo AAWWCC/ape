@@ -20,6 +20,13 @@ this and every later APE MCP call.
 - `plan_contract_version: 2` for every newly started behavioral fast or full `phase` run. Omit it for mechanical and
   non-phase modes, and every resume; explicit version 1 is only for legacy compatibility.
 
+Call `ape_config` with `action: "get"` before starting and inspect `shipping.auto_merge`. When it is
+true, explain that this run may push a branch, open a pull request, and merge it, then obtain the
+operator's explicit authorization for this run. Only after that authorization may the start include
+`auto_merge_authorized: true`. Never infer shipping consent from the APE invocation, a prior run, or
+persistent configuration. If authorization is absent, stop before `ape_run start` and offer to set
+`shipping.auto_merge` false so the run ends at the audited shipping hold.
+
 Do not invent missing load-bearing product choices. Recommend concrete options and ask only for
 decisions that materially change the outcome. If the work clearly spans multiple runs, offer a
 roadmap; registration still requires explicit approval.

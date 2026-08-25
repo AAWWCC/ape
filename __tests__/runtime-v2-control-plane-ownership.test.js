@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { evaluateLifecyclePolicy } from '../lib/runtime/hooks.js';
 
 // Control-plane ownership (friction #13; phantom-dispatch incident). The
-// orchestrator (main session) owns ape_run/ape_config/ape_history; a bound
+// orchestrator (main session) owns ape_run/ape_status/ape_config/ape_history; a bound
 // Claude subagent that reached ape_run next would receive a live dispatch nonce
 // — a launch capability — and could spawn its own subagent, exactly the phantom
 // binding the operator had to expire-dispatch away. The one-owner deny closes
@@ -41,6 +41,9 @@ describe('APE v2 control-plane ownership policy', () => {
     'mcp__plugin_ape_ape__ape_run',
     'mcp__ape__ape_run',
     'ape_run',
+    'mcp__plugin_ape_ape__ape_status',
+    'mcp__ape__ape_status',
+    'ape_status',
     'mcp__plugin_ape_ape__ape_config',
     'mcp__plugin_ape_ape__ape_history',
   ];
@@ -314,6 +317,7 @@ async function corruptProject() {
 
 const CORRUPT_CONTROL_TOOLS = [
   'mcp__plugin_ape_ape__ape_run',
+  'mcp__plugin_ape_ape__ape_status',
   'mcp__plugin_ape_ape__ape_config',
   'mcp__plugin_ape_ape__ape_history',
 ];

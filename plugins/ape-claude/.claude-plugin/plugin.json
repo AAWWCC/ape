@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "ape",
-  "version": "2.22.2",
+  "version": "2.22.3",
   "description": "APE — durable, evidence-gated engineering runs for AI coding agents.",
   "author": {
     "name": "AAWWCC",

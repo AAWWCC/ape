@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2.22.3 — 2026-08-24
+
+Prevented persistent `shipping.auto_merge` configuration from silently authorizing a new public
+run. Auto-merge starts now require explicit per-run operator authorization, verify the
+server-advertised base branch before creating a run branch, and repeat that freshness check before
+the first shipping mutation.
+
+Preserved exact clean committed trees when superseding blocked runs instead of creating an empty
+successor from the default branch. Also classified `ape_status` consistently as an
+orchestrator-owned control-plane tool across lifecycle policy, hooks, and agent manifests.
+
 ## 2.22.2 — 2026-08-23
 
 Moved high-risk design validation earlier by requiring structured threat-model, feasibility,

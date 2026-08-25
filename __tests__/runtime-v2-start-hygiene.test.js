@@ -184,6 +184,102 @@ describe('APE v2 start-time working-tree hygiene', () => {
     ]);
   });
 
+  it('carries an exact clean committed blocked tree into an explicit successor run', async () => {
+    const dir = await project();
+    const first = await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 2;\n');
+
+    const blocked = await readJson(paths.active);
+    blocked.status = 'blocked';
+    blocked.stage = 'gates';
+    blocked.block_reason = 'remote checks failed after shipping committed the run tree';
+    blocked.tree_sha = await currentTreeSha(dir);
+    await atomicWriteJson(paths.active, blocked);
+    await releaseRunLock(paths.lock, blocked.run_id);
+
+    git(dir, 'add', 'src/value.js');
+    git(dir, 'commit', '-qm', 'runtime-owned shipping commit');
+    const predecessorCommit = git(dir, 'rev-parse', 'HEAD');
+    expect(git(dir, 'status', '--porcelain').split('\n').filter((line) => line && !line.endsWith(' .ape/'))).toEqual([]);
+    expect(git(dir, 'rev-parse', 'HEAD^{tree}')).toBe(blocked.tree_sha);
+
+    const second = await startRun(dir, startInput({ supersedes_run: blocked.run_id }));
+    expect(second.ok).toBe(true);
+    expect(second.run.supersedes_run).toBe(blocked.run_id);
+    expect(second.run.branch).not.toBe(first.run.branch);
+    expect(second.run.base_commit_sha).toBe(blocked.base_commit_sha);
+    expect(git(dir, 'merge-base', '--is-ancestor', predecessorCommit, 'HEAD')).toBe('');
+    expect(await currentTreeSha(dir)).toBe(blocked.tree_sha);
+    expect(await readFileSync(path.join(dir, 'src', 'value.js'), 'utf8')).toContain('value = 2');
+    expect(second.run.receipts[0]).toMatchObject({
+      ticket_id: `${second.run.run_id}:carry-forward-admission`,
+      changed_files: ['src/value.js'],
+      evidence: { carry_forward_admission: { supersedes_run: blocked.run_id } },
+    });
+  });
+
+  it('requires explicit per-run authorization when automatic merging is enabled', async () => {
+    const dir = await project();
+    await atomicWriteJson(runtimePaths(dir).config, {
+      shipping: { auto_merge: true, provider: 'github', required_remote_checks: false },
+      test_commands: { full: 'node -e "process.exit(0)"', targeted: 'node -e "process.exit(0)"' },
+    });
+
+    await expect(startRun(dir, startInput({
+      host: 'claude',
+      binding_protocol: 'native-v1',
+    }))).rejects.toThrow(/auto_merge_authorized: true/);
+    expect((await statusRun(dir)).active).toBe(false);
+    expect(git(dir, 'branch', '--list', 'ape/*')).toBe('');
+
+    const started = await startRun(dir, startInput({
+      host: 'claude',
+      binding_protocol: 'native-v1',
+      auto_merge_authorized: true,
+    }));
+    expect(started.ok).toBe(true);
+    expect(started.run.auto_merge_authorized).toBe(true);
+  });
+
+  it('rejects an auto-merge start before branching when origin main is stale', async () => {
+    const dir = await project();
+    const remote = await mkdtemp(path.join(tmpdir(), 'ape-start-hygiene-remote-'));
+    const updater = await mkdtemp(path.join(tmpdir(), 'ape-start-hygiene-updater-'));
+    cleanups.push(remote, updater);
+    git(remote, 'init', '-q', '--bare', '-b', 'main');
+    git(dir, 'remote', 'add', 'origin', remote);
+    git(dir, 'push', '-q', '-u', 'origin', 'main');
+    git(dir, 'remote', 'set-head', 'origin', 'main');
+    const staleTip = git(dir, 'rev-parse', 'refs/remotes/origin/main');
+
+    git(updater, 'clone', '-q', remote, '.');
+    git(updater, 'config', 'user.email', 'ape@example.test');
+    git(updater, 'config', 'user.name', 'APE Test');
+    await writeFile(path.join(updater, 'src', 'remote.js'), 'export const remote = true;\n');
+    git(updater, 'add', 'src/remote.js');
+    git(updater, 'commit', '-qm', 'advance remote main');
+    git(updater, 'push', '-q', 'origin', 'main');
+    const remoteTip = git(updater, 'rev-parse', 'HEAD');
+    expect(remoteTip).not.toBe(staleTip);
+
+    await atomicWriteJson(runtimePaths(dir).config, {
+      shipping: { auto_merge: true, provider: 'github', required_remote_checks: false },
+      test_commands: { full: 'node -e "process.exit(0)"', targeted: 'node -e "process.exit(0)"' },
+    });
+    const branchBefore = git(dir, 'branch', '--show-current');
+    await expect(startRun(dir, startInput({
+      host: 'claude',
+      binding_protocol: 'native-v1',
+      auto_merge_authorized: true,
+    }))).rejects.toThrow(/origin\/main is stale.*git fetch origin main/);
+
+    expect((await statusRun(dir)).active).toBe(false);
+    expect(git(dir, 'branch', '--show-current')).toBe(branchBefore);
+    expect(git(dir, 'branch', '--list', 'ape/*')).toBe('');
+    expect(git(dir, 'rev-parse', 'refs/remotes/origin/main')).toBe(staleTip);
+  });
+
   it.each(['claude', 'codex'])('creates an isolated ape/* branch from the default tip for host %s', async (host) => {
     const dir = await project();
     const baseTip = git(dir, 'rev-parse', 'HEAD');
