@@ -9,8 +9,10 @@ only launch the tickets it returns.
 
 `implementer → gates → ship`
 
-For documentation, generated output, non-behavioral configuration, and tracked data. A declared
-risk can add security review without changing the lane.
+For documentation, generated output, non-behavioral configuration, and tracked data. Repository-
+owned nested output under `plugins/<host>/dist/` and `release/generated/` is mechanical too;
+arbitrary nested `dist` or `build` directories are not. A declared risk can add security review
+without changing the lane.
 
 ### Fast
 
@@ -36,6 +38,13 @@ cycle, but it does cost one additional deep-tier agent dispatch beyond the two p
 
 The judge receives the disagreeing reviewers' bounded `review_findings` and either advances or
 blocks the run. It is not a writing or remediation stage.
+
+Behavioral fast/full phase runs use the test-writer/red-test stage; plan contract v2 adds the
+preflight analyst before it. Non-behavioral fast/full phase runs keep their ordinary planning (full
+only), build, review, and merge gates but omit preflight v2 and the test-writer stage; targeted
+stage checks run only when `test_paths` are present. An explicit `plan_contract_version: 2` on
+non-behavioral, non-phase, or non-fast/full work is refused before APE creates a branch because that
+contract requires a schedulable preflight.
 
 ## Retries and remediation
 
@@ -74,9 +83,11 @@ blocks the run. It is not a writing or remediation stage.
 | `spike` | One read-only research stage. |
 | `land` | Reviews and ships an existing, non-empty diff with no writing stage. |
 
-For `land`, every changed file must be inside `claimed_paths` at start. A blocking review cannot be
-remediated because the pipeline deliberately has no writer; revise the diff outside APE and start a
-new land run.
+For `land`, HEAD must equal or descend from the resolved default-branch tip. APE reviews the entire
+diff from that tip through the live working tree, so already-committed feature work and dirty
+finishing edits are admitted together. Every changed file must be inside `claimed_paths` or
+`test_paths` at start. A blocking review cannot be remediated because the pipeline deliberately has
+no writer; revise the diff outside APE and start a new land run.
 
 ## Gates
 
@@ -99,7 +110,15 @@ or exhausted respawn budget fails closed.
 
 GitHub is the only shipping provider. On green gates APE pushes the run branch, opens or reuses a
 pull request, and rests in `shipping` while required checks run. `next` polls those checks; green
-checks lead to a runtime-owned squash merge, and a failed required check blocks at the gates.
+checks lead to a runtime-owned squash merge, and a failed required check blocks at the gates. If a
+protected base rejects the immediate merge and requires `--auto`, APE enables GitHub auto-merge and
+keeps polling until the exact pushed head is observed as merged.
+
+The scheduler first attempts its feature commit with the repository's normal signing setup. Only a
+signer/passphrase-specific failure is retried with `--no-gpg-sign`; unrelated commit failures remain
+fatal, and GitHub creates the final squash commit. After an exact remote merge is proven, local
+fetch/switch/pull/branch cleanup is best-effort. A worktree conflict or other cleanup error is
+retained in terminal checkout metadata for `ape_run resume` and does not falsify the remote merge.
 
 With `shipping.required_remote_checks: false`, a project explicitly declares that it has no CI and
 can merge in-call. With `shipping.auto_merge: false`, green work is held at merge. The audited

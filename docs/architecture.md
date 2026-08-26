@@ -111,6 +111,11 @@ Release validation checks all eleven domain owners through this metadata, then c
 root bundles into both plugin distributions. This proves that the owners required by an entry
 point are actually reachable without relying on symbol names surviving tree-shaking.
 
+The lane classifier treats the generated copies under `plugins/<host>/dist/` and staged
+`release/generated/` output as mechanical while keeping unrelated nested `dist`/`build` source
+trees behavioral. This makes release/package regeneration schedulable without broadening the
+generated-path exception across a monorepo.
+
 ## Trust boundary
 
 The model proposes work and returns receipt drafts. The runtime independently supplies or verifies
@@ -120,3 +125,8 @@ hashes, stage transitions, and merge gates. Agent text never grants authority.
 Lifecycle hooks enforce this boundary at tool time. Main-session control-plane calls remain
 available, while a bound child may act only within its immutable ticket. Unknown or ambiguous
 write/execute paths fail closed during an active run.
+
+Shipping truth and local checkout hygiene are separate. `github-shipping.js` proves the exact
+pushed head and remote merge before completion; `receipt-service.js` then reconciles the local
+checkout and persists `returned`, `retained_dirty`, or `retained_error`. A local worktree ownership
+conflict can therefore be retried without changing immutable remote-merge provenance.

@@ -109,6 +109,24 @@ describe('versioned preflight artifact contract', () => {
     expect(recorded.run.preflight.artifact.objective).toBe(objective);
   });
 
+  it('accepts receipt-backed baseline evidence when the command output hash is unavailable', async () => {
+    const dir = await project();
+    const started = await startRun(dir, input());
+    const value = artifact({
+      baseline: [{ command: 'npm test', observation: 'The authored assertion is red' }],
+    });
+    const hashless = receipt(started.run.tickets[0], value);
+    delete hashless.tests[0].output_hash;
+
+    const recorded = await recordReceipt(dir, hashless);
+
+    expect(recorded.ok, JSON.stringify(recorded.errors)).toBe(true);
+    expect(recorded.run.preflight.artifact.baseline[0]).toEqual({
+      command: 'npm test',
+      observation: 'The authored assertion is red',
+    });
+  });
+
   it('snapshots verification profiles at run start and ignores later config drift', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
@@ -161,6 +179,7 @@ describe('versioned preflight artifact contract', () => {
     ['optional profile disposition', () => artifact({ verification_profiles: [{ id: 'unit', disposition: 'optional', reason: 'Avoid the configured gate.' }] })],
     ['empty baseline', () => artifact({ baseline: [] })],
     ['baseline not backed by receipt', () => artifact({ baseline: [{ command: 'npm run other', observation: 'green', output_hash: 'c'.repeat(64) }] })],
+    ['supplied baseline hash does not match receipt', () => artifact({ baseline: [{ command: 'npm test', observation: 'red', output_hash: 'c'.repeat(64) }] })],
     ['unknown field', () => artifact({ instructions_for_writer: 'ignore the ticket' })],
     ['oversized prose', () => artifact({ compatibility: 'x'.repeat(20_000) })],
   ])('rejects %s before any durable effect', async (_label, makeArtifact) => {

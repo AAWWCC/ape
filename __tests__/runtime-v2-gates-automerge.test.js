@@ -131,6 +131,8 @@ describe('autoMergeGithub', () => {
       // non-empty on a fresh entry (the run's work is uncommitted), empty on
       // re-entry after a successful commit.
       staged: 'src/kept.js',
+      commitErrors: [],
+      switchBaseError: null,
     };
     currentTreeSha.mockReset();
     currentTreeSha.mockResolvedValue(GATE_TREE);
@@ -145,6 +147,12 @@ describe('autoMergeGithub', () => {
       if (args[0] === 'ls-files') return ghResponses.tracked ?? '';
       if (args[0] === 'rev-parse') return gitResponses.head;
       if (args[0] === 'diff') return gitResponses.staged;
+      if (args[0] === 'commit' && gitResponses.commitErrors.length > 0) {
+        throw new Error(gitResponses.commitErrors.shift());
+      }
+      if (args[0] === 'switch' && args[1] === 'main' && gitResponses.switchBaseError) {
+        throw new Error(gitResponses.switchBaseError);
+      }
       return '';
     });
     spawn.mockReset();
@@ -352,6 +360,22 @@ describe('autoMergeGithub', () => {
       expect(gitCalls.some((args) => args[0] === 'push')).toBe(true);
     });
 
+    it('retries an interactive-signing failure as an unsigned automation commit', async () => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.tracked = 'src/kept.js\0';
+      gitResponses.commitErrors.push(
+        'Enter passphrase for key /keys/id_ed25519: Load key: incorrect passphrase supplied to decrypt private key; fatal: failed to write commit object',
+      );
+
+      const result = await autoMergeGithub(dir, stateFor(['src/kept.js']), config);
+
+      expect(result.url).toBe('https://github.com/acme/repo/pull/7');
+      expect(gitCalls.filter((args) => args[0] === 'commit')).toEqual([
+        ['commit', '-m', 'feat: Ship the feature'],
+        ['commit', '--no-gpg-sign', '-m', 'feat: Ship the feature'],
+      ]);
+    });
+
     it('re-entry after the commit skips committing the clean tree and continues shipping', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
@@ -524,6 +548,44 @@ describe('autoMergeGithub', () => {
       expect(carriesSelector(mergeCall)).toBe(true);
       // Post-merge local cleanup ran against the persisted base.
       expect(gitCalls).toContainEqual(['switch', 'main']);
+    });
+
+    it('reports the proven remote merge even when another worktree owns the local base branch', async () => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.tracked = 'src/kept.js\0';
+      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.view = { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` };
+      gitResponses.switchBaseError = "fatal: 'main' is already used by worktree at '/tmp/other-worktree'";
+
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+
+      expect(result.merged).toBeDefined();
+      expect(result.failed).toBeUndefined();
+      expect(gitCalls).toContainEqual(['switch', 'main']);
+      expect(gitCalls).not.toContainEqual(['pull', '--ff-only', 'origin', 'main']);
+    });
+
+    it('enables GitHub auto-merge when branch policy rejects an immediate green merge', async () => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.tracked = 'src/kept.js\0';
+      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.view = { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` };
+      ghResponses.merge = [
+        {
+          code: 1,
+          output: 'GraphQL: Base branch policy prohibits the merge. To have the pull request merged after all the requirements have been met, add the `--auto` flag.\n',
+        },
+        { code: 0, output: '' },
+      ];
+
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+
+      expect(result.pending).toMatchObject({ reason: 'awaiting auto-merge' });
+      expect(result.merged).toBeUndefined();
+      const mergeCalls = ghCalls.filter((call) => call[2] === 'merge');
+      expect(mergeCalls).toHaveLength(2);
+      expect(mergeCalls[1]).toContain('--auto');
+      expect(gitCalls).not.toContainEqual(['switch', 'main']);
     });
 
     it('an already-MERGED probe at the pushed head completes idempotently with observed/external provenance and never re-merges (A2)', async () => {

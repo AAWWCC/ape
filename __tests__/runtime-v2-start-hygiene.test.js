@@ -454,7 +454,7 @@ describe('APE v2 start-time git/lock hygiene (baseline integrity)', () => {
     expect(existsSync(path.join(dir, 'src', 'dead.js'))).toBe(false);
   });
 
-  it('refuses a land-mode start whose dirty diff is not based on the default tip', async () => {
+  it('lands a committed feature-branch diff plus dirty finishing work when both descend from the default tip', async () => {
     const dir = await project();
     // A leftover ape/* checkout with its own unmerged commit.
     git(dir, 'switch', '-q', '-c', 'ape/phase-leftover');
@@ -463,17 +463,33 @@ describe('APE v2 start-time git/lock hygiene (baseline integrity)', () => {
     git(dir, 'commit', '-qm', 'unmerged work from a dead run');
     // A land admission needs a non-empty working-tree diff inside claimed_paths.
     await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 2;\n');
-    const before = apeBranches(dir);
-    expect(before).toEqual(['ape/phase-leftover']);
+    const committedTip = git(dir, 'rev-parse', 'HEAD');
 
-    // Land computes its admission baseline from HEAD before the branch arm, so
-    // silently re-basing a validated diff onto a fresh branch is wrong: the
-    // start must be refused rather than proceed.
-    const outcome = await startRun(dir, startInput({ mode: 'land', lane: 'auto', test_paths: [] }))
-      .then((result) => result, (thrown) => thrown);
-    expect(outcome?.ok).not.toBe(true);
-    expect(outcome.message).toMatch(/requires the finished diff to be based on the resolved default branch tip/);
-    // No new ape/* branch: only the leftover remains.
-    expect(apeBranches(dir)).toEqual(before);
+    const started = await startRun(dir, startInput({
+      mode: 'land',
+      lane: 'auto',
+      behavioral: false,
+      claimed_paths: ['src/leftover.js', 'src/value.js'],
+      test_paths: [],
+    }));
+    expect(started.ok).toBe(true);
+    expect(started.run.branch).toMatch(/^ape\/land-/);
+    expect(git(dir, 'merge-base', '--is-ancestor', committedTip, 'HEAD')).toBe('');
+    expect(started.run.receipts[0].changed_files).toEqual(['src/leftover.js', 'src/value.js']);
+    expect(await readFileSync(path.join(dir, 'src', 'leftover.js'), 'utf8')).toContain('leftover = 1');
+    expect(await readFileSync(path.join(dir, 'src', 'value.js'), 'utf8')).toContain('value = 2');
+  });
+
+  it('refuses land mode when the feature commit does not descend from the resolved default tip', async () => {
+    const dir = await project();
+    const baseTree = git(dir, 'rev-parse', 'HEAD^{tree}');
+    const unrelated = git(dir, 'commit-tree', baseTree, '-m', 'unrelated root');
+    git(dir, 'switch', '-q', '-c', 'feature/unrelated', unrelated);
+    await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 2;\n');
+
+    await expect(startRun(dir, startInput({ mode: 'land', lane: 'auto', test_paths: [] })))
+      .rejects.toThrow(/requires the finished diff to descend from the resolved default branch tip/);
+    expect(apeBranches(dir)).toEqual([]);
+    expect(git(dir, 'branch', '--show-current')).toBe('feature/unrelated');
   });
 });

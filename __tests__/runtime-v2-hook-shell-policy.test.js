@@ -71,6 +71,41 @@ describe('APE v2 lifecycle shell policy', () => {
     expect(result.decision).toBe('allow');
   });
 
+  it('diagnoses an unrecognized shell mutation before consulting executable pinning', () => {
+    const result = evaluateLifecyclePolicy(
+      {
+        ...boundSubagent('cp dist/root.mjs plugins/ape/dist/root.mjs'),
+        evidence: {
+          cwd_safe: true,
+          safe: true,
+          executable_safe: false,
+          executable_reason: 'evidence executable cp is missing from the trusted-start snapshot',
+        },
+      },
+      { state, ticket: buildTicket },
+    );
+    expect(result.decision).toBe('deny');
+    expect(result.reason).toContain('may run only recognized non-mutating evidence commands');
+    expect(result.reason).not.toContain('missing from the trusted-start snapshot');
+  });
+
+  it('still reports executable pinning failures for recognized evidence commands', () => {
+    const result = evaluateLifecyclePolicy(
+      {
+        ...boundSubagent('npm test'),
+        evidence: {
+          cwd_safe: true,
+          safe: true,
+          executable_safe: false,
+          executable_reason: 'evidence executable npm changed after the trusted run start',
+        },
+      },
+      { state, ticket: buildTicket },
+    );
+    expect(result.decision).toBe('deny');
+    expect(result.reason).toContain('evidence executable npm changed');
+  });
+
   it('allows a bound subagent to run tests through uv and other Python env managers', () => {
     // Regression guard: a uv-managed project runs `uv run pytest`; bare pytest is
     // not on PATH in the venv, so without these a uv/poetry project could produce

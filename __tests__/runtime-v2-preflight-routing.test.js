@@ -32,11 +32,10 @@ describe('structured preflight routing', () => {
   });
 
   it('does not add preflight to non-behavioral fast, mechanical, debug, spike, or land flows', () => {
-    expect(initialStages(run({ lane: 'fast', behavioral: false }))[0].id).toBe('test');
+    expect(initialStages(run({ lane: 'fast', behavioral: false }))[0].id).toBe('build');
     expect(initialStages(run({ lane: 'mechanical' }))[0].id).toBe('build');
     expect(initialStages(run({ mode: 'debug' }))[0].id).toBe('debug');
     expect(initialStages(run({ mode: 'spike' }))[0].id).toBe('spike');
     expect(initialStages(run({ mode: 'land' }))[0].id).toBe('review');
   });
 });
-

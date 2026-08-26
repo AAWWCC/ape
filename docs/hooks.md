@@ -131,6 +131,11 @@ one recognized family, and then checked for containment and executable identity.
 substitution, redirects, inline interpreters, control characters, and ambiguous tokenization fail
 closed.
 
+Command-family recognition precedes executable-pinning diagnostics. An unrecognized mutation such
+as `cp` is therefore refused as outside the non-mutating evidence allowlist, rather than being
+misreported as a missing trusted-start executable. Recognized evidence heads still fail closed when
+their pinned executable is missing, replaced, or PATH-shadowed.
+
 The character allowlist admits ASCII letters/digits, non-ASCII code points by range, plain spaces
 as separators, and the punctuation `- _ . / : = @ ~ , % ^ +`. Positional rules refuse `~`, `=`,
 or `^` at token start; `~` and `=` are also refused immediately after `=` or `:`. This closes zsh

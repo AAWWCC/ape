@@ -16,7 +16,8 @@ enforces.
    policy, gates, and completion.
 2. **No main-session production writes.** Production code flows through a stage ticket; the main
    session authors only orchestration state and prose.
-3. **Behavioral test independence.** Tests assert behavior, not the implementation that produced it.
+3. **Behavioral test independence.** Tests assert behavior, not the implementation that produced it;
+   non-behavioral work does not manufacture red-test evidence.
 4. **Deterministic, tree-bound evidence.** Every receipt is validated against a recomputed tree SHA
    and changed-file set — claims are never trusted as written.
 5. **One retry per failed stage and bounded, convergent remediation.** A new blocker set may receive
@@ -27,8 +28,10 @@ enforces.
    uses atomic writes. Receipt/service effects and MCP task generations have separate locks with a
    strict no-nesting boundary; task generations are append-only and hash-chained.
 8. **Truthful completion.** A stage is complete only when its evidence independently reproduces; an
-   agent returns `failed` rather than claiming unearned success.
-9. **Gated auto-merge.** A run merges only after every merge gate passes.
+   agent returns `failed` rather than claiming unearned success. A proven remote merge is not
+   rewritten as failed merely because local checkout cleanup must be retried.
+9. **Gated auto-merge.** A run merges only after every merge gate passes; protected-branch
+   auto-merge remains pending until the exact attested head is observed merged.
 
 ## Where each is enforced
 

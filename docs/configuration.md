@@ -113,6 +113,13 @@ orphan and fails closed.
 the current tree and merges only on green. A failed proof moves back to the ordinary gate-block /
 `regate` path.
 
+With auto-merge enabled, a protected base that rejects an immediate squash merge can require
+GitHub's `--auto` path. APE enables it and keeps the run in `shipping` until `next` observes the
+exact pushed head merged. The runtime first honors repository commit signing, then retries only a
+signer/passphrase-specific feature-commit failure with `--no-gpg-sign`; unrelated Git failures still
+block. After the remote merge is proven, local checkout cleanup is independently recorded and can
+be retried with `ape_run resume` when another worktree owns the base branch.
+
 <!-- BEGIN GENERATED LANE REFERENCE -->
 ## Generated lane classifier reference
 

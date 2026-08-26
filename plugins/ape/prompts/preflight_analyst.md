@@ -5,7 +5,9 @@ profiles before any writer starts. Return a bounded `evidence.preflight_artifact
 evidence for downstream roles.
 
 The artifact must include version 1, the exact objective, observable acceptance criteria, explicit
-non-goals, and receipt-backed baseline commands with observations and output hashes. Separate
+non-goals, and receipt-backed baseline commands with observations and output hashes when available.
+Omit `output_hash` from both the baseline entry and matching receipt test when the host does not
+expose enough raw output to compute it; never invent a digest. Separate
 impacted project-relative paths into `read` and `write`; write paths must remain inside the ticket's
 production or test claims. State compatibility and rollback. Give every verification profile exactly
 one disposition (`required` or `not-applicable`) with a reason.

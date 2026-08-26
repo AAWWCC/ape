@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runtimePaths } from '../lib/runtime/paths.js';
-import { startRun, statusRun } from '../lib/runtime/service.js';
+import { startRun } from '../lib/runtime/service.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
 
 const cleanups = [];
@@ -56,48 +56,50 @@ function startInput(overrides = {}) {
   };
 }
 
-// Guard-path starts use behavioral:false: the doctor's test-path-claims
-// precondition already blocks behavioral runs with empty test_paths before the
-// startRun guard runs (environment-readiness blocks keep precedence), so the
-// guard's own coverage is the behavioral:false gap friction #20 describes.
+// Behavioral runs still need authored test paths for the test-writer stage.
+// Non-behavioral runs deliberately do not schedule that stage and therefore
+// must not demand invented red-test evidence merely to satisfy admission.
 describe('APE v2 start-time test_paths guard', () => {
-  it('rejects a fast-lane start with empty test_paths before any branch or state exists', async () => {
+  it('accepts a non-behavioral fast-lane start without test_paths and starts at build', async () => {
     const dir = await project();
-    const branchBefore = git(dir, 'rev-parse', '--abbrev-ref', 'HEAD');
-
-    await expect(startRun(dir, startInput({
+    const started = await startRun(dir, startInput({
       lane: 'fast',
       behavioral: false,
       claimed_paths: ['src/value.js'],
       test_paths: [],
-    }))).rejects.toThrow(/lane fast requires test_paths/);
-
-    expect((await statusRun(dir)).active).toBe(false);
-    expect(git(dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(branchBefore);
-    expect(git(dir, 'branch', '--list', 'ape/*')).toBe('');
+    }));
+    expect(started.ok).toBe(true);
+    expect(started.run.tickets[0]).toMatchObject({
+      stage_id: 'build',
+      role: 'implementer',
+      required_checks: [],
+    });
   });
 
-  it('rejects an escalated behavioral lane and names the escalation reasons', async () => {
+  it('accepts an escalated non-behavioral lane and preserves the escalation reasons', async () => {
     const dir = await project();
-    const error = await startRun(dir, startInput({
+    const started = await startRun(dir, startInput({
       lane: 'mechanical',
       behavioral: false,
       claimed_paths: ['src/value.js'],
       test_paths: [],
-    })).then(() => null, (thrown) => thrown);
-    expect(error).toBeInstanceOf(Error);
-    expect(error.message).toMatch(/requires test_paths/);
-    expect(error.message).toMatch(/requested-mechanical-escalated/);
+    }));
+    expect(started.ok).toBe(true);
+    expect(started.run.lane).toBe('fast');
+    expect(started.run.lane_reasons).toContain('requested-mechanical-escalated');
+    expect(started.run.tickets[0].stage_id).toBe('build');
   });
 
-  it('rejects a full-lane start with empty test_paths even when behavioral is false', async () => {
+  it('accepts a non-behavioral full-lane start without test_paths and starts at planning', async () => {
     const dir = await project();
-    await expect(startRun(dir, startInput({
+    const started = await startRun(dir, startInput({
       lane: 'full',
       behavioral: false,
       claimed_paths: ['src/value.js'],
       test_paths: [],
-    }))).rejects.toThrow(/lane full requires test_paths/);
+    }));
+    expect(started.ok).toBe(true);
+    expect(started.run.tickets[0]).toMatchObject({ stage_id: 'plan', role: 'planner' });
   });
 
   it('preserves the mechanical lane start without test_paths', async () => {

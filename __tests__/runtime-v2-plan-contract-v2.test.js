@@ -148,6 +148,19 @@ async function walkToV2Review(dir) {
 }
 
 describe('plan contract v2 bindings', () => {
+  it('rejects an explicit v2 contract before mutation when the run cannot schedule preflight', async () => {
+    const dir = await integrationProject();
+    await expect(startRun(dir, {
+      objective: 'Rebuild generated bundles without changing behavior',
+      mode: 'phase', lane: 'full', host: 'codex',
+      claimed_paths: ['src/value.js'], test_paths: [],
+      requirements: [], risk_triggers: [], behavioral: false,
+      hooks_trusted: true, subagents_available: true, explicit_invocation: true,
+      plan_contract_version: 2,
+    })).rejects.toThrow(/plan_contract_version 2 requires.*behavioral/i);
+    expect(execFileSync('git', ['branch', '--list', 'ape/*'], { cwd: dir, encoding: 'utf8' }).trim()).toBe('');
+  });
+
   it('binds the exact preflight hash and assigns every required snapped profile', () => {
     expect(candidatePlanForScope(plan(), ['src/value.js'], null, context)).toMatchObject({
       valid: true, value: { plan: { version: 2, preflight_hash: HASH } },

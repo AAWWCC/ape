@@ -18,9 +18,9 @@ how to verify.
 - GitHub is the only shipping provider.
 - Node.js 22.12.0 or newer is required.
 - Claude and Codex install from this repository's marketplace files. Both launch the bundled MCP server locally
-  over stdio. A hosted broker and universal cloud-directory submission are outside the 2.18 release
+  over stdio. A hosted broker and universal cloud-directory submission are outside the current release
   scope.
-- Codex IDE integrations and ChatGPT web, mobile, and cloud runtimes are not supported in 2.18.
+- Codex IDE integrations and ChatGPT web, mobile, and cloud runtimes are not supported.
 
 ## Install
 
@@ -113,7 +113,7 @@ read-only `status` skill may be selected implicitly when relevant.
 | `phase` | Plan, test, implement, review, gate, and ship. The selected lane controls how much of that pipeline is needed. |
 | `debug` | Run one read-only debugger. |
 | `spike` | Run one read-only researcher. |
-| `land` | Review, gate, and ship an existing non-empty diff. APE does not edit it. |
+| `land` | Review, gate, and ship a finished non-empty diff based on the current default branch. APE does not edit it. |
 
 The building lanes are:
 
@@ -123,6 +123,9 @@ The building lanes are:
   schemas, concurrency, and destructive operations.
 
 `auto` lets the runtime classify the run. Scope may escalate during a run, but it never downgrades.
+Generated host bundles under `plugins/<host>/dist/` and release staging under
+`release/generated/` are recognized as mechanical output without treating arbitrary nested
+`dist` or `build` directories as generated code.
 
 Behavioral `phase` work in the fast and full lanes follows a test-first protocol: a test writer is
 assigned failing tests in `test_paths`, then a separate implementer owns production
@@ -132,6 +135,14 @@ protocol does not describe mechanical work, read-only `debug`/`spike`, or `land`
 ships an existing diff without editing it. High-risk runs add a security review. Each failed stage
 can be retried once; distinct blocking findings receive a bounded remediation budget, while repeated
 findings stop immediately as no-progress failures.
+
+Non-behavioral fast/full phase work keeps its planning, implementation, review, and merge gates but
+does not schedule a test writer or demand fabricated red-test evidence. It runs targeted stage
+checks only when `test_paths` were explicitly supplied. Plan contract v2 is therefore accepted only
+for behavioral fast/full phase runs, where its required preflight can actually be scheduled.
+`land` accepts both dirty finishing edits and already-committed feature work when HEAD descends from
+the resolved default tip; the complete default-to-working-tree diff must remain inside the combined
+production and test claims.
 
 New code and security reviews classify each blocking finding as production-, test-, or both-owned.
 APE serializes the matching remediation writers: production goes to the implementer, test goes to
@@ -152,6 +163,12 @@ request, waits for required checks, and squash-merges. Public/native starts requ
 per-run authorization (`auto_merge_authorized: true`) when this setting is enabled; the stored
 setting alone cannot authorize a new run. APE also verifies the server-advertised base tip at start
 and again before shipping so stale merge-base evidence cannot be published.
+
+If branch policy requires GitHub auto-merge, APE enables it and remains in `shipping` until a later
+poll proves the exact pushed head merged. APE first honors the repository's normal commit-signing
+configuration; only a signer/passphrase failure on the scheduler-owned feature commit is retried
+with signing disabled. Once the remote merge is proven, a local checkout/worktree cleanup failure
+is recorded for `ape_run resume` instead of rewriting the merged run as a shipping failure.
 
 ## Configuration
 
@@ -186,7 +203,7 @@ npm run eval:prompts:check
 npm run validate
 ```
 
-`npm run release:artifacts` produces the three host tarballs, checksum ledger, release manifest, and
+`npm run release:artifacts` produces the two host tarballs, checksum ledger, release manifest, and
 SPDX SBOM under `release/`. `npm run release:reproducible` builds that set twice and compares every
 artifact digest. Tagged releases run the same gates, a clean full-source export, and GitHub
 provenance attestation before publication. The credential-free prompt-evaluation check validates

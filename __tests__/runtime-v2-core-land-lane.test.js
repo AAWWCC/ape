@@ -94,7 +94,7 @@ describe('land start is the scope-truth moment', () => {
     const dir = await project();
     const branchBefore = git(dir, 'rev-parse', '--abbrev-ref', 'HEAD');
 
-    await expect(startRun(dir, startInput())).rejects.toThrow(/non-empty working-tree diff/);
+    await expect(startRun(dir, startInput())).rejects.toThrow(/non-empty finished diff/);
 
     expect((await statusRun(dir)).active).toBe(false);
     expect(git(dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(branchBefore);

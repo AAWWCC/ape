@@ -30,6 +30,12 @@ undetermined stack, storage, or deployment choices. If one objective clearly spa
 the project has no roadmap, it may propose roadmap entries; registration still waits for operator
 approval.
 
+The intake must align behavioral intent with the requested contract. Behavioral fast/full phase
+runs provide test paths and may use plan contract v2 preflight. Non-behavioral phase runs omit the
+test-writer/red-test stage and use contract v1; they may still classify fast/full when scope is not
+mechanical. `land` may start from committed feature work plus dirty finishing edits only when HEAD
+descends from the resolved default tip and the full diff is claimed.
+
 The roadmap is an optional audited ledger above the scheduler. It never starts or sequences runs,
 but it gates roadmap-backed start and completion on satisfied prerequisites. Entry status is
 derived from active state, requirements, and immutable history. A receipt can declare bounded

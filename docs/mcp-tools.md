@@ -38,8 +38,10 @@ metrics calls do not mutate that cache or send telemetry anywhere.
 
 - `start` validates objective, host, mode, lane, path claims, test paths, requirements, risk, host
   capabilities, and explicit invocation before creating a branch or run. Behavioral fast/full runs
-  require `test_paths`. `land` additionally requires a non-empty existing diff entirely inside
-  `claimed_paths`.
+  require `test_paths`; non-behavioral phase runs omit the test-writer/red-test stage. Explicit plan
+  contract v2 is limited to behavioral fast/full phase runs. `land` additionally requires a
+  non-empty default-tip-to-working-tree diff entirely inside `claimed_paths` and `test_paths`, with
+  HEAD equal to or descended from the resolved default tip.
 - `record` accepts an agent receipt draft. The runtime adds and verifies identity, tree/test
   evidence, observed external-tool effects, hashes, and the next transition.
 - `next` advances one pending transition or polls a `gating`/`shipping` watch.
@@ -87,6 +89,10 @@ a run branch, and shipping repeats that check before its first Git mutation.
 - `abort` seals the current run. `override` supports reason-audited `abort` and `reset` operations;
   an unaimed reset can recover an orphaned lock.
 
+Terminal `resume` also retries checkout reconciliation. Once an exact remote merge is proven, a
+local worktree conflict is stored as retained cleanup guidance rather than changing the run back to
+a shipping failure.
+
 `abort` and `override` may include `run_id` as a confirmation, never as a selector. A mismatched or
 explicitly null aim refuses before any effect. Other actions reject `run_id`. If `active.json` is
 unreadable, use an unaimed `override reset`; the runtime cannot safely confirm an aimed recovery.
@@ -108,6 +114,14 @@ Manifest wiring is only a static package check; it does not prove that the curre
 delivers lifecycle events. Missing, expired, replayed, or observed-but-unbound probes fail as
 infrastructure without creating a run or consuming a stage attempt. Claude uses its existing native
 binding path and does not run this preflight.
+
+### Behavioral plan preflight evidence
+
+Plan contract v2 starts with a read-only preflight analyst on behavioral fast/full phase runs. Every
+baseline entry in `evidence.preflight_artifact` must be backed by a receipt test entry with the same
+command. `output_hash` may be omitted from both entries when the host does not expose enough raw
+output to compute it; agents must never invent a digest. When a baseline hash is supplied, the
+matching receipt hash is required and must be byte-for-byte identical.
 
 ### External-tool claims
 

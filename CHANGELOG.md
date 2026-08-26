@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 2.22.4 — 2026-08-25
+
+Removed several run-start dead ends found in durable blocked and aborted history. Non-behavioral
+fast/full phase runs now omit the test-writer and red-test stages, invalid explicit v2 preflight
+combinations fail before mutation, generated host/release bundles classify as mechanical output,
+and `land` can review a claimed committed feature diff that descends from the current default tip.
+
+Made preflight baseline output hashes optional when a host does not expose the raw command output;
+the command must still be receipt-backed, and any supplied hash must match exactly. Forbidden shell
+mutations now report the evidence-command policy refusal before executable-pinning diagnostics.
+
+Hardened GitHub shipping recovery. Protected branches can fall back to GitHub auto-merge, signer or
+passphrase failures retry only the scheduler-owned feature commit without signing, and a proven
+remote merge remains complete when another worktree prevents local base-branch cleanup. Generated
+Codex and Claude packages carry the same runtime behavior.
+
 ## 2.22.3 — 2026-08-24
 
 Prevented persistent `shipping.auto_merge` configuration from silently authorizing a new public

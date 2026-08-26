@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyLane } from '../lib/runtime/lane-policy.js';
-import { docsOnlyMechanical, initialStages, nextStages } from '../lib/runtime/pipeline.js';
+import { docsOnlyMechanical, initialStages, nextStages, projectedPipeline } from '../lib/runtime/pipeline.js';
 import { reduceRun } from '../lib/runtime/scheduler.js';
 import { RunStartInputSchema } from '../lib/runtime/schemas.js';
 
@@ -313,9 +313,46 @@ describe('docs-only mechanical carve-out', () => {
   });
 
   it('never relaxes non-mechanical lanes', () => {
-    const run = docsRun({ lane: 'fast', test_paths: ['__tests__/a.test.js'] });
+    const run = docsRun({ lane: 'fast', behavioral: true, test_paths: ['__tests__/a.test.js'] });
     expect(docsOnlyMechanical(run)).toBe(false);
     expect(initialStages(run)[0].required_checks).toEqual(['red-test']);
+  });
+});
+
+describe('non-behavioral phase scheduling', () => {
+  const run = (overrides = {}) => ({
+    mode: 'phase',
+    lane: 'full',
+    behavioral: false,
+    claimed_paths: ['plugins/ape/dist/ape-mcp.bundle.mjs'],
+    test_paths: [],
+    remediation_cycles: 0,
+    ...overrides,
+  });
+
+  it('routes an agreed full plan directly to build without demanding fresh red evidence', () => {
+    for (const completed of ['plan-review-agreed', 'plan-judge']) {
+      expect(nextStages(run(), completed, {})).toEqual([
+        expect.objectContaining({ id: 'build', role: 'implementer', required_checks: [] }),
+      ]);
+    }
+  });
+
+  it('starts a non-behavioral fast run at build and only requires targeted tests when declared', () => {
+    expect(initialStages(run({ lane: 'fast' }))).toEqual([
+      expect.objectContaining({ id: 'build', required_checks: [] }),
+    ]);
+    expect(initialStages(run({ lane: 'fast', test_paths: ['__tests__/bundle.test.js'] }))).toEqual([
+      expect.objectContaining({ id: 'build', required_checks: ['targeted-tests'] }),
+    ]);
+  });
+
+  it('projects no test-writer stage for a non-behavioral full run', () => {
+    const projected = projectedPipeline(run());
+    expect(projected.stages.map((item) => item.id)).not.toContain('test');
+    expect(projected.stages).toContainEqual(
+      expect.objectContaining({ id: 'build', required_checks: [] }),
+    );
   });
 });
 
@@ -359,6 +396,16 @@ describe('mechanical-lane marker segment anchoring', () => {
       'build/out.js',
       'vendor/lib.js',
       'generated/schema.js',
+    ]) {
+      expect(laneFor(path), path).toBe('mechanical');
+    }
+  });
+
+  it('classifies the repository generated package and release bundle roots as mechanical', () => {
+    for (const path of [
+      'plugins/ape/dist/ape-mcp.bundle.mjs',
+      'plugins/ape-claude/dist/ape-mcp.bundle.mjs',
+      'release/generated/ape-mcp.bundle.mjs',
     ]) {
       expect(laneFor(path), path).toBe('mechanical');
     }
