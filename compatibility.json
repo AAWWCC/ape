@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "node": {
+    "minimum": "22.12.0",
+    "blocking": "24.15.0"
+  },
+  "hosts": {
+    "codex": {
+      "package": "@openai/codex",
+      "version": "0.147.0"
+    },
+    "claude": {
+      "package": "@anthropic-ai/claude-code",
+      "version": "2.1.228"
+    }
+  },
+  "platforms": [
+    "linux",
+    "macos",
+    "windows"
+  ]
+}

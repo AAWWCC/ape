@@ -37,6 +37,7 @@ jobs:
           test "$(node --version)" = "v24.15.0"
           test "$(npm --version)" = "11.12.1"
       - run: npm ci
+      - run: npm run compatibility:check
       - name: Verify release identity
         shell: bash
         run: |

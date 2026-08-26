@@ -4,6 +4,7 @@ Start with the [README](../README.md) for installation and normal use.
 
 | Document | Use it for |
 | --- | --- |
+| [Host compatibility](compatibility.md) | Canonical Node.js, Codex CLI, Claude Code, and platform support contract. |
 | [Pipeline](pipeline.md) | Modes, lanes, retries, remediation, gates, and shipping. |
 | [Configuration](configuration.md) | Every supported key, test commands, statusline wiring, and LARP MODE. |
 | [MCP tools](mcp-tools.md) | The `ape_run`, `ape_status`, `ape_history`, and `ape_config` contracts. |

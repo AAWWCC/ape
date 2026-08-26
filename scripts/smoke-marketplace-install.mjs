@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const pkg = JSON.parse(await readFile(join(REPO_ROOT, 'package.json'), 'utf8'));
+const compatibility = JSON.parse(await readFile(join(REPO_ROOT, 'compatibility.json'), 'utf8'));
 const VERSION = pkg.version;
 
 async function exists(path) {
@@ -40,6 +41,23 @@ function command(program, args, options) {
       else if (code !== 0) reject(new Error(`${program} ${args.join(' ')} exited ${code}: ${stderr}`));
       else resolvePromise({ stdout, stderr });
     });
+  });
+}
+
+function pinnedNpmEnv(env) {
+  return {
+    ...env,
+    npm_config_ignore_scripts: 'false',
+    npm_config_omit: '',
+    npm_config_optional: 'true',
+  };
+}
+
+function hostCommand(identity, args, options, mode, toolsRoot) {
+  if (mode === 'edge') return command(identity, args, options);
+  return command('npm', ['exec', '--prefix', toolsRoot, '--', identity, ...args], {
+    ...options,
+    env: pinnedNpmEnv(options.env),
   });
 }
 
@@ -132,26 +150,62 @@ async function initializeInstalled(host, pluginRoot) {
   }
 }
 
-function requestedHosts(argv) {
-  if (argv.length === 0) return new Set(['codex', 'claude']);
-  if (argv.length !== 2 || argv[0] !== '--host' || !['codex', 'claude'].includes(argv[1])) {
-    throw new Error('usage: node scripts/smoke-marketplace-install.mjs [--host codex|claude]');
+function requestedOptions(argv) {
+  let mode = 'blocking';
+  let hosts = new Set(Object.keys(compatibility.hosts));
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === '--edge') {
+      mode = 'edge';
+      continue;
+    }
+    if (token === '--host' && compatibility.hosts[argv[index + 1]]) {
+      hosts = new Set([argv[index + 1]]);
+      index += 1;
+      continue;
+    }
+    throw new Error('usage: node scripts/smoke-marketplace-install.mjs [--host codex|claude] [--edge]');
   }
-  return new Set([argv[1]]);
+  return { hosts, mode };
+}
+
+async function assertHostVersion(identity, mode, toolsRoot) {
+  const host = compatibility.hosts[identity];
+  const result = await hostCommand(identity, ['--version'], { cwd: REPO_ROOT, env: process.env }, mode, toolsRoot);
+  const output = `${result.stdout}\n${result.stderr}`.trim();
+  const observed = output.match(/\d+\.\d+\.\d+/u)?.[0];
+  if (!observed) throw new Error(`${identity} --version did not report a semantic version: ${output}`);
+  if (mode === 'edge') {
+    process.stdout.write(`${identity} informational edge version: ${observed}\n`);
+  } else if (observed !== host.version) {
+    throw new Error(`${identity} version ${observed} does not match compatibility pin ${host.version}`);
+  }
 }
 
 async function main(argv = process.argv.slice(2)) {
-  const hosts = requestedHosts(argv);
+  const { hosts, mode } = requestedOptions(argv);
   const scratch = await mkdtemp(join(tmpdir(), 'ape-clean-marketplace-'));
+  const toolsRoot = join(scratch, 'host-tools');
   const codexHome = join(scratch, 'codex-home');
   const claudeConfig = join(scratch, 'claude-config');
   await mkdir(codexHome, { recursive: true, mode: 0o700 });
   await mkdir(claudeConfig, { recursive: true, mode: 0o700 });
   try {
+    if (mode !== 'edge') {
+      const packages = [...hosts].map((identity) => {
+        const host = compatibility.hosts[identity];
+        return `${host.package}@${host.version}`;
+      });
+      await command('npm', ['install', '--no-save', '--prefix', toolsRoot, ...packages], {
+        cwd: scratch,
+        env: pinnedNpmEnv(process.env),
+      });
+    }
     if (hosts.has('codex')) {
+      await assertHostVersion('codex', mode, toolsRoot);
       const codexEnv = { ...process.env, CODEX_HOME: codexHome };
-      await command('codex', ['plugin', 'marketplace', 'add', REPO_ROOT, '--json'], { cwd: scratch, env: codexEnv });
-      await command('codex', ['plugin', 'add', 'ape@ape', '--json'], { cwd: scratch, env: codexEnv });
+      await hostCommand('codex', ['plugin', 'marketplace', 'add', REPO_ROOT, '--json'], { cwd: scratch, env: codexEnv }, mode, toolsRoot);
+      await hostCommand('codex', ['plugin', 'add', 'ape@ape', '--json'], { cwd: scratch, env: codexEnv }, mode, toolsRoot);
       const codexPackage = await findPackage(codexHome, '.codex-plugin');
       await assertNoAssets(codexPackage);
       await initializeInstalled('codex', codexPackage);
@@ -159,9 +213,10 @@ async function main(argv = process.argv.slice(2)) {
     }
 
     if (hosts.has('claude')) {
+      await assertHostVersion('claude', mode, toolsRoot);
       const claudeEnv = { ...process.env, CLAUDE_CONFIG_DIR: claudeConfig };
-      await command('claude', ['plugin', 'marketplace', 'add', REPO_ROOT, '--scope', 'user'], { cwd: scratch, env: claudeEnv });
-      await command('claude', ['plugin', 'install', 'ape@ape', '--scope', 'user'], { cwd: scratch, env: claudeEnv });
+      await hostCommand('claude', ['plugin', 'marketplace', 'add', REPO_ROOT, '--scope', 'user'], { cwd: scratch, env: claudeEnv }, mode, toolsRoot);
+      await hostCommand('claude', ['plugin', 'install', 'ape@ape', '--scope', 'user'], { cwd: scratch, env: claudeEnv }, mode, toolsRoot);
       const claudePackage = await findPackage(claudeConfig, '.claude-plugin');
       await assertNoAssets(claudePackage);
       await initializeInstalled('claude', claudePackage);

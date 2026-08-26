@@ -33,7 +33,7 @@
   },
   "homepage": "https://github.com/AAWWCC/ape#readme",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "test": "vitest run",
@@ -50,6 +50,7 @@
     "typecheck": "tsc -p jsconfig.json --noEmit",
     "bundle": "node scripts/bundle-mcp.mjs",
     "bundle:reach": "node scripts/bundle-reach.mjs",
+    "compatibility:check": "node scripts/check-host-compatibility.mjs",
     "docs:config": "node scripts/generate-config-docs.mjs",
     "docs:check": "node scripts/generate-config-docs.mjs --check",
     "package:plugins": "node scripts/build-plugin-packages.mjs",

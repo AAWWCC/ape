@@ -187,6 +187,53 @@ describe('plan contract v2 bindings', () => {
     )).toMatchObject({ valid: true });
   });
 
+  it('seals declared risk triggers into v2 preflight and planner tickets', async () => {
+    const dir = await integrationProject();
+    const objective = 'Change the value behind a least-privilege boundary';
+    const started = await startRun(dir, {
+      objective, mode: 'phase', lane: 'full', host: 'codex',
+      claimed_paths: ['src/value.js'], test_paths: ['tests/value.test.js'],
+      requirements: ['R1'], risk_triggers: ['security'], behavioral: true,
+      hooks_trusted: true, subagents_available: true, explicit_invocation: true,
+      plan_contract_version: 2,
+    });
+    expect(started.ok).toBe(true);
+    const preflightTicket = started.run.tickets.at(-1);
+    expect(preflightTicket).toMatchObject({
+      stage_id: 'preflight',
+      risk_triggers: ['security'],
+    });
+    expect(await readDiskTicket(dir, preflightTicket)).toMatchObject({
+      risk_triggers: ['security'],
+    });
+
+    const artifact = preflightArtifact(objective);
+    const preflight = await recordReceipt(dir, stageReceipt(preflightTicket, {
+      tests: [{ command: 'npm test', passed: false, exit_code: 1, duration_ms: 10, output_hash: 'c'.repeat(64) }],
+      evidence: { preflight_artifact: artifact },
+    }));
+    expect(preflight.ok, JSON.stringify(preflight.errors)).toBe(true);
+    const planner = preflight.run.tickets.at(-1);
+    expect(planner).toMatchObject({ stage_id: 'plan', risk_triggers: ['security'] });
+    const persisted = await readDiskTicket(dir, planner);
+    expect(persisted.risk_triggers).toEqual(['security']);
+    expect(validateTicket(persisted)).toMatchObject({ valid: true });
+
+    const securityAssurance = {
+      ...concurrencyAssurance(),
+      id: 'A-security',
+      risk_trigger: 'security',
+    };
+    const admittedPlan = plan({
+      preflight_hash: sha256(artifact),
+      assurances: [securityAssurance],
+    });
+    const planned = await recordReceipt(dir, stageReceipt(planner, {
+      evidence: { candidate_plan: admittedPlan },
+    }));
+    expect(planned.ok, JSON.stringify(planned.errors)).toBe(true);
+  });
+
   it('keeps v1 admission byte compatible when no v2 context is supplied', () => {
     const legacy = plan();
     legacy.version = 1;

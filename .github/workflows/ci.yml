@@ -18,14 +18,20 @@ concurrency:
 
 jobs:
   package-smoke:
-    name: Package smoke (${{ matrix.os }}, Node ${{ matrix.node }})
+    # Keep these display names stable because main branch protection keys its
+    # required checks by the Node major, while setup-node uses exact pins.
+    name: Package smoke (${{ matrix.os }}, Node ${{ matrix.node.major }})
     env:
       APE_PUBLIC_REQUIRE_FORBIDDEN_HASHES: '1'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: [22, 24]
+        node:
+          - version: 22.12.0
+            major: 22
+          - version: 24.15.0
+            major: 24
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -35,9 +41,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: ${{ matrix.node }}
+          node-version: ${{ matrix.node.version }}
           cache: npm
       - run: npm ci
+      - run: npm run compatibility:check
       - run: npm run typecheck
       - run: npm run bundle
       - name: Require fresh committed bundles
@@ -55,7 +62,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 22
+          node-version: 22.12.0
           cache: npm
       - run: npm ci
       - run: node scripts/run-ci-tests.mjs smoke
@@ -68,7 +75,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 22
+          node-version: 22.12.0
           cache: npm
       - run: npm ci
       - run: node scripts/run-ci-tests.mjs shard 1 3
@@ -81,7 +88,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 22
+          node-version: 22.12.0
           cache: npm
       - run: npm ci
       - run: node scripts/run-ci-tests.mjs shard 2 3
@@ -94,7 +101,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 22
+          node-version: 22.12.0
           cache: npm
       - run: npm ci
       - run: node scripts/run-ci-tests.mjs shard 3 3
@@ -108,7 +115,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 22
+          node-version: 22.12.0
           cache: npm
       - run: npm ci
       - run: npm audit --audit-level=high
@@ -126,6 +133,7 @@ jobs:
           node-version: 24.15.0
           cache: npm
       - run: npm ci
+      - run: npm run compatibility:check
       - name: Install pinned host CLIs
         run: npm install --global @openai/codex@0.147.0 @anthropic-ai/claude-code@2.1.228
       - run: npm run package:check

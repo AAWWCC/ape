@@ -16,7 +16,7 @@ how to verify.
 - The public surface is seven skills backed by four MCP tools.
 - Runs are explicit. Installing APE does not start agents or change a repository.
 - GitHub is the only shipping provider.
-- Node.js 22 or newer is required.
+- Node.js 22.12.0 or newer is required.
 - Claude and Codex install from this repository's marketplace files. Both launch the bundled MCP server locally
   over stdio. A hosted broker and universal cloud-directory submission are outside the 2.18 release
   scope.
@@ -49,12 +49,16 @@ to an APE-operated service.
 
 ### Compatibility
 
+[`compatibility.json`](compatibility.json) is the machine-readable source of truth for supported
+platforms and blocking host versions. The detailed [host compatibility contract](docs/compatibility.md)
+explains how pull-request, release, and informational edge checks consume it.
+
 | Host | Package | MCP transport | Agent integration | External-tool attestation |
 | --- | --- | --- | --- | --- |
 | Codex CLI | `plugins/ape` | Local stdio | Native Codex subagents and lifecycle hooks | Codex-specific GitHub connector and Codex Security reads are covered; other providers depend on the installed server. |
 | Claude Code | `plugins/ape-claude` | Local stdio | Claude Agent tool and supplemental hooks | Core policy is shared, but Codex-only connectors and live provider parity are not claimed. |
 
-Node.js 22 and 24 are exercised on Windows, Linux, and macOS. Provider availability, host plugin
+Node.js 22.12.0 and the pinned Node.js 24 release runtime are exercised on Windows, Linux, and macOS. Provider availability, host plugin
 discovery, and external editor connections remain host/version/environment dependent.
 
 For development from this checkout, rebuild the packages before using a host reinstall helper:

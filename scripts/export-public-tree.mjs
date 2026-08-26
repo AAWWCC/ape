@@ -21,6 +21,7 @@ const REPO_ROOT = dirname(SCRIPT_DIR);
 const PUBLIC_VERSION = '2.22.3';
 const PUBLIC_FILES = Object.freeze([
   '.gitattributes',
+  'compatibility.json',
   'LICENSE',
   'README.md',
   'SECURITY.md',
