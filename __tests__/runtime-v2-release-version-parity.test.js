@@ -20,6 +20,8 @@ const packageJson = readJson('package.json');
 const packageLock = readJson('package-lock.json');
 const claudeManifest = readJson('plugins/ape-claude/.claude-plugin/plugin.json');
 const codexManifest = readJson('plugins/ape/.codex-plugin/plugin.json');
+const versionsSource = read('lib/runtime/versions.js');
+const durableVersionMatch = versionsSource.match(/export const APE_VERSION = '([^']+)'/u);
 
 // The anchor every other surface must match.
 const sharedVersion = packageJson.version;
@@ -39,6 +41,7 @@ describe('release version parity across every version surface', () => {
       'package-lock.json (packages[""].version)': semverBase(packageLock.packages[''].version),
       'plugins/ape-claude manifest (version)': semverBase(claudeManifest.version),
       'plugins/ape manifest (version, semver base)': semverBase(codexManifest.version),
+      'durable run provenance (APE_VERSION)': semverBase(durableVersionMatch?.[1]),
     };
     for (const [surface, version] of Object.entries(surfaces)) {
       expect(

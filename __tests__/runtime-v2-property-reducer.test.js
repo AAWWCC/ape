@@ -23,8 +23,9 @@ import {
 //  - invariant 5: stage attempts never exceed MAX_STAGE_ATTEMPTS, each failed
 //    stage is retried at most once, remediation cycles never exceed
 //    MAX_REMEDIATION_CYCLES, review-group failures vote disagree instead of
-//    consuming the stage retry, and capability / test-contradiction failures
-//    skip the retry and block honestly;
+//    consuming the stage retry, capability failures block honestly, and an
+//    eligible implementer's test-contradiction claim gets at most one bounded
+//    reconciliation cycle;
 //  - invariant 8: terminal states are absorbing — completed/aborted admit only
 //    STATUS and the sanctioned OVERRIDE arms, and blocked exits only via
 //    ABORT, a valid REGATE (stage 'gates', bounded attempts), or a valid SHIP
@@ -240,6 +241,7 @@ function checkStepInvariants(state, actions, tracker, context) {
       );
     }
     expect(state.remediation_cycles ?? 0).toBeLessThanOrEqual(MAX_REMEDIATION_CYCLES);
+    expect(state.test_contradiction_reconciliations ?? 0).toBeLessThanOrEqual(1);
   }
   // Review-group failures vote disagree; they never consume the stage retry.
   if (
@@ -257,20 +259,66 @@ function checkStepInvariants(state, actions, tracker, context) {
       expect(state.attempts?.[event.stage.id] ?? 1).toBe(attemptsBefore[event.stage.id] ?? 1);
     }
   }
-  // Capability / test-contradiction failures on a non-review stage skip the
-  // provably futile retry and block honestly.
+  // A capability failure on a non-review stage skips the provably futile
+  // retry and blocks honestly.
   if (
     event.type === 'RECEIPT_RECORDED' &&
     event.receipt.status !== 'passed' &&
     !REVIEW_GROUPS.includes(event.stage.parallel_group) &&
-    ['capability', 'test-contradiction'].includes(event.receipt.evidence?.failure_kind) &&
+    event.receipt.evidence?.failure_kind === 'capability' &&
     before &&
     !TERMINAL_STATUSES.has(before.status)
   ) {
     expect(actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
     const transition = actions.find((entry) => entry.type === 'transition');
     expect(transition?.patch?.status).toBe('blocked');
-    expect(transition?.patch?.block_reason).toMatch(/capability-blocked|test-contradiction-blocked/);
+    expect(transition?.patch?.block_reason).toMatch(/capability-blocked/);
+  }
+  // A test-contradiction marker is special only for an eligible implementer.
+  // Its first claim issues one read-only reconciliation ticket; a repeated
+  // claim blocks. Markers from other roles remain ordinary failed receipts,
+  // so they consume the same one-retry budget instead of gaining a second
+  // recovery channel. The two scheduler-owned recovery stages are themselves
+  // single-attempt and fail closed.
+  if (
+    event.type === 'RECEIPT_RECORDED' &&
+    event.receipt.status !== 'passed' &&
+    !REVIEW_GROUPS.includes(event.stage.parallel_group) &&
+    event.receipt.evidence?.failure_kind === 'test-contradiction' &&
+    before &&
+    !TERMINAL_STATUSES.has(before.status)
+  ) {
+    const transition = actions.find((entry) => entry.type === 'transition');
+    const eligibleImplementer =
+      event.ticket.role === 'implementer' &&
+      before.behavioral !== false &&
+      (event.ticket.test_paths?.length ?? before.test_paths?.length ?? 0) > 0;
+    const recoveryStage = ['test-reconcile', 'test-recheck'].includes(event.ticket.stage_id);
+    const priorAttempts = attemptsBefore[event.ticket.stage_id] ?? 1;
+    if (recoveryStage) {
+      expect(actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
+      expect(transition?.patch?.status).toBe('blocked');
+      expect(transition?.patch?.terminal_reason_code).toBe('test_contradiction');
+    } else if (
+      eligibleImplementer &&
+      (before.test_contradiction_reconciliations ?? 0) < 1
+    ) {
+      expect(transition?.patch?.status).not.toBe('blocked');
+      expect(transition?.patch?.test_contradiction_reconciliations).toBe(1);
+      const issued = actions.filter((entry) => entry.type === 'issue_ticket');
+      expect(issued).toHaveLength(1);
+      expect(issued[0].stage.id).toBe('test-reconcile');
+      expect(issued[0].retry_of).toBeUndefined();
+    } else if (eligibleImplementer || priorAttempts >= MAX_STAGE_ATTEMPTS) {
+      expect(actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
+      expect(transition?.patch?.status).toBe('blocked');
+    } else {
+      const retry = actions.find(
+        (entry) => entry.type === 'issue_ticket' && entry.retry_of === event.ticket.ticket_id,
+      );
+      expect(retry?.stage.id).toBe(event.ticket.stage_id);
+      expect(transition?.patch?.attempts?.[event.ticket.stage_id]).toBe(priorAttempts + 1);
+    }
   }
   // Deadline-expiry consumes the same bounded attempt budget as a failure.
   if (
@@ -283,7 +331,13 @@ function checkStepInvariants(state, actions, tracker, context) {
       const priorAttempts = attemptsBefore[pending.stage_id] ?? 1;
       const transition = actions.find((entry) => entry.type === 'transition');
       expect(transition?.patch?.expired_tickets ?? []).toContain(pending.ticket_id);
-      if (priorAttempts < MAX_STAGE_ATTEMPTS) {
+      if (['test-reconcile', 'test-recheck'].includes(pending.stage_id)) {
+        // Recovery verifiers are deliberately single-attempt: expiry must
+        // fail closed rather than opening a second reconciliation/recheck.
+        expect(actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
+        expect(transition?.patch?.status).toBe('blocked');
+        expect(transition?.patch?.terminal_reason_code).toBe('test_contradiction');
+      } else if (priorAttempts < MAX_STAGE_ATTEMPTS) {
         expect(transition?.patch?.attempts?.[pending.stage_id]).toBe(priorAttempts + 1);
         const retry = actions.find(
           (entry) => entry.type === 'issue_ticket' && entry.retry_of === pending.ticket_id,

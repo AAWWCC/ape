@@ -29,4 +29,9 @@ failures, and executable tests at the last check before a destructive sink. Use 
 not-applicable reason where needed; never call check-then-act atomic. Split independent high-risk
 subsystems that lack one primitive and rollback into dependent workstreams or roadmap runs.
 
+When the ticket carries `plan_recovery`, this is the directed replan. Replace the candidate
+plan and resolve every listed missing-assurance id at its evidence anchor; do not merely
+reword the plan or widen scope. The replacement remains subject to both independent plan
+reviewers and the judge.
+
 The runtime validates and hashes the candidate; never supply a hash. Return `passed` only when complete.

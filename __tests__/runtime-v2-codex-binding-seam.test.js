@@ -318,6 +318,14 @@ describe('APE v2 native Codex dispatch handshake', () => {
 
   it('authorizes spawn_agent, binds SubagentStart, injects a receipt capability, and admits the claimed write', async () => {
     const { dir, action } = await startedCodexProject();
+    expect(action.dispatch.spawn_args).toMatchObject({
+      task_name: action.dispatch.agent_name,
+      fork_turns: 'none',
+      model: action.dispatch.model.model,
+      reasoning_effort: action.dispatch.model.reasoning_effort,
+    });
+    expect(action.dispatch.spawn_args.message).toContain('APE common contract');
+    expect(action.dispatch.spawn_args.message).toContain('Immutable StageTicket');
     expect((await statusRun(dir)).dispatches).toEqual([
       expect.objectContaining({
         ticket_id: action.ticket.ticket_id,
@@ -335,10 +343,8 @@ describe('APE v2 native Codex dispatch handshake', () => {
       tool_use_id: 'spawn-1',
       tool_name: 'collaborationspawn_agent',
       tool_input: {
-        task_name: action.dispatch.agent_name,
+        ...action.dispatch.spawn_args,
         message: 'gAAAAABencrypted-v2-message',
-        model: action.dispatch.model.model,
-        reasoning_effort: action.dispatch.model.reasoning_effort,
       },
     });
     expect(launch.decision).toBe('allow');

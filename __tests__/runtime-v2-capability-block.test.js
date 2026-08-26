@@ -5,8 +5,9 @@ import { reduceRun } from '../lib/runtime/scheduler.js';
 // denied a required operation) is a verdict on the environment: the verbatim
 // retry would re-dispatch an identical ticket against an identical gate, so
 // the reducer must skip it and block honestly, while every unmarked failure
-// keeps its one retry, review-group receipts keep falling through as disagree
-// votes, and the marker is inert on a passed receipt.
+// keeps its one retry, review-group denials wait for group convergence and then
+// block with the same actionable recovery envelope, and the marker is inert on
+// a passed receipt.
 
 function run(overrides = {}) {
   return {
@@ -76,8 +77,15 @@ describe('APE v2 capability-blocked failure (reducer)', () => {
     expect(actions[1].stage).toBe(stage);
   });
 
-  it('treats a capability-marked review receipt as a disagree vote, not an early block', () => {
-    const ticket = { ticket_id: 't-review', stage_id: 'review', parallel_group: 'code-review' };
+  it('blocks actionably after a capability-marked review group settles', () => {
+    const ticket = {
+      ticket_id: 't-review',
+      stage_id: 'review',
+      role: 'reviewer',
+      parallel_group: 'code-review',
+      claimed_paths: [],
+      test_paths: [],
+    };
     const receipt = {
       ticket_id: 't-review',
       status: 'failed',
@@ -96,12 +104,18 @@ describe('APE v2 capability-blocked failure (reducer)', () => {
       stage: { id: 'review', role: 'reviewer', parallel_group: 'code-review' },
       next_state: state,
     });
-    // Falls through to the group outcome: one remediation cycle, no block.
+    expect(actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
     const transition = actions.find((entry) => entry.type === 'transition');
-    expect(transition.patch.remediation_cycles).toBe(1);
-    expect(transition.patch.status).toBeUndefined();
-    const issued = actions.find((entry) => entry.type === 'issue_ticket');
-    expect(issued.stage.id).toBe('remediation-build');
+    expect(transition.patch).toMatchObject({
+      status: 'blocked',
+      stage: 'review',
+      terminal_reason_code: 'capability_blocked',
+      blocked_recovery: {
+        source_ticket_id: ticket.ticket_id,
+        successor_required: true,
+        supersession_required: true,
+      },
+    });
   });
 
   it('ignores the marker on a passed receipt and advances normally', () => {

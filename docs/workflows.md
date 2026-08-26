@@ -17,10 +17,21 @@ This proves that the current host session delivers both the launch hook and `Sub
 shipped hook manifest alone is not treated as operational proof. The completed proof is fresh,
 single-use, and consumed before the run's first Git mutation.
 
-The parent inlines the ordered `prompt_paths` and ticket into `spawn_agent.message`, forwards
-`dispatch.agent_name` as `task_name`, and forwards the model and reasoning effort. The action's
-`agent_type` remains APE's logical worker/explorer policy role; Multi-Agent V2 does not expose a
-native `agent_type` argument.
+The runtime returns a versioned `dispatch.spawn_args` object containing the exact native
+`task_name`, `fork_turns: "none"`, model, optional reasoning effort, and one self-contained
+`message`. `fork_turns: "none"` is required because the host's inherited-history default cannot be
+combined with model/reasoning overrides, and the message already carries the whole stage context.
+The message
+contains the dispatch intent, complete common contract, complete role contract, and canonical
+immutable ticket. `ticket_projection` is normally `full`; for a large ticket it is `bounded`, and
+the message carries only the immutable ticket id/hash plus its explicit sanctioned on-disk path, so
+the child must read and verify the complete ticket before stage work. The parent passes
+`spawn_args` to `spawn_agent` unchanged; `prompt_paths`,
+`agent_name`, and the structured `dispatch.model` remain compatibility/diagnostic fields, not an
+invitation to reconstruct the launch. The action's `agent_type` remains APE's logical
+worker/explorer policy role; Multi-Agent V2 does not expose a native `agent_type` argument.
+Concretely, `dispatch.spawn_args.task_name` equals `dispatch.agent_name`, and
+`dispatch.spawn_args.message` is the native `spawn_agent.message`.
 Multi-Agent V2 exposes the canonical hook tool name as `collaborationspawn_agent`; the generated
 task name carries the visible one-time launch capability because the message is encrypted before
 PreToolUse.

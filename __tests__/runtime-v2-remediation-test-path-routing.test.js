@@ -170,6 +170,7 @@ function testRemediation(testPaths, reason = DECLARATION_REASON) {
 function blockingDeclaration(testPaths = ['tests/value.test.js'], extra = {}) {
   return {
     findings: [{
+      id: 'finding.authored-assertion',
       file: testPaths[0] ?? 'tests/value.test.js',
       line: 1,
       title: 'authored assertion correction',
@@ -470,6 +471,7 @@ describe('a review finding in an authored TEST path is remediable within the cyc
       tests: greenTest,
       findings: [
         {
+          id: 'finding.production-boundary',
           file: 'src/value.js',
           line: 3,
           title: 'production boundary correction',
@@ -478,6 +480,7 @@ describe('a review finding in an authored TEST path is remediable within the cyc
           remediation: { owner: 'production' },
         },
         {
+          id: 'finding.authored-assertion',
           file: 'tests/value.test.js',
           line: 2,
           title: 'authored assertion correction',

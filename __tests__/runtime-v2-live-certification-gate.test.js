@@ -1,0 +1,348 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  TERMINAL_REASON_CODES,
+  TERMINAL_REASON_TAXONOMY_VERSION,
+} from '../lib/runtime/terminal-telemetry.js';
+import {
+  LIVE_CERTIFICATION_HOSTS,
+  LIVE_CERTIFICATION_PIPELINES,
+  LiveCertificationError,
+  parseLiveCertificationJson,
+  validateLiveCertificationDocument as validateDocument,
+  verifyLiveCertificationRepository,
+} from '../scripts/verify-live-certification.mjs';
+
+const VERSION = '2.23.0';
+const SOURCE = 'a'.repeat(40);
+const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
+const temporaryRepositories = [];
+
+function hash(number) {
+  return number.toString(16).padStart(40, '0');
+}
+
+function runRecordHash(number) {
+  return number.toString(16).padStart(64, '0');
+}
+
+function landProof(sequence) {
+  const pushed = hash(100 + sequence);
+  const merge = hash(300 + sequence);
+  return {
+    target_branch: 'main',
+    merge_method: 'squash',
+    auto_merge_required: true,
+    pr_state: 'MERGED',
+    pushed_head_commit: pushed,
+    observed_merged_pr_head: pushed,
+    merge_commit: merge,
+    remote_head_after_merge: merge,
+  };
+}
+
+function cleanAttempt({ sequence, host, pipeline, sourceCommit = SOURCE }) {
+  return {
+    sequence,
+    attempt_id: `${host}-${pipeline}-${sequence}`,
+    host,
+    host_version: HOST_VERSIONS[host],
+    plugin_version: VERSION,
+    pipeline,
+    source_commit: sourceCommit,
+    run_record_sha256: runRecordHash(sequence),
+    ticket_count: pipeline === 'mechanical' ? 3 : 9,
+    duration_ms: 1_000 + sequence,
+    outcome: 'success',
+    terminal_reason_code: 'completed',
+    manual_intervention: false,
+    prompt_assembly_failure: false,
+    receipt_repair: false,
+    duplicate_dispatch: false,
+    abort_successor: false,
+    protected_land: pipeline === 'protected-branch-land' ? landProof(sequence) : null,
+  };
+}
+
+function validLedger(sourceCommit = SOURCE) {
+  const attempts = [];
+  for (const host of LIVE_CERTIFICATION_HOSTS) {
+    for (const pipeline of LIVE_CERTIFICATION_PIPELINES) {
+      for (let repetition = 0; repetition < 3; repetition += 1) {
+        attempts.push(cleanAttempt({
+          sequence: attempts.length + 1,
+          host,
+          pipeline,
+          sourceCommit,
+        }));
+      }
+    }
+  }
+  return {
+    schema_version: 1,
+    ape_version: VERSION,
+    source_commit: sourceCommit,
+    terminal_reason_taxonomy_version: TERMINAL_REASON_TAXONOMY_VERSION,
+    attempts,
+  };
+}
+
+function canonical(document) {
+  return `${JSON.stringify(document, null, 2)}\n`;
+}
+
+function validateLiveCertificationDocument(document, options = {}) {
+  return validateDocument(document, {
+    packageVersion: VERSION,
+    sourceCommit: SOURCE,
+    hostVersions: HOST_VERSIONS,
+    ...options,
+  });
+}
+
+function git(repo, ...args) {
+  return execFileSync('git', args, {
+    cwd: repo,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'APE Certification Test',
+      GIT_AUTHOR_EMAIL: 'ape-certification@example.invalid',
+      GIT_COMMITTER_NAME: 'APE Certification Test',
+      GIT_COMMITTER_EMAIL: 'ape-certification@example.invalid',
+    },
+  }).trim();
+}
+
+function sourceRepository() {
+  const repo = mkdtempSync(path.join(tmpdir(), 'ape-live-certification-'));
+  temporaryRepositories.push(repo);
+  git(repo, 'init', '--initial-branch=main');
+  mkdirSync(path.join(repo, 'evals'));
+  writeFileSync(path.join(repo, 'package.json'), canonical({ name: 'ape', version: VERSION }));
+  writeFileSync(path.join(repo, 'compatibility.json'), canonical({
+    version: 1,
+    hosts: {
+      codex: { package: '@openai/codex', version: HOST_VERSIONS.codex },
+      claude: { package: '@anthropic-ai/claude-code', version: HOST_VERSIONS.claude },
+    },
+  }));
+  writeFileSync(path.join(repo, 'source.txt'), 'tested source\n');
+  git(repo, 'add', 'package.json', 'compatibility.json', 'source.txt');
+  git(repo, 'commit', '-m', 'source candidate');
+  return { repo, source: git(repo, 'rev-parse', 'HEAD') };
+}
+
+function certificationCommit({ extraPath = null, sourceOverride = null } = {}) {
+  const { repo, source } = sourceRepository();
+  const document = validLedger(sourceOverride ?? source);
+  writeFileSync(path.join(repo, 'evals', 'live-certification.json'), canonical(document));
+  git(repo, 'add', 'evals/live-certification.json');
+  if (extraPath) {
+    writeFileSync(path.join(repo, extraPath), 'not certification evidence\n');
+    git(repo, 'add', extraPath);
+  }
+  git(repo, 'commit', '-m', 'certify live hosts');
+  const head = git(repo, 'rev-parse', 'HEAD');
+  git(repo, 'tag', `v${VERSION}`);
+  return { repo, source, head };
+}
+
+afterEach(() => {
+  for (const directory of temporaryRepositories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+describe('live release certification evidence', () => {
+  it('requires three clean completed raw attempts for every host and pipeline', () => {
+    const result = validateLiveCertificationDocument(validLedger(), {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    });
+    expect(result).toEqual({ version: VERSION, attempt_count: 24, cohort_count: 8 });
+  });
+
+  it('retains earlier failed attempts without averaging them into the final consecutive result', () => {
+    const document = validLedger();
+    const failed = {
+      ...cleanAttempt({ sequence: 1, host: 'codex', pipeline: 'mechanical' }),
+      attempt_id: 'codex-mechanical-failed-raw-attempt',
+      outcome: 'failure',
+      terminal_reason_code: 'aborted_dispatch',
+      prompt_assembly_failure: true,
+      run_record_sha256: runRecordHash(1_000),
+    };
+    document.attempts.unshift(failed);
+    document.attempts.forEach((attempt, index) => { attempt.sequence = index + 1; });
+    expect(validateLiveCertificationDocument(document, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    }).attempt_count).toBe(25);
+  });
+
+  it('fails closed on missing coverage, a dirty final run, or non-completed success', () => {
+    const missing = validLedger();
+    missing.attempts.splice(-3);
+    missing.attempts.push(
+      cleanAttempt({ sequence: 22, host: 'claude', pipeline: 'full' }),
+      cleanAttempt({ sequence: 23, host: 'claude', pipeline: 'full' }),
+      cleanAttempt({ sequence: 24, host: 'claude', pipeline: 'full' }),
+    );
+    expect(() => validateLiveCertificationDocument(missing, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/claude\/protected-branch-land has fewer/iu);
+
+    const dirty = validLedger();
+    dirty.attempts.at(-1).receipt_repair = true;
+    expect(() => validateLiveCertificationDocument(dirty, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/does not end with three clean completed/iu);
+
+    const contradictory = validLedger();
+    contradictory.attempts[0].terminal_reason_code = 'test_failed';
+    expect(() => validateLiveCertificationDocument(contradictory, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/outcome and terminal reason code disagree/iu);
+  });
+
+  it('requires exact pushed-head merge proof for every successful protected land attempt', () => {
+    const document = validLedger();
+    const protectedAttempt = document.attempts.find((attempt) => attempt.pipeline === 'protected-branch-land');
+    protectedAttempt.protected_land.observed_merged_pr_head = hash(999);
+    expect(() => validateLiveCertificationDocument(document, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/did not merge the exact pushed head/iu);
+
+    const unprotected = validLedger();
+    const unprotectedAttempt = unprotected.attempts
+      .find((attempt) => attempt.pipeline === 'protected-branch-land');
+    unprotectedAttempt.protected_land.auto_merge_required = false;
+    expect(() => validateLiveCertificationDocument(unprotected, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/required protected auto-merge path/iu);
+  });
+
+  it('rejects free-form fields, unsafe versions, mismatched source/version, and non-canonical JSON', () => {
+    const withProse = validLedger();
+    withProse.attempts[0].objective = 'unbounded private prose';
+    expect(() => validateLiveCertificationDocument(withProse, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/missing or unsupported fields/iu);
+
+    const unsupportedVersion = validLedger();
+    unsupportedVersion.attempts[0].host_version = 'banana';
+    expect(() => validateLiveCertificationDocument(unsupportedVersion, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/host version does not match compatibility\.json/iu);
+
+    const reusedRecord = validLedger();
+    reusedRecord.attempts[1].run_record_sha256 = reusedRecord.attempts[0].run_record_sha256;
+    expect(() => validateLiveCertificationDocument(reusedRecord, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/reuses an archived run-record digest/iu);
+
+    expect(() => validateLiveCertificationDocument(validLedger(), {
+      packageVersion: '9.9.9',
+      sourceCommit: SOURCE,
+    })).toThrow(/version does not match/iu);
+    expect(() => validateLiveCertificationDocument(validLedger(), {
+      packageVersion: VERSION,
+      sourceCommit: 'b'.repeat(40),
+    })).toThrow(/source commit/iu);
+    expect(() => parseLiveCertificationJson(JSON.stringify(validLedger()))).toThrow(/canonical/iu);
+    expect(() => parseLiveCertificationJson('x'.repeat(256 * 1024 + 1))).toThrow(/size limit/iu);
+  });
+});
+
+describe('tagged certification-only commit gate', () => {
+  it('verifies committed evidence from a single-child tag and ignores the working tree', () => {
+    const { repo, head } = certificationCommit();
+    writeFileSync(path.join(repo, 'evals', 'live-certification.json'), '{"fabricated":true}\n');
+    expect(verifyLiveCertificationRepository({ repo, head, tag: `v${VERSION}` })).toEqual({
+      version: VERSION,
+      attempt_count: 24,
+      cohort_count: 8,
+    });
+  });
+
+  it('rejects a certification commit with any additional changed path', () => {
+    const { repo, head } = certificationCommit({ extraPath: 'extra.txt' });
+    expect(() => verifyLiveCertificationRepository({ repo, head, tag: `v${VERSION}` }))
+      .toThrow(/only add or modify evals\/live-certification\.json/iu);
+  });
+
+  it('rejects evidence that names any source other than the certification commit parent', () => {
+    const { repo, head } = certificationCommit({ sourceOverride: 'b'.repeat(40) });
+    expect(() => verifyLiveCertificationRepository({ repo, head, tag: `v${VERSION}` }))
+      .toThrow(/source commit is not the certification commit parent/iu);
+  });
+
+  it('rejects a two-parent release head even when its first-parent diff only adds the ledger', () => {
+    const { repo, source } = sourceRepository();
+    const sourceTree = git(repo, 'rev-parse', `${source}^{tree}`);
+    const secondParent = git(repo, 'commit-tree', sourceTree, '-p', source, '-m', 'empty side parent');
+    writeFileSync(path.join(repo, 'evals', 'live-certification.json'), canonical(validLedger(source)));
+    git(repo, 'add', 'evals/live-certification.json');
+    const certificationTree = git(repo, 'write-tree');
+    const head = git(
+      repo,
+      'commit-tree',
+      certificationTree,
+      '-p',
+      source,
+      '-p',
+      secondParent,
+      '-m',
+      'invalid merge certification',
+    );
+    git(repo, 'update-ref', 'refs/heads/main', head);
+    git(repo, 'tag', `v${VERSION}`, head);
+    expect(() => verifyLiveCertificationRepository({ repo, head, tag: `v${VERSION}` }))
+      .toThrow(/exactly one parent/iu);
+  });
+
+  it('requires the version tag itself to resolve to the certification head', () => {
+    const { repo, source, head } = certificationCommit();
+    git(repo, 'tag', '--force', `v${VERSION}`, source);
+    expect(() => verifyLiveCertificationRepository({ repo, head, tag: `v${VERSION}` }))
+      .toThrow(/tag does not point to the certification commit/iu);
+  });
+
+  it('refuses to verify a tag other than the commit currently checked out', () => {
+    const { repo, head } = certificationCommit();
+    writeFileSync(path.join(repo, 'after-tag.txt'), 'different checkout\n');
+    git(repo, 'add', 'after-tag.txt');
+    git(repo, 'commit', '-m', 'move checkout past certification');
+    expect(() => verifyLiveCertificationRepository({ repo, head, tag: `v${VERSION}` }))
+      .toThrow(/tag commit must be the checked-out HEAD/iu);
+  });
+
+  it('ships a strict privacy-safe schema but no fabricated live ledger', () => {
+    const schema = JSON.parse(readFileSync(new URL('../evals/live-certification.schema.json', import.meta.url), 'utf8'));
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.$defs.attempt.additionalProperties).toBe(false);
+    expect(schema.properties.terminal_reason_taxonomy_version.const)
+      .toBe(TERMINAL_REASON_TAXONOMY_VERSION);
+    expect(schema.$defs.attempt.properties.host.enum).toEqual(['codex', 'claude']);
+    expect(schema.$defs.attempt.properties.pipeline.enum).toEqual([
+      'mechanical',
+      'fast',
+      'full',
+      'protected-branch-land',
+    ]);
+    expect(schema.$defs.terminal_reason_code.enum).toEqual(TERMINAL_REASON_CODES);
+    expect(LiveCertificationError).toBeTypeOf('function');
+  });
+});

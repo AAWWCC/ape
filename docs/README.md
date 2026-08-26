@@ -14,3 +14,4 @@ Start with the [README](../README.md) for installation and normal use.
 | [Skills](skills.md) | User-facing skill behavior and invocation policy. |
 | [Agents](agents.md) | Roles, model tiers, and host adapters. |
 | [Native-agent adapters](workflows.md) | Claude and Codex dispatch/binding details. |
+| [Operational readiness](operational-readiness.md) | Replay gates, live dogfood certification, and release-health claims. |

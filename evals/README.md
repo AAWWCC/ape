@@ -34,3 +34,11 @@ npm run eval:prompts:verify -- --results evals/results/release-candidate
 
 Generated result directories are ignored. Preserve an approved release artifact in external CI or
 release storage rather than committing model output to the source tree.
+
+## Live operational certification
+
+The separate live-host release ledger is defined by `live-certification.schema.json` and documented
+in [operational readiness](../docs/operational-readiness.md). The schema deliberately permits only
+privacy-safe structured outcomes. The real `live-certification.json` must not exist until its raw
+Codex and Claude attempts have actually run; the release verifier also requires it to be the sole
+change in a dedicated tagged certification commit over the exact tested source commit.

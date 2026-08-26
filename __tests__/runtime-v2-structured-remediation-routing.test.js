@@ -26,9 +26,12 @@ afterEach(async () => {
 });
 function finding(owner, overrides = {}) {
   const testOwned = owner === 'test' || owner === 'both';
+  const file = overrides.file ?? (testOwned ? 'tests/value.test.js' : 'src/value.js');
+  const line = overrides.line ?? (testOwned ? 2 : 1);
   return {
-    file: testOwned ? 'tests/value.test.js' : 'src/value.js',
-    line: testOwned ? 2 : 1,
+    id: overrides.id ?? `finding.${owner}.${file.replace(/[^A-Za-z0-9]+/g, '-')}.${line}`,
+    file,
+    line,
     title: `${owner} boundary is incorrect`,
     detail: `apply the bounded ${owner} correction`,
     blocking: true,
@@ -296,9 +299,10 @@ describe('versioned review admission is bounded, atomic, and legacy-compatible',
     const review = await walkToReview(await project());
     expect(review.review_contract_version).toBe(VERSION);
     const schema = JSON.stringify(review.output_schema);
-    for (const key of ['file', 'line', 'title', 'detail', 'blocking', 'remediation', 'owner', 'test_paths']) {
+    for (const key of ['id', 'file', 'line', 'title', 'detail', 'blocking', 'remediation', 'owner', 'test_paths']) {
       expect(schema).toContain(key);
     }
+    expect(review.output_schema.properties.findings.items.required).toContain('id');
     expect(schema).toContain('maxLength');
     expect(schema).toContain('maxItems');
   }, 30_000);

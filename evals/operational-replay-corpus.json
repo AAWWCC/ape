@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "description": "Normalized, non-sensitive failure classes that must remain recoverable before release.",
+  "cases": [
+    {
+      "id": "codex-dispatch-envelope",
+      "category": "orchestration",
+      "observed_failure": "The parent had to reconstruct prompt ordering and native launch arguments from prose and paths.",
+      "recovery_contract": "A dispatch response supplies one exact machine-copyable launch envelope and explicit next control action.",
+      "test_file": "__tests__/runtime-v2-adapters.test.js",
+      "test_anchor": "codex-dispatch-envelope returns one exact, canonical native spawn payload"
+    },
+    {
+      "id": "plan-directed-replan",
+      "category": "planning",
+      "observed_failure": "A material but correctable plan disagreement terminally blocked the run.",
+      "recovery_contract": "One scheduler-owned directed replan carries structured missing-assurance feedback before a repeated defect blocks.",
+      "test_file": "__tests__/runtime-v2-bounded-false-block-recovery.test.js",
+      "test_anchor": "plan-directed-replan"
+    },
+    {
+      "id": "test-contradiction-verification",
+      "category": "test-contract",
+      "observed_failure": "An implementer contradiction claim terminally blocked without independent adjudication.",
+      "recovery_contract": "One read-only reconciliation dispatch validates the claim and either resumes or blocks with structured evidence.",
+      "test_file": "__tests__/runtime-v2-bounded-false-block-recovery.test.js",
+      "test_anchor": "test-contradiction-verification"
+    },
+    {
+      "id": "stable-review-finding-identity",
+      "category": "review",
+      "observed_failure": "Equivalent review findings with wording drift consumed distinct remediation cycles.",
+      "recovery_contract": "Canonical finding identity is derived from material evidence rather than prose wording.",
+      "test_file": "__tests__/runtime-v2-bounded-false-block-recovery.test.js",
+      "test_anchor": "stable-review-finding-identity"
+    },
+    {
+      "id": "actionable-scope-denial",
+      "category": "scope-policy",
+      "observed_failure": "A capability or path denial did not state the exact safe recovery shape.",
+      "recovery_contract": "The refusal names additive claims and whether the current run can expand or requires a successor.",
+      "test_file": "__tests__/runtime-v2-bounded-false-block-recovery.test.js",
+      "test_anchor": "actionable-scope-denial"
+    },
+    {
+      "id": "protected-branch-shipping",
+      "category": "shipping",
+      "observed_failure": "A protected branch requiring auto-merge was treated as a terminal shipping failure.",
+      "recovery_contract": "Authorized shipping enables auto-merge and polls the exact pushed head to completion.",
+      "test_file": "__tests__/runtime-v2-gates-automerge.test.js",
+      "test_anchor": "enables GitHub auto-merge when branch policy rejects an immediate green merge"
+    },
+    {
+      "id": "nonbehavioral-test-stage-omission",
+      "category": "pipeline-selection",
+      "observed_failure": "Non-behavioral work was required to manufacture current-run red-test evidence.",
+      "recovery_contract": "Non-behavioral phase work omits preflight and test-writer stages.",
+      "test_file": "__tests__/runtime-v2-core-lane-surface.test.js",
+      "test_anchor": "projects no test-writer stage for a non-behavioral full run"
+    },
+    {
+      "id": "versioned-terminal-diagnostics",
+      "category": "observability",
+      "observed_failure": "Historical outcomes could not be attributed to an APE or dispatch-protocol version and collapsed to generic blocked status.",
+      "recovery_contract": "New terminal records retain runtime and protocol provenance plus a stable terminal reason code.",
+      "test_file": "__tests__/runtime-v2-versioned-terminal-diagnostics.test.js",
+      "test_anchor": "versioned-terminal-diagnostics"
+    }
+  ]
+}

@@ -106,6 +106,23 @@ describe('ape v2 statusline renderer', () => {
     expect(out).toContain('P T B R G M');
   });
 
+  it.each([
+    ['plan-replan', 'full', 'plan'],
+    ['test-reconcile', 'fast', 'test'],
+    ['test-recheck', 'fast', 'test'],
+  ])('renders active %s as the %s milestone without a corrupt/unknown fallback', (stage, lane, milestone) => {
+    writeActive(dir, {
+      lane,
+      stage,
+      tickets: [{ ticket_id: `ticket-${stage}`, stage_id: stage, role:
+        stage === 'plan-replan' ? 'planner' : stage === 'test-recheck' ? 'test_writer' : 'reviewer' }],
+    });
+    const out = stripAnsi(render({ workspace: { current_dir: dir } }));
+    expect(out).toContain(milestone);
+    expect(out).not.toContain('corrupt_state');
+    expect(out).not.toContain('unknown');
+  });
+
   it('carries in-progress state without any glyph — no loading mark, spinner, pending marker, or check', () => {
     writeActive(dir, {
       mode: 'phase',

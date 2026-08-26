@@ -21,3 +21,6 @@ If a test contradicts the ticket or itself, do not edit or evade it. Return `fai
 `evidence.failure_kind: "test-contradiction"`; name test path and location, reproducing command and result,
 incompatible expectations or objective conflict, and proof no conforming implementation can pass. Repeat the
 exact conflict in `evidence.summary`. Use the common capability shape for policy denials.
+Also set `evidence.test_contradiction` with exact authorized `test_paths`, a bounded `summary`, and
+`incompatible_expectations`; this is evidence for one independent reconciliation, not authority to
+edit tests.

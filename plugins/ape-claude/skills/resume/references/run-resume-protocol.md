@@ -18,10 +18,19 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    Codex Multi-Agent V2, that field is APE's logical policy role and is not a native tool argument;
    on Antigravity, pass it as `TypeName` and pass the ticket model as `Model`.
    Never substitute a model, semantic task name, SDK, nested CLI, or API call.
-3. Compose the child's context from the complete common prompt, the complete role prompt, and the
-   action's immutable ticket. On Codex, inline them after the dispatch-intent prompt in that order,
-   labeled `APE common contract`, `APE <role> contract`, and `Immutable StageTicket`. On Claude,
-   use the returned plugin agent wrapper, which loads the same prompt files, and append the ticket.
+3. On Codex, pass `dispatch.spawn_args` directly to native `spawn_agent` with every key and value
+   unchanged. It is the versioned, self-contained launch envelope: `message` already contains the
+   dispatch-intent prompt, complete common prompt, complete role prompt, and immutable ticket in
+   that order, labeled `APE common contract`, `APE <role> contract`, and `Immutable StageTicket`.
+   `ticket_projection: "full"` means the complete ticket is inline; `"bounded"` carries only its
+   immutable id/hash and explicit sanctioned `.ape/runtime/tickets/` path, so the child must load and
+   verify the complete ticket before stage work.
+   The exact native arguments include `fork_turns: "none"`: model/reasoning overrides are
+   incompatible with the host's inherited-history default, and this message needs no parent history.
+   Never reread `prompt_paths`, assemble a replacement message, or copy the compatibility
+   `dispatch.model` object into the native `model` string argument. On Claude, use the returned
+   plugin agent wrapper, which loads the same prompt files, and append the ticket. On Antigravity,
+   compose its prompt from the complete common prompt, complete role prompt, and immutable ticket.
 4. Launch distinct tickets as returned. On Codex and Antigravity, finish each spawn call and confirm
    its dispatch is bound before launching the next; bound agents may then run concurrently. Never launch two
    physical agents for one ticket. Wait through the host's native primitive; do not poll unchanged
@@ -32,6 +41,8 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    `review_contract_version` uses bounded structured findings: advisory entries omit remediation;
    blocking entries declare `production`, `test`, or `both` ownership and exact authorized
    `test_paths` when test-owned. Do not translate these into legacy `evidence.test_remediation`.
+   The Codex dispatch's `next_control` states the same handoff compactly: record the returned
+   receipt unchanged, then call `ape_run next` after the returned dispatch group is fully recorded.
 6. If recording preflight returns `input_required`, obtain complete exact answers for all question
    ids and submit one aimed `answer-preflight` action with the exact hash, a bounded audit `reason`,
    and additive-only `claimed_paths`, `test_paths`, and canonical `risk_triggers`. Do not dispatch a

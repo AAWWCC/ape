@@ -43,6 +43,8 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${version}"
+      - name: Require committed live-host certification
+        run: npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
       - run: npm run typecheck
       - run: npm run bundle
       - name: Require fresh committed bundles
@@ -51,6 +53,8 @@ jobs:
       - run: npm run package:reproducible
       - name: Validate the credential-free prompt evaluation release gate
         run: npm run eval:prompts:check
+      - name: Replay operational failure canaries
+        run: npm run operational:canary
       - run: npm run public:check
       - run: npm run smoke:plugins
       - name: Verify a clean full public source export
@@ -117,6 +121,8 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${version}"
+      - name: Require committed live-host certification
+        run: npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
       - run: npm run typecheck
       - run: npm run bundle
       - name: Require fresh committed bundles
@@ -125,6 +131,8 @@ jobs:
       - run: npm run package:reproducible
       - name: Validate the credential-free prompt evaluation release gate
         run: npm run eval:prompts:check
+      - name: Replay operational failure canaries
+        run: npm run operational:canary
       - run: npm run public:check
       - run: npm run smoke:plugins
       - name: Verify a clean full public source export

@@ -21,3 +21,6 @@ If the candidate is missing or the legacy artifact is truncated, distinguish uns
 a demonstrated plan defect.
 Return `status: "passed"` with `evidence.verdict: "agree"` or `"disagree"`; return `failed` only when
 review is impossible.
+On disagree, provide 1-16 bounded `evidence.missing_assurances` entries with `summary`,
+`evidence_anchor`, and applicable `requirement_id`/`risk_trigger`. Never reject merely because
+another design is possible.

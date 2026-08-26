@@ -200,6 +200,8 @@ npm run package:check
 npm run package:reproducible
 npm run public:check
 npm run eval:prompts:check
+npm run operational:canary
+npm run release:live-certification -- --head <certification-commit> --tag <version-tag>
 npm run validate
 ```
 
@@ -211,6 +213,14 @@ the synthetic scenario matrix, prompt hashes, schema, scorer, and release thresh
 model calls. Live prompt evaluation has separate explicit paid-call guards, and
 `npm run eval:prompts:verify` verifies a supplied result artifact offline; see
 [the evaluation guide](evals/README.md).
+
+`npm run operational:canary` replays normalized failure classes covering dispatch, planning,
+test-contract disputes, review remediation, scope guidance, shipping, pipeline selection, and
+terminal diagnostics. It is deterministic and credential-free. A release candidate must also pass
+live native-host dogfooding before publication. Tagged releases fail closed unless the real raw
+Codex/Claude ledger is the only change in a dedicated certification commit over the exact tested
+source; see [operational readiness](docs/operational-readiness.md). The verifier is offline, so it
+does not pretend CI can manufacture host lifecycle delivery or remote shipping evidence.
 
 `npm test` runs the standalone suite with six workers. When several agents may test concurrently,
 use `npm run test:agent -- <paths...>` for the three-worker profile. Run

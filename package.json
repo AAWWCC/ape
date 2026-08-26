@@ -1,6 +1,6 @@
 {
   "name": "ape",
-  "version": "2.22.4",
+  "version": "2.23.0",
   "type": "module",
   "private": true,
   "description": "APE — durable, evidence-gated engineering runs for AI coding agents",
@@ -47,6 +47,8 @@
     "eval:prompts:plan": "node evals/prompt-evals.mjs plan",
     "eval:prompts:run": "node evals/prompt-evals.mjs run",
     "eval:prompts:verify": "node evals/prompt-evals.mjs verify",
+    "operational:canary": "node scripts/run-operational-canaries.mjs",
+    "release:live-certification": "node scripts/verify-live-certification.mjs",
     "typecheck": "tsc -p jsconfig.json --noEmit",
     "bundle": "node scripts/bundle-mcp.mjs",
     "bundle:reach": "node scripts/bundle-reach.mjs",

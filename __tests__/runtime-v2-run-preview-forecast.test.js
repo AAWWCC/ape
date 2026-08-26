@@ -144,12 +144,12 @@ describe('projectedPipeline export and shape', () => {
 // ==================================================================
 
 describe('projectedPipeline stage graph (full+high_risk)', () => {
-  it('includes all 13 reachable stages', () => {
+  it('includes all 16 reachable stages', () => {
     const result = projectedPipeline(runSpec());
     const stageIds = result.stages.map((s) => s.id);
     for (const expected of [
-      'preflight', 'plan', 'plan-check', 'plan-critic', 'plan-judge',
-      'test', 'build', 'review', 'security-review',
+      'preflight', 'plan', 'plan-check', 'plan-critic', 'plan-judge', 'plan-replan',
+      'test', 'test-reconcile', 'test-recheck', 'build', 'review', 'security-review',
       'remediation-test', 'remediation-build',
       'remediation-review', 'remediation-security-review',
     ]) {
@@ -186,27 +186,65 @@ describe('projectedPipeline stage graph (full+high_risk)', () => {
 // ==================================================================
 
 describe('projectedPipeline forecast bounds', () => {
-  it('full+high_risk worst-case total equals 26', () => {
+  it('full+high_risk total includes every default remediation cycle and global retry', () => {
     const result = projectedPipeline(runSpec());
-    expect(result.dispatch_bounds.total).toBe(26);
+    expect(result.dispatch_bounds.total).toBe(41);
   });
 
-  it('each stage has max_dispatches equal to MAX_STAGE_ATTEMPTS', () => {
+  it('models single-attempt reconciliation, two plan rounds, and repeated remediation', () => {
     const result = projectedPipeline(runSpec());
     for (const [stageId, count] of Object.entries(result.dispatch_bounds.by_stage)) {
-      expect(count, `stage ${stageId}`).toBe(MAX_STAGE_ATTEMPTS);
+      const expected = ['test-reconcile', 'test-recheck'].includes(stageId)
+        ? 1
+        : ['plan-check', 'plan-critic', 'plan-judge'].includes(stageId)
+          ? MAX_STAGE_ATTEMPTS + 1
+          : stageId.startsWith('remediation-')
+            ? MAX_REMEDIATION_CYCLES + (MAX_STAGE_ATTEMPTS - 1)
+          : MAX_STAGE_ATTEMPTS;
+      expect(count, `stage ${stageId}`).toBe(expected);
     }
   });
 
-  it('full+no_risk omits security-review stages and has a lower total', () => {
+  it('derives remediation dispatches from the maximum configured cycle policy', () => {
+    const result = projectedPipeline(runSpec({ policy: {
+      high_risk_security_review: true,
+      max_remediation_cycles: 10,
+    } }));
+    expect(result.dispatch_bounds.total).toBe(69);
+    for (const stageId of [
+      'remediation-test',
+      'remediation-build',
+      'remediation-review',
+      'remediation-security-review',
+    ]) {
+      expect(result.dispatch_bounds.by_stage[stageId]).toBe(11);
+    }
+  });
+
+  it('full+no_risk includes the security graph that a later risk receipt can arm', () => {
     const result = projectedPipeline(runSpec({ high_risk: false }));
+    const stageIds = result.stages.map((s) => s.id);
+    expect(stageIds).toContain('security-review');
+    expect(stageIds).toContain('remediation-security-review');
+    expect(result.dispatch_bounds.total).toBe(41);
+    expect(result.conditional_branches).toContainEqual({
+      id: 'security-review',
+      label: 'Security review (late risk trigger)',
+    });
+  });
+
+  it('omits the security graph only when policy explicitly disables it', () => {
+    const result = projectedPipeline(runSpec({
+      high_risk: false,
+      policy: { high_risk_security_review: false },
+    }));
     const stageIds = result.stages.map((s) => s.id);
     expect(stageIds).not.toContain('security-review');
     expect(stageIds).not.toContain('remediation-security-review');
-    expect(result.dispatch_bounds.total).toBeLessThan(26);
+    expect(result.dispatch_bounds.total).toBe(35);
   });
 
-  it('mechanical lane total equals MAX_STAGE_ATTEMPTS', () => {
+  it('mechanical lane includes late-armed security review and its remediation envelope', () => {
     const result = projectedPipeline(runSpec({
       lane: 'mechanical',
       behavioral: false,
@@ -214,6 +252,40 @@ describe('projectedPipeline forecast bounds', () => {
       plan_contract_version: undefined,
       claimed_paths: ['docs/guide.md'],
       test_paths: [],
+    }));
+    expect(result.dispatch_bounds.total).toBe(20);
+    expect(result.dispatch_bounds.by_stage).toMatchObject({
+      build: 2,
+      'security-review': 2,
+      'remediation-test': 4,
+      'remediation-build': 4,
+      'remediation-review': 4,
+      'remediation-security-review': 4,
+    });
+  });
+
+  it('mechanical lane derives its security remediation envelope from the cycle policy', () => {
+    const result = projectedPipeline(runSpec({
+      lane: 'mechanical',
+      behavioral: false,
+      high_risk: false,
+      plan_contract_version: undefined,
+      claimed_paths: ['docs/guide.md'],
+      test_paths: [],
+      policy: { high_risk_security_review: true, max_remediation_cycles: 10 },
+    }));
+    expect(result.dispatch_bounds.total).toBe(48);
+  });
+
+  it('mechanical lane is build-only when security review is explicitly disabled', () => {
+    const result = projectedPipeline(runSpec({
+      lane: 'mechanical',
+      behavioral: false,
+      high_risk: false,
+      plan_contract_version: undefined,
+      claimed_paths: ['docs/guide.md'],
+      test_paths: [],
+      policy: { high_risk_security_review: false },
     }));
     expect(result.dispatch_bounds.total).toBe(MAX_STAGE_ATTEMPTS);
   });
@@ -243,21 +315,55 @@ describe('projectedPipeline forecast bounds', () => {
     const fastResult = projectedPipeline(runSpec({
       lane: 'fast',
       high_risk: false,
+      plan_contract_version: undefined,
     }));
     expect(fastResult.dispatch_bounds.total).toBeLessThan(fullResult.dispatch_bounds.total);
     expect(fastResult.dispatch_bounds.total).toBeGreaterThan(MAX_STAGE_ATTEMPTS);
   });
 
-  it('land mode total is bounded by the review group plus remediation', () => {
+  it('fast v2 preflight forecasts the full graph that additive answers can arm', () => {
+    const result = projectedPipeline(runSpec({ lane: 'fast', high_risk: false }));
+    expect(result.stages.map((stage) => stage.id)).toContain('plan');
+    expect(result.dispatch_bounds.total).toBe(41);
+    expect(result.conditional_branches).toContainEqual({
+      id: 'lane-escalation',
+      label: 'Full-lane planning (preflight escalation)',
+    });
+  });
+
+  it('fast v2 preflight derives the escalated full envelope from remediation policy', () => {
+    const result = projectedPipeline(runSpec({
+      lane: 'fast',
+      high_risk: false,
+      policy: { high_risk_security_review: true, max_remediation_cycles: 10 },
+    }));
+    expect(result.dispatch_bounds.total).toBe(69);
+  });
+
+  it('land mode forecasts only read-only review and terminally blocks disagreement', () => {
     const result = projectedPipeline(runSpec({
       mode: 'land',
       lane: 'full',
       high_risk: true,
     }));
-    // Land has review + security-review + remediation stages at most.
-    // Total must be less than the full building pipeline.
-    expect(result.dispatch_bounds.total).toBeLessThan(26);
-    expect(result.dispatch_bounds.total).toBeGreaterThanOrEqual(MAX_STAGE_ATTEMPTS * 2);
+    expect(result.stages.map((stage) => stage.id)).toEqual(['review', 'security-review']);
+    expect(result.stages.every((stage) => stage.role.endsWith('reviewer'))).toBe(true);
+    expect(result.dispatch_bounds.total).toBe(4);
+    expect(result.conditional_branches).toContainEqual({
+      id: 'review-disagreement-block',
+      label: 'Review disagreement (terminal block; land mode has no writer)',
+    });
+  });
+
+  it('land mode is review-only when security audit policy is disabled', () => {
+    const result = projectedPipeline(runSpec({
+      mode: 'land',
+      lane: 'full',
+      high_risk: false,
+      policy: { high_risk_security_review: false },
+    }));
+    expect(result.stages.map((stage) => stage.id)).toEqual(['review']);
+    expect(result.dispatch_bounds.total).toBe(MAX_STAGE_ATTEMPTS);
   });
 });
 
@@ -334,17 +440,21 @@ describe('projectedPipeline conditional branches', () => {
   });
 
   it('omits plan-judge branch for non-full lanes', () => {
-    const result = projectedPipeline(runSpec({ lane: 'fast', high_risk: false }));
+    const result = projectedPipeline(runSpec({
+      lane: 'fast',
+      high_risk: false,
+      plan_contract_version: undefined,
+    }));
     const labels = result.conditional_branches.map((b) =>
       typeof b === 'string' ? b : b.label ?? b.id ?? String(b));
     expect(labels.some((l) => /plan.?judge/i.test(l))).toBe(false);
   });
 
-  it('omits security-review branch for non-high-risk runs', () => {
+  it('labels late-armable security review for non-high-risk runs', () => {
     const result = projectedPipeline(runSpec({ high_risk: false }));
     const labels = result.conditional_branches.map((b) =>
       typeof b === 'string' ? b : b.label ?? b.id ?? String(b));
-    expect(labels.some((l) => /security/i.test(l))).toBe(false);
+    expect(labels.some((l) => /late risk trigger/i.test(l))).toBe(true);
   });
 });
 

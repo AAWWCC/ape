@@ -4,9 +4,9 @@ import { reduceRun } from '../lib/runtime/scheduler.js';
 
 // friction #22: a plan-judge receipt can be status 'passed' (the stage ran to
 // completion) while its evidence records verdict 'disagree' (the judge upheld
-// the plan-review disagreement). The reducer must block the run instead of
-// advancing to the test stage — advancing would build against a plan the
-// pipeline's own judge ruled unsound. These tests drive the pure reducer the
+// the plan-review disagreement). The reducer must direct exactly one replan
+// instead of advancing against an unsound plan, then block if the replacement
+// is rejected too. These tests drive the pure reducer the
 // way service.applyActions would, mirroring the harness style of
 // runtime-v2-core-remediation-convergence.test.js.
 
@@ -73,23 +73,31 @@ function stateAtPlanJudge(overrides = {}) {
 }
 
 describe('APE v2 plan-judge verdict handling (friction #22)', () => {
-  it('blocks the run when a passed plan-judge receipt records verdict disagree', () => {
+  it('issues one directed replan when a passed plan-judge receipt records verdict disagree', () => {
     const { state, judgeTicket } = stateAtPlanJudge();
-    const actions = record(state, judgeTicket, { evidence: { verdict: 'disagree' } });
+    const actions = record(state, judgeTicket, {
+      evidence: {
+        verdict: 'disagree',
+        missing_assurances: [{ summary: 'Bind R1 to an executable check', requirement_id: 'R1' }],
+      },
+    });
 
     expect(actions.map((action) => action.type)).toEqual([
       'transition',
-      'archive_history',
-      'release_lock',
+      'issue_ticket',
       'persist_state',
     ]);
-    expect(actions[0].patch.status).toBe('blocked');
-    expect(actions[0].patch.stage).toBe('plan-judge');
-    expect(actions[0].patch.block_reason).toMatch(/plan judged unsound/);
-    expect(actions[1].if_absent).toBe(true);
-    expect(actions.some((action) => action.type === 'issue_ticket')).toBe(false);
+    expect(actions[0].patch.plan_replan_cycles).toBe(1);
+    expect(actions[0].patch.plan_recovery.missing_assurances[0]).toMatchObject({
+      requirement_id: 'R1',
+      summary: 'Bind R1 to an executable check',
+    });
+    expect(actions[1]).toMatchObject({
+      type: 'issue_ticket',
+      stage: { id: 'plan-replan', role: 'planner' },
+    });
     expect(actions.some((action) => action.type === 'run_gates')).toBe(false);
-    expect(state.status).toBe('blocked');
+    expect(state.status).toBe('running');
   });
 
   it('advances to the test stage when the judge agrees', () => {
@@ -127,8 +135,8 @@ describe('APE v2 plan-judge verdict handling (friction #22)', () => {
     expect(state.status).toBe('running');
   });
 
-  it('treats the verdict case-insensitively: DISAGREE blocks', () => {
-    const { state, judgeTicket } = stateAtPlanJudge();
+  it('treats the verdict case-insensitively: a second DISAGREE blocks', () => {
+    const { state, judgeTicket } = stateAtPlanJudge({ plan_replan_cycles: 1 });
     const actions = record(state, judgeTicket, { evidence: { verdict: 'DISAGREE' } });
 
     expect(actions[0].type).toBe('transition');
@@ -169,11 +177,24 @@ describe('APE v2 plan-judge full-lane lifecycle (friction #22)', () => {
     return { state, judgeTicket };
   }
 
-  it('a disagreeing judge blocks the run and the block is scheduling-terminal and not gate-recoverable', () => {
+  it('a replacement rejected after the directed replan blocks and is not gate-recoverable', () => {
     const { state, judgeTicket } = walkToPlanJudge();
+    record(state, judgeTicket, { evidence: { verdict: 'disagree' } });
+    expect(state.status).toBe('running');
+    const replan = state.tickets.at(-1);
+    expect(replan.stage_id).toBe('plan-replan');
+
+    record(state, replan, { evidence: { verdict: 'agree' } });
+    const [replacementCheck, replacementCritic] = state.tickets.slice(-2);
+    expect(replacementCheck.stage_id).toBe('plan-check');
+    expect(replacementCritic.stage_id).toBe('plan-critic');
+    record(state, replacementCheck, { evidence: { verdict: 'agree' } });
+    record(state, replacementCritic, { evidence: { verdict: 'disagree' } });
+    const replacementJudge = state.tickets.at(-1);
+    expect(replacementJudge.stage_id).toBe('plan-judge');
     const ticketCountBefore = state.tickets.length;
 
-    record(state, judgeTicket, { evidence: { verdict: 'disagree' } });
+    record(state, replacementJudge, { evidence: { verdict: 'disagree' } });
     expect(state.status).toBe('blocked');
     expect(state.stage).toBe('plan-judge');
     expect(state.block_reason).toMatch(/plan judged unsound/);
@@ -328,10 +349,10 @@ describe('APE v2 plan-review dissent routing (friction #23 extension)', () => {
     expect(state.status).toBe('running');
   });
 
-  // friction #36 precedent: a marked review-group receipt still votes disagree — for
-  // plan-review the judge, not the capability-blocked operator block, weighs
-  // the reported malfunction.
-  it('a capability-marked failed plan-critic votes disagree instead of capability-blocking', () => {
+  // A denied read is immutable-authority evidence, not a plan verdict. Once
+  // the group settles it must retain actionable successor guidance instead of
+  // asking a judge to adjudicate an operation that never ran.
+  it('a capability-marked failed plan-critic blocks actionably after the group settles', () => {
     const { state, planCheck, planCritic } = stateAtPlanReview();
     record(state, planCheck, { evidence: { verdict: 'agree' } });
     const actions = record(state, planCritic, {
@@ -339,11 +360,17 @@ describe('APE v2 plan-review dissent routing (friction #23 extension)', () => {
       evidence: { failure_kind: 'capability', summary: 'APE read denied: plan outside project root' },
     });
 
-    const issued = actions.filter((action) => action.type === 'issue_ticket');
-    expect(issued).toHaveLength(1);
-    expect(issued[0].stage.id).toBe('plan-judge');
-    expect(state.status).toBe('running');
-    expect(state.block_reason).toBeUndefined();
+    expect(actions.some((action) => action.type === 'issue_ticket')).toBe(false);
+    expect(state).toMatchObject({
+      status: 'blocked',
+      stage: 'plan-critic',
+      terminal_reason_code: 'capability_blocked',
+      blocked_recovery: {
+        source_ticket_id: planCritic.ticket_id,
+        successor_required: true,
+        supersession_required: true,
+      },
+    });
   });
 
   it('a test-contradiction-marked failed plan-check votes disagree instead of blocking', () => {

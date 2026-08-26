@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AAWWCC/ape/blob/main/evals/live-certification.schema.json",
+  "title": "APE live release certification ledger",
+  "description": "Privacy-safe raw outcomes for the offline tagged-release certification gate. Cross-record ancestry, coverage, ordering, and consecutive-success rules are enforced by scripts/verify-live-certification.mjs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ape_version",
+    "source_commit",
+    "terminal_reason_taxonomy_version",
+    "attempts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "ape_version": {
+      "$ref": "#/$defs/version"
+    },
+    "source_commit": {
+      "$ref": "#/$defs/commit"
+    },
+    "terminal_reason_taxonomy_version": {
+      "const": 1
+    },
+    "attempts": {
+      "type": "array",
+      "minItems": 24,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/attempt"
+      }
+    }
+  },
+  "$defs": {
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]*$"
+    },
+    "terminal_reason_code": {
+      "enum": [
+        "completed",
+        "aborted",
+        "aborted_dispatch",
+        "aborted_preflight",
+        "aborted_planning",
+        "aborted_test",
+        "aborted_implementation",
+        "aborted_review",
+        "aborted_gating",
+        "aborted_shipping",
+        "aborted_investigation",
+        "aborted_unclassified",
+        "planning_rejected",
+        "preflight_failed",
+        "test_contradiction",
+        "capability_blocked",
+        "dispatch_expired",
+        "test_failed",
+        "implementation_failed",
+        "review_remediation_exhausted",
+        "gate_failed",
+        "shipping_hold",
+        "shipping_failed",
+        "stage_failed",
+        "blocked_unclassified",
+        "legacy_unclassified"
+      ]
+    },
+    "protected_land": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_branch",
+        "merge_method",
+        "auto_merge_required",
+        "pr_state",
+        "pushed_head_commit",
+        "observed_merged_pr_head",
+        "merge_commit",
+        "remote_head_after_merge"
+      ],
+      "properties": {
+        "target_branch": {
+          "const": "main"
+        },
+        "merge_method": {
+          "const": "squash"
+        },
+        "auto_merge_required": {
+          "const": true
+        },
+        "pr_state": {
+          "const": "MERGED"
+        },
+        "pushed_head_commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "observed_merged_pr_head": {
+          "$ref": "#/$defs/commit"
+        },
+        "merge_commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "remote_head_after_merge": {
+          "$ref": "#/$defs/commit"
+        }
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "attempt_id",
+        "host",
+        "host_version",
+        "plugin_version",
+        "pipeline",
+        "source_commit",
+        "run_record_sha256",
+        "ticket_count",
+        "duration_ms",
+        "outcome",
+        "terminal_reason_code",
+        "manual_intervention",
+        "prompt_assembly_failure",
+        "receipt_repair",
+        "duplicate_dispatch",
+        "abort_successor",
+        "protected_land"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "host": {
+          "enum": [
+            "codex",
+            "claude"
+          ]
+        },
+        "host_version": {
+          "$ref": "#/$defs/version"
+        },
+        "plugin_version": {
+          "$ref": "#/$defs/version"
+        },
+        "pipeline": {
+          "enum": [
+            "mechanical",
+            "fast",
+            "full",
+            "protected-branch-land"
+          ]
+        },
+        "source_commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "run_record_sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "SHA-256 of the exact privately retained archived APE run-record bytes for this attempt."
+        },
+        "ticket_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failure"
+          ]
+        },
+        "terminal_reason_code": {
+          "$ref": "#/$defs/terminal_reason_code"
+        },
+        "manual_intervention": {
+          "type": "boolean"
+        },
+        "prompt_assembly_failure": {
+          "type": "boolean"
+        },
+        "receipt_repair": {
+          "type": "boolean"
+        },
+        "duplicate_dispatch": {
+          "type": "boolean"
+        },
+        "abort_successor": {
+          "type": "boolean"
+        },
+        "protected_land": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/protected_land"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

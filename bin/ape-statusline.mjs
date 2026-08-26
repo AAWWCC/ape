@@ -140,7 +140,8 @@ const readActive = (dir) => {
         ['phase', 'debug', 'spike', 'land'].includes(value.mode) &&
         ['auto', 'mechanical', 'fast', 'full'].includes(value.lane) &&
         ['planning', 'running', 'gating', 'blocked', 'shipping', 'completed', 'aborted'].includes(value.status) &&
-        ['dispatch', 'plan', 'plan-check', 'plan-critic', 'plan-judge', 'test', 'build', 'review',
+        ['dispatch', 'plan', 'plan-replan', 'plan-check', 'plan-critic', 'plan-judge',
+          'test', 'test-reconcile', 'test-recheck', 'build', 'review',
           'security-review', 'remediation-test', 'remediation-build', 'remediation-review',
           'remediation-security-review', 'gates', 'merge', 'debug', 'spike', 'complete',
           'completed', 'aborted'].includes(value.stage) &&
@@ -169,7 +170,8 @@ const readActive = (dir) => {
         && ['phase', 'debug', 'spike', 'land'].includes(value.mode)
         && ['auto', 'mechanical', 'fast', 'full'].includes(value.lane)
         && ['planning', 'running', 'gating', 'blocked', 'shipping', 'completed', 'aborted'].includes(value.status)
-        && ['dispatch', 'plan', 'plan-check', 'plan-critic', 'plan-judge', 'test', 'build', 'review',
+        && ['dispatch', 'plan', 'plan-replan', 'plan-check', 'plan-critic', 'plan-judge',
+          'test', 'test-reconcile', 'test-recheck', 'build', 'review',
           'security-review', 'remediation-test', 'remediation-build', 'remediation-review',
           'remediation-security-review', 'gates', 'merge', 'debug', 'spike', 'complete',
           'completed', 'aborted'].includes(value.stage)
@@ -395,13 +397,13 @@ function milestones(run) {
   return ['plan', 'test', 'build', 'review', 'gates', 'merge'];
 }
 function milestoneOf(stage) {
-  if (['dispatch', 'plan', 'plan-check', 'plan-critic', 'plan-judge'].includes(stage)) return 'plan';
+  if (['dispatch', 'plan', 'plan-replan', 'plan-check', 'plan-critic', 'plan-judge'].includes(stage)) return 'plan';
   // 'remediation-test' is the remediation cycle's optional first stage (roadmap
   // entry remediation-test-path-role-gap). Without this fold the `return stage`
   // fall-through below hands GLOBAL_ORDER an unknown word, indexOf pins the
   // milestone index at 0 and the box renders a raw stage id; status-doc.js
   // STAGE_TO_MILESTONE maps it to 'test' for the same reason.
-  if (['test', 'remediation-test'].includes(stage)) return 'test';
+  if (['test', 'test-reconcile', 'test-recheck', 'remediation-test'].includes(stage)) return 'test';
   if (['build', 'remediation-build'].includes(stage)) return 'build';
   if (['review', 'security-review', 'remediation-review', 'remediation-security-review'].includes(stage)) return 'review';
   if (stage === 'gates') return 'gates';

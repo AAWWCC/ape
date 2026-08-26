@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 2.23.0 — 2026-08-26
+
+Reworked native orchestration around machine-copyable dispatch envelopes so Codex callers no
+longer reconstruct common prompts, role prompts, immutable tickets, or follow-up control calls from
+conversation memory. Added bounded recovery for correctable plan, test-contract, review-finding,
+and scope-policy disputes instead of sealing every first disagreement as an opaque block.
+
+Terminal history now records release/protocol provenance and stable failure reasons suitable for
+version-cohort metrics, including stage-specific abort reasons and unsuperseded recovery-lineage
+outcomes with explicit malformed/cyclic coverage. A credential-free operational replay corpus and
+release canary gate cover the failure classes. Tagged releases now separately fail closed unless a
+privacy-safe Codex/Claude live ledger is the sole change in a certification commit over the exact
+tested source, with three clean completions per host/pipeline and exact protected-land merge proof.
+
 ## 2.22.4 — 2026-08-25
 
 Removed several run-start dead ends found in durable blocked and aborted history. Non-behavioral

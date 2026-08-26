@@ -17,3 +17,6 @@ for a safe ruling is unavailable, say exactly what is missing rather than invent
 When judgment completes, return `status: "passed"` and exactly one
 `evidence.verdict: "agree"` or `"disagree"`, with a concise evidence-grounded rationale. Return
 `status: "failed"` only when you cannot perform the judgment.
+A `disagree` verdict must include `evidence.missing_assurances` as 1-16 bounded entries with
+`summary` and `evidence_anchor`, plus `requirement_id` and `risk_trigger` when applicable. These
+entries direct the scheduler's one allowed replan; omit style preferences and optional alternatives.

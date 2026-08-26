@@ -22,11 +22,28 @@ Preflight input holds retain question IDs/counts only; operator answer text is n
 summary provenance.
 
 `ape_history metrics` aggregates effective terminal records with optional inclusive `since` and
-`until` ISO timestamps and exact `lane`, `mode`, `host`, and `status` filters. Invalid timestamps,
-unknown enum values, and reversed ranges are refused. Each call processes the newest 256 runs and
-returns `coverage.available_runs`, `processed_runs`, `limit`, and `truncated` so a bounded sample is
-never presented as complete project history. Outcomes, rates, p50/p90/p95/p99 duration values, and
-legacy-unknown counts are computed only over the processed records matching the filters.
+`until` ISO timestamps and exact `lane`, `mode`, `host`, `status`, `ape_version`, `runtime_version`,
+`host_plugin_version`, Codex `protocol_version` / `envelope_version`,
+`terminal_reason_taxonomy_version`, and `terminal_reason_code` filters. Invalid timestamps, versions,
+unknown enum values, and reversed ranges are refused. These exact cohort filters let operators compare
+failure reasons and rates across releases without exposing receipt prose. Each call processes the newest
+256 runs and returns `coverage.available_runs`, `processed_runs`, `limit`, and `truncated` so a bounded
+sample is never presented as complete project history. Outcomes, rates, terminal-reason counts,
+version cohorts, p50/p90/p95/p99 duration values, and legacy-unknown counts are computed only over the
+processed records matching the filters. Codex protocol/envelope fields are reported as `not_applicable`
+for Claude runs rather than as missing legacy telemetry. Each version-cohort map returns at most the
+16 most populous cohorts and preserves exact coverage with `omitted_cohorts` and `omitted_runs`; use
+an exact cohort filter to inspect an omitted version.
+
+`lineage_outcomes` collapses recovery history at every unsuperseded effective leaf: a predecessor with
+multiple durable successors contributes each successor leaf, rather than causing the entire component
+to disappear. Cohort filters apply to those leaves. Coverage separately discloses missing, invalid,
+self-referential, branching, and cyclic supersession structure. A leaf whose ancestry enters a cycle
+is cycle-tainted rather than trustworthy; cycle-core, tainted, and total omitted record counts are
+explicit. `superseded_runs` counts distinct predecessor records, while `valid_supersession_links`
+counts edges (so branching does not distort the run count). `terminal_reason_counts` classifies aborts by runtime-owned
+terminal stage (dispatch, preflight, planning, test, implementation, review, gating, shipping, or investigation)
+without inspecting operator prose.
 
 The statusline already uses recent immutable receipt timings to calibrate its stage-duration bar.
 It reads at most the newest 20 history files and caches validated samples under `.ape/runtime/`;

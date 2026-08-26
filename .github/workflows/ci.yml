@@ -121,6 +121,8 @@ jobs:
       - run: npm audit --audit-level=high
       - name: Validate prompt evaluation release gate
         run: npm run eval:prompts:check
+      - name: Replay operational failure canaries
+        run: npm run operational:canary
 
   marketplace-install-smoke:
     name: Clean marketplace install (both hosts)

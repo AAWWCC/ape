@@ -42,6 +42,7 @@ import { resolveGovernedRoot } from '../lib/runtime/paths.js';
 import { projectHistoryResponse, projectRunResponse } from '../lib/runtime/projection.js';
 import { LANES } from '../lib/runtime/constants.js';
 import { START_MODES } from '../lib/runtime/schemas.js';
+import { TERMINAL_REASON_CODES } from '../lib/runtime/terminal-telemetry.js';
 
 // Plugin manifests pin the launching host on argv. Environment markers are
 // inherited process state and can be stale when one host starts inside the
@@ -194,6 +195,13 @@ const TOOLS = Object.freeze([
         mode: { type: 'string', enum: [...START_MODES, 'patch'], description: 'metrics only: filter by current or legacy run mode.' },
         host: { type: 'string', enum: ['claude', 'codex'], description: 'metrics only: filter by host.' },
         status: { type: 'string', enum: ['completed', 'blocked', 'aborted'], description: 'metrics only: filter by terminal run status.' },
+        ape_version: { type: 'string', description: 'metrics only: exact APE release-version cohort.' },
+        runtime_version: { type: 'integer', minimum: 1, maximum: 1000000, description: 'metrics only: exact runtime-version cohort.' },
+        host_plugin_version: { type: 'string', description: 'metrics only: exact host-plugin release-version cohort.' },
+        protocol_version: { type: 'string', description: 'metrics only: exact Codex dispatch-protocol cohort.' },
+        envelope_version: { type: 'integer', minimum: 1, maximum: 1000000, description: 'metrics only: exact Codex dispatch-envelope cohort.' },
+        terminal_reason_taxonomy_version: { type: 'integer', minimum: 1, maximum: 1000000, description: 'metrics only: exact terminal-reason taxonomy cohort.' },
+        terminal_reason_code: { type: 'string', enum: [...TERMINAL_REASON_CODES], description: 'metrics only: exact privacy-safe terminal outcome class.' },
         delete_legacy: { type: 'boolean' },
         keep_recent_runs: {
           type: 'integer',
@@ -318,7 +326,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.22.4' };
+    return { name: 'ape', version: '2.23.0' };
   }
 }
 

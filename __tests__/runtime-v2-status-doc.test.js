@@ -431,6 +431,26 @@ describe('ape v2 status-doc dispatch stage', () => {
   });
 });
 
+describe('ape v2 status-doc bounded recovery stages', () => {
+  it.each([
+    ['plan-replan', 'full', 'plan', 6],
+    ['test-reconcile', 'fast', 'test', 3],
+    ['test-recheck', 'fast', 'test', 3],
+  ])('renders active %s at the %s milestone instead of corrupt or stage zero', (stage, lane, milestone, total) => {
+    const doc = renderStatusDoc({
+      mode: 'phase',
+      lane,
+      status: 'running',
+      stage,
+      tickets: [{ ticket_id: `ticket-${stage}` }],
+      receipts: [],
+    });
+    expect(doc).not.toContain('corrupt_state');
+    expect(doc).not.toMatch(new RegExp(`stage 0 of ${total}`, 'i'));
+    expect(doc).toMatch(new RegExp(`- \\[ \\] ${milestone}[^\\n]*◀`, 'i'));
+  });
+});
+
 // A terminal `aborted` run is sealed: the lock is released, history is
 // archived, and no scheduler will ever act on it again. Unlike the override
 // reset path, status.md survives — so it must not tell its reader to wait for

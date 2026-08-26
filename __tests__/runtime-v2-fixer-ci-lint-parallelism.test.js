@@ -87,11 +87,12 @@ describe('public cross-platform CI and release contract', () => {
     expect(packageSmoke).toContain("APE_PUBLIC_REQUIRE_FORBIDDEN_HASHES: '1'");
   });
 
-  it('keeps audit and the credential-free prompt gate while the full-suite aggregate depends on every partition', async () => {
+  it('keeps audit and both credential-free release gates while the full-suite aggregate depends on every partition', async () => {
     const yaml = await read('.github/workflows/ci.yml');
     const full = jobBlock(yaml, 'full-suite');
     expect(yaml.match(/npm audit --audit-level=high/gu)).toHaveLength(1);
     expect(yaml.match(/npm run eval:prompts:check/gu)).toHaveLength(1);
+    expect(yaml.match(/npm run operational:canary/gu)).toHaveLength(1);
     for (const dependency of ['package-smoke', 'marketplace-install-smoke', 'smoke', 'shard']) {
       expect(full).toContain(dependency);
     }
@@ -159,6 +160,11 @@ describe('public cross-platform CI and release contract', () => {
     }
     expect(release.indexOf('SOURCE_DATE_EPOCH=')).toBeLessThan(release.indexOf('npm run package:check'));
     expect(release.indexOf('npm run eval:prompts:check')).toBeLessThan(release.indexOf('gh release create'));
+    expect(release.match(/npm run operational:canary/gu)).toHaveLength(2);
+    expect(release.match(/npm run release:live-certification/gu)).toHaveLength(2);
+    expect(release).toContain('--head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"');
+    expect(release.indexOf('npm run operational:canary')).toBeLessThan(release.indexOf('gh release create'));
+    expect(release.indexOf('npm run release:live-certification')).toBeLessThan(release.indexOf('gh release create'));
   });
 
   it('isolates registry-fetched host CLIs from the privileged publication job', async () => {

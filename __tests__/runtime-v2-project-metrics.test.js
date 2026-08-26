@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { archiveRun, calculateProjectMetrics } from '../lib/runtime/history.js';
+import { projectHistoryResponse, RESPONSE_BUDGET_CHARS } from '../lib/runtime/projection.js';
 import { historyAction } from '../lib/runtime/service.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
 
@@ -96,6 +97,27 @@ describe('APE v2 Project Metrics Aggregation & Telemetry', () => {
       expect(fastLane.outcomes.blocked).toBe(1);
       expect(fastLane.outcomes.aborted).toBe(1);
     });
+
+    it('accepts the protected-branch land mode advertised by the MCP contract', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-land-mode-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      await archiveRun(paths, makeRunRecord('run-land-complete', {
+        mode: 'land',
+        lane: 'full',
+        status: 'completed',
+      }));
+      await archiveRun(paths, makeRunRecord('run-phase-complete', {
+        mode: 'phase',
+        lane: 'full',
+        status: 'completed',
+      }));
+
+      const land = await historyAction(dir, 'metrics', { mode: 'land' });
+      expect(land.metrics.total_runs).toBe(1);
+      expect(land.metrics.outcomes.completed).toBe(1);
+      expect(land.metrics.lineage_outcomes.outcomes.completed).toBe(1);
+    });
   });
 
   describe('calculateProjectMetrics outcome distributions and success rates', () => {
@@ -123,6 +145,86 @@ describe('APE v2 Project Metrics Aggregation & Telemetry', () => {
       expect(metrics.success_rate).toBeCloseTo(0.6, 2);
       expect(metrics.blocked_rate).toBeCloseTo(0.3, 2);
       expect(metrics.aborted_rate).toBeCloseTo(0.1, 2);
+    });
+
+    it('reports unsuperseded leaf outcomes without erasing branched recovery attempts', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-lineages-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+
+      await archiveRun(paths, makeRunRecord('run-lineage-root', { status: 'blocked' }));
+      await archiveRun(paths, makeRunRecord('run-lineage-aborted', {
+        status: 'aborted',
+        supersedes_run: 'run-lineage-root',
+      }));
+      await archiveRun(paths, makeRunRecord('run-lineage-complete', {
+        status: 'completed',
+        supersedes_run: 'run-lineage-root',
+      }));
+      await archiveRun(paths, makeRunRecord('run-lineage-standalone', { status: 'blocked' }));
+      await archiveRun(paths, makeRunRecord('run-lineage-partial', {
+        status: 'aborted',
+        supersedes_run: 'run-lineage-missing',
+      }));
+      await archiveRun(paths, makeRunRecord('run-lineage-invalid', {
+        status: 'aborted',
+        supersedes_run: 'run-lineage-invalid',
+      }));
+
+      const metrics = await calculateProjectMetrics(paths, {});
+      expect(metrics.total_runs).toBe(6);
+      expect(metrics.lineage_outcomes).toMatchObject({
+        total_lineages: 5,
+        outcomes: { completed: 1, blocked: 1, aborted: 3, unknown: 0 },
+        coverage: {
+          resolved_lineages: 3,
+          partial_lineages: 1,
+          malformed_lineages: 1,
+          superseded_runs: 1,
+          valid_supersession_links: 2,
+          missing_predecessor_links: 1,
+          self_links: 1,
+          branching_predecessors: 1,
+        },
+      });
+
+      const completed = await calculateProjectMetrics(paths, { status: 'completed' });
+      expect(completed.lineage_outcomes).toMatchObject({
+        total_lineages: 1,
+        outcomes: { completed: 1, blocked: 0, aborted: 0, unknown: 0 },
+      });
+    });
+
+    it('excludes supersession cycles from outcome rates and discloses every uncounted record', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-lineage-cycle-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+
+      await archiveRun(paths, makeRunRecord('run-cycle-one', {
+        status: 'blocked',
+        supersedes_run: 'run-cycle-two',
+      }));
+      await archiveRun(paths, makeRunRecord('run-cycle-two', {
+        status: 'aborted',
+        supersedes_run: 'run-cycle-one',
+      }));
+      await archiveRun(paths, makeRunRecord('run-cycle-tainted-leaf', {
+        status: 'completed',
+        supersedes_run: 'run-cycle-one',
+      }));
+
+      const metrics = await calculateProjectMetrics(paths, {});
+      expect(metrics.lineage_outcomes).toMatchObject({
+        total_lineages: 0,
+        outcomes: { completed: 0, blocked: 0, aborted: 0, unknown: 0 },
+        coverage: {
+          cycle_components: 1,
+          cycle_runs: 2,
+          cycle_tainted_runs: 1,
+          uncounted_runs: 3,
+          malformed_components: 1,
+        },
+      });
     });
 
     it('handles empty datasets without division by zero errors', async () => {
@@ -248,6 +350,12 @@ describe('APE v2 Project Metrics Aggregation & Telemetry', () => {
         .rejects.toThrow('metrics lane must be one of');
       await expect(historyAction(dir, 'metrics', { host: 'remote-cloud' }))
         .rejects.toThrow('metrics host must be one of');
+      await expect(historyAction(dir, 'metrics', { ape_version: 'dev' }))
+        .rejects.toThrow('metrics ape_version is invalid');
+      await expect(historyAction(dir, 'metrics', { protocol_version: 'codex-latest' }))
+        .rejects.toThrow('metrics protocol_version is invalid');
+      await expect(historyAction(dir, 'metrics', { terminal_reason_code: 'mysterious' }))
+        .rejects.toThrow('metrics terminal_reason_code must be one of');
     });
 
     it('caps work at 256 newest runs and discloses truncated coverage', async () => {
@@ -270,6 +378,42 @@ describe('APE v2 Project Metrics Aggregation & Telemetry', () => {
         processed_runs: 256,
         limit: 256,
         truncated: true,
+      });
+    });
+
+    it('bounds high-cardinality version cohorts before the metrics response reaches the wire', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-cohort-bound-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      await mkdir(paths.history, { recursive: true });
+      await Promise.all(Array.from({ length: 256 }, (_, index) => {
+        const runId = `run-cohort-bound-${String(index).padStart(3, '0')}`;
+        return atomicWriteJson(path.join(paths.history, `${runId}.json`), makeRunRecord(runId, {
+          ape_version: `2.${index}.0`,
+          runtime_version: index + 1,
+          host_plugin_version: `3.${index}.0`,
+          protocol_version: `ape-codex-dispatch-v${index + 1}`,
+          envelope_version: index + 1,
+          terminal_reason_taxonomy_version: index + 1,
+          terminal_reason_code: 'completed',
+        }));
+      }));
+
+      const response = projectHistoryResponse({
+        ok: true,
+        metrics: await calculateProjectMetrics(paths, {}),
+      });
+      expect(JSON.stringify(response).length).toBeLessThan(RESPONSE_BUDGET_CHARS);
+      expect(response.metrics.version_cohorts.ape_version).toMatchObject({
+        unknown: 0,
+        omitted_cohorts: 240,
+        omitted_runs: 240,
+      });
+      expect(response.metrics.version_cohorts.protocol_version).toMatchObject({
+        unknown: 0,
+        not_applicable: 0,
+        omitted_cohorts: 240,
+        omitted_runs: 240,
       });
     });
   });
