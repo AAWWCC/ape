@@ -62,8 +62,12 @@ describe('public cross-platform CI and release contract', () => {
     const packageSmoke = jobBlock(yaml, 'package-smoke');
     expect(packageSmoke).toContain('fail-fast: false');
     expect(packageSmoke).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
-    expect(packageSmoke).toContain('node: [22, 24]');
-    expect(packageSmoke).toContain('node-version: ${{ matrix.node }}');
+    expect(packageSmoke).toContain('version: 22.12.0');
+    expect(packageSmoke).toContain('major: 22');
+    expect(packageSmoke).toContain('version: 24.15.0');
+    expect(packageSmoke).toContain('major: 24');
+    expect(packageSmoke).toContain('name: Package smoke (${{ matrix.os }}, Node ${{ matrix.node.major }})');
+    expect(packageSmoke).toContain('node-version: ${{ matrix.node.version }}');
   });
 
   it('runs deterministic package, public-safety, and direct MCP gates in every matrix cell', async () => {
