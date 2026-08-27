@@ -17,9 +17,9 @@ tickets, receipts, hashes, paths, or prose from `.ape/runtime/` into it.
 
 Before describing a release candidate as operationally healthy, run the candidate package through
 these canaries in a disposable repository on every host marked `required` for live certification in
-`compatibility.json`. For APE 2.23.0, Codex is the sole required host. Claude remains packaged and
-receives pinned structural and marketplace validation, but authenticated Claude live operation is
-marked `unverified` and is not part of the release certificate.
+`compatibility.json`. For APE 2.23.0 and later, Codex is the sole required host. Claude remains
+packaged and receives pinned structural and marketplace validation, but authenticated Claude live
+operation is marked `unverified` and is not part of the release certificate.
 
 1. A non-behavioral mechanical phase.
 2. A bounded behavioral fast phase.

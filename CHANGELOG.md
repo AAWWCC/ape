@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.23.1 — 2026-08-27
+
+Corrected the plugin cache identity after packaged Codex and Claude plugin contents changed during
+2.23.0 release preparation. Bumped every source, manifest, bundle, export, and release-artifact
+version surface to `2.23.1`; runtime behavior is unchanged from the final 2.23.0 source.
+
 ## 2.23.0 — 2026-08-26
 
 Reworked native orchestration around machine-copyable dispatch envelopes so Codex callers no
