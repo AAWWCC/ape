@@ -8,6 +8,9 @@ Reworked native orchestration around machine-copyable dispatch envelopes so Code
 longer reconstruct common prompts, role prompts, immutable tickets, or follow-up control calls from
 conversation memory. Added bounded recovery for correctable plan, test-contract, review-finding,
 and scope-policy disputes instead of sealing every first disagreement as an opaque block.
+The preflight role now receives the exact strict artifact shape. Run/resume callers now send only
+`action`, `project_dir`, and `receipt` when recording, preventing valid stage evidence from failing
+at handoff because of an extraneous `run_id`.
 
 Terminal history now records release/protocol provenance and stable failure reasons suitable for
 version-cohort metrics, including stage-specific abort reasons and unsuperseded recovery-lineage

@@ -37,7 +37,9 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    status.
 5. Require exactly one receipt JSON matching the ticket's `output_schema`, including the exact
    injected `receipt_capability`. Call `ape_run` with `action: "record"` and place that complete
-   receipt inside `receipt`. Never repair, fabricate, or omit agent evidence. A ticket with
+   receipt inside `receipt`. At the control-call top level send only `action`, `project_dir`, and
+   `receipt`; never send `run_id` on a record call. Never repair,
+   fabricate, or omit agent evidence. A ticket with
    `review_contract_version` uses bounded structured findings: advisory entries omit remediation;
    blocking entries declare `production`, `test`, or `both` ownership and exact authorized
    `test_paths` when test-owned. Do not translate these into legacy `evidence.test_remediation`.

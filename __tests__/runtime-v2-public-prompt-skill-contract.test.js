@@ -2,7 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { PlanContractSchema } from '../lib/runtime/plan-contract.js';
+import { PlanContractSchema, validatePreflightArtifact } from '../lib/runtime/plan-contract.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const ROLES = [
@@ -122,6 +122,17 @@ describe('public prompt contracts', () => {
     expect(prompts.preflight_analyst).toMatch(/impacted[\s\S]*read[\s\S]*write/iu);
     expect(prompts.preflight_analyst).toMatch(/compatibility[\s\S]*rollback[\s\S]*question/iu);
     expect(prompts.preflight_analyst).toMatch(/verification[\s\S]*disposition/iu);
+    for (const field of [
+      '"version"', '"objective"', '"acceptance"', '"non_goals"', '"baseline"',
+      '"impacted_paths"', '"compatibility"', '"rollback"', '"verification_profiles"',
+      '"questions"',
+    ]) {
+      expect(prompts.preflight_analyst, `preflight artifact field ${field}`).toContain(field);
+    }
+    expect(prompts.preflight_analyst).toMatch(/every top-level field present and no other fields/iu);
+    expect(prompts.preflight_analyst).toMatch(/at least one `acceptance` and one `baseline` entry/iu);
+    expect(prompts.preflight_analyst).toMatch(/empty arrays only where the schema permits/iu);
+    expect(prompts.preflight_analyst).toMatch(/Baseline entries contain only[\s\S]*execution metadata/iu);
     expect(prompts.plan_checker).toMatch(/Coverage:[\s\S]*Paths:[\s\S]*Checks:[\s\S]*Acceptance:/u);
     expect(prompts.plan_checker).toMatch(/Do not judge feasibility/u);
     expect(prompts.plan_critic).toMatch(/own feasibility review/u);
@@ -142,6 +153,45 @@ describe('public prompt contracts', () => {
       expect(prompts[role]).toMatch(/`file`, `line`, `title`, and `detail`/u);
       expect(prompts[role]).toMatch(/"passed"[\s\S]*"pass"[\s\S]*"fail"/u);
     }
+  });
+
+  it('publishes a preflight artifact example accepted by the live strict schema', async () => {
+    const preflight = await read('prompts', 'preflight_analyst.md');
+    const block = preflight.match(/```json\n([\s\S]*?)\n```/u);
+    expect(block).not.toBeNull();
+    const artifact = JSON.parse(block[1]);
+    artifact.objective = 'Add bounded behavior';
+    artifact.acceptance = ['The behavior is observable'];
+    artifact.non_goals = [];
+    artifact.baseline = [{
+      command: 'npm test',
+      observation: 'The existing suite passes',
+      output_hash: 'a'.repeat(64),
+    }];
+    artifact.impacted_paths = { read: ['package.json'], write: ['src/value.js'] };
+    artifact.compatibility = 'Keep the existing public export.';
+    artifact.rollback = 'Revert the implementation and focused test.';
+    artifact.verification_profiles = [{
+      id: 'unit',
+      disposition: 'required',
+      reason: 'The requested change is behavioral.',
+    }];
+    artifact.questions = [];
+
+    const validated = validatePreflightArtifact(artifact, {
+      objective: artifact.objective,
+      claims: ['src/value.js'],
+      profiles: [{ id: 'unit' }],
+      tests: [{ command: 'npm test', output_hash: 'a'.repeat(64) }],
+    });
+    expect(validated.valid, JSON.stringify(validated.errors)).toBe(true);
+    expect(Object.keys(artifact).sort()).toEqual([
+      'acceptance', 'baseline', 'compatibility', 'impacted_paths', 'non_goals', 'objective',
+      'questions', 'rollback', 'verification_profiles', 'version',
+    ]);
+    expect(Object.keys(artifact.baseline[0]).sort()).toEqual([
+      'command', 'observation', 'output_hash',
+    ]);
   });
 
   it('publishes a planner example accepted by the live PlanContract schema', async () => {
@@ -235,6 +285,8 @@ describe('canonical skill sources', () => {
     expect(canonical).toMatch(/dispatch_agent[\s\S]*common prompt[\s\S]*role prompt[\s\S]*immutable ticket/u);
     expect(canonical).toContain('`receipt_capability`');
     expect(canonical).toContain('`action: "record"`');
+    expect(canonical).toMatch(/control-call top level[\s\S]*only `action`, `project_dir`, and[\s\S]*`receipt`/u);
+    expect(canonical).toMatch(/never send `run_id` on a record call/u);
     expect(canonical).toContain('`ape_run next`');
   });
 });
