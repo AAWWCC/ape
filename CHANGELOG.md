@@ -7,7 +7,9 @@
 Reworked native orchestration around machine-copyable dispatch envelopes so Codex callers no
 longer reconstruct common prompts, role prompts, immutable tickets, or follow-up control calls from
 conversation memory. Added bounded recovery for correctable plan, test-contract, review-finding,
-and scope-policy disputes instead of sealing every first disagreement as an opaque block.
+and scope-policy disputes instead of sealing every first disagreement as an opaque block. Test and
+implementation prompts now emit plan-deviation evidence only when an approved plan exists and work
+materially deviates, matching the runtime's strict receipt contract.
 The preflight role now receives the exact strict artifact shape. Run/resume callers now send only
 `action`, `project_dir`, and `receipt` when recording, preventing valid stage evidence from failing
 at handoff because of an extraneous `run_id`.
@@ -16,8 +18,10 @@ Terminal history now records release/protocol provenance and stable failure reas
 version-cohort metrics, including stage-specific abort reasons and unsuperseded recovery-lineage
 outcomes with explicit malformed/cyclic coverage. A credential-free operational replay corpus and
 release canary gate cover the failure classes. Tagged releases now separately fail closed unless a
-privacy-safe Codex/Claude live ledger is the sole change in a certification commit over the exact
-tested source, with three clean completions per host/pipeline and exact protected-land merge proof.
+privacy-safe Codex live ledger is the sole change in a certification commit over the exact tested
+source, with three clean completions per pipeline and exact protected-land merge proof. Claude
+remains packaged and structurally validated at its pinned CLI version, but authenticated Claude live
+operation is explicitly unverified and makes no release-certification claim.
 
 ## 2.22.4 — 2026-08-25
 

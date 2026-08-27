@@ -9,9 +9,10 @@ import {
   TERMINAL_REASON_TAXONOMY_VERSION,
 } from '../lib/runtime/terminal-telemetry.js';
 
-export const LIVE_CERTIFICATION_SCHEMA_VERSION = 1;
+export const LIVE_CERTIFICATION_SCHEMA_VERSION = 2;
 export const LIVE_CERTIFICATION_PATH = 'evals/live-certification.json';
-export const LIVE_CERTIFICATION_HOSTS = Object.freeze(['codex', 'claude']);
+export const LIVE_CERTIFICATION_HOSTS = Object.freeze(['codex']);
+export const LIVE_CERTIFICATION_UNVERIFIED_HOSTS = Object.freeze(['claude']);
 export const LIVE_CERTIFICATION_PIPELINES = Object.freeze([
   'mechanical',
   'fast',
@@ -33,6 +34,8 @@ const ROOT_KEYS = Object.freeze([
   'schema_version',
   'ape_version',
   'source_commit',
+  'certified_hosts',
+  'unverified_hosts',
   'terminal_reason_taxonomy_version',
   'attempts',
 ]);
@@ -87,6 +90,12 @@ function reject(message) {
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sameArray(value, expected) {
+  return Array.isArray(value)
+    && value.length === expected.length
+    && value.every((entry, index) => entry === expected[index]);
 }
 
 function requireExactKeys(value, expected, label) {
@@ -174,12 +183,18 @@ export function validateLiveCertificationDocument(document, {
   if (typeof packageVersion !== 'string' || document.ape_version !== packageVersion) {
     reject('certification version does not match package.json');
   }
+  if (!sameArray(document.certified_hosts, LIVE_CERTIFICATION_HOSTS)) {
+    reject('certification ledger does not name the exact required live-certified hosts');
+  }
+  if (!sameArray(document.unverified_hosts, LIVE_CERTIFICATION_UNVERIFIED_HOSTS)) {
+    reject('certification ledger does not name the exact unverified hosts');
+  }
   requireHash(sourceCommit, 'source commit');
   if (document.source_commit !== sourceCommit) {
     reject('certification source commit is not the certification commit parent');
   }
   if (!isObject(hostVersions)) reject('supported host versions are unavailable');
-  for (const host of LIVE_CERTIFICATION_HOSTS) {
+  for (const host of [...LIVE_CERTIFICATION_HOSTS, ...LIVE_CERTIFICATION_UNVERIFIED_HOSTS]) {
     if (typeof hostVersions[host] !== 'string' || !SAFE_VERSION.test(hostVersions[host])) {
       reject('supported host versions are invalid');
     }
@@ -302,14 +317,23 @@ function parseHostVersions(raw) {
   } catch {
     reject('tagged compatibility.json is invalid');
   }
-  if (!isObject(compatibility) || compatibility.version !== 1 || !isObject(compatibility.hosts)) {
+  if (!isObject(compatibility) || compatibility.version !== 2 || !isObject(compatibility.hosts)) {
     reject('tagged compatibility.json has an unsupported shape');
   }
   const hostVersions = {};
-  for (const host of LIVE_CERTIFICATION_HOSTS) {
+  const certificationPolicy = Object.freeze({ codex: 'required', claude: 'unverified' });
+  const declaredHosts = Object.keys(compatibility.hosts);
+  if (
+    declaredHosts.length !== Object.keys(certificationPolicy).length
+    || declaredHosts.some((host) => !Object.hasOwn(certificationPolicy, host))
+  ) reject('tagged compatibility.json does not declare the exact certification host partition');
+  for (const [host, liveCertification] of Object.entries(certificationPolicy)) {
     const version = compatibility.hosts[host]?.version;
     if (typeof version !== 'string' || !SAFE_VERSION.test(version)) {
       reject('tagged compatibility.json has an invalid host version');
+    }
+    if (compatibility.hosts[host]?.live_certification !== liveCertification) {
+      reject('tagged compatibility.json has an invalid live-certification policy');
     }
     hostVersions[host] = version;
   }

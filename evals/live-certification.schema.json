@@ -2,19 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/AAWWCC/ape/blob/main/evals/live-certification.schema.json",
   "title": "APE live release certification ledger",
-  "description": "Privacy-safe raw outcomes for the offline tagged-release certification gate. Cross-record ancestry, coverage, ordering, and consecutive-success rules are enforced by scripts/verify-live-certification.mjs.",
+  "description": "Privacy-safe raw Codex outcomes for the offline tagged-release certification gate, with the packaged but operationally unverified Claude host named explicitly. Cross-record ancestry, coverage, ordering, and consecutive-success rules are enforced by scripts/verify-live-certification.mjs.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "ape_version",
     "source_commit",
+    "certified_hosts",
+    "unverified_hosts",
     "terminal_reason_taxonomy_version",
     "attempts"
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "ape_version": {
       "$ref": "#/$defs/version"
@@ -22,12 +24,24 @@
     "source_commit": {
       "$ref": "#/$defs/commit"
     },
+    "certified_hosts": {
+      "const": [
+        "codex"
+      ],
+      "description": "Hosts whose authenticated live execution is required and certified by this ledger."
+    },
+    "unverified_hosts": {
+      "const": [
+        "claude"
+      ],
+      "description": "Packaged hosts that have structural and marketplace validation but no authenticated live release certification."
+    },
     "terminal_reason_taxonomy_version": {
       "const": 1
     },
     "attempts": {
       "type": "array",
-      "minItems": 24,
+      "minItems": 12,
       "maxItems": 256,
       "items": {
         "$ref": "#/$defs/attempt"
@@ -159,8 +173,7 @@
         },
         "host": {
           "enum": [
-            "codex",
-            "claude"
+            "codex"
           ]
         },
         "host_version": {

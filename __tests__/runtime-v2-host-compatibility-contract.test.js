@@ -80,7 +80,9 @@ describe('host compatibility contract', () => {
     const manifest = JSON.parse(await read('compatibility.json'));
     const serialized = JSON.stringify(manifest);
 
-    expect(manifest.version).toBe(1);
+    expect(manifest.version).toBe(2);
+    expect(manifest.hosts.codex.live_certification).toBe('required');
+    expect(manifest.hosts.claude.live_certification).toBe('unverified');
     for (const value of ['22.12.0', '24.15.0', '0.147.0', '2.1.228']) {
       expect(serialized).toContain(value);
     }
@@ -101,6 +103,7 @@ describe('host compatibility contract', () => {
 
   const drifts = [
     ['manifest', 'compatibility.json', (text) => text.replace('22.12.0', '22.13.0')],
+    ['live-certification policy', 'compatibility.json', (text) => text.replace('"required"', '"unverified"')],
     ['package metadata', 'package.json', (text) => text.replace('>=22.12.0', '>=22.13.0')],
     ['lock metadata', 'package-lock.json', (text) => text.replace('>=22.12.0', '>=22.13.0')],
     ['README', 'README.md', (text) => text.replace('22.12.0', '22.13.0')],

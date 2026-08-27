@@ -12,7 +12,11 @@ vi.mock('../lib/runtime/gates.js', async (importOriginal) => {
 import { abortRun, historyAction, recordReceipt, startRun } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
-import { candidatePlanForScope, PLAN_CONTRACT_MAX_BYTES } from '../lib/runtime/plan-contract.js';
+import {
+  candidatePlanForScope,
+  PLAN_CONTRACT_MAX_BYTES,
+  validatePlanDeviation,
+} from '../lib/runtime/plan-contract.js';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { projectRunResponse } from '../lib/runtime/projection.js';
 
@@ -126,6 +130,14 @@ async function reachReview(dir) {
 }
 
 describe('versioned structured plan contract', () => {
+  it('accepts omitted deviation evidence with or without a plan and rejects array placeholders', () => {
+    expect(validatePlanDeviation(undefined, undefined, []).valid).toBe(true);
+    expect(validatePlanDeviation(undefined, {}, []).valid).toBe(true);
+    expect(validatePlanDeviation([], undefined, []).errors).toContain(
+      'evidence.plan_deviation is not allowed without a valid approved_plan on the ticket',
+    );
+  });
+
   it('bounds and validates canonical candidate plans before hashing', () => {
     const accepted = candidatePlanForScope(PLAN, ['src/value.js', 'tests/value.test.js']);
     expect(accepted.valid).toBe(true);

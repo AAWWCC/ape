@@ -16,7 +16,10 @@ tickets, receipts, hashes, paths, or prose from `.ape/runtime/` into it.
 ## Live certification
 
 Before describing a release candidate as operationally healthy, run the candidate package through
-these canaries in a disposable repository on each supported host:
+these canaries in a disposable repository on every host marked `required` for live certification in
+`compatibility.json`. For APE 2.23.0, Codex is the sole required host. Claude remains packaged and
+receives pinned structural and marketplace validation, but authenticated Claude live operation is
+marked `unverified` and is not part of the release certificate.
 
 1. A non-behavioral mechanical phase.
 2. A bounded behavioral fast phase.
@@ -27,12 +30,13 @@ Record every attempt in a candidate ledger using `evals/live-certification.schem
 is intentionally limited to bounded identifiers, versions, counters, stable terminal reason codes,
 booleans, and commit hashes. It has no fields for objectives, ticket text, receipt prose, command
 output, provider responses, or repository paths. Do not copy those values into identifiers. Each
-attempt's host version must equal that host's exact `compatibility.json` pin, and its unique
-`run_record_sha256` is the SHA-256 of the exact archived APE run-record bytes retained outside the
-public repository for audit.
+ledger names the exact `certified_hosts` and `unverified_hosts` partition required by the tagged
+compatibility policy. Every attempt's host version must equal that host's exact `compatibility.json`
+pin. Its unique `run_record_sha256` is the SHA-256 of the exact archived APE run-record bytes retained
+outside the public repository for audit.
 
-Each of the four pipeline shapes must end with three consecutive clean `completed` attempts on both
-Codex and Claude. A clean attempt has no manual intervention, prompt-assembly failure, receipt
+Each of the four pipeline shapes must end with three consecutive clean `completed` attempts on
+Codex. A clean attempt has no manual intervention, prompt-assembly failure, receipt
 repair, duplicate dispatch, or abort/successor workaround. Earlier failures remain in raw sequence;
 do not discard or average them away. A successful protected-branch attempt additionally records a
 GitHub auto-squash with `MERGED` PR state, an observed PR head equal to the exact pushed head, and an
@@ -48,7 +52,8 @@ The tagged-release gate is mechanically separate from the live work:
    the tagged-release workflow runs the same offline check before validation or publication.
 
 The verifier reads committed Git objects, not the working tree, performs no network requests, and
-rejects non-canonical or oversized ledgers, unknown fields, missing host/pipeline cohorts, unsafe
+rejects non-canonical or oversized ledgers, unknown fields, a changed certified/unverified host
+partition, missing required host/pipeline cohorts, unsafe
 free-form strings, and a tag that does not point at the certification-only commit. The actual
 `evals/live-certification.json` is deliberately absent until real attempts exist. Never create one
 from examples or fabricated outcomes.

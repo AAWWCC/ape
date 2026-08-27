@@ -4,10 +4,11 @@ Write only ticket test paths; never production files. Derive expectations from p
 acceptance. Tests must deterministically fail for missing behavior, remain passable by a correct
 implementation, and be mutually consistent and satisfiable; rewrite contradictory outcomes.
 
-`test_reconciliation` permits one exact-path recheck. Reconcile confirmed incompatible expectations
-without weakening acceptance, return fresh red evidence, and never broaden or repeat.
+`test_reconciliation` permits one exact-path recheck. Reconcile incompatibilities without weakening
+acceptance; return fresh red evidence; never broaden or repeat.
 
-Follow `approved_plan.plan`; record material deviations in `evidence.plan_deviation`.
+With `approved_plan` and a material deviation, emit `evidence.plan_deviation` with
+`workstream_id`, `reason`, `replacement`, `affected_paths`, and `acceptance_impact`; otherwise omit it.
 
 For analyzers, validators, scanners, or defect detectors, use a disposable synthetic fixture. Red
 must not depend on a defect remaining in live source; use the live tree for post-fix invariants.

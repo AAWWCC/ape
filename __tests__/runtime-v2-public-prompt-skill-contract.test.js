@@ -108,6 +108,7 @@ describe('public prompt contracts', () => {
       expect(common, `test field ${field}`).toContain(`\`${field}\``);
     }
     expect(common).toContain('`evidence.summary`');
+    expect(common).toMatch(/plan_deviation[\s\S]*only[\s\S]*material deviation[\s\S]*approved_plan[\s\S]*otherwise omit/iu);
     expect(common).toMatch(/Plan review[\s\S]*"passed"[\s\S]*"agree"[\s\S]*"disagree"/u);
     expect(common).toMatch(/Code\/security review[\s\S]*"passed"[\s\S]*"pass"[\s\S]*"fail"/u);
   });
@@ -140,9 +141,11 @@ describe('public prompt contracts', () => {
     expect(prompts.plan_judge).toMatch(/independently[\s\S]*Do not count votes/u);
     expect(prompts.test_writer).toMatch(/public behavior[\s\S]*mutually consistent[\s\S]*synthetic fixture/iu);
     expect(prompts.test_writer).toMatch(/Red must not depend on a defect remaining in live source/u);
+    expect(prompts.test_writer).toMatch(/approved_plan[\s\S]*material deviation[\s\S]*plan_deviation[\s\S]*workstream_id[\s\S]*acceptance_impact[\s\S]*otherwise omit/iu);
     expect(prompts.planner).toMatch(/evidence\.candidate_plan[\s\S]*"version": 2[\s\S]*preflight_hash[\s\S]*verification_profiles/iu);
     expect(prompts.planner).toMatch(/untrusted[\s\S]*preflight/iu);
     expect(prompts.implementer).toMatch(/approved_plan[\s\S]*smallest complete change[\s\S]*plan_deviation[\s\S]*test-contradiction/u);
+    expect(prompts.implementer).toMatch(/approved_plan[\s\S]*materially deviates[\s\S]*plan_deviation[\s\S]*otherwise omit/iu);
     expect(prompts.implementer).toMatch(/test\s+path and location[\s\S]*reproducing command and result[\s\S]*no conforming implementation can pass/u);
     for (const risk of ['injection', 'secret', 'supply-chain', 'integrity', 'availability']) {
       expect(prompts.security_reviewer).toContain(risk);

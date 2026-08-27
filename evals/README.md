@@ -40,5 +40,6 @@ release storage rather than committing model output to the source tree.
 The separate live-host release ledger is defined by `live-certification.schema.json` and documented
 in [operational readiness](../docs/operational-readiness.md). The schema deliberately permits only
 privacy-safe structured outcomes. The real `live-certification.json` must not exist until its raw
-Codex and Claude attempts have actually run; the release verifier also requires it to be the sole
-change in a dedicated tagged certification commit over the exact tested source commit.
+Codex attempts have actually run; the release verifier also requires it to be the sole change in a
+dedicated tagged certification commit over the exact tested source commit. Claude remains packaged
+but is explicitly listed as unverified and cannot appear as certified attempt evidence.

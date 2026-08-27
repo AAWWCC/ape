@@ -7,6 +7,9 @@ marketplace smoke tests, and the public export are checked against it by
 
 The public Node.js minimum is 22.12.0. Blocking release validation uses Node.js 24.15.0,
 Codex CLI 0.147.0, and Claude Code 2.1.228 exactly. Linux, macOS, and Windows are supported.
+Codex is the sole required live release-certification host. The Claude package, manifest, pinned
+CLI, and marketplace installation remain structurally validated. Claude live operation is unverified
+and makes no authenticated operational certification claim.
 
 Pull-request and tagged-release jobs use the exact blocking pins. Registry-installed host CLIs run
 only in unprivileged validation jobs, and the privileged publish job depends on successful host

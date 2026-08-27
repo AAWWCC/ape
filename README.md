@@ -12,7 +12,9 @@ how to verify.
 
 ## Current status
 
-- Claude Code and Codex CLI are supported end to end.
+- Codex CLI is supported end to end and is the sole host required for live release certification.
+- Claude Code integration remains shipped and structurally and marketplace validated at its pinned
+  CLI version, but Claude live operation is unverified in this release.
 - The public surface is seven skills backed by four MCP tools.
 - Runs are explicit. Installing APE does not start agents or change a repository.
 - GitHub is the only shipping provider.
@@ -53,10 +55,10 @@ to an APE-operated service.
 platforms and blocking host versions. The detailed [host compatibility contract](docs/compatibility.md)
 explains how pull-request, release, and informational edge checks consume it.
 
-| Host | Package | MCP transport | Agent integration | External-tool attestation |
-| --- | --- | --- | --- | --- |
-| Codex CLI | `plugins/ape` | Local stdio | Native Codex subagents and lifecycle hooks | Codex-specific GitHub connector and Codex Security reads are covered; other providers depend on the installed server. |
-| Claude Code | `plugins/ape-claude` | Local stdio | Claude Agent tool and supplemental hooks | Core policy is shared, but Codex-only connectors and live provider parity are not claimed. |
+| Host | Package | MCP transport | Agent integration | Live release status | External-tool attestation |
+| --- | --- | --- | --- | --- | --- |
+| Codex CLI | `plugins/ape` | Local stdio | Native Codex subagents and lifecycle hooks | Required; certification is supplied by the tagged-release ledger. | Codex-specific GitHub connector and Codex Security reads are covered; other providers depend on the installed server. |
+| Claude Code | `plugins/ape-claude` | Local stdio | Claude Agent tool and supplemental hooks | Packaged and structurally validated; authenticated live operation is unverified. | Core policy is shared, but Codex-only connectors and live provider parity are not claimed. |
 
 Node.js 22.12.0 and the pinned Node.js 24 release runtime are exercised on Windows, Linux, and macOS. Provider availability, host plugin
 discovery, and external editor connections remain host/version/environment dependent.
@@ -217,10 +219,12 @@ model calls. Live prompt evaluation has separate explicit paid-call guards, and
 `npm run operational:canary` replays normalized failure classes covering dispatch, planning,
 test-contract disputes, review remediation, scope guidance, shipping, pipeline selection, and
 terminal diagnostics. It is deterministic and credential-free. A release candidate must also pass
-live native-host dogfooding before publication. Tagged releases fail closed unless the real raw
-Codex/Claude ledger is the only change in a dedicated certification commit over the exact tested
-source; see [operational readiness](docs/operational-readiness.md). The verifier is offline, so it
-does not pretend CI can manufacture host lifecycle delivery or remote shipping evidence.
+live Codex dogfooding before publication. Tagged releases fail closed unless the real raw Codex
+ledger is the only change in a dedicated certification commit over the exact tested source; see
+[operational readiness](docs/operational-readiness.md). Claude remains packaged and receives pinned
+structural and marketplace validation, but those checks do not constitute live certification. The
+verifier is offline, so it does not pretend CI can manufacture host lifecycle delivery or remote
+shipping evidence.
 
 `npm test` runs the standalone suite with six workers. When several agents may test concurrently,
 use `npm run test:agent -- <paths...>` for the three-worker profile. Run

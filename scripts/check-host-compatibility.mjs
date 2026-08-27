@@ -49,13 +49,25 @@ function requireFullActionPins(yaml, consumer) {
 async function check(root) {
   const manifestText = await text(root, 'compatibility.json');
   const manifest = JSON.parse(manifestText);
-  requireCondition(manifest.version === 1, 'compatibility.json version must be 1');
+  requireCondition(manifest.version === 2, 'compatibility.json version must be 2');
   requireCondition(manifest.node?.minimum === '22.12.0', 'Node.js minimum must be 22.12.0');
   requireCondition(manifest.node?.blocking === '24.15.0', 'blocking Node.js must be 24.15.0');
   requireCondition(manifest.hosts?.codex?.package === '@openai/codex', 'Codex package identity mismatch');
   requireCondition(manifest.hosts?.codex?.version === '0.147.0', 'Codex CLI pin mismatch');
+  requireCondition(
+    manifest.hosts?.codex?.live_certification === 'required',
+    'Codex must be the required live-certification host',
+  );
   requireCondition(manifest.hosts?.claude?.package === '@anthropic-ai/claude-code', 'Claude Code package identity mismatch');
   requireCondition(manifest.hosts?.claude?.version === '2.1.228', 'Claude Code pin mismatch');
+  requireCondition(
+    manifest.hosts?.claude?.live_certification === 'unverified',
+    'Claude live certification must be marked unverified',
+  );
+  requireCondition(
+    JSON.stringify(Object.keys(manifest.hosts ?? {}).sort()) === JSON.stringify(['claude', 'codex']),
+    'host policy partition must contain exactly Codex and Claude',
+  );
   requireCondition(
     JSON.stringify(manifest.platforms) === JSON.stringify(['linux', 'macos', 'windows']),
     'supported platforms must be linux, macos, and windows',
@@ -72,12 +84,15 @@ async function check(root) {
   requireContains(readme, `Node.js ${manifest.node.minimum} or newer is required.`, 'README.md');
   requireContains(readme, '[`compatibility.json`](compatibility.json)', 'README.md');
   requireContains(readme, '(docs/compatibility.md)', 'README.md');
+  requireContains(readme, 'Claude live operation is unverified', 'README.md');
 
   const compatibilityDocs = await text(root, 'docs/compatibility.md');
   for (const value of [manifest.node.minimum, manifest.node.blocking, manifest.hosts.codex.version, manifest.hosts.claude.version]) {
     requireContains(compatibilityDocs, value, 'docs/compatibility.md');
   }
   for (const platform of ['Linux', 'macOS', 'Windows']) requireContains(compatibilityDocs, platform, 'docs/compatibility.md');
+  requireContains(compatibilityDocs, 'Codex is the sole required live release-certification host', 'docs/compatibility.md');
+  requireContains(compatibilityDocs, 'Claude live operation is unverified', 'docs/compatibility.md');
   requireContains(await text(root, 'docs/README.md'), 'compatibility.md', 'docs/README.md');
 
   const ci = await text(root, '.github/workflows/ci.yml');

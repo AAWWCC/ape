@@ -10,6 +10,7 @@ import {
 import {
   LIVE_CERTIFICATION_HOSTS,
   LIVE_CERTIFICATION_PIPELINES,
+  LIVE_CERTIFICATION_UNVERIFIED_HOSTS,
   LiveCertificationError,
   parseLiveCertificationJson,
   validateLiveCertificationDocument as validateDocument,
@@ -82,9 +83,11 @@ function validLedger(sourceCommit = SOURCE) {
     }
   }
   return {
-    schema_version: 1,
+    schema_version: 2,
     ape_version: VERSION,
     source_commit: sourceCommit,
+    certified_hosts: [...LIVE_CERTIFICATION_HOSTS],
+    unverified_hosts: [...LIVE_CERTIFICATION_UNVERIFIED_HOSTS],
     terminal_reason_taxonomy_version: TERMINAL_REASON_TAXONOMY_VERSION,
     attempts,
   };
@@ -117,17 +120,36 @@ function git(repo, ...args) {
   }).trim();
 }
 
-function sourceRepository() {
+function sourceRepository({
+  codexCertification = 'required',
+  claudeCertification = 'unverified',
+  extraHost = false,
+} = {}) {
   const repo = mkdtempSync(path.join(tmpdir(), 'ape-live-certification-'));
   temporaryRepositories.push(repo);
   git(repo, 'init', '--initial-branch=main');
   mkdirSync(path.join(repo, 'evals'));
   writeFileSync(path.join(repo, 'package.json'), canonical({ name: 'ape', version: VERSION }));
   writeFileSync(path.join(repo, 'compatibility.json'), canonical({
-    version: 1,
+    version: 2,
     hosts: {
-      codex: { package: '@openai/codex', version: HOST_VERSIONS.codex },
-      claude: { package: '@anthropic-ai/claude-code', version: HOST_VERSIONS.claude },
+      codex: {
+        package: '@openai/codex',
+        version: HOST_VERSIONS.codex,
+        live_certification: codexCertification,
+      },
+      claude: {
+        package: '@anthropic-ai/claude-code',
+        version: HOST_VERSIONS.claude,
+        live_certification: claudeCertification,
+      },
+      ...(extraHost ? {
+        other: {
+          package: '@example/other-host',
+          version: '1.0.0',
+          live_certification: 'unverified',
+        },
+      } : {}),
     },
   }));
   writeFileSync(path.join(repo, 'source.txt'), 'tested source\n');
@@ -136,8 +158,18 @@ function sourceRepository() {
   return { repo, source: git(repo, 'rev-parse', 'HEAD') };
 }
 
-function certificationCommit({ extraPath = null, sourceOverride = null } = {}) {
-  const { repo, source } = sourceRepository();
+function certificationCommit({
+  extraPath = null,
+  sourceOverride = null,
+  codexCertification = 'required',
+  claudeCertification = 'unverified',
+  extraHost = false,
+} = {}) {
+  const { repo, source } = sourceRepository({
+    codexCertification,
+    claudeCertification,
+    extraHost,
+  });
   const document = validLedger(sourceOverride ?? source);
   writeFileSync(path.join(repo, 'evals', 'live-certification.json'), canonical(document));
   git(repo, 'add', 'evals/live-certification.json');
@@ -158,12 +190,12 @@ afterEach(() => {
 });
 
 describe('live release certification evidence', () => {
-  it('requires three clean completed raw attempts for every host and pipeline', () => {
+  it('requires three clean completed raw attempts for every certified host and pipeline', () => {
     const result = validateLiveCertificationDocument(validLedger(), {
       packageVersion: VERSION,
       sourceCommit: SOURCE,
     });
-    expect(result).toEqual({ version: VERSION, attempt_count: 24, cohort_count: 8 });
+    expect(result).toEqual({ version: VERSION, attempt_count: 12, cohort_count: 4 });
   });
 
   it('retains earlier failed attempts without averaging them into the final consecutive result', () => {
@@ -181,21 +213,21 @@ describe('live release certification evidence', () => {
     expect(validateLiveCertificationDocument(document, {
       packageVersion: VERSION,
       sourceCommit: SOURCE,
-    }).attempt_count).toBe(25);
+    }).attempt_count).toBe(13);
   });
 
   it('fails closed on missing coverage, a dirty final run, or non-completed success', () => {
     const missing = validLedger();
     missing.attempts.splice(-3);
     missing.attempts.push(
-      cleanAttempt({ sequence: 22, host: 'claude', pipeline: 'full' }),
-      cleanAttempt({ sequence: 23, host: 'claude', pipeline: 'full' }),
-      cleanAttempt({ sequence: 24, host: 'claude', pipeline: 'full' }),
+      cleanAttempt({ sequence: 10, host: 'codex', pipeline: 'full' }),
+      cleanAttempt({ sequence: 11, host: 'codex', pipeline: 'full' }),
+      cleanAttempt({ sequence: 12, host: 'codex', pipeline: 'full' }),
     );
     expect(() => validateLiveCertificationDocument(missing, {
       packageVersion: VERSION,
       sourceCommit: SOURCE,
-    })).toThrow(/claude\/protected-branch-land has fewer/iu);
+    })).toThrow(/codex\/protected-branch-land has fewer/iu);
 
     const dirty = validLedger();
     dirty.attempts.at(-1).receipt_repair = true;
@@ -210,6 +242,36 @@ describe('live release certification evidence', () => {
       packageVersion: VERSION,
       sourceCommit: SOURCE,
     })).toThrow(/outcome and terminal reason code disagree/iu);
+  });
+
+  it('rejects Claude attempts because Claude is packaged but not live-certified', () => {
+    const document = validLedger();
+    document.attempts[0] = {
+      ...document.attempts[0],
+      attempt_id: 'claude-unverified-attempt',
+      host: 'claude',
+      host_version: HOST_VERSIONS.claude,
+    };
+    expect(() => validateLiveCertificationDocument(document, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/unsupported host/iu);
+  });
+
+  it('fails closed when the ledger changes the certified or unverified host partition', () => {
+    const noCertifiedHost = validLedger();
+    noCertifiedHost.certified_hosts = [];
+    expect(() => validateLiveCertificationDocument(noCertifiedHost, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/exact required live-certified hosts/iu);
+
+    const claimsClaude = validLedger();
+    claimsClaude.unverified_hosts = [];
+    expect(() => validateLiveCertificationDocument(claimsClaude, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/exact unverified hosts/iu);
   });
 
   it('requires exact pushed-head merge proof for every successful protected land attempt', () => {
@@ -272,8 +334,8 @@ describe('tagged certification-only commit gate', () => {
     writeFileSync(path.join(repo, 'evals', 'live-certification.json'), '{"fabricated":true}\n');
     expect(verifyLiveCertificationRepository({ repo, head, tag: `v${VERSION}` })).toEqual({
       version: VERSION,
-      attempt_count: 24,
-      cohort_count: 8,
+      attempt_count: 12,
+      cohort_count: 4,
     });
   });
 
@@ -287,6 +349,21 @@ describe('tagged certification-only commit gate', () => {
     const { repo, head } = certificationCommit({ sourceOverride: 'b'.repeat(40) });
     expect(() => verifyLiveCertificationRepository({ repo, head, tag: `v${VERSION}` }))
       .toThrow(/source commit is not the certification commit parent/iu);
+  });
+
+  it('rejects a tagged source whose required and unverified host statuses are swapped', () => {
+    const { repo, head } = certificationCommit({
+      codexCertification: 'unverified',
+      claudeCertification: 'required',
+    });
+    expect(() => verifyLiveCertificationRepository({ repo, head, tag: `v${VERSION}` }))
+      .toThrow(/invalid live-certification policy/iu);
+  });
+
+  it('rejects a tagged source that adds a host outside the exact policy partition', () => {
+    const { repo, head } = certificationCommit({ extraHost: true });
+    expect(() => verifyLiveCertificationRepository({ repo, head, tag: `v${VERSION}` }))
+      .toThrow(/exact certification host partition/iu);
   });
 
   it('rejects a two-parent release head even when its first-parent diff only adds the ledger', () => {
@@ -335,7 +412,11 @@ describe('tagged certification-only commit gate', () => {
     expect(schema.$defs.attempt.additionalProperties).toBe(false);
     expect(schema.properties.terminal_reason_taxonomy_version.const)
       .toBe(TERMINAL_REASON_TAXONOMY_VERSION);
-    expect(schema.$defs.attempt.properties.host.enum).toEqual(['codex', 'claude']);
+    expect(schema.properties.schema_version.const).toBe(2);
+    expect(schema.properties.certified_hosts.const).toEqual(['codex']);
+    expect(schema.properties.unverified_hosts.const).toEqual(['claude']);
+    expect(schema.properties.attempts.minItems).toBe(12);
+    expect(schema.$defs.attempt.properties.host.enum).toEqual(['codex']);
     expect(schema.$defs.attempt.properties.pipeline.enum).toEqual([
       'mechanical',
       'fast',

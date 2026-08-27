@@ -43,7 +43,7 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${version}"
-      - name: Require committed live-host certification
+      - name: Require committed live Codex certification
         run: npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
       - run: npm run typecheck
       - run: npm run bundle
@@ -121,7 +121,7 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${version}"
-      - name: Require committed live-host certification
+      - name: Require committed live Codex certification
         run: npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
       - run: npm run typecheck
       - run: npm run bundle
