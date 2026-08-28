@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 2.23.19 — 2026-08-28
+
+The first 2.23.18 targeted source gate rejected stale schema-version and cohort-error assertions.
+The assertions now pin schema v3, its exact twelve-record bound, and the host-transport-retry field.
+Version 2.23.19 restarts the release candidate after that source-gate failure rather than reusing the
+2.23.18 candidate.
+
+## 2.23.18 — 2026-08-28
+
+The first 2.23.17 fast-lane certification cycle was rejected when the Codex host's WebSocket
+transport disconnected and automatically retried a sampling request. Live release certification
+now requires exactly three first-pass-perfect attempts per pipeline: the first proves correctness,
+and the next two prove repeatability. Any worker-tool failure, control-call failure, host transport
+retry, receipt repair, duplicate dispatch, remediation, self-correction, or successor workaround
+rejects the candidate and requires a version bump plus a fresh exact-source campaign. Subsequent
+campaigns use an OpenAI-authenticated zero-retry SSE profile so transport loss fails visibly instead
+of being hidden by the host's default retry policy.
+
 ## 2.23.17 — 2026-08-28
 
 Aligned the test-evidence contract with the shell policy exposed by the first 2.23.12 fast-lane

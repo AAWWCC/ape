@@ -9,7 +9,7 @@ import {
   TERMINAL_REASON_TAXONOMY_VERSION,
 } from '../lib/runtime/terminal-telemetry.js';
 
-export const LIVE_CERTIFICATION_SCHEMA_VERSION = 2;
+export const LIVE_CERTIFICATION_SCHEMA_VERSION = 3;
 export const LIVE_CERTIFICATION_PATH = 'evals/live-certification.json';
 export const LIVE_CERTIFICATION_HOSTS = Object.freeze(['codex']);
 export const LIVE_CERTIFICATION_UNVERIFIED_HOSTS = Object.freeze(['claude']);
@@ -22,9 +22,7 @@ export const LIVE_CERTIFICATION_PIPELINES = Object.freeze([
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MAX_LEDGER_BYTES = 256 * 1024;
-const MAX_ATTEMPTS = 256;
-const MAX_ATTEMPTS_PER_COHORT = 32;
-const REQUIRED_CONSECUTIVE_SUCCESSES = 3;
+const REQUIRED_ATTEMPTS_PER_COHORT = 3;
 const HASH = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u;
@@ -54,8 +52,13 @@ const ATTEMPT_KEYS = Object.freeze([
   'terminal_reason_code',
   'manual_intervention',
   'prompt_assembly_failure',
+  'worker_tool_failure',
+  'control_call_failure',
+  'host_transport_retry',
   'receipt_repair',
   'duplicate_dispatch',
+  'remediation',
+  'self_correction',
   'abort_successor',
   'protected_land',
 ]);
@@ -72,8 +75,13 @@ const LAND_PROOF_KEYS = Object.freeze([
 const CLEAN_RUN_FLAGS = Object.freeze([
   'manual_intervention',
   'prompt_assembly_failure',
+  'worker_tool_failure',
+  'control_call_failure',
+  'host_transport_retry',
   'receipt_repair',
   'duplicate_dispatch',
+  'remediation',
+  'self_correction',
   'abort_successor',
 ]);
 
@@ -201,11 +209,10 @@ export function validateLiveCertificationDocument(document, {
   }
   if (
     !Array.isArray(document.attempts)
-    || document.attempts.length < LIVE_CERTIFICATION_HOSTS.length
+    || document.attempts.length !== LIVE_CERTIFICATION_HOSTS.length
       * LIVE_CERTIFICATION_PIPELINES.length
-      * REQUIRED_CONSECUTIVE_SUCCESSES
-    || document.attempts.length > MAX_ATTEMPTS
-  ) reject('certification attempts are missing or outside the bounded ledger size');
+      * REQUIRED_ATTEMPTS_PER_COHORT
+  ) reject('certification ledger must contain exactly three attempts for every required cohort');
 
   const ids = new Set();
   const runRecordDigests = new Set();
@@ -252,6 +259,9 @@ export function validateLiveCertificationDocument(document, {
       reject(`attempt ${attemptNumber} outcome and terminal reason code disagree`);
     }
     for (const key of CLEAN_RUN_FLAGS) requireBoolean(attempt[key], `attempt ${attemptNumber} ${key}`);
+    if (!cleanCompletedAttempt(attempt)) {
+      reject(`attempt ${attemptNumber} is not first-pass perfect; bump the candidate version and restart certification`);
+    }
 
     if (attempt.pipeline === 'protected-branch-land' && attempt.outcome === 'success') {
       validateLandProof(attempt.protected_land, attemptNumber);
@@ -262,7 +272,9 @@ export function validateLiveCertificationDocument(document, {
     const cohortKey = `${attempt.host}/${attempt.pipeline}`;
     const cohort = cohorts.get(cohortKey) ?? [];
     cohort.push(attempt);
-    if (cohort.length > MAX_ATTEMPTS_PER_COHORT) reject(`cohort ${cohortKey} exceeds the raw-attempt limit`);
+    if (cohort.length > REQUIRED_ATTEMPTS_PER_COHORT) {
+      reject(`cohort ${cohortKey} exceeds the three-run repeatability proof`);
+    }
     cohorts.set(cohortKey, cohort);
   }
 
@@ -270,12 +282,8 @@ export function validateLiveCertificationDocument(document, {
     for (const pipeline of LIVE_CERTIFICATION_PIPELINES) {
       const cohortKey = `${host}/${pipeline}`;
       const cohort = cohorts.get(cohortKey) ?? [];
-      if (cohort.length < REQUIRED_CONSECUTIVE_SUCCESSES) {
-        reject(`cohort ${cohortKey} has fewer than three raw attempts`);
-      }
-      const latest = cohort.slice(-REQUIRED_CONSECUTIVE_SUCCESSES);
-      if (latest.some((attempt) => !cleanCompletedAttempt(attempt))) {
-        reject(`cohort ${cohortKey} does not end with three clean completed attempts`);
+      if (cohort.length !== REQUIRED_ATTEMPTS_PER_COHORT) {
+        reject(`cohort ${cohortKey} must contain exactly three first-pass-perfect attempts`);
       }
     }
   }

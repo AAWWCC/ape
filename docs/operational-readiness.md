@@ -41,10 +41,14 @@ compatibility policy. Every attempt's host version must equal that host's exact 
 pin. Its unique `run_record_sha256` is the SHA-256 of the exact archived APE run-record bytes retained
 outside the public repository for audit.
 
-Each of the four pipeline shapes must end with three consecutive clean `completed` attempts on
-Codex. A clean attempt has no manual intervention, prompt-assembly failure, receipt
-repair, duplicate dispatch, or abort/successor workaround. Earlier failures remain in raw sequence;
-do not discard or average them away. A successful protected-branch attempt additionally records a
+Each of the four pipeline shapes must produce exactly three clean `completed` attempts on Codex.
+The first attempt must already be perfect; attempts two and three prove repeatability rather than
+repairing a bad cycle. A clean attempt has no manual intervention, prompt-assembly failure, failed
+worker tool, failed control call, host transport retry, receipt repair, duplicate dispatch,
+remediation, self-correction, or abort/successor workaround. Any such event rejects the candidate:
+fix the cause, bump the version, and restart from a fresh clone of the new exact source commit. Never
+discard the failed attempt and chase three later successes under the same version. A successful
+protected-branch attempt additionally records a
 GitHub auto-squash with `MERGED` PR state, an observed PR head equal to the exact pushed head, and an
 observed remote head equal to the reported squash merge commit.
 
@@ -66,7 +70,7 @@ from examples or fabricated outcomes.
 
 The repository writer who creates the certification commit is the attesting operator. The offline
 gate mechanically verifies the attestation's shape, exact source/tag topology, pinned host versions,
-unique archived-record bindings, clean consecutive outcomes, and internal merge proof; it cannot
+unique archived-record bindings, exact first-pass-perfect outcomes, and internal merge proof; it cannot
 independently observe or cryptographically prove that an external host or GitHub event occurred.
 Retain the archived records and remote release evidence so an auditor can recompute the hashes. Do
 not describe this operator-attested ledger as provider-signed execution proof.

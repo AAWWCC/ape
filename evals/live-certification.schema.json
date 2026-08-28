@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/AAWWCC/ape/blob/main/evals/live-certification.schema.json",
   "title": "APE live release certification ledger",
-  "description": "Privacy-safe raw Codex outcomes for the offline tagged-release certification gate, with the packaged but operationally unverified Claude host named explicitly. Cross-record ancestry, coverage, ordering, and consecutive-success rules are enforced by scripts/verify-live-certification.mjs.",
+  "description": "Privacy-safe first-pass-perfect Codex outcomes for the offline tagged-release certification gate, with the packaged but operationally unverified Claude host named explicitly. Cross-record ancestry, exact coverage, ordering, and zero-retry rules are enforced by scripts/verify-live-certification.mjs.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -16,7 +16,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 2
+      "const": 3
     },
     "ape_version": {
       "$ref": "#/$defs/version"
@@ -42,7 +42,7 @@
     "attempts": {
       "type": "array",
       "minItems": 12,
-      "maxItems": 256,
+      "maxItems": 12,
       "items": {
         "$ref": "#/$defs/attempt"
       }
@@ -157,8 +157,13 @@
         "terminal_reason_code",
         "manual_intervention",
         "prompt_assembly_failure",
+        "worker_tool_failure",
+        "control_call_failure",
+        "host_transport_retry",
         "receipt_repair",
         "duplicate_dispatch",
+        "remediation",
+        "self_correction",
         "abort_successor",
         "protected_land"
       ],
@@ -222,10 +227,25 @@
         "prompt_assembly_failure": {
           "type": "boolean"
         },
+        "worker_tool_failure": {
+          "type": "boolean"
+        },
+        "control_call_failure": {
+          "type": "boolean"
+        },
+        "host_transport_retry": {
+          "type": "boolean"
+        },
         "receipt_repair": {
           "type": "boolean"
         },
         "duplicate_dispatch": {
+          "type": "boolean"
+        },
+        "remediation": {
+          "type": "boolean"
+        },
+        "self_correction": {
           "type": "boolean"
         },
         "abort_successor": {

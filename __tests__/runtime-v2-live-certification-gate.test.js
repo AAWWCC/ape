@@ -21,7 +21,7 @@ import {
   verifyLiveCertificationEnvironment,
 } from '../scripts/check-live-certification-environment.mjs';
 
-const VERSION = '2.23.17';
+const VERSION = '2.23.19';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
@@ -65,8 +65,13 @@ function cleanAttempt({ sequence, host, pipeline, sourceCommit = SOURCE }) {
     terminal_reason_code: 'completed',
     manual_intervention: false,
     prompt_assembly_failure: false,
+    worker_tool_failure: false,
+    control_call_failure: false,
+    host_transport_retry: false,
     receipt_repair: false,
     duplicate_dispatch: false,
+    remediation: false,
+    self_correction: false,
     abort_successor: false,
     protected_land: pipeline === 'protected-branch-land' ? landProof(sequence) : null,
   };
@@ -87,7 +92,7 @@ function validLedger(sourceCommit = SOURCE) {
     }
   }
   return {
-    schema_version: 2,
+    schema_version: 3,
     ape_version: VERSION,
     source_commit: sourceCommit,
     certified_hosts: [...LIVE_CERTIFICATION_HOSTS],
@@ -232,7 +237,7 @@ describe('live release certification evidence', () => {
     expect(result).toEqual({ version: VERSION, attempt_count: 12, cohort_count: 4 });
   });
 
-  it('retains earlier failed attempts without averaging them into the final consecutive result', () => {
+  it('rejects the candidate on its first failed attempt instead of accepting later clean runs', () => {
     const document = validLedger();
     const failed = {
       ...cleanAttempt({ sequence: 1, host: 'codex', pipeline: 'mechanical' }),
@@ -242,12 +247,28 @@ describe('live release certification evidence', () => {
       prompt_assembly_failure: true,
       run_record_sha256: runRecordHash(1_000),
     };
-    document.attempts.unshift(failed);
-    document.attempts.forEach((attempt, index) => { attempt.sequence = index + 1; });
-    expect(validateLiveCertificationDocument(document, {
+    document.attempts[0] = failed;
+    expect(() => validateLiveCertificationDocument(document, {
       packageVersion: VERSION,
       sourceCommit: SOURCE,
-    }).attempt_count).toBe(13);
+    })).toThrow(/first-pass perfect/iu);
+  });
+
+  it.each([
+    'worker_tool_failure',
+    'control_call_failure',
+    'host_transport_retry',
+    'receipt_repair',
+    'duplicate_dispatch',
+    'remediation',
+    'self_correction',
+  ])('rejects a candidate whose first cycle records %s', (flag) => {
+    const document = validLedger();
+    document.attempts[0][flag] = true;
+    expect(() => validateLiveCertificationDocument(document, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/not first-pass perfect/iu);
   });
 
   it('fails closed on missing coverage, a dirty final run, or non-completed success', () => {
@@ -261,14 +282,14 @@ describe('live release certification evidence', () => {
     expect(() => validateLiveCertificationDocument(missing, {
       packageVersion: VERSION,
       sourceCommit: SOURCE,
-    })).toThrow(/codex\/protected-branch-land has fewer/iu);
+    })).toThrow(/three-run repeatability|protected-branch-land must contain exactly three/iu);
 
     const dirty = validLedger();
     dirty.attempts.at(-1).receipt_repair = true;
     expect(() => validateLiveCertificationDocument(dirty, {
       packageVersion: VERSION,
       sourceCommit: SOURCE,
-    })).toThrow(/does not end with three clean completed/iu);
+    })).toThrow(/not first-pass perfect/iu);
 
     const contradictory = validLedger();
     contradictory.attempts[0].terminal_reason_code = 'test_failed';
@@ -446,10 +467,12 @@ describe('tagged certification-only commit gate', () => {
     expect(schema.$defs.attempt.additionalProperties).toBe(false);
     expect(schema.properties.terminal_reason_taxonomy_version.const)
       .toBe(TERMINAL_REASON_TAXONOMY_VERSION);
-    expect(schema.properties.schema_version.const).toBe(2);
+    expect(schema.properties.schema_version.const).toBe(3);
     expect(schema.properties.certified_hosts.const).toEqual(['codex']);
     expect(schema.properties.unverified_hosts.const).toEqual(['claude']);
     expect(schema.properties.attempts.minItems).toBe(12);
+    expect(schema.properties.attempts.maxItems).toBe(12);
+    expect(schema.$defs.attempt.required).toContain('host_transport_retry');
     expect(schema.$defs.attempt.properties.host.enum).toEqual(['codex']);
     expect(schema.$defs.attempt.properties.pipeline.enum).toEqual([
       'mechanical',
