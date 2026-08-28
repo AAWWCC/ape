@@ -28,7 +28,7 @@ import {
   validateCertificationCatalogAudit,
 } from '../scripts/run-live-certification-parent.mjs';
 
-const VERSION = '2.23.36';
+const VERSION = '2.23.37';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
@@ -37,6 +37,7 @@ function certificationParentFixture({
   zeroRetry = true,
   analyticsDisabled = true,
   pluginsEnabled = true,
+  appsDisabled = true,
   remotePluginEnabled = true,
 } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'ape-live-parent-'));
@@ -59,6 +60,7 @@ function certificationParentFixture({
       analyticsDisabled ? 'enabled = false' : 'enabled = true',
       '[features]',
       pluginsEnabled ? 'plugins = true' : 'plugins = false',
+      appsDisabled ? 'apps = false' : 'apps = true',
       remotePluginEnabled ? 'remote_plugin = true' : 'remote_plugin = false',
     ].join('\n'),
   );
@@ -254,6 +256,8 @@ describe('live certification Codex parent launcher', () => {
       'exec',
       '-c',
       'chatgpt_base_url="http://127.0.0.1:1"',
+      '-c',
+      'features.apps=false',
       '--dangerously-bypass-approvals-and-sandbox',
       '--dangerously-bypass-hook-trust',
       '--color',
@@ -287,6 +291,14 @@ describe('live certification Codex parent launcher', () => {
     expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
     expect(() => buildCodexParentInvocation(fixture)).toThrow(
       /enable plugins.*local APE plugin/iu,
+    );
+  });
+
+  it('fails closed before launch when the unrelated Apps MCP transport is enabled', () => {
+    const fixture = certificationParentFixture({ appsDisabled: false });
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(
+      /disable apps.*Apps MCP transport/iu,
     );
   });
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 2.23.37 — 2026-08-28
+
+The first 2.23.36 mechanical parent was rejected before run creation because Codex also derives its
+host-owned Apps MCP URL from the global ChatGPT origin. The catalog loopback correctly rejected
+those unrelated POST requests, but Codex retried Apps MCP initialization and emitted warnings. The
+live launcher now requires and command-line-pins `[features] apps = false` while retaining local APE
+plugins and remote catalog mode. This prevents the unrelated Apps MCP transport from starting at
+all; version 2.23.37 restarts every source gate and live pipeline from fresh public source.
+
 ## 2.23.36 — 2026-08-28
 
 The 2.23.35 source candidate was rejected because release preparation invoked the clean public-tree

@@ -74,6 +74,11 @@ function requireDeterministicConfig(codexHome) {
       'isolated Codex config must enable plugins so the installed local APE plugin is loaded',
     );
   }
+  if (!featuresBody.some((line) => /^\s*apps\s*=\s*false\s*$/u.test(line))) {
+    throw new LiveCertificationParentError(
+      'isolated Codex config must disable apps so the catalog loopback cannot intercept the unrelated Apps MCP transport',
+    );
+  }
   if (!featuresBody.some((line) => /^\s*remote_plugin\s*=\s*true\s*$/u.test(line))) {
     throw new LiveCertificationParentError(
       'isolated Codex config must enable remote_plugin so Codex cannot fall back to legacy curated-plugin sync',
@@ -180,6 +185,8 @@ export function buildCodexParentInvocation({
       'exec',
       '-c',
       `chatgpt_base_url=${JSON.stringify(catalogUrl)}`,
+      '-c',
+      'features.apps=false',
       '--dangerously-bypass-approvals-and-sandbox',
       '--dangerously-bypass-hook-trust',
       '--color',
