@@ -1519,6 +1519,8 @@ describe('APE v2 hook binary evidence containment (cwd + operand precompute)', (
     for (const command of [
       'git diff --no-index /dev/null src/is-even-2319-1.js',
       'git diff --no-index src/is-even-2319-1.js /dev/null',
+      'git diff --no-index -- /dev/null src/is-even-2319-1.js',
+      'git diff --no-index -- src/is-even-2319-1.js /dev/null',
     ]) {
       const response = await invokeHook(boundBashCall(dir, command, dir), dir);
       expect(response.hookSpecificOutput.permissionDecision, command).toBe('allow');
@@ -1531,6 +1533,9 @@ describe('APE v2 hook binary evidence containment (cwd + operand precompute)', (
       'git diff --no-index /dev/nullish src/is-even-2319-1.js',
       'git diff --no-index /dev/null/../tmp/x src/is-even-2319-1.js',
       'git diff --no-index --stat /dev/null src/is-even-2319-1.js',
+      'git diff --no-index -- -- /dev/null src/is-even-2319-1.js',
+      'git diff --no-index -- /dev/null /tmp/outside.js',
+      'git diff --no-index -- /dev/null /dev/null',
       'git diff --no-index /dev/null /tmp/outside.js',
       'git diff --no-index /dev/null /dev/null',
     ]) {

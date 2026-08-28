@@ -81,8 +81,8 @@ describe('2.17 public plugin packages', () => {
   it('ships companion-file local stdio MCP declarations with explicit host pins', async () => {
     const codexManifest = await json('plugins/ape/.codex-plugin/plugin.json');
     const claudeManifest = await json('plugins/ape-claude/.claude-plugin/plugin.json');
-    expect(codexManifest).toMatchObject({ version: '2.23.48', mcpServers: './.mcp.json' });
-    expect(claudeManifest).toMatchObject({ version: '2.23.48', hooks: './hooks/claude-hooks.json' });
+    expect(codexManifest).toMatchObject({ version: '2.23.49', mcpServers: './.mcp.json' });
+    expect(claudeManifest).toMatchObject({ version: '2.23.49', hooks: './hooks/claude-hooks.json' });
     for (const manifest of [codexManifest, claudeManifest]) {
       expect(manifest.author).toEqual({ name: 'AAWWCC', url: 'https://github.com/AAWWCC' });
       expect(manifest.author).not.toHaveProperty('email');

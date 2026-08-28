@@ -1615,12 +1615,17 @@ describe('APE v2 lifecycle shell policy', () => {
       // the ordinary rule.
       expectAllow('git diff --no-index /dev/null src/is-even-2319-1.js');
       expectAllow('git diff --no-index src/is-even-2319-1.js /dev/null');
+      expectAllow('git diff --no-index -- /dev/null src/is-even-2319-1.js');
+      expectAllow('git diff --no-index -- src/is-even-2319-1.js /dev/null');
     });
 
     it('keeps the `/dev/null` exception exact and keeps the companion operand contained', () => {
       for (const command of [
         'git diff /dev/null src/is-even-2319-1.js',
         'git diff --no-index --stat /dev/null src/is-even-2319-1.js',
+        'git diff --no-index -- -- /dev/null src/is-even-2319-1.js',
+        'git diff --no-index -- /dev/null /tmp/outside.js',
+        'git diff --no-index -- /dev/null /dev/null',
         'git diff --no-index /dev/nullish src/is-even-2319-1.js',
         'git diff --no-index /dev/null/../tmp/x src/is-even-2319-1.js',
         'git diff --no-index /dev/null /tmp/outside.js',

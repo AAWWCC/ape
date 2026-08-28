@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.23.49 — 2026-08-28
+
+The first 2.23.48 full certification attempt exposed a missing read-only evidence spelling. An
+independent reviewer rendered newly added files with `git diff --no-index -- /dev/null <path>`, but
+the lifecycle policy's narrow `/dev/null` sentinel exception covered only the equivalent form
+without Git's end-of-options separator. The exception now admits either exact shape while retaining
+the same containment checks and denying extra separators, extra flags, external companion paths,
+two sentinel operands, and near-miss sentinel names. Version 2.23.49 restarts the finite four-cohort
+certification cycle from fresh public source.
+
 ## 2.23.48 — 2026-08-28
 
 Live release certification now gates on one first-pass-perfect attempt for each required Codex
