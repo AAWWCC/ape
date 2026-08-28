@@ -50,13 +50,14 @@ compatibility policy. Every attempt's host version must equal that host's exact 
 pin. Its unique `run_record_sha256` is the SHA-256 of the exact archived APE run-record bytes retained
 outside the public repository for audit.
 
-Each of the four pipeline shapes must produce exactly three clean `completed` attempts on Codex.
-The first attempt must already be perfect; attempts two and three prove repeatability rather than
-repairing a bad cycle. A clean attempt has no manual intervention, prompt-assembly failure, failed
+Each of the four pipeline shapes must produce exactly one clean `completed` attempt on Codex. Every
+release-gating attempt must be first-pass perfect. Repeatability exercises may run separately as
+non-blocking operational monitoring, but they are not added to the release ledger and cannot repair
+a failed release attempt. A clean attempt has no manual intervention, prompt-assembly failure, failed
 worker tool, failed control call, host transport retry, receipt repair, duplicate dispatch,
 remediation, self-correction, or abort/successor workaround. Any such event rejects the candidate:
 fix the cause, bump the version, and restart from a fresh clone of the new exact source commit. Never
-discard the failed attempt and chase three later successes under the same version. A successful
+discard the failed attempt and substitute a later success under the same version. A successful
 protected-branch attempt additionally records a
 GitHub auto-squash with `MERGED` PR state, an observed PR head equal to the exact pushed head, and an
 observed remote head equal to the reported squash merge commit.

@@ -58,7 +58,7 @@ function attemptContract(pipeline, repetition) {
 
 export function buildLiveCertificationPrompt(campaignRoot, pipeline, repetition) {
   const root = exactCampaignRoot(campaignRoot);
-  if (!PIPELINES.includes(pipeline) || ![1, 2, 3].includes(repetition)) {
+  if (!PIPELINES.includes(pipeline) || repetition !== 1) {
     throw new LiveCertificationPromptError('pipeline and repetition must name one pinned certification attempt');
   }
   const projectDir = path.join(root, pipeline);
@@ -89,15 +89,14 @@ export function writeLiveCertificationPrompts(campaignRoot) {
   mkdirSync(promptsDir, { mode: 0o700 });
   const written = [];
   for (const pipeline of PIPELINES) {
-    for (const repetition of [1, 2, 3]) {
-      const file = path.join(promptsDir, `${pipeline}-${repetition}.txt`);
-      writeFileSync(file, buildLiveCertificationPrompt(root, pipeline, repetition), {
-        encoding: 'utf8',
-        flag: 'wx',
-        mode: 0o600,
-      });
-      written.push(file);
-    }
+    const repetition = 1;
+    const file = path.join(promptsDir, `${pipeline}-${repetition}.txt`);
+    writeFileSync(file, buildLiveCertificationPrompt(root, pipeline, repetition), {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    written.push(file);
   }
   return Object.freeze(written);
 }

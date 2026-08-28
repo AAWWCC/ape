@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.23.48 — 2026-08-28
+
+Live release certification now gates on one first-pass-perfect attempt for each required Codex
+pipeline shape: mechanical, fast, full, and protected-branch land. The previous policy required
+three already-perfect repetitions per shape, turning eight redundant repeatability exercises into
+release blockers after correctness had been established. Repeatability can still be monitored
+outside the release ledger, while any failure in the four release-gating attempts continues to
+reject the candidate. The ledger schema advances to version 4 and is bounded to exactly four raw
+attempts.
+
 ## 2.23.47 — 2026-08-28
 
 The first 2.23.46 full certification cycle exposed two host-contract defects and rejected that

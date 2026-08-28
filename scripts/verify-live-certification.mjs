@@ -9,7 +9,7 @@ import {
   TERMINAL_REASON_TAXONOMY_VERSION,
 } from '../lib/runtime/terminal-telemetry.js';
 
-export const LIVE_CERTIFICATION_SCHEMA_VERSION = 3;
+export const LIVE_CERTIFICATION_SCHEMA_VERSION = 4;
 export const LIVE_CERTIFICATION_PATH = 'evals/live-certification.json';
 export const LIVE_CERTIFICATION_HOSTS = Object.freeze(['codex']);
 export const LIVE_CERTIFICATION_UNVERIFIED_HOSTS = Object.freeze(['claude']);
@@ -22,7 +22,7 @@ export const LIVE_CERTIFICATION_PIPELINES = Object.freeze([
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const MAX_LEDGER_BYTES = 256 * 1024;
-const REQUIRED_ATTEMPTS_PER_COHORT = 3;
+const REQUIRED_ATTEMPTS_PER_COHORT = 1;
 const HASH = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u;
@@ -212,7 +212,7 @@ export function validateLiveCertificationDocument(document, {
     || document.attempts.length !== LIVE_CERTIFICATION_HOSTS.length
       * LIVE_CERTIFICATION_PIPELINES.length
       * REQUIRED_ATTEMPTS_PER_COHORT
-  ) reject('certification ledger must contain exactly three attempts for every required cohort');
+  ) reject('certification ledger must contain exactly one release-gating attempt for every required cohort');
 
   const ids = new Set();
   const runRecordDigests = new Set();
@@ -273,7 +273,7 @@ export function validateLiveCertificationDocument(document, {
     const cohort = cohorts.get(cohortKey) ?? [];
     cohort.push(attempt);
     if (cohort.length > REQUIRED_ATTEMPTS_PER_COHORT) {
-      reject(`cohort ${cohortKey} exceeds the three-run repeatability proof`);
+      reject(`cohort ${cohortKey} exceeds its one release-gating attempt`);
     }
     cohorts.set(cohortKey, cohort);
   }
@@ -283,7 +283,7 @@ export function validateLiveCertificationDocument(document, {
       const cohortKey = `${host}/${pipeline}`;
       const cohort = cohorts.get(cohortKey) ?? [];
       if (cohort.length !== REQUIRED_ATTEMPTS_PER_COHORT) {
-        reject(`cohort ${cohortKey} must contain exactly three first-pass-perfect attempts`);
+        reject(`cohort ${cohortKey} must contain exactly one first-pass-perfect attempt`);
       }
     }
   }

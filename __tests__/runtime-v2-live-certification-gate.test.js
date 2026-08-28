@@ -33,7 +33,7 @@ import {
   writeLiveCertificationPrompts,
 } from '../scripts/prepare-live-certification-prompts.mjs';
 
-const VERSION = '2.23.47';
+const VERSION = '2.23.48';
 const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
@@ -151,18 +151,16 @@ function validLedger(sourceCommit = SOURCE) {
   const attempts = [];
   for (const host of LIVE_CERTIFICATION_HOSTS) {
     for (const pipeline of LIVE_CERTIFICATION_PIPELINES) {
-      for (let repetition = 0; repetition < 3; repetition += 1) {
-        attempts.push(cleanAttempt({
-          sequence: attempts.length + 1,
-          host,
-          pipeline,
-          sourceCommit,
-        }));
-      }
+      attempts.push(cleanAttempt({
+        sequence: attempts.length + 1,
+        host,
+        pipeline,
+        sourceCommit,
+      }));
     }
   }
   return {
-    schema_version: 3,
+    schema_version: 4,
     ape_version: VERSION,
     source_commit: sourceCommit,
     certified_hosts: [...LIVE_CERTIFICATION_HOSTS],
@@ -433,20 +431,12 @@ describe('live certification prompt preparation', () => {
   it('derives all attempt paths and version strings from one canonical campaign root', () => {
     const root = promptCampaign();
     const files = writeLiveCertificationPrompts(root);
-    expect(files).toHaveLength(12);
+    expect(files).toHaveLength(4);
     expect(files.map((file) => path.basename(file))).toEqual([
       'mechanical-1.txt',
-      'mechanical-2.txt',
-      'mechanical-3.txt',
       'fast-1.txt',
-      'fast-2.txt',
-      'fast-3.txt',
       'full-1.txt',
-      'full-2.txt',
-      'full-3.txt',
       'land-1.txt',
-      'land-2.txt',
-      'land-3.txt',
     ]);
     for (const file of files) {
       const prompt = readFileSync(file, 'utf8');
@@ -454,10 +444,10 @@ describe('live certification prompt preparation', () => {
       expect(prompt).toContain(root);
       expect(prompt).not.toMatch(/2\.23\.(?:3[0-9]|4[01])/u);
     }
-    expect(readFileSync(path.join(root, 'prompts', 'fast-2.txt'), 'utf8'))
-      .toContain(`src/is-even-${VERSION_SUFFIX}-2.js`);
-    expect(readFileSync(path.join(root, 'prompts', 'land-3.txt'), 'utf8'))
-      .toContain(`docs/codex-${VERSION_SUFFIX}-protected-land-3.md`);
+    expect(readFileSync(path.join(root, 'prompts', 'fast-1.txt'), 'utf8'))
+      .toContain(`src/is-even-${VERSION_SUFFIX}-1.js`);
+    expect(readFileSync(path.join(root, 'prompts', 'land-1.txt'), 'utf8'))
+      .toContain(`docs/codex-${VERSION_SUFFIX}-protected-land-1.md`);
   });
 
   it('refuses stale prompt-directory reuse and non-canonical attempt inputs', () => {
@@ -465,6 +455,8 @@ describe('live certification prompt preparation', () => {
     writeLiveCertificationPrompts(root);
     expect(() => writeLiveCertificationPrompts(root)).toThrow(LiveCertificationPromptError);
     expect(() => buildLiveCertificationPrompt(root, 'unknown', 1))
+      .toThrow(/pinned certification attempt/iu);
+    expect(() => buildLiveCertificationPrompt(root, 'mechanical', 2))
       .toThrow(/pinned certification attempt/iu);
   });
 });
@@ -500,12 +492,12 @@ describe('live release certification evidence', () => {
     expect(output).toMatch(/live-certification environment passed/u);
   });
 
-  it('requires three clean completed raw attempts for every certified host and pipeline', () => {
+  it('requires one first-pass-perfect completed attempt for every certified host and pipeline', () => {
     const result = validateLiveCertificationDocument(validLedger(), {
       packageVersion: VERSION,
       sourceCommit: SOURCE,
     });
-    expect(result).toEqual({ version: VERSION, attempt_count: 12, cohort_count: 4 });
+    expect(result).toEqual({ version: VERSION, attempt_count: 4, cohort_count: 4 });
   });
 
   it('rejects the candidate on its first failed attempt instead of accepting later clean runs', () => {
@@ -544,16 +536,12 @@ describe('live release certification evidence', () => {
 
   it('fails closed on missing coverage, a dirty final run, or non-completed success', () => {
     const missing = validLedger();
-    missing.attempts.splice(-3);
-    missing.attempts.push(
-      cleanAttempt({ sequence: 10, host: 'codex', pipeline: 'full' }),
-      cleanAttempt({ sequence: 11, host: 'codex', pipeline: 'full' }),
-      cleanAttempt({ sequence: 12, host: 'codex', pipeline: 'full' }),
-    );
+    missing.attempts.splice(-1, 1,
+      cleanAttempt({ sequence: 4, host: 'codex', pipeline: 'full' }));
     expect(() => validateLiveCertificationDocument(missing, {
       packageVersion: VERSION,
       sourceCommit: SOURCE,
-    })).toThrow(/three-run repeatability|protected-branch-land must contain exactly three/iu);
+    })).toThrow(/one release-gating attempt|protected-branch-land must contain exactly one/iu);
 
     const dirty = validLedger();
     dirty.attempts.at(-1).receipt_repair = true;
@@ -660,7 +648,7 @@ describe('tagged certification-only commit gate', () => {
     writeFileSync(path.join(repo, 'evals', 'live-certification.json'), '{"fabricated":true}\n');
     expect(verifyLiveCertificationRepository({ repo, head, tag: `v${VERSION}` })).toEqual({
       version: VERSION,
-      attempt_count: 12,
+      attempt_count: 4,
       cohort_count: 4,
     });
   });
@@ -738,11 +726,11 @@ describe('tagged certification-only commit gate', () => {
     expect(schema.$defs.attempt.additionalProperties).toBe(false);
     expect(schema.properties.terminal_reason_taxonomy_version.const)
       .toBe(TERMINAL_REASON_TAXONOMY_VERSION);
-    expect(schema.properties.schema_version.const).toBe(3);
+    expect(schema.properties.schema_version.const).toBe(4);
     expect(schema.properties.certified_hosts.const).toEqual(['codex']);
     expect(schema.properties.unverified_hosts.const).toEqual(['claude']);
-    expect(schema.properties.attempts.minItems).toBe(12);
-    expect(schema.properties.attempts.maxItems).toBe(12);
+    expect(schema.properties.attempts.minItems).toBe(4);
+    expect(schema.properties.attempts.maxItems).toBe(4);
     expect(schema.$defs.attempt.required).toContain('host_transport_retry');
     expect(schema.$defs.attempt.properties.host.enum).toEqual(['codex']);
     expect(schema.$defs.attempt.properties.pipeline.enum).toEqual([
