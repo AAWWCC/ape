@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 2.23.39 — 2026-08-28
+
+The 2.23.38 source candidate was rejected when release preparation called the intentionally
+argument-requiring public exporter without its `--out` target. Version 2.23.39 retains the
+automatic-shipping preflight and exact Codex user-settings isolation fix, uses a fresh temporary
+export directory for the immutable public-tree proof, and restarts every source gate and live
+pipeline from fresh public source.
+
+## 2.23.38 — 2026-08-28
+
+The first 2.23.37 mechanical parent was rejected because the disposable repository retained APE's
+safe produce-and-hold default (`shipping.auto_merge: false`), and Codex 0.147 also made its pinned
+authenticated user-settings request through the isolated ChatGPT origin. The live launcher now
+refuses to start unless the governed repository explicitly enables automatic shipping, and its
+loopback service returns the schema-valid disabled commit-attribution policy for the exact
+`GET /api/codex/settings/user` contract. Unknown methods, routes, and query shapes remain rejected.
+Version 2.23.38 restarts every source gate and live pipeline from fresh public source.
+
 ## 2.23.37 — 2026-08-28
 
 The first 2.23.36 mechanical parent was rejected before run creation because Codex also derives its

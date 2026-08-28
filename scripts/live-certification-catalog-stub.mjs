@@ -33,6 +33,12 @@ export function catalogResponseFor(method, requestUrl) {
   }
 
   const { pathname, searchParams } = url;
+  if (pathname === '/api/codex/settings/user') {
+    const valid = hasOnly(searchParams, []) && [...searchParams.keys()].length === 0;
+    return valid
+      ? { known: true, status: 200, body: { commit_attribution_enabled: false } }
+      : { known: false, status: 400, body: { error: 'unexpected user-settings query' } };
+  }
   if (pathname === '/ps/plugins/suggested') {
     const valid = hasOnly(searchParams, ['scope']) && searchParams.get('scope') === 'GLOBAL';
     return valid

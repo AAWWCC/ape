@@ -28,7 +28,7 @@ import {
   validateCertificationCatalogAudit,
 } from '../scripts/run-live-certification-parent.mjs';
 
-const VERSION = '2.23.37';
+const VERSION = '2.23.39';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
@@ -39,6 +39,7 @@ function certificationParentFixture({
   pluginsEnabled = true,
   appsDisabled = true,
   remotePluginEnabled = true,
+  autoMergeEnabled = true,
 } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'ape-live-parent-'));
   temporaryRepositories.push(root);
@@ -46,6 +47,11 @@ function certificationParentFixture({
   const codexHome = path.join(root, 'codex-home');
   const promptPath = path.join(root, 'prompt.txt');
   mkdirSync(projectDir, { recursive: true });
+  mkdirSync(path.join(projectDir, '.ape', 'runtime'), { recursive: true });
+  writeFileSync(
+    path.join(projectDir, '.ape', 'runtime', 'config.json'),
+    `${JSON.stringify({ shipping: { auto_merge: autoMergeEnabled } })}\n`,
+  );
   mkdirSync(path.join(codexHome, 'plugins', 'cache', 'ape', 'ape', VERSION), { recursive: true });
   const exactProject = realpathSync(projectDir);
   writeFileSync(promptPath, `$ape:run\nPass project_dir "${exactProject}" on every APE MCP call.\n`);
@@ -310,6 +316,14 @@ describe('live certification Codex parent launcher', () => {
     );
   });
 
+  it('fails closed before launch when APE automatic shipping is not explicitly enabled', () => {
+    const fixture = certificationParentFixture({ autoMergeEnabled: false });
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(
+      /shipping\.auto_merge = true.*first-pass-perfect/iu,
+    );
+  });
+
   it('serves only deterministic empty catalog responses and audits every request', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'ape-live-catalog-test-'));
     temporaryRepositories.push(root);
@@ -317,6 +331,7 @@ describe('live certification Codex parent launcher', () => {
     const stub = await startCertificationCatalogStub(auditPath);
     try {
       const requests = [
+        '/api/codex/settings/user',
         '/ps/plugins/suggested?scope=GLOBAL',
         '/ps/plugins/list?scope=GLOBAL&limit=200',
         '/ps/plugins/installed?scope=GLOBAL&includeDownloadUrls=true',
@@ -325,13 +340,14 @@ describe('live certification Codex parent launcher', () => {
       ];
       const responses = await Promise.all(requests.map((request) => fetch(`${stub.baseUrl}${request}`)));
       expect(responses.every((response) => response.status === 200)).toBe(true);
-      expect(await responses[0].json()).toEqual({ enabled: true, plugins: [] });
-      expect(await responses[1].json()).toEqual({
+      expect(await responses[0].json()).toEqual({ commit_attribution_enabled: false });
+      expect(await responses[1].json()).toEqual({ enabled: true, plugins: [] });
+      expect(await responses[2].json()).toEqual({
         plugins: [],
         pagination: { next_page_token: null },
       });
-      expect(await responses[4].json()).toEqual([]);
-      expect(validateCertificationCatalogAudit(auditPath)).toEqual({ request_count: 5 });
+      expect(await responses[5].json()).toEqual([]);
+      expect(validateCertificationCatalogAudit(auditPath)).toEqual({ request_count: 6 });
     } finally {
       await stopCertificationCatalogStub(stub);
     }

@@ -111,6 +111,23 @@ function requireExactPlugin(codexHome) {
   }
 }
 
+function requireAutomaticShipping(project) {
+  const configPath = path.join(project, '.ape', 'runtime', 'config.json');
+  let config;
+  try {
+    config = JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch {
+    throw new LiveCertificationParentError(
+      'governed project has no readable .ape/runtime/config.json with release shipping enabled',
+    );
+  }
+  if (config?.shipping?.auto_merge !== true) {
+    throw new LiveCertificationParentError(
+      'governed project must explicitly set shipping.auto_merge = true before first-pass-perfect certification',
+    );
+  }
+}
+
 function requireExactPromptProject(prompt, project) {
   const directives = [...prompt.matchAll(/\bproject_dir\b\s*(?::|=)?\s*"([^"\r\n]+)"/gu)];
   if (directives.length === 0) {
@@ -176,6 +193,7 @@ export function buildCodexParentInvocation({
     throw new LiveCertificationParentError('--prompt must not be empty');
   }
   requireExactPromptProject(prompt, project);
+  requireAutomaticShipping(project);
   requireDeterministicConfig(home);
   requireExactPlugin(home);
   const catalogUrl = exactLoopbackCatalogUrl(catalogBaseUrl);
