@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 2.23.41 — 2026-08-28
+
+The first 2.23.40 focused source gate rejected a regression fixture that attempted to omit the
+remote-check setting by passing `undefined`, which JavaScript correctly replaced with the fixture's
+default `false`. The fixture now has an independent field-presence switch, proving that the launcher
+rejects an actually absent policy. Version 2.23.41 retains the explicit remote-check preflight and
+restarts every source gate and live pipeline from fresh public source.
+
+## 2.23.40 — 2026-08-28
+
+The first 2.23.39 mechanical live attempt was rejected after its no-CI disposable repository
+inherited `shipping.required_remote_checks: true` and correctly blocked when no remote check could
+register. The live launcher now requires every certification repository to explicitly declare its
+remote-check policy instead of inheriting a default: mechanical, fast, and full no-CI fixtures use
+`false`, while the protected-land fixture uses `true` with its required workflows. Version 2.23.40
+restarts every source gate and live pipeline from fresh public source.
+
 ## 2.23.39 — 2026-08-28
 
 The 2.23.38 source candidate was rejected when release preparation called the intentionally

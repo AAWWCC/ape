@@ -28,7 +28,7 @@ import {
   validateCertificationCatalogAudit,
 } from '../scripts/run-live-certification-parent.mjs';
 
-const VERSION = '2.23.39';
+const VERSION = '2.23.41';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
@@ -40,6 +40,8 @@ function certificationParentFixture({
   appsDisabled = true,
   remotePluginEnabled = true,
   autoMergeEnabled = true,
+  requiredRemoteChecks = false,
+  includeRequiredRemoteChecks = true,
 } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'ape-live-parent-'));
   temporaryRepositories.push(root);
@@ -50,7 +52,14 @@ function certificationParentFixture({
   mkdirSync(path.join(projectDir, '.ape', 'runtime'), { recursive: true });
   writeFileSync(
     path.join(projectDir, '.ape', 'runtime', 'config.json'),
-    `${JSON.stringify({ shipping: { auto_merge: autoMergeEnabled } })}\n`,
+    `${JSON.stringify({
+      shipping: {
+        auto_merge: autoMergeEnabled,
+        ...(includeRequiredRemoteChecks
+          ? { required_remote_checks: requiredRemoteChecks }
+          : {}),
+      },
+    })}\n`,
   );
   mkdirSync(path.join(codexHome, 'plugins', 'cache', 'ape', 'ape', VERSION), { recursive: true });
   const exactProject = realpathSync(projectDir);
@@ -321,6 +330,14 @@ describe('live certification Codex parent launcher', () => {
     expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
     expect(() => buildCodexParentInvocation(fixture)).toThrow(
       /shipping\.auto_merge = true.*first-pass-perfect/iu,
+    );
+  });
+
+  it('fails closed before launch when the repository remote-check policy is implicit', () => {
+    const fixture = certificationParentFixture({ includeRequiredRemoteChecks: false });
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(
+      /shipping\.required_remote_checks.*CI topology.*first-pass-perfect/iu,
     );
   });
 
