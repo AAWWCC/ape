@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 2.23.16 — 2026-08-28
+## 2.23.17 — 2026-08-28
 
 Aligned the test-evidence contract with the shell policy exposed by the first 2.23.12 fast-lane
 cycle. Bound workers may now use exact-head `sha256sum` and macOS `shasum` commands with the existing
@@ -17,6 +17,10 @@ audit/funding calls; the workflows retain their explicit bundle, smoke, and high
 gates. The first 2.23.15 local package check correctly rejected a candidate whose versioned plugin
 packages had not yet been regenerated. This release keeps the worker contract within the enforced
 prompt-size bound and regenerates all package surfaces before gating.
+
+The first 2.23.16 live-certification launch was rejected before APE start because its operator-built
+prompt named a stale temporary project root. Version 2.23.17 restarts certification from a newly
+generated, exact-root campaign rather than repairing or resuming that attempt.
 
 ## 2.23.12 — 2026-08-28
 
