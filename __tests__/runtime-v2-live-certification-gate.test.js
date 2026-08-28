@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,11 +20,44 @@ import {
 import {
   verifyLiveCertificationEnvironment,
 } from '../scripts/check-live-certification-environment.mjs';
+import {
+  LiveCertificationParentError,
+  buildCodexParentInvocation,
+} from '../scripts/run-live-certification-parent.mjs';
 
-const VERSION = '2.23.22';
+const VERSION = '2.23.24';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
+
+function certificationParentFixture({ zeroRetry = true } = {}) {
+  const root = mkdtempSync(path.join(tmpdir(), 'ape-live-parent-'));
+  temporaryRepositories.push(root);
+  const projectDir = path.join(root, 'project');
+  const codexHome = path.join(root, 'codex-home');
+  const promptPath = path.join(root, 'prompt.txt');
+  mkdirSync(projectDir, { recursive: true });
+  mkdirSync(path.join(codexHome, 'plugins', 'cache', 'ape', 'ape', VERSION), { recursive: true });
+  writeFileSync(promptPath, '$ape:run\n');
+  writeFileSync(
+    path.join(codexHome, 'config.toml'),
+    [
+      'model_provider = "openai-zero-retry"',
+      zeroRetry ? 'request_max_retries = 0' : 'request_max_retries = 5',
+      'stream_max_retries = 0',
+      'supports_websockets = false',
+    ].join('\n'),
+  );
+  writeFileSync(
+    path.join(codexHome, 'plugins', 'cache', 'ape', 'ape', VERSION, 'package.json'),
+    `${JSON.stringify({ name: 'ape', version: VERSION })}\n`,
+  );
+  return {
+    projectDir: realpathSync(projectDir),
+    codexHome: realpathSync(codexHome),
+    promptPath,
+  };
+}
 
 function hash(number) {
   return number.toString(16).padStart(40, '0');
@@ -196,6 +229,32 @@ afterEach(() => {
   for (const directory of temporaryRepositories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+describe('live certification Codex parent launcher', () => {
+  it('always carries the vetted-hook flag and the isolated zero-retry home', () => {
+    const fixture = certificationParentFixture();
+    const invocation = buildCodexParentInvocation(fixture);
+    expect(invocation.command).toBe('codex');
+    expect(invocation.args).toEqual([
+      'exec',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--dangerously-bypass-hook-trust',
+      '--color',
+      'never',
+      '-C',
+      fixture.projectDir,
+      '-',
+    ]);
+    expect(invocation.env).toEqual({ CODEX_HOME: fixture.codexHome });
+    expect(invocation.input).toBe('$ape:run\n');
+  });
+
+  it('fails closed before launch when automatic transport retries are enabled', () => {
+    const fixture = certificationParentFixture({ zeroRetry: false });
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/request_max_retries = 0/iu);
+  });
 });
 
 describe('live release certification evidence', () => {

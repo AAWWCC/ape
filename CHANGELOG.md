@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 2.23.24 — 2026-08-28
+
+The first 2.23.23 typecheck rejected an ambiguous tuple inference in the new certification-parent
+launcher. Its launch requirements now use named `pattern` and `description` fields, keeping the
+runtime check identical while making the type contract explicit. Version 2.23.24 restarts the
+candidate with typecheck included in its first targeted gate.
+
+## 2.23.23 — 2026-08-28
+
+The first 2.23.22 live infrastructure probe was rejected before run creation because its
+non-interactive Codex parent omitted the automation-only hook-trust flag, so `SubagentStart` could
+not inject the probe capability. Live Codex certification parents now launch through a checked-in
+wrapper that always supplies the vetted-hook flag and fails closed unless the isolated home
+contains the exact candidate plugin with request retries, stream retries, and WebSockets disabled.
+The launch contract is regression-tested and documented; version 2.23.23 restarts from a fresh
+public source commit rather than retrying the rejected candidate.
+
 ## 2.23.22 — 2026-08-28
 
 The first 2.23.21 targeted source gate rejected the module-boundary update because its independent

@@ -27,6 +27,15 @@ Run `npm run release:live-preflight -- --project-dir <disposable-repository>` fr
 candidate and require it to pass before launching the host. This prevents GitHub private-email push
 protection from turning a clean APE run into a shipping failure.
 
+Launch every non-interactive Codex certification parent through `npm run release:live-parent --
+--project-dir <disposable-repository> --codex-home <isolated-home> --prompt <attempt-prompt>`. The
+launcher fails closed unless the isolated home contains the exact candidate plugin and declares
+zero request retries, zero stream retries, and WebSockets disabled. It also supplies Codex's
+automation-only `--dangerously-bypass-hook-trust` flag after the candidate hook source has been
+vetted. Project trust alone does not authorize lifecycle-hook delivery for this non-interactive
+path: omitting the flag leaves `SubagentStart` unable to inject the binding capability and rejects
+the infrastructure probe before a run can start.
+
 1. A non-behavioral mechanical phase.
 2. A bounded behavioral fast phase.
 3. A behavioral full phase with plan review.
