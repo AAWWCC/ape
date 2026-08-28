@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 2.23.33 — 2026-08-28
+
+The first 2.23.32 focused source gate rejected a stale version fallback in the root executable. The
+release bump had updated package and runtime constants before bundling but had not treated
+`bin/ape-mcp.mjs` as an independent source surface. Release preparation now bumps that executable
+before regenerating the root and plugin bundles. Version 2.23.33 restarts every source gate and live
+pipeline; the failed 2.23.32 gate is not rerun.
+
+## 2.23.32 — 2026-08-28
+
+The third 2.23.31 mechanical parent was rejected before APE start when Codex attempted an optional
+global remote-plugin catalog refresh and logged a transport failure. The live launcher now also
+requires explicit `[features] remote_plugin = false`, preserving the installed local APE plugin
+while preventing the unrelated global catalog transport from entering certification. The
+requirement is covered by a launch refusal regression, and version 2.23.32 restarts every source
+gate and live pipeline from fresh public source.
+
 ## 2.23.31 — 2026-08-28
 
 The first 2.23.30 live parent was rejected when Codex's optional analytics client logged a retried

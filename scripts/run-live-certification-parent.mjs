@@ -26,6 +26,17 @@ function exactDirectory(value, label) {
   }
 }
 
+function configTableBody(lines, table) {
+  const start = lines.findIndex((line) => line.trim() === `[${table}]`);
+  if (start === -1) {
+    return [];
+  }
+  const nextTable = lines.findIndex(
+    (line, index) => index > start && /^\s*\[\[?/u.test(line),
+  );
+  return lines.slice(start + 1, nextTable === -1 ? lines.length : nextTable);
+}
+
 function requireZeroRetryConfig(codexHome) {
   const configPath = path.join(codexHome, 'config.toml');
   let config;
@@ -48,18 +59,16 @@ function requireZeroRetryConfig(codexHome) {
     }
   }
   const lines = config.split(/\r?\n/u);
-  const analyticsStart = lines.findIndex((line) => line.trim() === '[analytics]');
-  const analyticsBody = analyticsStart === -1
-    ? []
-    : lines.slice(
-      analyticsStart + 1,
-      lines.findIndex((line, index) => index > analyticsStart && /^\s*\[/u.test(line)) === -1
-        ? lines.length
-        : lines.findIndex((line, index) => index > analyticsStart && /^\s*\[/u.test(line)),
-    );
+  const analyticsBody = configTableBody(lines, 'analytics');
   if (!analyticsBody.some((line) => /^\s*enabled\s*=\s*false\s*$/u.test(line))) {
     throw new LiveCertificationParentError(
       'isolated Codex config must disable analytics to prevent optional event transport retries',
+    );
+  }
+  const featuresBody = configTableBody(lines, 'features');
+  if (!featuresBody.some((line) => /^\s*remote_plugin\s*=\s*false\s*$/u.test(line))) {
+    throw new LiveCertificationParentError(
+      'isolated Codex config must disable remote_plugin to prevent optional catalog transport failures',
     );
   }
 }

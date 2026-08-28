@@ -25,12 +25,16 @@ import {
   buildCodexParentInvocation,
 } from '../scripts/run-live-certification-parent.mjs';
 
-const VERSION = '2.23.31';
+const VERSION = '2.23.33';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
 
-function certificationParentFixture({ zeroRetry = true, analyticsDisabled = true } = {}) {
+function certificationParentFixture({
+  zeroRetry = true,
+  analyticsDisabled = true,
+  remotePluginDisabled = true,
+} = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'ape-live-parent-'));
   temporaryRepositories.push(root);
   const projectDir = path.join(root, 'project');
@@ -49,6 +53,8 @@ function certificationParentFixture({ zeroRetry = true, analyticsDisabled = true
       'supports_websockets = false',
       '[analytics]',
       analyticsDisabled ? 'enabled = false' : 'enabled = true',
+      '[features]',
+      remotePluginDisabled ? 'remote_plugin = false' : 'remote_plugin = true',
     ].join('\n'),
   );
   writeFileSync(
@@ -266,6 +272,14 @@ describe('live certification Codex parent launcher', () => {
     expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
     expect(() => buildCodexParentInvocation(fixture)).toThrow(
       /disable analytics.*transport retries/iu,
+    );
+  });
+
+  it('fails closed before launch when optional remote plugin catalog transport is enabled', () => {
+    const fixture = certificationParentFixture({ remotePluginDisabled: false });
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(
+      /disable remote_plugin.*catalog transport failures/iu,
     );
   });
 
