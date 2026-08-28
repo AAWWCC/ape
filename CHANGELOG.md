@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 2.23.36 — 2026-08-28
+
+The 2.23.35 source candidate was rejected because release preparation invoked the clean public-tree
+export before creating its immutable source commit. Version 2.23.36 makes the release sequence
+explicit: pre-commit gates complete first, the exact source is committed, and only then does the
+clean-export gate run. All source gates and live pipelines restart from zero.
+
+## 2.23.35 — 2026-08-28
+
+The 2.23.34 source candidate was rejected when release preparation invoked the argument-requiring
+bundle reachability helper without a source path. That helper is a targeted development check, not
+a zero-argument release gate. Version 2.23.35 keeps the catalog-isolation fix and restarts every
+source gate and live pipeline with the documented release commands only.
+
+## 2.23.34 — 2026-08-28
+
+The first 2.23.33 mechanical parent was rejected before APE start because disabling Codex's remote
+plugin catalog activates a legacy curated-plugin sync, which loaded an unrelated manifest and
+emitted validation warnings. The live launcher now keeps local plugin support and remote mode
+enabled while overriding only Codex's optional plugin-catalog origin with a deterministic loopback
+service. That service returns schema-valid empty catalog results, audits every request, and rejects
+unknown methods, paths, or query shapes; the custom zero-retry model provider continues to use the
+real Responses endpoint. Version 2.23.34 restarts every source gate and live pipeline from fresh
+public source.
+
 ## 2.23.33 — 2026-08-28
 
 The first 2.23.32 focused source gate rejected a stale version fallback in the root executable. The

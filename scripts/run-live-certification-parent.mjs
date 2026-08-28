@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
-import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const RELEASE_VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+const CATALOG_STUB = path.join(ROOT, 'scripts', 'live-certification-catalog-stub.mjs');
+const FAIL_CLOSED_CATALOG_URL = 'http://127.0.0.1:1';
 
 export class LiveCertificationParentError extends Error {
   constructor(message) {
@@ -37,7 +40,7 @@ function configTableBody(lines, table) {
   return lines.slice(start + 1, nextTable === -1 ? lines.length : nextTable);
 }
 
-function requireZeroRetryConfig(codexHome) {
+function requireDeterministicConfig(codexHome) {
   const configPath = path.join(codexHome, 'config.toml');
   let config;
   try {
@@ -66,9 +69,14 @@ function requireZeroRetryConfig(codexHome) {
     );
   }
   const featuresBody = configTableBody(lines, 'features');
-  if (!featuresBody.some((line) => /^\s*remote_plugin\s*=\s*false\s*$/u.test(line))) {
+  if (!featuresBody.some((line) => /^\s*plugins\s*=\s*true\s*$/u.test(line))) {
     throw new LiveCertificationParentError(
-      'isolated Codex config must disable remote_plugin to prevent optional catalog transport failures',
+      'isolated Codex config must enable plugins so the installed local APE plugin is loaded',
+    );
+  }
+  if (!featuresBody.some((line) => /^\s*remote_plugin\s*=\s*true\s*$/u.test(line))) {
+    throw new LiveCertificationParentError(
+      'isolated Codex config must enable remote_plugin so Codex cannot fall back to legacy curated-plugin sync',
     );
   }
 }
@@ -123,7 +131,36 @@ function requireExactPromptProject(prompt, project) {
   }
 }
 
-export function buildCodexParentInvocation({ projectDir, codexHome, promptPath }) {
+function exactLoopbackCatalogUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new LiveCertificationParentError('catalog isolation URL must be a valid URL');
+  }
+  if (
+    url.protocol !== 'http:'
+    || url.hostname !== '127.0.0.1'
+    || !url.port
+    || url.username
+    || url.password
+    || url.pathname !== '/'
+    || url.search
+    || url.hash
+  ) {
+    throw new LiveCertificationParentError(
+      'catalog isolation URL must be an exact loopback HTTP origin with an explicit port',
+    );
+  }
+  return url.origin;
+}
+
+export function buildCodexParentInvocation({
+  projectDir,
+  codexHome,
+  promptPath,
+  catalogBaseUrl = FAIL_CLOSED_CATALOG_URL,
+}) {
   const project = exactDirectory(projectDir, '--project-dir');
   const home = exactDirectory(codexHome, '--codex-home');
   if (typeof promptPath !== 'string' || !existsSync(promptPath)) {
@@ -134,12 +171,15 @@ export function buildCodexParentInvocation({ projectDir, codexHome, promptPath }
     throw new LiveCertificationParentError('--prompt must not be empty');
   }
   requireExactPromptProject(prompt, project);
-  requireZeroRetryConfig(home);
+  requireDeterministicConfig(home);
   requireExactPlugin(home);
+  const catalogUrl = exactLoopbackCatalogUrl(catalogBaseUrl);
   return Object.freeze({
     command: 'codex',
     args: Object.freeze([
       'exec',
+      '-c',
+      `chatgpt_base_url=${JSON.stringify(catalogUrl)}`,
       '--dangerously-bypass-approvals-and-sandbox',
       '--dangerously-bypass-hook-trust',
       '--color',
@@ -152,6 +192,94 @@ export function buildCodexParentInvocation({ projectDir, codexHome, promptPath }
     env: Object.freeze({ CODEX_HOME: home }),
     input: prompt,
   });
+}
+
+export async function startCertificationCatalogStub(auditPath) {
+  const child = spawn(process.execPath, [CATALOG_STUB, '--audit', auditPath], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => {
+    stderr = `${stderr}${chunk}`.slice(-4_000);
+  });
+  let baseUrl;
+  try {
+    baseUrl = await new Promise((resolve, reject) => {
+      let stdout = '';
+      const timeout = setTimeout(() => {
+        reject(new LiveCertificationParentError('catalog isolation stub did not become ready'));
+      }, 5_000);
+      const fail = (message) => {
+        clearTimeout(timeout);
+        reject(new LiveCertificationParentError(`${message}${stderr ? `: ${stderr.trim()}` : ''}`));
+      };
+      child.once('error', (error) => fail(`catalog isolation stub failed to launch: ${error.message}`));
+      child.once('exit', (code) => fail(`catalog isolation stub exited before ready with code ${code}`));
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk;
+        const newline = stdout.indexOf('\n');
+        if (newline === -1) return;
+        clearTimeout(timeout);
+        try {
+          const ready = JSON.parse(stdout.slice(0, newline));
+          resolve(exactLoopbackCatalogUrl(ready.base_url));
+        } catch (error) {
+          reject(new LiveCertificationParentError(
+            `catalog isolation stub returned invalid readiness data: ${error.message}`,
+          ));
+        }
+      });
+    });
+  } catch (error) {
+    child.kill('SIGKILL');
+    throw error;
+  }
+  return Object.freeze({ child, baseUrl, stderr: () => stderr });
+}
+
+export async function stopCertificationCatalogStub(stub) {
+  if (!stub || stub.child.exitCode !== null) return;
+  await new Promise((resolve) => {
+    const force = setTimeout(() => {
+      stub.child.kill('SIGKILL');
+    }, 1_000);
+    stub.child.once('exit', () => {
+      clearTimeout(force);
+      resolve();
+    });
+    stub.child.kill('SIGTERM');
+  });
+}
+
+export function validateCertificationCatalogAudit(auditPath) {
+  let text;
+  try {
+    text = readFileSync(auditPath, 'utf8');
+  } catch {
+    throw new LiveCertificationParentError('catalog isolation stub produced no readable audit');
+  }
+  const lines = text.split(/\r?\n/u).filter(Boolean);
+  if (lines.length === 0) {
+    throw new LiveCertificationParentError('catalog isolation stub received no requests');
+  }
+  const records = lines.map((line, index) => {
+    try {
+      return JSON.parse(line);
+    } catch {
+      throw new LiveCertificationParentError(
+        `catalog isolation audit line ${index + 1} is not valid JSON`,
+      );
+    }
+  });
+  const rejected = records.find((record) => record.known !== true || record.status !== 200);
+  if (rejected) {
+    throw new LiveCertificationParentError(
+      `catalog isolation rejected unexpected request ${rejected.method ?? '<missing>'} ${rejected.url ?? '<missing>'}`,
+    );
+  }
+  return Object.freeze({ request_count: records.length });
 }
 
 function parseArgs(argv) {
@@ -189,9 +317,11 @@ function invokedDirectly(argvPath) {
 }
 
 if (invokedDirectly(process.argv[1])) {
+  let catalogRoot;
+  let catalogStub;
   try {
     const parsed = parseArgs(process.argv.slice(2));
-    const invocation = buildCodexParentInvocation(parsed);
+    let invocation = buildCodexParentInvocation(parsed);
     if (parsed.dryRun) {
       process.stdout.write(`${JSON.stringify({
         command: invocation.command,
@@ -201,6 +331,13 @@ if (invokedDirectly(process.argv[1])) {
         prompt_bytes: Buffer.byteLength(invocation.input),
       })}\n`);
     } else {
+      catalogRoot = mkdtempSync(path.join(tmpdir(), 'ape-live-catalog-'));
+      const auditPath = path.join(catalogRoot, 'requests.jsonl');
+      catalogStub = await startCertificationCatalogStub(auditPath);
+      invocation = buildCodexParentInvocation({
+        ...parsed,
+        catalogBaseUrl: catalogStub.baseUrl,
+      });
       const result = spawnSync(invocation.command, invocation.args, {
         cwd: invocation.cwd,
         env: { ...process.env, ...invocation.env },
@@ -208,10 +345,14 @@ if (invokedDirectly(process.argv[1])) {
         stdio: ['pipe', 'inherit', 'inherit'],
       });
       if (result.error) throw result.error;
+      validateCertificationCatalogAudit(auditPath);
       process.exitCode = result.status ?? 1;
     }
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
+  } finally {
+    await stopCertificationCatalogStub(catalogStub);
+    if (catalogRoot) rmSync(catalogRoot, { recursive: true, force: true });
   }
 }

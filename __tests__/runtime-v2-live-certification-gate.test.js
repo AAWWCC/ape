@@ -23,9 +23,12 @@ import {
 import {
   LiveCertificationParentError,
   buildCodexParentInvocation,
+  startCertificationCatalogStub,
+  stopCertificationCatalogStub,
+  validateCertificationCatalogAudit,
 } from '../scripts/run-live-certification-parent.mjs';
 
-const VERSION = '2.23.33';
+const VERSION = '2.23.36';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
@@ -33,7 +36,8 @@ const temporaryRepositories = [];
 function certificationParentFixture({
   zeroRetry = true,
   analyticsDisabled = true,
-  remotePluginDisabled = true,
+  pluginsEnabled = true,
+  remotePluginEnabled = true,
 } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'ape-live-parent-'));
   temporaryRepositories.push(root);
@@ -54,7 +58,8 @@ function certificationParentFixture({
       '[analytics]',
       analyticsDisabled ? 'enabled = false' : 'enabled = true',
       '[features]',
-      remotePluginDisabled ? 'remote_plugin = false' : 'remote_plugin = true',
+      pluginsEnabled ? 'plugins = true' : 'plugins = false',
+      remotePluginEnabled ? 'remote_plugin = true' : 'remote_plugin = false',
     ].join('\n'),
   );
   writeFileSync(
@@ -247,6 +252,8 @@ describe('live certification Codex parent launcher', () => {
     expect(invocation.command).toBe('codex');
     expect(invocation.args).toEqual([
       'exec',
+      '-c',
+      'chatgpt_base_url="http://127.0.0.1:1"',
       '--dangerously-bypass-approvals-and-sandbox',
       '--dangerously-bypass-hook-trust',
       '--color',
@@ -275,12 +282,63 @@ describe('live certification Codex parent launcher', () => {
     );
   });
 
-  it('fails closed before launch when optional remote plugin catalog transport is enabled', () => {
-    const fixture = certificationParentFixture({ remotePluginDisabled: false });
+  it('fails closed before launch when local plugins are disabled', () => {
+    const fixture = certificationParentFixture({ pluginsEnabled: false });
     expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
     expect(() => buildCodexParentInvocation(fixture)).toThrow(
-      /disable remote_plugin.*catalog transport failures/iu,
+      /enable plugins.*local APE plugin/iu,
     );
+  });
+
+  it('fails closed before launch when Codex could fall back to legacy curated-plugin sync', () => {
+    const fixture = certificationParentFixture({ remotePluginEnabled: false });
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(
+      /enable remote_plugin.*legacy curated-plugin sync/iu,
+    );
+  });
+
+  it('serves only deterministic empty catalog responses and audits every request', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'ape-live-catalog-test-'));
+    temporaryRepositories.push(root);
+    const auditPath = path.join(root, 'requests.jsonl');
+    const stub = await startCertificationCatalogStub(auditPath);
+    try {
+      const requests = [
+        '/ps/plugins/suggested?scope=GLOBAL',
+        '/ps/plugins/list?scope=GLOBAL&limit=200',
+        '/ps/plugins/installed?scope=GLOBAL&includeDownloadUrls=true',
+        '/ps/plugins/workspace/shared?limit=200',
+        '/plugins/featured?platform=codex',
+      ];
+      const responses = await Promise.all(requests.map((request) => fetch(`${stub.baseUrl}${request}`)));
+      expect(responses.every((response) => response.status === 200)).toBe(true);
+      expect(await responses[0].json()).toEqual({ enabled: true, plugins: [] });
+      expect(await responses[1].json()).toEqual({
+        plugins: [],
+        pagination: { next_page_token: null },
+      });
+      expect(await responses[4].json()).toEqual([]);
+      expect(validateCertificationCatalogAudit(auditPath)).toEqual({ request_count: 5 });
+    } finally {
+      await stopCertificationCatalogStub(stub);
+    }
+  });
+
+  it('rejects any catalog request outside the pinned Codex startup contract', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'ape-live-catalog-reject-'));
+    temporaryRepositories.push(root);
+    const auditPath = path.join(root, 'requests.jsonl');
+    const stub = await startCertificationCatalogStub(auditPath);
+    try {
+      const response = await fetch(`${stub.baseUrl}/unknown`);
+      expect(response.status).toBe(404);
+      expect(() => validateCertificationCatalogAudit(auditPath)).toThrow(
+        /rejected unexpected request GET \/unknown/iu,
+      );
+    } finally {
+      await stopCertificationCatalogStub(stub);
+    }
   });
 
   it('fails closed when the prompt omits or misstates the governed project root', () => {
