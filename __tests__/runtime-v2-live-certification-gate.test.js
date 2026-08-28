@@ -25,7 +25,7 @@ import {
   buildCodexParentInvocation,
 } from '../scripts/run-live-certification-parent.mjs';
 
-const VERSION = '2.23.29';
+const VERSION = '2.23.30';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
@@ -38,7 +38,8 @@ function certificationParentFixture({ zeroRetry = true } = {}) {
   const promptPath = path.join(root, 'prompt.txt');
   mkdirSync(projectDir, { recursive: true });
   mkdirSync(path.join(codexHome, 'plugins', 'cache', 'ape', 'ape', VERSION), { recursive: true });
-  writeFileSync(promptPath, '$ape:run\n');
+  const exactProject = realpathSync(projectDir);
+  writeFileSync(promptPath, `$ape:run\nPass project_dir "${exactProject}" on every APE MCP call.\n`);
   writeFileSync(
     path.join(codexHome, 'config.toml'),
     [
@@ -53,7 +54,7 @@ function certificationParentFixture({ zeroRetry = true } = {}) {
     `${JSON.stringify({ name: 'ape', version: VERSION })}\n`,
   );
   return {
-    projectDir: realpathSync(projectDir),
+    projectDir: exactProject,
     codexHome: realpathSync(codexHome),
     promptPath,
   };
@@ -247,13 +248,42 @@ describe('live certification Codex parent launcher', () => {
       '-',
     ]);
     expect(invocation.env).toEqual({ CODEX_HOME: fixture.codexHome });
-    expect(invocation.input).toBe('$ape:run\n');
+    expect(invocation.input).toBe(
+      `$ape:run\nPass project_dir "${fixture.projectDir}" on every APE MCP call.\n`,
+    );
   });
 
   it('fails closed before launch when automatic transport retries are enabled', () => {
     const fixture = certificationParentFixture({ zeroRetry: false });
     expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
     expect(() => buildCodexParentInvocation(fixture)).toThrow(/request_max_retries = 0/iu);
+  });
+
+  it('fails closed when the prompt omits or misstates the governed project root', () => {
+    const fixture = certificationParentFixture();
+    writeFileSync(fixture.promptPath, '$ape:run\n');
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(
+      /prompt must declare the exact project_dir/iu,
+    );
+
+    const staleProject = path.join(path.dirname(fixture.projectDir), 'stale-project');
+    mkdirSync(staleProject);
+    writeFileSync(
+      fixture.promptPath,
+      `$ape:run\nPass project_dir "${staleProject}" on every APE MCP call.\n`,
+    );
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(
+      /does not match --project-dir/iu,
+    );
+
+    const missingProject = path.join(path.dirname(fixture.projectDir), 'missing-project');
+    writeFileSync(
+      fixture.promptPath,
+      `$ape:run\nPass project_dir "${missingProject}" on every APE MCP call.\n`,
+    );
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(
+      /does not resolve to an existing path/iu,
+    );
   });
 });
 

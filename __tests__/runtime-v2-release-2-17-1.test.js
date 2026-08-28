@@ -7,8 +7,8 @@ import { describe, expect, it } from 'vitest';
 const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.url), 'utf8');
 const readJson = (relative) => JSON.parse(read(relative));
 
-describe('release 2.23.29 public packaging', () => {
-  it('pins source and generated package surfaces to 2.23.29', () => {
+describe('release 2.23.30 public packaging', () => {
+  it('pins source and generated package surfaces to 2.23.30', () => {
     for (const relative of [
       'package.json',
       'plugins/ape/package.json',
@@ -16,9 +16,9 @@ describe('release 2.23.29 public packaging', () => {
       'plugins/ape-claude/package.json',
       'plugins/ape-claude/.claude-plugin/plugin.json',
     ]) {
-      expect(readJson(relative).version, relative).toBe('2.23.29');
+      expect(readJson(relative).version, relative).toBe('2.23.30');
     }
-    expect(read('bin/ape-mcp.mjs')).toContain("version: '2.23.29'");
+    expect(read('bin/ape-mcp.mjs')).toContain("version: '2.23.30'");
   });
 
   it('pins every executable that controls the public release', () => {

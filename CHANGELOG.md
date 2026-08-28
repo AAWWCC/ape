@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.23.30 — 2026-08-28
+
+The first 2.23.29 live parent was rejected before APE start because its prompt retained a stale
+campaign-directory suffix even though the launch arguments targeted the new repository. The
+certification parent now parses every prompt-declared `project_dir`, requires it to resolve, and
+requires its real path to equal `--project-dir` before Codex can launch. Missing, nonexistent, and
+mismatched prompt roots are regression-tested. Version 2.23.30 restarts from fresh public source.
+
 ## 2.23.29 — 2026-08-28
 
 The first 2.23.28 live-environment preflight was invoked in an unprepared source checkout and

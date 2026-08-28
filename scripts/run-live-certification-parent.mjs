@@ -74,6 +74,31 @@ function requireExactPlugin(codexHome) {
   }
 }
 
+function requireExactPromptProject(prompt, project) {
+  const directives = [...prompt.matchAll(/\bproject_dir\b\s*(?::|=)?\s*"([^"\r\n]+)"/gu)];
+  if (directives.length === 0) {
+    throw new LiveCertificationParentError(
+      '--prompt must declare the exact project_dir used for every APE control call',
+    );
+  }
+  for (const directive of directives) {
+    const declaredRaw = directive[1];
+    let declared;
+    try {
+      declared = realpathSync(declaredRaw);
+    } catch {
+      throw new LiveCertificationParentError(
+        `prompt project_dir ${declaredRaw} does not resolve to an existing path`,
+      );
+    }
+    if (declared !== project) {
+      throw new LiveCertificationParentError(
+        `prompt project_dir ${declaredRaw} does not match --project-dir ${project}`,
+      );
+    }
+  }
+}
+
 export function buildCodexParentInvocation({ projectDir, codexHome, promptPath }) {
   const project = exactDirectory(projectDir, '--project-dir');
   const home = exactDirectory(codexHome, '--codex-home');
@@ -84,6 +109,7 @@ export function buildCodexParentInvocation({ projectDir, codexHome, promptPath }
   if (prompt.trim().length === 0) {
     throw new LiveCertificationParentError('--prompt must not be empty');
   }
+  requireExactPromptProject(prompt, project);
   requireZeroRetryConfig(home);
   requireExactPlugin(home);
   return Object.freeze({
