@@ -5,10 +5,10 @@
     {
       "id": "codex-dispatch-envelope",
       "category": "orchestration",
-      "observed_failure": "The parent had to reconstruct prompt ordering and native launch arguments from prose and paths.",
-      "recovery_contract": "A dispatch response supplies one exact machine-copyable launch envelope and explicit next control action.",
+      "observed_failure": "Codex encrypted the relayed launch message before APE could attest it, allowing contract or receipt-schema omissions to reach a child.",
+      "recovery_contract": "The launch message is transport-only and the trusted SubagentStart hook injects a hash-bound authoritative contract and ticket reference.",
       "test_file": "__tests__/runtime-v2-adapters.test.js",
-      "test_anchor": "codex-dispatch-envelope returns one exact, canonical native spawn payload"
+      "test_anchor": "codex-dispatch-envelope returns a static bootstrap and canonical hook context"
     },
     {
       "id": "plan-directed-replan",

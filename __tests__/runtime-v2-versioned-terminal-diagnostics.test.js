@@ -316,8 +316,8 @@ describe('versioned-terminal-diagnostics', () => {
       ...runVersionProvenance('codex'),
       ape_version: NEXT_APE_VERSION,
       host_plugin_version: NEXT_APE_VERSION,
-      protocol_version: 'ape-codex-dispatch-v2',
-      envelope_version: 2,
+      protocol_version: 'ape-codex-dispatch-v3',
+      envelope_version: 3,
       stage: 'build',
       block_reason: 'stage build test-contradiction-blocked',
     }));
@@ -335,7 +335,7 @@ describe('versioned-terminal-diagnostics', () => {
 
     const next = await historyAction(dir, 'metrics', {
       ape_version: NEXT_APE_VERSION,
-      protocol_version: 'ape-codex-dispatch-v2',
+      protocol_version: 'ape-codex-dispatch-v3',
       terminal_reason_code: 'test_contradiction',
     });
     expect(next.metrics.total_runs).toBe(1);
@@ -343,16 +343,16 @@ describe('versioned-terminal-diagnostics', () => {
 
     const all = await calculateProjectMetrics(paths);
     expect(all.version_cohorts.protocol_version).toEqual({
-      'ape-codex-dispatch-v1': 1,
       'ape-codex-dispatch-v2': 1,
+      'ape-codex-dispatch-v3': 1,
       unknown: 0,
       not_applicable: 1,
       omitted_cohorts: 0,
       omitted_runs: 0,
     });
     expect(all.version_cohorts.envelope_version).toEqual({
-      1: 1,
       2: 1,
+      3: 1,
       unknown: 0,
       not_applicable: 1,
       omitted_cohorts: 0,

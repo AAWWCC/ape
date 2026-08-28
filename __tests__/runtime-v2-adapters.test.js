@@ -3,8 +3,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
-  CODEX_DISPATCH_MESSAGE_WIRE_LIMIT,
+  CODEX_DISPATCH_BOOTSTRAP_MESSAGE,
   CODEX_DISPATCH_NEXT_CONTROL,
+  codexInjectedDispatchContext,
   nativeDispatch,
 } from '../lib/runtime/adapters.js';
 import { canonicalJson, sha256 } from '../lib/runtime/canonical.js';
@@ -76,7 +77,7 @@ describe('APE v2 adapter conformance', () => {
     ]);
   });
 
-  it('shares one self-contained dispatch-envelope protocol for fresh and resumed dispatches', async () => {
+  it('shares one hook-injected dispatch-envelope protocol for fresh and resumed dispatches', async () => {
     const [runSkill, resumeSkill, protocol] = await Promise.all([
       readFile(path.join(root, 'plugin-src', 'skills', 'run', 'body.md'), 'utf8'),
       readFile(path.join(root, 'plugin-src', 'skills', 'resume', 'body.md'), 'utf8'),
@@ -89,13 +90,14 @@ describe('APE v2 adapter conformance', () => {
     expect(protocol).toContain('every key and value\n   unchanged');
     expect(protocol).toContain('`fork_turns: "none"`');
     expect(protocol).toContain('Never reread `prompt_paths`');
-    const common = protocol.indexOf('complete common prompt');
-    const role = protocol.indexOf('complete role prompt');
-    const ticket = protocol.indexOf('immutable ticket');
+    const common = protocol.indexOf('common prompt');
+    const role = protocol.indexOf('role prompt');
+    const ticket = protocol.indexOf('immutable ticket reference');
     expect([common, role, ticket].every((index) => index >= 0)).toBe(true);
     expect(common).toBeLessThan(role);
     expect(role).toBeLessThan(ticket);
-    expect(protocol).toMatch(/On Codex,[\s\S]*self-contained launch envelope/);
+    expect(protocol).toMatch(/On Codex,[\s\S]*transport-only\s+bootstrap/);
+    expect(protocol).toContain('`ticket_projection: "hook-injected"`');
     expect(protocol).toMatch(/record the returned[\s\S]*receipt unchanged[\s\S]*ape_run next/);
 
     for (const role of roles) {
@@ -153,52 +155,47 @@ describe('APE v2 adapter conformance', () => {
     expect(bound.ticket_id).toBe('ticket-1');
   });
 
-  it('codex-dispatch-envelope returns one exact, canonical native spawn payload', async () => {
+  it('codex-dispatch-envelope returns a static bootstrap and canonical hook context', async () => {
     const intent = {
       agent_name: `ape_implementer_${'b'.repeat(32)}`,
       prompt: 'Execute the immutable APE StageTicket ticket-1.',
     };
-    const [commonPrompt, rolePrompt] = await Promise.all([
-      readFile(path.join(root, 'prompts', 'common.md'), 'utf8'),
-      readFile(path.join(root, 'prompts', 'implementer.md'), 'utf8'),
-    ]);
-    const expectedMessage = [
-      intent.prompt,
-      'APE common contract',
-      commonPrompt,
-      'APE implementer contract',
-      rolePrompt,
-      'Immutable StageTicket',
-      canonicalJson(ticket),
-    ].join('\n\n');
-
     const codex = nativeDispatch('codex', ticket, intent);
+    const injected = codexInjectedDispatchContext(ticket);
 
     expect(codex.protocol_version).toBe(CODEX_DISPATCH_PROTOCOL_VERSION);
     expect(codex.envelope_version).toBe(CODEX_DISPATCH_ENVELOPE_VERSION);
     expect(codex.ticket_id).toBe(ticket.ticket_id);
-    expect(codex.ticket_projection).toBe('full');
+    expect(codex.ticket_projection).toBe('hook-injected');
     expect(codex.spawn_args).toStrictEqual({
       task_name: intent.agent_name,
       fork_turns: 'none',
       model: 'gpt-5.5',
       reasoning_effort: 'medium',
-      message: expectedMessage,
+      message: CODEX_DISPATCH_BOOTSTRAP_MESSAGE,
     });
+    expect(injected).toContain('APE trusted SubagentStart context (authoritative)');
+    expect(injected).toContain('APE common contract');
+    expect(injected).toContain('APE implementer contract');
+    expect(injected).toContain('Immutable StageTicket reference');
+    expect(injected).toContain('"path":".ape/runtime/tickets/ticket-1.json"');
+    expect(injected).toContain(`"ticket_hash":"${ticket.ticket_hash}"`);
+    expect(codex.spawn_args.message).not.toContain('APE common contract');
+    expect(codex.spawn_args.message).not.toContain(ticket.ticket_id);
     expect(codex.next_control).toBe(CODEX_DISPATCH_NEXT_CONTROL);
     expect(codex.next_control).toBe(
       'Record each returned receipt unchanged with ape_run action "record"; after the group is fully recorded, call ape_run action "next".',
     );
 
     // Compatibility and diagnostics stay available, but no installed-package
-    // absolute path is exposed and no parent-side prompt assembly is needed.
+    // absolute path is exposed and no parent-side contract assembly is trusted.
     expect(codex.agent_name).toBe(intent.agent_name);
     expect(codex.model).toBe(ticket.model);
     expect(codex.prompt_paths).toEqual(['prompts/common.md', 'prompts/implementer.md']);
     expect(JSON.stringify(codex)).not.toContain(root);
   });
 
-  it('canonicalizes the immutable StageTicket and rejects path-shaped roles before prompt loading', () => {
+  it('canonicalizes the injected ticket reference and rejects path-shaped roles before prompt loading', () => {
     const reordered = {
       writable: ticket.writable,
       ticket_id: ticket.ticket_id,
@@ -206,23 +203,20 @@ describe('APE v2 adapter conformance', () => {
       model: { reasoning_effort: 'medium', model: 'gpt-5.5' },
       role: ticket.role,
     };
-    const first = nativeDispatch('codex', ticket).spawn_args.message;
-    const second = nativeDispatch('codex', reordered).spawn_args.message;
+    const first = codexInjectedDispatchContext(ticket);
+    const second = codexInjectedDispatchContext(reordered);
     expect(first).toBe(second);
 
     expect(() => nativeDispatch('codex', { ...ticket, role: '../../outside' }))
       .toThrow('Codex dispatch ticket carries an invalid role');
-    expect(() => nativeDispatch('codex', ticket, { prompt: 'x'.repeat(4 * 1024 + 1) }))
-      .toThrow('Codex dispatch intent must carry a bounded text prompt');
-
-    expect(CODEX_DISPATCH_MESSAGE_WIRE_LIMIT).toBeLessThan(RESPONSE_BUDGET_CHARS);
-    expect(() => nativeDispatch('codex', {
+    const bulky = nativeDispatch('codex', {
       ...ticket,
-      objective: '"\\'.repeat(CODEX_DISPATCH_MESSAGE_WIRE_LIMIT),
-    })).toThrow('Codex dispatch message exceeds the bounded launch envelope');
+      objective: '"\\'.repeat(RESPONSE_BUDGET_CHARS),
+    });
+    expect(bulky.spawn_args.message).toBe(CODEX_DISPATCH_BOOTSTRAP_MESSAGE);
   });
 
-  it('uses the existing lossless ticket references when a full message would cross the cap', () => {
+  it('keeps every load-bearing ticket field out of the unobservable launch message', () => {
     const objective = 'z'.repeat(24_000);
     const oversizedTicket = {
       ...ticket,
@@ -231,15 +225,16 @@ describe('APE v2 adapter conformance', () => {
     const dispatch = nativeDispatch('codex', oversizedTicket, null, {
       run_objective: objective,
     });
-    expect(dispatch.ticket_projection).toBe('bounded');
-    expect(JSON.stringify(dispatch.spawn_args.message).length)
-      .toBeLessThanOrEqual(CODEX_DISPATCH_MESSAGE_WIRE_LIMIT);
-    expect(dispatch.spawn_args.message).toContain(
+    const injected = codexInjectedDispatchContext(oversizedTicket);
+    expect(dispatch.ticket_projection).toBe('hook-injected');
+    expect(dispatch.spawn_args.message).toBe(CODEX_DISPATCH_BOOTSTRAP_MESSAGE);
+    expect(injected).toContain(
       '"path":".ape/runtime/tickets/ticket-1.json"',
     );
-    expect(dispatch.spawn_args.message).toContain(`"ticket_hash":"${ticket.ticket_hash}"`);
+    expect(injected).toContain(`"ticket_hash":"${ticket.ticket_hash}"`);
     expect(dispatch.spawn_args.message).not.toContain('"objective"');
     expect(dispatch.spawn_args.message).not.toContain(objective);
+    expect(injected).not.toContain(objective);
   });
 
   it('keeps a near-limit codex-dispatch-envelope response inside the wire target', () => {
@@ -249,8 +244,7 @@ describe('APE v2 adapter conformance', () => {
       agent_name: `ape_implementer_${'c'.repeat(32)}`,
       prompt: 'Execute the immutable APE StageTicket ticket-1.',
     }, { run_objective: objective, dispatch_group_size: 1 });
-    expect(JSON.stringify(dispatch.spawn_args.message).length)
-      .toBeLessThanOrEqual(CODEX_DISPATCH_MESSAGE_WIRE_LIMIT);
+    expect(dispatch.spawn_args.message).toBe(CODEX_DISPATCH_BOOTSTRAP_MESSAGE);
 
     const projected = projectRunResponse({
       ok: true,
@@ -318,14 +312,13 @@ describe('APE v2 adapter conformance', () => {
       { run_objective: objective, dispatch_group_size: tickets.length },
     ));
     for (const [index, dispatch] of dispatches.entries()) {
-      expect(dispatch.ticket_projection).toBe('bounded');
+      expect(dispatch.ticket_projection).toBe('hook-injected');
       expect(dispatch.spawn_args.fork_turns).toBe('none');
+      expect(dispatch.spawn_args.message).toBe(CODEX_DISPATCH_BOOTSTRAP_MESSAGE);
       expect(dispatch.spawn_args.message).not.toContain('risk-0-');
-      expect(dispatch.spawn_args.message).toContain(
+      expect(codexInjectedDispatchContext(tickets[index])).toContain(
         `.ape/runtime/tickets/${tickets[index].ticket_id.replaceAll(':', '_')}.json`,
       );
-      expect(JSON.stringify(dispatch.spawn_args.message).length)
-        .toBeLessThanOrEqual(CODEX_DISPATCH_MESSAGE_WIRE_LIMIT / tickets.length);
     }
 
     const projected = projectRunResponse({

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -76,7 +76,26 @@ function holdReceiptLock(projectDir) {
   const lock = runtimePaths(projectDir).receiptLock;
   mkdirSync(lock, { recursive: true, mode: 0o700 });
   writeFileSync(path.join(lock, 'owner'), 'external-test-holder', { mode: 0o600 });
-  return () => rmSync(lock, { recursive: true, force: true });
+  // Full-suite load can suspend this worker beyond the runtime's 10-second
+  // stale window. Model a genuinely live external holder by maintaining the
+  // same directory-mtime heartbeat as withDirLock; otherwise the child may
+  // lawfully steal the fixture and race this teardown into ENOTEMPTY.
+  const heartbeat = setInterval(() => {
+    const timestamp = new Date();
+    try {
+      utimesSync(lock, timestamp, timestamp);
+    } catch {
+      // The explicit release may have removed the fixture between ticks.
+    }
+  }, 250);
+  heartbeat.unref?.();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    clearInterval(heartbeat);
+    rmSync(lock, { recursive: true, force: true });
+  };
 }
 
 const callRecord = (id, projectDir) => ({

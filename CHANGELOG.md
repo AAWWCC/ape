@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 2.23.3 — 2026-08-27
+
+Made Codex dispatch deterministic at the trusted lifecycle boundary. Native launch messages are now
+fixed transport-only bootstraps; after binding the host-issued child identity, APE injects the
+complete common and role contracts plus a hash-bound immutable ticket reference itself. Binding
+fails closed if either the active ticket hash or the prepared authoritative-context hash differs,
+so a launcher cannot omit or rewrite receipt fields, stage instructions, or ticket authority.
+
+Documented the bound-worker shell allowlist so agents use native inspection tools or single
+recognized evidence commands without avoidable hook denials. Bumped the Codex dispatch protocol and
+envelope to v2.
+
 ## 2.23.2 — 2026-08-27
 
 Fixed protected GitHub auto-merge reconciliation when a pull request transitions from open to

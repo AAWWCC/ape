@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -265,6 +265,13 @@ async function startedCodexProject() {
   return { dir, action };
 }
 
+async function onlyCodexIntentFile(dir) {
+  const intentDirectory = path.join(dir, '.ape', 'runtime', 'dispatch-intents');
+  const files = (await readdir(intentDirectory)).filter((name) => name.endsWith('.json'));
+  expect(files).toHaveLength(1);
+  return path.join(intentDirectory, files[0]);
+}
+
 describe('APE v2 native Codex dispatch handshake', () => {
   it('rejects a forged task-name capability and keeps the dispatch prepared', async () => {
     const { dir, action } = await startedCodexProject();
@@ -324,8 +331,10 @@ describe('APE v2 native Codex dispatch handshake', () => {
       model: action.dispatch.model.model,
       reasoning_effort: action.dispatch.model.reasoning_effort,
     });
-    expect(action.dispatch.spawn_args.message).toContain('APE common contract');
-    expect(action.dispatch.spawn_args.message).toContain('Immutable StageTicket');
+    expect(action.dispatch.ticket_projection).toBe('hook-injected');
+    expect(action.dispatch.spawn_args.message).toContain('trusted SubagentStart hook');
+    expect(action.dispatch.spawn_args.message).not.toContain('APE common contract');
+    expect(action.dispatch.spawn_args.message).not.toContain(action.ticket.ticket_id);
     expect((await statusRun(dir)).dispatches).toEqual([
       expect.objectContaining({
         ticket_id: action.ticket.ticket_id,
@@ -374,6 +383,27 @@ describe('APE v2 native Codex dispatch handshake', () => {
     expect(start.hookSpecificOutput?.additionalContext).toMatch(
       /APE_RECEIPT_CAPABILITY=[A-Za-z0-9_-]{32,256}/,
     );
+    expect(start.hookSpecificOutput?.additionalContext).toContain(
+      'APE trusted SubagentStart context (authoritative)',
+    );
+    expect(start.hookSpecificOutput?.additionalContext).toContain('APE common contract');
+    expect(start.hookSpecificOutput?.additionalContext).toContain('APE implementer contract');
+    expect(start.hookSpecificOutput?.additionalContext).toContain('Immutable StageTicket reference');
+    expect(start.hookSpecificOutput?.additionalContext).toContain(
+      `.ape/runtime/tickets/${action.ticket.ticket_id.replaceAll(':', '_')}.json`,
+    );
+    expect(start.hookSpecificOutput?.additionalContext).toContain(action.ticket.ticket_hash);
+    const persistedTicket = JSON.parse(await readFile(
+      path.join(
+        dir,
+        '.ape',
+        'runtime',
+        'tickets',
+        `${action.ticket.ticket_id.replaceAll(':', '_')}.json`,
+      ),
+      'utf8',
+    ));
+    expect(persistedTicket.output_schema.properties.tests.items.properties).toHaveProperty('exit_code');
     expect((await statusRun(dir)).dispatches).toEqual([
       expect.objectContaining({
         ticket_id: action.ticket.ticket_id,
@@ -433,6 +463,121 @@ describe('APE v2 native Codex dispatch handshake', () => {
       tool_input: { file_path: target, content: 'export const changed = false;\n' },
     });
     expect(impostor.decision).toBe('deny');
+  });
+
+  it('fails closed when the prepared authoritative context hash is altered', async () => {
+    const { dir, action } = await startedCodexProject();
+    const launch = await invokeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: 'codex-parent-session',
+      turn_id: 'turn-context-hash',
+      tool_use_id: 'spawn-context-hash',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: {
+        ...action.dispatch.spawn_args,
+        message: 'opaque-and-untrusted-launch-message',
+      },
+    });
+    expect(launch.decision).toBe('allow');
+
+    const intentFile = await onlyCodexIntentFile(dir);
+    const intent = JSON.parse(await readFile(intentFile, 'utf8'));
+    expect(intent.injected_context_hash).toMatch(/^[a-f0-9]{64}$/);
+    await writeFile(intentFile, `${JSON.stringify({
+      ...intent,
+      injected_context_hash: '0'.repeat(64),
+    })}\n`);
+
+    const start = await invokeHook({
+      hook_event_name: 'SubagentStart',
+      project_dir: dir,
+      session_id: 'codex-child-context-hash',
+      turn_id: 'turn-context-hash',
+      agent_id: 'codex-agent-context-hash',
+      agent_type: 'default',
+    });
+    expect(start.decision).toBe('deny');
+    expect(start.systemMessage).toMatch(/authoritative context hash mismatch/i);
+    expect((await statusRun(dir)).dispatches).toEqual([
+      expect.objectContaining({ status: 'launched', launch_attempts: 1 }),
+    ]);
+  });
+
+  it('fails closed when the prepared intent no longer matches the active ticket hash', async () => {
+    const { dir, action } = await startedCodexProject();
+    const launch = await invokeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: 'codex-parent-session',
+      turn_id: 'turn-ticket-hash',
+      tool_use_id: 'spawn-ticket-hash',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: action.dispatch.spawn_args,
+    });
+    expect(launch.decision).toBe('allow');
+
+    const intentFile = await onlyCodexIntentFile(dir);
+    const intent = JSON.parse(await readFile(intentFile, 'utf8'));
+    await writeFile(intentFile, `${JSON.stringify({
+      ...intent,
+      ticket_hash: 'f'.repeat(64),
+    })}\n`);
+
+    const start = await invokeHook({
+      hook_event_name: 'SubagentStart',
+      project_dir: dir,
+      session_id: 'codex-child-ticket-hash',
+      turn_id: 'turn-ticket-hash',
+      agent_id: 'codex-agent-ticket-hash',
+      agent_type: 'default',
+    });
+    expect(start.decision).toBe('deny');
+    expect(start.systemMessage).toMatch(/dispatch ticket hash mismatch/i);
+  });
+
+  it('re-injects the authoritative context and rotates the capability on native identity resume', async () => {
+    const { dir, action } = await startedCodexProject();
+    const sessionId = 'codex-child-resume';
+    const agentId = 'codex-agent-resume';
+    const launch = await invokeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: 'codex-parent-resume',
+      turn_id: 'turn-resume',
+      tool_use_id: 'spawn-resume',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: action.dispatch.spawn_args,
+    });
+    expect(launch.decision).toBe('allow');
+    const first = await invokeHook({
+      hook_event_name: 'SubagentStart',
+      project_dir: dir,
+      session_id: sessionId,
+      turn_id: 'turn-resume',
+      agent_id: agentId,
+      agent_type: 'default',
+    });
+    expect(first.decision, JSON.stringify(first)).toBe('allow');
+    const firstCapability = first.hookSpecificOutput.additionalContext
+      .match(/APE_RECEIPT_CAPABILITY=([A-Za-z0-9_-]+)/)?.[1];
+
+    const resumed = await invokeHook({
+      hook_event_name: 'SubagentStart',
+      project_dir: dir,
+      session_id: sessionId,
+      turn_id: 'turn-resume-2',
+      agent_id: agentId,
+      agent_type: 'default',
+    });
+    expect(resumed.decision, JSON.stringify(resumed)).toBe('allow');
+    expect(resumed.hookSpecificOutput.additionalContext).toContain(
+      'APE trusted SubagentStart context (authoritative)',
+    );
+    const resumedCapability = resumed.hookSpecificOutput.additionalContext
+      .match(/APE_RECEIPT_CAPABILITY=([A-Za-z0-9_-]+)/)?.[1];
+    expect(resumedCapability).toMatch(/^[A-Za-z0-9_-]{32,256}$/);
+    expect(resumedCapability).not.toBe(firstCapability);
   });
 });
 
