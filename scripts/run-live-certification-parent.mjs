@@ -47,6 +47,21 @@ function requireZeroRetryConfig(codexHome) {
       );
     }
   }
+  const lines = config.split(/\r?\n/u);
+  const analyticsStart = lines.findIndex((line) => line.trim() === '[analytics]');
+  const analyticsBody = analyticsStart === -1
+    ? []
+    : lines.slice(
+      analyticsStart + 1,
+      lines.findIndex((line, index) => index > analyticsStart && /^\s*\[/u.test(line)) === -1
+        ? lines.length
+        : lines.findIndex((line, index) => index > analyticsStart && /^\s*\[/u.test(line)),
+    );
+  if (!analyticsBody.some((line) => /^\s*enabled\s*=\s*false\s*$/u.test(line))) {
+    throw new LiveCertificationParentError(
+      'isolated Codex config must disable analytics to prevent optional event transport retries',
+    );
+  }
 }
 
 function requireExactPlugin(codexHome) {

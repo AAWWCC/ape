@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.23.31 — 2026-08-28
+
+The first 2.23.30 live parent was rejected when Codex's optional analytics client logged a retried
+503 event submission during the binding probe. The zero-retry certification launcher now also
+requires an explicit `[analytics] enabled = false` section, preventing nonessential event transport
+from introducing retry-shaped traffic into a first-pass-perfect run. The requirement is covered by
+a launch refusal regression, and version 2.23.31 restarts from fresh public source.
+
 ## 2.23.30 — 2026-08-28
 
 The first 2.23.29 live parent was rejected before APE start because its prompt retained a stale

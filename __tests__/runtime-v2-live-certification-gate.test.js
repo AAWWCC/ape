@@ -25,12 +25,12 @@ import {
   buildCodexParentInvocation,
 } from '../scripts/run-live-certification-parent.mjs';
 
-const VERSION = '2.23.30';
+const VERSION = '2.23.31';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
 
-function certificationParentFixture({ zeroRetry = true } = {}) {
+function certificationParentFixture({ zeroRetry = true, analyticsDisabled = true } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'ape-live-parent-'));
   temporaryRepositories.push(root);
   const projectDir = path.join(root, 'project');
@@ -47,6 +47,8 @@ function certificationParentFixture({ zeroRetry = true } = {}) {
       zeroRetry ? 'request_max_retries = 0' : 'request_max_retries = 5',
       'stream_max_retries = 0',
       'supports_websockets = false',
+      '[analytics]',
+      analyticsDisabled ? 'enabled = false' : 'enabled = true',
     ].join('\n'),
   );
   writeFileSync(
@@ -257,6 +259,14 @@ describe('live certification Codex parent launcher', () => {
     const fixture = certificationParentFixture({ zeroRetry: false });
     expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
     expect(() => buildCodexParentInvocation(fixture)).toThrow(/request_max_retries = 0/iu);
+  });
+
+  it('fails closed before launch when optional analytics transport is enabled', () => {
+    const fixture = certificationParentFixture({ analyticsDisabled: false });
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(
+      /disable analytics.*transport retries/iu,
+    );
   });
 
   it('fails closed when the prompt omits or misstates the governed project root', () => {
