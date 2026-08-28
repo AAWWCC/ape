@@ -176,6 +176,11 @@ describe('APE v2 adapter conformance', () => {
     });
     expect(injected).toContain('APE trusted SubagentStart context (authoritative)');
     expect(injected).toContain('Shell inspection permits only ls, cat, pwd, which, and read-only git.');
+    expect(injected).toContain('never run git rev-parse HEAD^{tree}; braces are denied');
+    expect(injected).toContain('The ticket already supplies base_tree_sha and the runtime recomputes tree hashes.');
+    expect(injected).toContain('If commit evidence is needed, use git rev-parse HEAD.');
+    expect(injected.indexOf('never run git rev-parse HEAD^{tree}; braces are denied'))
+      .toBeLessThan(injected.indexOf('APE common contract'));
     expect(injected).toContain('Never invoke rg, grep, sed, find, awk');
     expect(injected.indexOf('Never invoke rg, grep, sed, find, awk'))
       .toBeLessThan(injected.indexOf('APE common contract'));

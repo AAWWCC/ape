@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.23.6 — 2026-08-27
+
+Aligned the hook-injected Codex worker guidance with APE's positive shell-character policy. Workers
+are now explicitly told not to run brace-bearing `git rev-parse HEAD^{tree}`; the ticket supplies
+`base_tree_sha`, the runtime recomputes tree hashes, and brace-free `git rev-parse HEAD` remains
+available for commit evidence. This removes the first test-worker denial observed by the 2.23.5
+fast canary.
+
 ## 2.23.5 — 2026-08-27
 
 Made the Codex binding-probe contract complete at every model-visible surface. The run protocol and
