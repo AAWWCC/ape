@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.23.10 — 2026-08-27
+
+Made the live-certification preflight execute correctly through filesystem path aliases such as
+macOS `/tmp` and `/private/tmp`. Direct invocation now compares canonical real paths, with a CLI
+regression through a symlinked source root so a skipped preflight cannot report false success.
+
 ## 2.23.9 — 2026-08-27
 
 Made live-certification Git identity a checked precondition instead of ambient machine state.

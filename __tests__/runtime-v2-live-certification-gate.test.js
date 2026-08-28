@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   TERMINAL_REASON_CODES,
@@ -20,7 +21,7 @@ import {
   verifyLiveCertificationEnvironment,
 } from '../scripts/check-live-certification-environment.mjs';
 
-const VERSION = '2.23.9';
+const VERSION = '2.23.10';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
@@ -206,6 +207,21 @@ describe('live release certification evidence', () => {
       identity_scope: 'repository-local',
       email_domain: 'users.noreply.github.com',
     });
+
+    const aliasRoot = mkdtempSync(path.join(tmpdir(), 'ape-live-certification-alias-'));
+    temporaryRepositories.push(aliasRoot);
+    const sourceAlias = path.join(aliasRoot, 'source');
+    symlinkSync(
+      fileURLToPath(new URL('..', import.meta.url)),
+      sourceAlias,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    const output = execFileSync(process.execPath, [
+      path.join(sourceAlias, 'scripts', 'check-live-certification-environment.mjs'),
+      '--project-dir',
+      repo,
+    ], { encoding: 'utf8' });
+    expect(output).toMatch(/live-certification environment passed/u);
   });
 
   it('requires three clean completed raw attempts for every certified host and pipeline', () => {
