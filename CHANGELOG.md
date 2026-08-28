@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.23.45 — 2026-08-28
+
+The protected-land repeatability run exposed a post-merge checkout bug: GitHub's squash commit and
+the already-finished local land commit had identical trees but divergent histories, so the
+`--ff-only` cleanup could not align local `main` with `origin/main`. Cleanup now compares the full
+checkout tree with the fetched squash tree and resets only when they are identical; any content
+drift remains non-destructive and terminal reconciliation no longer reports a divergent GitHub base
+as returned. Regression coverage pins both the safe alignment and the fail-closed path. Version
+2.23.45 restarts every source gate and live pipeline from fresh public source.
+
 ## 2.23.44 — 2026-08-28
 
 The first 2.23.43 focused source gate rejected hardcoded prior-version objective filenames in the

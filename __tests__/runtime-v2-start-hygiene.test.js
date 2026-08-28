@@ -11,6 +11,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { acquireRunLock, releaseRunLock } from '../lib/runtime/lock.js';
 import { currentTreeSha } from '../lib/runtime/git.js';
 import { bindCodexDispatch } from './codex-native-test-helper.js';
+import { reconcileTerminalCheckout } from '../lib/runtime/receipt-service.js';
 
 const cleanups = [];
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -340,6 +341,48 @@ describe('APE v2 start-time working-tree hygiene', () => {
     expect(completed.run.checkout_cleanup).toMatchObject({ status: 'returned', retained: false, deleted: true });
     expect(git(dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
     expect(git(dir, 'branch', '--list', started.run.branch)).toBe('');
+  });
+
+  it('does not report a completed GitHub checkout returned while local main still diverges from the squash merge', async () => {
+    const dir = await project();
+    const remote = await mkdtemp(path.join(tmpdir(), 'ape-start-hygiene-remote-'));
+    const updater = await mkdtemp(path.join(tmpdir(), 'ape-start-hygiene-updater-'));
+    cleanups.push(remote, updater);
+    git(remote, 'init', '-q', '--bare', '-b', 'main');
+    git(dir, 'remote', 'add', 'origin', remote);
+    git(dir, 'push', '-q', '-u', 'origin', 'main');
+
+    await writeFile(path.join(dir, 'docs', 'land.md'), 'landed\n');
+    git(dir, 'add', 'docs/land.md');
+    git(dir, 'commit', '-qm', 'local land commit');
+    const localTip = git(dir, 'rev-parse', 'HEAD');
+
+    git(updater, 'clone', '-q', remote, '.');
+    git(updater, 'config', 'user.email', 'ape@example.test');
+    git(updater, 'config', 'user.name', 'APE Test');
+    await writeFile(path.join(updater, 'docs', 'land.md'), 'landed\n');
+    git(updater, 'add', 'docs/land.md');
+    git(updater, 'commit', '-qm', 'remote squash commit');
+    git(updater, 'push', '-q', 'origin', 'main');
+    git(dir, 'fetch', '-q', 'origin', 'main');
+    const remoteTip = git(dir, 'rev-parse', 'refs/remotes/origin/main');
+    expect(remoteTip).not.toBe(localTip);
+
+    const cleanup = await reconcileTerminalCheckout(runtimePaths(dir), {
+      status: 'completed',
+      branch: 'ape/land-test',
+      base_branch: 'main',
+      merge: { provider: 'github' },
+    });
+
+    expect(cleanup).toMatchObject({
+      status: 'retained_error',
+      base_branch: 'main',
+      retained: true,
+      deleted: false,
+    });
+    expect(cleanup.reason).toMatch(/not aligned with origin\/main/);
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(localTip);
   });
 
   it('returns a clean blocked run to main while retaining its APE branch', async () => {

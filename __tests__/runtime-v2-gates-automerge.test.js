@@ -133,6 +133,8 @@ describe('autoMergeGithub', () => {
       staged: 'src/kept.js',
       commitErrors: [],
       switchBaseError: null,
+      pullBaseError: null,
+      remoteBaseTree: GATE_TREE,
     };
     currentTreeSha.mockReset();
     currentTreeSha.mockResolvedValue(GATE_TREE);
@@ -145,6 +147,9 @@ describe('autoMergeGithub', () => {
       if (args[0] === 'branch' && args[1] === '--show-current') return gitResponses.branch;
       if (args[0] === 'symbolic-ref') return 'refs/remotes/origin/main';
       if (args[0] === 'ls-files') return ghResponses.tracked ?? '';
+      if (args[0] === 'rev-parse' && args[1] === 'refs/remotes/origin/main^{tree}') {
+        return gitResponses.remoteBaseTree;
+      }
       if (args[0] === 'rev-parse') return gitResponses.head;
       if (args[0] === 'diff') return gitResponses.staged;
       if (args[0] === 'commit' && gitResponses.commitErrors.length > 0) {
@@ -152,6 +157,9 @@ describe('autoMergeGithub', () => {
       }
       if (args[0] === 'switch' && args[1] === 'main' && gitResponses.switchBaseError) {
         throw new Error(gitResponses.switchBaseError);
+      }
+      if (args[0] === 'pull' && gitResponses.pullBaseError) {
+        throw new Error(gitResponses.pullBaseError);
       }
       return '';
     });
@@ -650,6 +658,38 @@ describe('autoMergeGithub', () => {
       expect(ghCalls.some((call) => call[2] === 'merge')).toBe(false);
       // Explicit provenance marker distinguishes an externally-observed merge.
       expect(JSON.stringify(result.merged)).toMatch(/observ|external/i);
+    });
+
+    it('aligns a tree-identical divergent land base to the observed squash commit after ff-only cleanup cannot apply', async () => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.tracked = 'src/kept.js\0';
+      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.view = { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` };
+      gitResponses.branch = 'main';
+      gitResponses.pullBaseError = 'fatal: Not possible to fast-forward, aborting.';
+      currentTreeSha.mockResolvedValue(GATE_TREE);
+
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState({ mode: 'land' }), checksConfig);
+
+      expect(result.merged).toBeDefined();
+      expect(gitCalls).toContainEqual(['pull', '--ff-only', 'origin', 'main']);
+      expect(gitCalls).toContainEqual(['rev-parse', 'refs/remotes/origin/main^{tree}']);
+      expect(gitCalls).toContainEqual(['reset', '--hard', 'refs/remotes/origin/main']);
+    });
+
+    it('never rewrites a divergent base when its checkout tree differs from the observed squash tree', async () => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.tracked = 'src/kept.js\0';
+      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.view = { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` };
+      gitResponses.branch = 'main';
+      gitResponses.pullBaseError = 'fatal: Not possible to fast-forward, aborting.';
+      currentTreeSha.mockResolvedValue('e'.repeat(40));
+
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState({ mode: 'land' }), checksConfig);
+
+      expect(result.merged).toBeDefined();
+      expect(gitCalls).not.toContainEqual(['reset', '--hard', 'refs/remotes/origin/main']);
     });
 
     it('refuses a drifted-head MERGED probe as an external-merge/head-drift block, never a completion (A2)', async () => {
