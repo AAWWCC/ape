@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 2.23.22 — 2026-08-28
+
+The first 2.23.21 targeted source gate rejected the module-boundary update because its independent
+hooks-facade export-count baseline still expected 34 owned symbols after the manifest gained its
+35th. The explicit baseline now advances with the ownership list, and version 2.23.22 restarts the
+candidate from its first targeted gate.
+
+## 2.23.21 — 2026-08-28
+
+The first 2.23.20 complete source gate rejected an incomplete runtime ownership manifest: the new
+shared evidence-policy helper was exported through the hooks facade but had not been assigned to
+its real owner in the explicit module-boundary symbol list. The manifest now owns that symbol in
+`lib/runtime/evidence-policy.js`, and version 2.23.21 restarts the candidate rather than reusing the
+partially gated 2.23.20 build.
+
+## 2.23.20 — 2026-08-28
+
+The first 2.23.19 fast-lane certification cycle was rejected when its independent reviewer used
+the standard read-only `git diff --no-index /dev/null <new-file>` form and APE's generic evidence
+containment guard denied the `/dev/null` empty-file sentinel as an out-of-project operand. The
+evidence policy and its async hook precompute now share one narrow exception for exactly that
+five-token comparison shape, while the companion path still requires ordinary project containment
+and near-miss paths, extra flags, redirects, and every other external operand remain denied. Exact
+unit and hook-process regressions pin the command that rejected 2.23.19 and the refusal boundary.
+
 ## 2.23.19 — 2026-08-28
 
 The first 2.23.18 targeted source gate rejected stale schema-version and cohort-error assertions.

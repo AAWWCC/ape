@@ -1508,6 +1508,37 @@ describe('APE v2 hook binary evidence containment (cwd + operand precompute)', (
     }
   });
 
+  it('ALLOWS the exact live reviewer `/dev/null` comparison through the async hook precompute', async () => {
+    // 2.23.19 certification exposed this exact denial on the first fast-lane
+    // review. This end-to-end arm is the discriminator: a synchronous-only
+    // exception still fails because bin/ape-hook.mjs precomputes the external
+    // `/dev/null` operand before evaluateLifecyclePolicy reads the event.
+    const dir = hookProject();
+    mkdirSync(path.join(dir, 'src'), { recursive: true });
+    writeFileSync(path.join(dir, 'src', 'is-even-2319-1.js'), 'export const isEven = (n) => n % 2 === 0;\n', 'utf8');
+    for (const command of [
+      'git diff --no-index /dev/null src/is-even-2319-1.js',
+      'git diff --no-index src/is-even-2319-1.js /dev/null',
+    ]) {
+      const response = await invokeHook(boundBashCall(dir, command, dir), dir);
+      expect(response.hookSpecificOutput.permissionDecision, command).toBe('allow');
+    }
+  });
+
+  it('DENIES near-miss sentinels, extra-tail shapes, and an external companion end to end', async () => {
+    const dir = hookProject();
+    for (const command of [
+      'git diff --no-index /dev/nullish src/is-even-2319-1.js',
+      'git diff --no-index /dev/null/../tmp/x src/is-even-2319-1.js',
+      'git diff --no-index --stat /dev/null src/is-even-2319-1.js',
+      'git diff --no-index /dev/null /tmp/outside.js',
+      'git diff --no-index /dev/null /dev/null',
+    ]) {
+      const response = await invokeHook(boundBashCall(dir, command, dir), dir);
+      expect(response.hookSpecificOutput.permissionDecision, command).toBe('deny');
+    }
+  });
+
   it('DENIES when the session cwd has drifted outside the governed root', async () => {
     // Claude's Bash tool keeps a persistent shell whose cwd drifts on `cd`, and
     // every relative operand resolves against THAT — with no token left for the

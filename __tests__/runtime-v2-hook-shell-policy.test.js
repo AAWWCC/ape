@@ -1557,6 +1557,30 @@ describe('APE v2 lifecycle shell policy', () => {
       expectAllow('pnpm vitest --dir tests');
       expectDeny('pnpm vitest --dir /outside');
     });
+
+    it('admits exactly one `/dev/null` operand for the exact `git diff --no-index` comparison shape', () => {
+      // A reviewer uses this form to render a newly added, untracked file.
+      // `/dev/null` is an empty-file sentinel here, not project input. Both
+      // directions are legitimate; the companion path remains contained by
+      // the ordinary rule.
+      expectAllow('git diff --no-index /dev/null src/is-even-2319-1.js');
+      expectAllow('git diff --no-index src/is-even-2319-1.js /dev/null');
+    });
+
+    it('keeps the `/dev/null` exception exact and keeps the companion operand contained', () => {
+      for (const command of [
+        'git diff /dev/null src/is-even-2319-1.js',
+        'git diff --no-index --stat /dev/null src/is-even-2319-1.js',
+        'git diff --no-index /dev/nullish src/is-even-2319-1.js',
+        'git diff --no-index /dev/null/../tmp/x src/is-even-2319-1.js',
+        'git diff --no-index /dev/null /tmp/outside.js',
+        'git diff --no-index /dev/null /dev/null',
+        'git show /dev/null',
+        'cat /dev/null',
+      ]) {
+        expectDeny(command);
+      }
+    });
   });
 
   describe('the precomputed evidence verdict is consulted, and its own failure is explicit', () => {

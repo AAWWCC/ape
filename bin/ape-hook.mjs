@@ -11,6 +11,7 @@ import {
   parseDeletionCommand,
   parseEvidenceCommand,
   evidenceOperandCandidates,
+  evidenceOperandIsGitNoIndexDevNull,
   evidenceOperandNeedsRoot,
   verifyEvidenceExecutableSnapshot,
   pathResolvesWithinClaims,
@@ -495,9 +496,18 @@ try {
             reason = reason ?? `cd target ${parsedEvidence.cdTarget} resolves outside the governed project`;
           }
         }
-        outer: for (const token of parsedEvidence.tokens) {
+        outer: for (const [tokenIndex, token] of parsedEvidence.tokens.entries()) {
           if (!safe) break;
           for (const candidate of evidenceOperandCandidates(token)) {
+            if (
+              evidenceOperandIsGitNoIndexDevNull(
+                parsedEvidence.tokens,
+                tokenIndex,
+                candidate,
+              )
+            ) {
+              continue;
+            }
             if (!evidenceOperandNeedsRoot(candidate)) continue;
             // Relative operands resolve against the session cwd, exactly as the
             // shell resolves them — same reasoning as the deletion targets.

@@ -42,6 +42,7 @@ const OWNER_MANIFEST = [
       'verifyEvidenceExecutableSnapshot', 'EVIDENCE_SECOND_POSITION_PROBES',
       'gitEvidenceArgsSafe', 'parseEvidenceCommand', 'evidenceOperandNeedsRoot',
       'evidenceOperandCandidates', 'evidenceOperandEscapes',
+      'evidenceOperandIsGitNoIndexDevNull',
     ],
   },
   {
@@ -128,7 +129,7 @@ const REQUIRED_OWNER_FILES = OWNER_MANIFEST
 
 const FACADE_EXPORT_COUNTS = Object.freeze({
   'lib/runtime/service.js': 22,
-  'lib/runtime/hooks.js': 34,
+  'lib/runtime/hooks.js': 35,
   'lib/runtime/gates.js': 12,
   'lib/runtime/scheduler.js': 3,
 });
