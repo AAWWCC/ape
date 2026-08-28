@@ -175,7 +175,8 @@ describe('APE v2 adapter conformance', () => {
       message: CODEX_DISPATCH_BOOTSTRAP_MESSAGE,
     });
     expect(injected).toContain('APE trusted SubagentStart context (authoritative)');
-    expect(injected).toContain('Shell inspection permits only ls, cat, pwd, which, and read-only git.');
+    expect(injected).toContain('Shell inspection permits only ls, cat, pwd, which, and these read-only git verbs:');
+    expect(injected).toContain('ls-files, and ls-tree.');
     expect(injected).toContain('never run git rev-parse HEAD^{tree}; braces are denied');
     expect(injected).toContain('The ticket already supplies base_tree_sha and the runtime recomputes tree hashes.');
     expect(injected).toContain('If commit evidence is needed, use git rev-parse HEAD.');

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.23.12 — 2026-08-28
+
+Admitted `git ls-tree` as a recognized read-only evidence command for bound workers while retaining
+the existing output-flag and project-path guards. The trusted Codex context now names the exact Git
+verbs workers may use, and a regression covers the full commit-and-path command emitted by the
+2.23.11 fast-lane reviewer.
+
 ## 2.23.11 — 2026-08-28
 
 Canonicalized alternate filesystem spellings before authorizing a host edit target. A claimed new

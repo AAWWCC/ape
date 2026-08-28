@@ -395,6 +395,7 @@ describe('APE v2 lifecycle shell policy', () => {
       'git rev-parse HEAD',
       'git describe --tags',
       'git ls-files',
+      'git ls-tree --name-only d219961556aa64865367635a1215cf76a9bafa53 src/is-even-2311-3.js test/is-even-2311-3.test.js',
       'cd sub && git diff --stat',
     ]) {
       const result = evaluateLifecyclePolicy(boundSubagent(command), { state, ticket: buildTicket });
@@ -1702,7 +1703,7 @@ describe('APE v2 lifecycle shell policy', () => {
       'npm test', 'npm t', 'npm run test', 'pnpm test', 'yarn test', 'bun test',
       'npx vitest', 'npx vitest run', 'pnpm exec eslint', 'node --test',
       'python3 -m pytest', 'uv run pytest', 'go test', 'cargo test',
-      'git status', 'git log', 'git show', 'git diff', 'git ls-files',
+      'git status', 'git log', 'git show', 'git diff', 'git ls-files', 'git ls-tree',
       'ls', 'cat', 'echo', 'pwd', 'which', 'true',
       'pytest', 'vitest', 'tox', 'hatch test', 'rye test',
       'mypy', 'ruff check', 'eslint', 'prettier --check', 'tsc',
@@ -1974,6 +1975,7 @@ describe('APE v2 lifecycle shell policy', () => {
       expect(gitArgs('git', 'branch', '-vv')).toBe(true);
       expect(gitArgs('git', 'branch', '--show-current')).toBe(true);
       expect(gitArgs('git', 'ls-files')).toBe(true);
+      expect(gitArgs('git', 'ls-tree', '--name-only', 'HEAD', 'src/value.js')).toBe(true);
     });
 
     it('takes the FULL vector, head included: a non-git command answers true', () => {
@@ -2010,6 +2012,7 @@ describe('APE v2 lifecycle shell policy', () => {
       ['git branch -a', true],
       ['git rev-parse HEAD', true],
       ['git ls-files', true],
+      ['git ls-tree --name-only HEAD src/value.js', true],
       ['git diff --output=x', false],
       ['git log --output=out.txt', false],
       ['git diff --output-directory=tmp', false],
@@ -2084,6 +2087,7 @@ describe('APE v2 lifecycle shell policy', () => {
       // GIT_EVIDENCE_VERB_TOKEN after `git`.
       { prefix: 'git', token: 'status' },
       { prefix: 'git', token: 'ls-files' },
+      { prefix: 'git', token: 'ls-tree', tail: '--name-only HEAD src/value.js' },
       { prefix: 'git', token: 'rev-parse', tail: 'HEAD' },
       { prefix: 'git', token: 'show', tail: 'HEAD' },
       // NODE_EVIDENCE_FLAG after `node`.

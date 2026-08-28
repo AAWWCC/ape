@@ -367,6 +367,7 @@ describe('APE v2 evidence commands: a POSITIVE per-token character allowlist', (
       'git diff --stat',
       'git branch --show-current',
       'git ls-files',
+      'git ls-tree --name-only HEAD src/index.js',
       'git show 4f5e65d1 -- lib/runtime/hooks.js',
       'git log main..HEAD',
       'cat package.json',
