@@ -7,10 +7,10 @@ disable-model-invocation: true
 
 # APE run
 
-Use this skill only when the user explicitly asks to run APE. Do not infer consent from a coding
-request or from plugin availability.
+Use this skill only when the user explicitly asks to run APE. Never infer consent from a coding
+request or plugin availability.
 
-Before `ape_run start`, inspect the repository and compose cold-reader-complete inputs:
+Before `ape_run start`, inspect the repository and compose complete inputs:
 
 Repository discovery is evidence, not an assertion that optional files exist. Run inspections
 separately. Where no match is valid (for example, no `AGENTS.md`), use `|| true`; never place
@@ -18,8 +18,8 @@ optional discovery in an `&&` chain. Stop instead of retrying or self-correcting
 call. For optional `AGENTS.md` discovery, run this exact standalone command without wrapping it in
 another shell or changing its arguments: `rg --files -g 'AGENTS.md' -g '!**/.git/**' || true`.
 
-When the host is Google Antigravity / Gemini, pass the exact open project root as `project_dir` on
-this and every later APE MCP call.
+On Google Antigravity / Gemini, pass the exact open project root as `project_dir` on every APE MCP
+call.
 
 - `objective`: the observable outcome and acceptance criteria.
 - `mode`: `phase`, `debug`, `spike`, or `land` for an already-finished diff.
@@ -33,15 +33,16 @@ this and every later APE MCP call.
 - `plan_contract_version: 2` for every newly started behavioral fast/full `phase` run. Omit it for
   mechanical, non-phase modes, and every resume; version 1 is legacy-only.
 
-Before starting, call `ape_config` action `get` and inspect `shipping.auto_merge`. If true, explain
-that the run may push, open a pull request, and merge; obtain run-specific operator authorization
-before including `auto_merge_authorized: true`. Never infer consent from invocation, prior runs, or
-configuration. Without authorization, stop before start and offer `shipping.auto_merge: false` so
-the run ends at the audited shipping hold.
+Before starting, call `ape_config` with `action: "doctor"` and `action: "get"`, then complete the
+gate-command and visual-evidence readiness checks in the run/resume protocol below.
 
-Do not invent missing load-bearing product choices. Recommend concrete options and ask only for
-decisions that materially change the outcome. If the work clearly spans multiple runs, offer a
-roadmap; registration still requires explicit approval.
+Inspect `shipping.auto_merge`. If true, explain the run may push, open a pull request, and merge;
+obtain run-specific authorization before including `auto_merge_authorized: true`.
+Never infer consent from invocation, prior runs, or configuration. Without authorization, stop
+before start and offer `shipping.auto_merge: false` so the run ends at the audited shipping hold.
+
+Do not invent product choices. Ask only for decisions that change the outcome. If the
+work clearly spans multiple runs, offer a roadmap; registration still requires explicit approval.
 
 Treat concurrency, destructive persistence, migration, schema compatibility, authentication, and
 security as independent high-risk subsystems unless they share a threat model, platform primitive,

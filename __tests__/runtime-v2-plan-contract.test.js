@@ -18,6 +18,7 @@ import {
   validatePlanDeviation,
 } from '../lib/runtime/plan-contract.js';
 import { sha256 } from '../lib/runtime/canonical.js';
+import { evaluateLifecyclePolicy } from '../lib/runtime/lifecycle-policy.js';
 import { projectRunResponse } from '../lib/runtime/projection.js';
 
 const cleanups = [];
@@ -36,6 +37,9 @@ async function project() {
   await mkdir(path.join(dir, 'tests'));
   await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 1;\n');
   await writeFile(path.join(dir, 'tests', 'value.test.js'), 'throw new Error("red");\n');
+  await writeFile(path.join(dir, 'package.json'), JSON.stringify({
+    scripts: { build: 'node --check src/value.js', verify: 'node --test' },
+  }));
   git(dir, 'init', '-q');
   git(dir, 'config', 'user.email', 'ape@example.test');
   git(dir, 'config', 'user.name', 'APE Test');
@@ -180,7 +184,7 @@ describe('versioned structured plan contract', () => {
     const unsafeCommand = structuredClone(PLAN);
     unsafeCommand.workstreams[0].evidence_commands = ['node -e process.exit(0)'];
     expect(candidatePlanForScope(unsafeCommand, ['src/value.js', 'tests/value.test.js']).errors.join(' '))
-      .toMatch(/not a recognized non-mutating evidence command/);
+      .toMatch(/not a recognized project evidence command/);
 
     const oversized = structuredClone(PLAN);
     const long = 'x'.repeat(500);
@@ -201,6 +205,31 @@ describe('versioned structured plan contract', () => {
       ['src/value.js', 'tests/value.test.js'],
       dir,
     ).valid).toBe(true);
+  });
+
+  it('admits a declared build script as future writable evidence without admitting arbitrary scripts', async () => {
+    const dir = await project();
+    const build = structuredClone(PLAN);
+    build.workstreams[0].evidence_commands = ['npm run build'];
+    expect(candidatePlanForScope(build, ['src/value.js', 'tests/value.test.js'], dir).valid).toBe(true);
+
+    const missing = structuredClone(build);
+    missing.workstreams[0].evidence_commands = ['npm run undeclared'];
+    expect(candidatePlanForScope(missing, ['src/value.js', 'tests/value.test.js'], dir).errors.join(' '))
+      .toMatch(/not a recognized project evidence command/);
+
+    const plannerExecution = evaluateLifecyclePolicy({
+      event: 'PreToolUse',
+      tool_name: 'Bash',
+      command: 'npm run build',
+      is_subagent: true,
+      host: 'codex',
+      project_dir: dir,
+    }, {
+      state: { status: 'running' },
+      ticket: { ticket_id: 'planner-read-only', role: 'planner', writable: false },
+    });
+    expect(plannerExecution.decision).toBe('deny');
   });
 
   it('sends byte-identical candidates to both reviewers, seals unanimous approval, and forwards it to retries/history', async () => {

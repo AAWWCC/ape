@@ -129,8 +129,11 @@ describe('ape v2 statusline renderer', () => {
       lane: 'fast',
       status: 'running',
       stage: 'test',
-      tickets: [{ ticket_id: 't1' }, { ticket_id: 't2' }],
-      receipts: [{ ticket_id: 't1' }],
+      tickets: [
+        { ticket_id: 't1', stage_id: 'test', role: 'test_writer' },
+        { ticket_id: 't2', stage_id: 'test', role: 'test_writer' },
+      ],
+      receipts: [{ ticket_id: 't1', status: 'passed' }],
     });
     const out = stripAnsi(render({ workspace: { current_dir: dir } }));
     // The fast lane displays a three-milestone strip: test/build/review.
@@ -296,6 +299,7 @@ describe('ape v2 statusline renderer', () => {
         // The planner receipt: the plan milestone began an hour ago, and its
         // 10s duration calibrates the plan median so the creep saturates.
         ticket_id: 'run-1:plan:x',
+        status: 'passed',
         timing: {
           started_at: new Date(now - 3600 * 1000).toISOString(),
           completed_at: new Date(now - 3590 * 1000).toISOString(),
@@ -584,6 +588,23 @@ describe('ape v2 statusline renderer', () => {
     expect(out).toContain('corrupt_state');
     expect(out).toContain('ape_run override reset');
     expect(out.length).toBeLessThan(1024);
+  });
+
+  it('renders corrupt blocked-looking state as CORRUPT without a blocked progress claim', () => {
+    writeActive(dir, {
+      schema_version: 'invalid',
+      status: 'blocked',
+      stage: 'build',
+      tickets: [],
+      receipts: [],
+    });
+    const out = stripAnsi(render({ workspace: { current_dir: dir } }));
+    expect(out).toContain('CORRUPT');
+    expect(out).toContain('corrupt_state');
+    expect(out).toContain('ape_run override reset');
+    expect(out).not.toContain('BLOCK');
+    expect(out).not.toContain('█');
+    expect(out).not.toContain('T B R');
   });
 
   it.each([

@@ -144,11 +144,16 @@ equals expansion such as `=node` under the named assumptions and narrows `MAGIC_
 exposure. A `cd` target additionally refuses `~` and `^` anywhere and a leading `-` or `+`; a name
 can still be reached as `./-build` or `./+build`.
 
-Next.js dynamic-route paths are the one narrow quote exception. A complete single-quoted operand
-whose bracket-bearing segments are `[name]`, `[...name]`, or `[[...name]]` is de-quoted before the
-same containment checks; for example, `cat 'app/trace/[traceId]/page.tsx'`. Unquoted brackets remain
-refused because zsh treats them as glob syntax. Double quotes, partial bracket segments, ordinary
-quoted paths, embedded quotes, and spaces inside the quoted token remain refused.
+Static `cat` and `ls` operands may use one complete pair of single or double quotes. The de-quoted
+content must use the ordinary token alphabet and may not contain spaces; quoted heads, partial quote
+concatenation, quoted package-script names, and embedded quotes remain refused. This admits harmless
+shell spellings such as `cat 'eslint.config.mjs'` without expanding the executable or script surface.
+
+Next.js dynamic-route paths are a separate bracket-aware quote exception. A complete single-quoted
+operand whose bracket-bearing segments are `[name]`, `[...name]`, or `[[...name]]` is de-quoted before
+the same containment checks; for example, `cat 'app/trace/[traceId]/page.tsx'`. Unquoted brackets
+remain refused because zsh treats them as glob syntax. Double-quoted dynamic routes, partial bracket
+segments, embedded quotes, and spaces inside the quoted token remain refused.
 
 Deletion is stricter: every target refuses `~`, `=`, and `^` in every position. The retired
 `DELETION_UNSAFE_CHARS` argument was monotone only for truncation; it did not cover substitution,

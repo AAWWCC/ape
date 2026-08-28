@@ -735,6 +735,40 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
 });
 
 describe('APE v2 bounded recovery receipt admission', () => {
+  it('accepts a correctable command-shape denial without invented authority and schedules one retry', async () => {
+    const dir = await integrationProject();
+    const started = await startRun(dir, {
+      objective: 'Retry one correctable policy command shape',
+      mode: 'phase',
+      lane: 'full',
+      host: 'codex',
+      claimed_paths: ['src'],
+      test_paths: ['tests/value.test.js'],
+      requirements: [],
+      risk_triggers: [],
+      behavioral: true,
+      hooks_trusted: true,
+      subagents_available: true,
+      explicit_invocation: true,
+    });
+    const planner = started.run.tickets.at(-1);
+    const recorded = await recordReceipt(dir, receipt(planner, {
+      status: 'failed',
+      evidence: {
+        failure_kind: 'command-shape',
+        summary: "APE denied `cat 'eslint.config.mjs'`; retry with an admitted static path form.",
+      },
+    }));
+    expect(recorded.ok, JSON.stringify(recorded.errors)).toBe(true);
+    expect(recorded.run.status).toBe('running');
+    expect(recorded.run.attempts.plan).toBe(2);
+    expect(recorded.run.tickets.at(-1)).toMatchObject({
+      stage_id: 'plan',
+      attempt: 2,
+      prior_attempts: [expect.stringMatching(/eslint\.config\.mjs/)],
+    });
+  }, 30_000);
+
   it('rejects empty, malformed, noncanonical, and non-additive capability declarations before persistence', async () => {
     const dir = await integrationProject();
     const started = await startRun(dir, {

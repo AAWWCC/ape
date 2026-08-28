@@ -259,8 +259,7 @@ function checkStepInvariants(state, actions, tracker, context) {
       expect(state.attempts?.[event.stage.id] ?? 1).toBe(attemptsBefore[event.stage.id] ?? 1);
     }
   }
-  // A capability failure on a non-review stage skips the provably futile
-  // retry and blocks honestly.
+  // A capability failure names missing immutable authority and blocks honestly.
   if (
     event.type === 'RECEIPT_RECORDED' &&
     event.receipt.status !== 'passed' &&
@@ -272,7 +271,7 @@ function checkStepInvariants(state, actions, tracker, context) {
     expect(actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
     const transition = actions.find((entry) => entry.type === 'transition');
     expect(transition?.patch?.status).toBe('blocked');
-    expect(transition?.patch?.block_reason).toMatch(/capability-blocked/);
+    expect(transition?.patch?.block_reason).toMatch(/capability-blocked|capability denial/);
   }
   // A test-contradiction marker is special only for an eligible implementer.
   // Its first claim issues one read-only reconciliation ticket; a repeated

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2.23.52 — 2026-08-28
+
+APE now treats harmless static quoting on `cat` and `ls` operands as command shape rather than new
+authority, while retaining fail-closed parsing for quoted heads, scripts, interpolation, and wider
+shell syntax. Planning admits declared package build scripts without granting them to read-only
+workers; correctable command-shape denials and malformed receipts receive bounded same-agent
+retries, while genuine missing authority still blocks immediately. Run preflight now reports
+incomplete gate commands and visual-verification readiness before dispatch, and a corrupt status
+snapshot renders `CORRUPT` without a misleading progress bar. Version 2.23.52 invalidates the prior
+source certification and starts a fresh release cycle.
+
 ## 2.23.51 — 2026-08-28
 
 Every native stage worker now receives an explicit, shared instruction to single-quote complete

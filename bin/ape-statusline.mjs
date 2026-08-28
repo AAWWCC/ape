@@ -130,6 +130,10 @@ const projectDir = (p) =>
   });
 let activeStateCorrupt = false;
 const readActive = (dir) => {
+  // The renderer is normally one process per refresh, but tests and embedders
+  // may invoke it repeatedly. Corruption belongs to this read, not to a prior
+  // workspace rendered by the same process.
+  activeStateCorrupt = false;
   try {
     const value = JSON.parse(readFileSync(join(dir, '.ape', 'runtime', 'active.json'), 'utf8'));
     const diagnostic = projectRunDiagnostic(value);
@@ -574,6 +578,12 @@ function apeSegments(run) {
     text: `APE ${safeDiagnosticText(run.mode, 32) ?? '?'}/${safeDiagnosticText(run.lane, 32) ?? '?'}`,
     fg: idFg, bg: 'gray',
   };
+  if (activeStateCorrupt) {
+    return [identity, {
+      text: `${G.block ? `${G.block} ` : ''}CORRUPT`,
+      fg: CHARSET === 'nerdfont' ? 'bg' : 'orange', bg: 'orange',
+    }];
+  }
   const color = runColor(run);
   const mark = run.status === 'blocked' ? G.block : run.status === 'completed' ? G.check : '';
   const baseLabel = run.status === 'blocked' ? 'BLOCK'
@@ -844,7 +854,6 @@ function currentMilestoneElapsedMs(run) {
 function runBar(run, medians) {
   const { list, idx } = milestoneIndex(run);
   const total = list.length;
-  if (activeStateCorrupt) return smoothBar(100 / Math.max(1, total), 8, 'orange', 'track');
   // A running bar stays neutral (the palette fg, a soft white) — the strip and
   // the stage box already carry the milestone hue. Status states keep colour
   // as their signal: yellow blocked, green completed, cyan shipping. (Aborted
@@ -893,7 +902,11 @@ function main() {
 
   const trailing = [];
   if (apeProject) trailing.push(diagnosticText(dir, run));
-  if (run && run.status === 'aborted') {
+  if (activeStateCorrupt) {
+    // A corrupt file is diagnostic evidence, not trustworthy run progress.
+    // Keep the explicit CORRUPT box and reset instruction, but render neither
+    // a milestone strip nor a bar whose fill/color would falsely assert state.
+  } else if (run && run.status === 'aborted') {
     // A sealed abort records stage: 'aborted', so nothing here may anchor to a
     // milestone. The strip does not need to: stageStrip's terminal arm derives
     // its marks from milestones(run) — the mode/lane list alone — and paints

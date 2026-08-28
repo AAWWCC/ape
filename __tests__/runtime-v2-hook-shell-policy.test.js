@@ -853,6 +853,27 @@ describe('APE v2 lifecycle shell policy', () => {
       const relocated = hooks.parseEvidenceCommand('cd packages/api && npx vitest run x');
       expect(relocated.cdTarget).toBe('packages/api');
       expect(relocated.tokens).toEqual(['npx', 'vitest', 'run', 'x']);
+
+      expect(hooks.parseEvidenceCommand("cat 'eslint.config.mjs'").tokens)
+        .toEqual(['cat', 'eslint.config.mjs']);
+      expect(hooks.parseEvidenceCommand('ls "docs/hooks.md"').tokens)
+        .toEqual(['ls', 'docs/hooks.md']);
+    });
+
+    it('admits only complete static quoted operands without whitespace for cat and ls', () => {
+      expectAllow("cat 'eslint.config.mjs'");
+      expectAllow('ls "docs/hooks.md"');
+      for (const command of [
+        "'cat' eslint.config.mjs",
+        "cat eslint'.config'.mjs",
+        "cat 'eslint.config.mjs'x",
+        'ls "docs/My Guide"',
+        "cat '$HOME'",
+        "npm 'test'",
+        "npm run 'typecheck'",
+      ]) {
+        expectDeny(command);
+      }
     });
 
     it('dequotes complete single-quoted Next.js dynamic-route path operands', () => {
@@ -970,7 +991,6 @@ describe('APE v2 lifecycle shell policy', () => {
         "cat 'app/trace/[...]/page.tsx'",
         "cat 'app/trace/[traceId]/page.tsx'tail",
         "cat prefix'app/trace/[traceId]/page.tsx'",
-        "cat 'ordinary/path.tsx'",
         "cat 'app/trace/[trace Id]/page.tsx'",
       ]) {
         expectDeny(command);

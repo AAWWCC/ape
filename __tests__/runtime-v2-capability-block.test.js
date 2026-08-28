@@ -1,13 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { reduceRun } from '../lib/runtime/scheduler.js';
 
-// A capability failure (evidence.failure_kind 'capability' — APE policy itself
-// denied a required operation) is a verdict on the environment: the verbatim
-// retry would re-dispatch an identical ticket against an identical gate, so
-// the reducer must skip it and block honestly, while every unmarked failure
-// keeps its one retry, review-group denials wait for group convergence and then
-// block with the same actionable recovery envelope, and the marker is inert on
-// a passed receipt.
+// A capability failure means the immutable ticket lacks required authority, so
+// it blocks honestly. A correctable policy syntax mistake uses command-shape
+// and gets one bounded evidence-backed retry. Review-group capability denials
+// wait for convergence, and the capability marker is inert on a pass.
 
 function run(overrides = {}) {
   return {
@@ -46,13 +43,25 @@ describe('APE v2 capability-blocked failure (reducer)', () => {
       'persist_state',
     ]);
     expect(actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
-    const { patch } = actions[0];
-    expect(patch.status).toBe('blocked');
-    expect(patch.stage).toBe('build');
-    expect(patch.block_reason).toContain('capability-blocked');
-    // The exact denial reason rides along via the attempt-summary diagnostics.
-    expect(patch.block_reason).toBe(`stage build capability-blocked: attempt 1: ${DENIAL}`);
-    expect(actions[1].if_absent).toBe(true);
+    expect(actions[0].patch).toMatchObject({ status: 'blocked', stage: 'build' });
+    expect(actions[0].patch.block_reason).toBe(`stage build capability-blocked: attempt 1: ${DENIAL}`);
+  });
+
+  it('issues one evidence-backed retry for a correctable command-shape denial', () => {
+    const state = run({
+      attempts: { build: 1 },
+      tickets: [{ ticket_id: 't1', stage_id: 'build' }],
+    });
+    const actions = reduceRun(state, {
+      type: 'RECEIPT_RECORDED',
+      ticket: state.tickets[0],
+      receipt: { status: 'failed', evidence: { failure_kind: 'command-shape', summary: DENIAL } },
+      stage: { id: 'build', role: 'implementer', parallel_group: null },
+    });
+    expect(actions.map((entry) => entry.type)).toEqual(['transition', 'issue_ticket', 'persist_state']);
+    expect(actions[0].patch.attempts.build).toBe(2);
+    expect(actions[1].retry_of).toBe('t1');
+    expect(actions[1].prior_attempts).toEqual([`attempt 1: ${DENIAL}`]);
   });
 
   it('still issues the verbatim retry for an unmarked failure', () => {

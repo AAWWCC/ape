@@ -293,6 +293,7 @@ describe('canonical skill sources', () => {
       "`rg --files -g 'AGENTS.md' -g '!**/.git/**' || true`",
     );
     expect(run).toMatch(/Stop instead of[\s\S]*(?:retrying|self-correcting)[\s\S]*inspection[\s\S]*call/iu);
+    expect(run).toMatch(/ape_config[\s\S]*doctor[\s\S]*gate-command and visual-evidence readiness/iu);
   });
 
   it('shares one synchronized run/resume protocol reference', async () => {
@@ -313,5 +314,7 @@ describe('canonical skill sources', () => {
     expect(canonical).toContain('`wait_ms: 300000`');
     expect(canonical).toMatch(/server-side poll/iu);
     expect(canonical).toMatch(/do not sleep inside[\s\S]*`functions\.exec`/iu);
+    expect(canonical).toMatch(/record.*rejects[\s\S]*same physical agent[\s\S]*at most two/iu);
+    expect(canonical).toMatch(/test_commands\.full[\s\S]*verification\.profiles[\s\S]*browser\/Playwright/iu);
   });
 });

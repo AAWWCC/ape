@@ -2,6 +2,19 @@
 
 The parent orchestrator owns every APE control call. It never performs stage work itself.
 
+## Start readiness
+
+Before `ape_run start`, call `ape_config doctor` and `get`. For behavioral work, if
+`test_commands.full` or `test_commands.targeted_template` is unset, call `ape_config init` for a
+repository-grounded proposal. Apply only a complete proposal with operator approval; otherwise
+stop and report the missing slots before any agent dispatch.
+
+When acceptance requires browser or visual inspection, require either a configured
+`verification.profiles` command that records the evidence or an actually callable
+browser/Playwright provider covered by least-privilege `tool_claims`. A doctor warning or provider
+name in prose does not establish availability. If neither exists, stop before start and report the
+concrete configuration requirement.
+
 On Google Antigravity / Gemini, pass the exact open project root as `project_dir` on every APE MCP
 call. The plugin process runs from its installed package directory, so its process working directory
 is never project authority. Use one native `invoke_subagent` call per returned ticket with the exact
@@ -48,8 +61,16 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    `review_contract_version` uses bounded structured findings: advisory entries omit remediation;
    blocking entries declare `production`, `test`, or `both` ownership and exact authorized
    `test_paths` when test-owned. Do not translate these into legacy `evidence.test_remediation`.
+   If `record` rejects the receipt with bounded validation errors or corrections, do not repair it
+   in the parent and do not launch another physical agent. Use the host's native continuation or
+   follow-up primitive for the same physical agent, pass the exact returned errors, and require one
+   complete replacement receipt. Record that replacement unchanged. Allow at most two such
+   correction continuations for one ticket; if continuation is unavailable or the second
+   replacement is still rejected, stop and report the validation block without calling `next`.
    The Codex dispatch's `next_control` states the same handoff compactly: record the returned
-   receipt unchanged, then call `ape_run next` after the returned dispatch group is fully recorded.
+   receipt unchanged; on rejection, continue the same agent with the exact errors and record the
+   replacement unchanged; then call `ape_run next` after the returned dispatch group is fully
+   recorded.
 6. If recording preflight returns `input_required`, obtain complete exact answers for all question
    ids and submit one aimed `answer-preflight` action with the exact hash, a bounded audit `reason`,
    and additive-only `claimed_paths`, `test_paths`, and canonical `risk_triggers`. Do not dispatch a

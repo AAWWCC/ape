@@ -66,8 +66,10 @@ contract requires a schedulable preflight.
   remains in the final group when armed, and all three paths spend one cycle per writer sequence. Versioned
   remediation-test tickets carry `test_scope: "exact"`; lifecycle and receipt/tree validation deny
   sibling writes, while unversioned legacy remediation tickets retain their historical widening.
-- `failure_kind: capability` blocks immediately because the same ticket would face the same policy
-  denial.
+- `failure_kind: command-shape` receives the ordinary single bounded retry, with the exact denial in
+  `prior_attempts` so the replacement can correct syntax without new authority.
+- `failure_kind: capability` means the immutable ticket truly lacks required authority and blocks
+  immediately with exact additive claims and structured successor guidance.
 - `failure_kind: test-contradiction` also blocks immediately. The marker is an implementer claim,
   not a runtime finding. Recovery is the normal audited path: ABORT the run or OVERRIDE reset with
   a reason, then correct the work outside that blocked run. For a worked blocked-run instance, see
