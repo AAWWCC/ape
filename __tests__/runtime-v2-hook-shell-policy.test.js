@@ -950,7 +950,7 @@ describe('APE v2 lifecycle shell policy', () => {
         "cat 'app/docs/[[...parts]]/page.tsx'",
         "git diff -- 'app/trace/[traceId]/page.tsx'",
         "sha256sum 'app/trace/[traceId]/page.tsx'",
-        // The exact shape that blocked run-20260828192205807-7c62490a,
+        // The exact shape that blocked a real Next.js dynamic-route inspection,
         // corrected only by quoting the one dynamic-route operand.
         "cat app/page.tsx components/landing.tsx 'app/trace/[traceId]/page.tsx' components/trace/trace-progress.tsx",
       ]) {
