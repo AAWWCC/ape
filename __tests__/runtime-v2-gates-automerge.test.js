@@ -588,6 +588,57 @@ describe('autoMergeGithub', () => {
       expect(gitCalls).not.toContainEqual(['switch', 'main']);
     });
 
+    it('reconciles a merge-command race when GitHub merged the exact pushed head before reporting not mergeable', async () => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.tracked = 'src/kept.js\0';
+      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.view = [
+        { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
+        { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` },
+      ];
+      ghResponses.merge = {
+        code: 1,
+        output: 'GraphQL: Pull Request is not mergeable (mergePullRequest)\n',
+      };
+
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+
+      expect(result.failed).toBeUndefined();
+      expect(result.pending).toBeUndefined();
+      expect(result.merged).toMatchObject({
+        url: WATCH_PR,
+        branch: 'feat/thing',
+        base: 'main',
+        merged_at: '2026-07-09T12:00:00Z',
+        provenance: 'observed-after-merge-command',
+      });
+      expect(ghCalls.filter((call) => call[2] === 'view')).toHaveLength(2);
+      expect(ghCalls.filter((call) => call[2] === 'merge')).toHaveLength(1);
+      expect(gitCalls).toContainEqual(['switch', 'main']);
+    });
+
+    it('does not reconcile a merge-command race when GitHub merged a different head', async () => {
+      const dir = await project(['src/kept.js']);
+      const driftedHead = 'd'.repeat(40);
+      ghResponses.tracked = 'src/kept.js\0';
+      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.view = [
+        { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
+        { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${driftedHead}\n` },
+      ];
+      ghResponses.merge = {
+        code: 1,
+        output: 'GraphQL: Pull Request is not mergeable (mergePullRequest)\n',
+      };
+
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+
+      expect(result.merged).toBeUndefined();
+      expect(result.pending).toBeUndefined();
+      expect(result.failed).toMatch(/drifted head.*not the pushed commit/);
+      expect(gitCalls).not.toContainEqual(['switch', 'main']);
+    });
+
     it('an already-MERGED probe at the pushed head completes idempotently with observed/external provenance and never re-merges (A2)', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';

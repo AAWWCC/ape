@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.23.2 — 2026-08-27
+
+Fixed protected GitHub auto-merge reconciliation when a pull request transitions from open to
+merged between APE's state probe and merge command. APE now re-probes a failed merge command and
+truthfully completes only when GitHub merged the exact run-attested head.
+
 ## 2.23.1 — 2026-08-27
 
 Corrected the plugin cache identity after packaged Codex and Claude plugin contents changed during
