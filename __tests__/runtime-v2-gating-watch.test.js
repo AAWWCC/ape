@@ -1058,6 +1058,9 @@ describe('APE v2 gating watch — non-blocking, resumable local merge gates', ()
     expect(result.ok).toBe(true);
     expect(result.run.status).toBe('gating');
     expect(pollGateSuite.mock.calls.length).toBe(1);
+    const pending = result.actions.find((action) => action.type === 'gating_pending');
+    expect(pending.hint).toContain('wait_ms: 300000');
+    expect(pending.hint).toMatch(/server-side/iu);
   });
 
   it('the wait_ms loop floors each sleep so a sustained-pending gate polls a bounded, multiple number of times (GATE_NEXT_POLL_FLOOR_MS — red anchor)', async () => {

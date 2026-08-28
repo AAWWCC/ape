@@ -433,6 +433,8 @@ describe('route (c): shipping_watch.last_checks_summary — CLOSE at the assignm
       expect(pending.summary).not.toContain(ESC);
       expect(pending.summary).toContain('CI tail');
       expect(pending.summary).toContain('still running');
+      expect(pending.hint).toContain('wait_ms: 300000');
+      expect(pending.hint).toMatch(/server-side/iu);
 
       const status = await statusRun(dir);
       expect(status.run.shipping_watch.last_checks_summary).not.toContain(ESC);

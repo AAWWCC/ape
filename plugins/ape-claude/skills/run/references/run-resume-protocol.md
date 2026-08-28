@@ -55,9 +55,13 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    and additive-only `claimed_paths`, `test_paths`, and canonical `risk_triggers`. Do not dispatch a
    writer while the hold remains.
 7. After all receipts in the returned group are recorded, call `ape_run next` and repeat until the
-runtime reports `completed` or `blocked`. Poll `next` while a shipping run reports pending remote
-checks. Remediation routes are scheduler-owned and serialized: production, test, and mixed/both
-findings select build; test then review; or test then build then review respectively.
+runtime reports `completed` or `blocked`. When it reports `gating_pending` or `shipping_pending`,
+make the next call with `wait_ms: 300000` so APE performs bounded server-side polling with progress
+heartbeats. On Codex, do not sleep inside a `functions.exec` wrapper before the APE call: starting an
+MCP call at the wrapper's yield boundary can expose a host transport retry. If a gating wait returns
+`shipping_started`, make a new `next` call with `wait_ms: 300000` for shipping. Remediation routes
+are scheduler-owned and serialized: production, test, and mixed/both findings select build; test
+then review; or test then build then review respectively.
 
 When a blocked run retains a dirty APE branch and the user explicitly asks APE to keep going, start
 one successor with `supersedes_run` set to the exact blocked run id and the same or additive claims.

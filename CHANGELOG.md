@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.23.46 — 2026-08-28
+
+The first 2.23.45 protected-land attempt exposed a Codex orchestration boundary: the shipped run
+protocol told the parent to delay before each shipping poll, so the MCP call began at the
+`functions.exec` wrapper's yield boundary and the host surfaced a transport failure before
+reissuing it. Pending gate and shipping guidance now uses APE's existing bounded `wait_ms`
+server-side poll loop with progress heartbeats and explicitly forbids sleeping inside the host
+wrapper before the call. Regression coverage pins the shared run protocol and both pending response
+paths. Version 2.23.46 restarts every source gate and live pipeline from fresh public source.
+
 ## 2.23.45 — 2026-08-28
 
 The protected-land repeatability run exposed a post-merge checkout bug: GitHub's squash commit and

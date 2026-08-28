@@ -297,5 +297,8 @@ describe('canonical skill sources', () => {
     expect(canonical).toMatch(/control-call top level[\s\S]*only `action`, `project_dir`, and[\s\S]*`receipt`/u);
     expect(canonical).toMatch(/never send `run_id` on a record call/u);
     expect(canonical).toContain('`ape_run next`');
+    expect(canonical).toContain('`wait_ms: 300000`');
+    expect(canonical).toMatch(/server-side poll/iu);
+    expect(canonical).toMatch(/do not sleep inside[\s\S]*`functions\.exec`/iu);
   });
 });
