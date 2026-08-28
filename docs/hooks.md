@@ -110,7 +110,8 @@ Recognized command families:
   wrappers, `tox`, `go test`, and `cargo test`;
 - read-only git (`status`, `diff`, `log`, `show`, `rev-parse`, listing-only `branch`, `describe`,
   `ls-files`, `ls-tree`), with output-writing flags denied;
-- `ls`, `pwd`, `cat`, `echo`, `true`, `which`, and bare `env`;
+- `ls`, `pwd`, `cat`, `echo`, `true`, `which`, exact-head `sha256sum`/`shasum` checksum evidence,
+  and bare `env`;
 - check-only Ruff, Flake8, Mypy, Pylint, Black, Isort, ESLint, and Prettier forms; and
 - at most one leading `cd <dir> &&`.
 

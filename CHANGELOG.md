@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 2.23.16 — 2026-08-28
+
+Aligned the test-evidence contract with the shell policy exposed by the first 2.23.12 fast-lane
+cycle. Bound workers may now use exact-head `sha256sum` and macOS `shasum` commands with the existing
+project-containment, command-shape, and executable-identity guards. The trusted Codex context and
+test-writer prompt also make `output_hash` explicitly optional and forbid shell composition or a
+standalone checksum probe merely to synthesize it.
+
+The first 2.23.13 source gate rejected an overlong test-writer prompt before publication, and the
+first 2.23.14 GitHub check set exposed a silent Windows dependency-install failure before package
+tests began. Automated lockfile installs now disable dependency lifecycle scripts and incidental
+audit/funding calls; the workflows retain their explicit bundle, smoke, and high-severity audit
+gates. The first 2.23.15 local package check correctly rejected a candidate whose versioned plugin
+packages had not yet been regenerated. This release keeps the worker contract within the enforced
+prompt-size bound and regenerates all package surfaces before gating.
+
 ## 2.23.12 — 2026-08-28
 
 Admitted `git ls-tree` as a recognized read-only evidence command for bound workers while retaining

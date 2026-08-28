@@ -21,6 +21,8 @@ describe('APE v2 test-writer red satisfiability contract', () => {
     for (const evidence of ['command', 'tree SHA', 'exit code', 'repetition count', 'red result', 'green result', 'output hash', 'gate']) {
       expect(prompt).toContain(evidence);
     }
+    expect(prompt).toMatch(/optional output hash/i);
+    expect(prompt).toMatch(/never pipe, redirect, or run a standalone checksum probe/i);
     expect(prompt).toMatch(/identical command alternates fail\/pass[\s\S]*nondeterministic[\s\S]*rewrite/i);
   });
 

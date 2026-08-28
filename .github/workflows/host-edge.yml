@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: node
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run compatibility:check
       - name: Install current host CLIs in this unprivileged job
         run: npm install --global @openai/codex@latest @anthropic-ai/claude-code@latest

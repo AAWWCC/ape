@@ -403,6 +403,22 @@ describe('APE v2 lifecycle shell policy', () => {
     }
   });
 
+  it('allows portable exact-head SHA-256 evidence, including the denied live command', () => {
+    for (const command of [
+      'sha256sum',
+      'sha256sum test/is-even-2312-1.test.js',
+      'shasum -a 256 test/is-even-2312-1.test.js',
+    ]) {
+      const result = evaluateLifecyclePolicy(boundSubagent(command), { state, ticket: buildTicket });
+      expect(result.decision, command).toBe('allow');
+    }
+
+    for (const command of ['sha256sum-pwn', 'shasum-pwn']) {
+      const result = evaluateLifecyclePolicy(boundSubagent(command), { state, ticket: buildTicket });
+      expect(result.decision, command).toBe('deny');
+    }
+  });
+
   it('denies main-session no-space redirects, inline interpreters, and dd of=', () => {
     // The main-session gate is a BLOCKLIST (defense in depth, not a sandbox;
     // see docs/hooks.md): these are the enumerated write channels the
@@ -921,7 +937,7 @@ describe('APE v2 lifecycle shell policy', () => {
       }
       for (const required of [
         'npm', 'pnpm', 'yarn', 'bun', 'npx', 'node', 'git', 'cargo', 'go',
-        'pytest', 'ls', 'cat', 'eslint', 'ruff',
+        'pytest', 'ls', 'cat', 'sha256sum', 'shasum', 'eslint', 'ruff',
       ]) {
         expect(names, `head table must name ${required}`).toContain(required);
       }

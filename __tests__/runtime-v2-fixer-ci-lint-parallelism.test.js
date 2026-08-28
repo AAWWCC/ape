@@ -87,6 +87,21 @@ describe('public cross-platform CI and release contract', () => {
     expect(packageSmoke).toContain("APE_PUBLIC_REQUIRE_FORBIDDEN_HASHES: '1'");
   });
 
+  it('keeps automated lockfile installs free of lifecycle and incidental network side effects', async () => {
+    for (const workflow of [
+      '.github/workflows/ci.yml',
+      '.github/workflows/host-edge.yml',
+      '.github/workflows/release.yml',
+    ]) {
+      const yaml = await read(workflow);
+      const installs = yaml.split(/\r?\n/u).filter((line) => /- run: npm ci(?:\s|$)/u.test(line));
+      expect(installs.length, workflow).toBeGreaterThan(0);
+      for (const line of installs) {
+        expect(line, workflow).toContain('npm ci --ignore-scripts --no-audit --no-fund');
+      }
+    }
+  });
+
   it('keeps audit and both credential-free release gates while the full-suite aggregate depends on every partition', async () => {
     const yaml = await read('.github/workflows/ci.yml');
     const full = jobBlock(yaml, 'full-suite');

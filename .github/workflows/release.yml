@@ -36,7 +36,7 @@ jobs:
         run: |
           test "$(node --version)" = "v24.15.0"
           test "$(npm --version)" = "11.12.1"
-      - run: npm ci
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run compatibility:check
       - name: Verify release identity
         shell: bash
@@ -115,7 +115,7 @@ jobs:
           test "$(node --version)" = "v24.15.0"
           test "$(npm --version)" = "11.12.1"
           test "$(gh --version | head -n 1)" = "gh version ${GH_CLI_VERSION} (2025-07-30)"
-      - run: npm ci
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify release identity
         shell: bash
         run: |

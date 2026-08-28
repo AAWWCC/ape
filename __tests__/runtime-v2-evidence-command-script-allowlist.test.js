@@ -1204,6 +1204,7 @@ describe('APE v2 evidence-command run-script allowlist (two-tier, role-aware)', 
       // deny-reason arm of the sibling shell-policy suite.
       expect(EVIDENCE_COMMAND_FAMILIES).toContain('read-only git');
       expect(EVIDENCE_COMMAND_FAMILIES).toContain('cargo test');
+      expect(EVIDENCE_COMMAND_FAMILIES).toContain('sha256sum|shasum');
       expect(EVIDENCE_COMMAND_FAMILIES).toContain('policy.evidence_scripts');
       expect(EVIDENCE_COMMAND_FAMILIES).toMatch(/writable/i);
     });

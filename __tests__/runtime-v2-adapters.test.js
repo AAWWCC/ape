@@ -177,6 +177,9 @@ describe('APE v2 adapter conformance', () => {
     expect(injected).toContain('APE trusted SubagentStart context (authoritative)');
     expect(injected).toContain('Shell inspection permits only ls, cat, pwd, which, and these read-only git verbs:');
     expect(injected).toContain('ls-files, and ls-tree.');
+    expect(injected).toContain('exact sha256sum and shasum command heads');
+    expect(injected).toContain('optional output_hash, omit it');
+    expect(injected).toContain('never pipe, redirect, or run a standalone checksum probe');
     expect(injected).toContain('never run git rev-parse HEAD^{tree}; braces are denied');
     expect(injected).toContain('The ticket already supplies base_tree_sha and the runtime recomputes tree hashes.');
     expect(injected).toContain('If commit evidence is needed, use git rev-parse HEAD.');
