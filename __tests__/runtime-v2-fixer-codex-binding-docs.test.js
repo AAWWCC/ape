@@ -21,6 +21,7 @@ describe('APE v2 Codex ticket-binding docs', () => {
       /ape_run probe[\s\S]*host: "codex"[\s\S]*explicit_invocation: true[\s\S]*hooks_trusted: true[\s\S]*subagents_available: true/i,
     );
     expect(protocol).toMatch(/mandatory on the probe call itself[\s\S]*do not make a partial probe call and retry/i);
+    expect(protocol).toMatch(/action `status` with only `action` and `project_dir`[\s\S]*never send `run_id` on status[\s\S]*active-bound/i);
     expect(protocol).toMatch(/receipt_capability[\s\S]*action: "record"/i);
   });
 

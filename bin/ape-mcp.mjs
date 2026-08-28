@@ -72,7 +72,7 @@ const TOOLS = Object.freeze([
         action: {
           type: 'string',
           enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'],
-          description: 'For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true.',
+          description: 'For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
         },
         project_dir: {
           type: 'string',
@@ -330,7 +330,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.23.6' };
+    return { name: 'ape', version: '2.23.7' };
   }
 }
 

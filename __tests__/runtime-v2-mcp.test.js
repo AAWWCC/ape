@@ -123,6 +123,7 @@ describe('APE v2 MCP public surface', () => {
     expect(run.inputSchema.properties.probe_capability).toMatchObject({ type: 'string' });
     expect(run.description).toMatch(/first call must include[\s\S]*explicit_invocation: true[\s\S]*hooks_trusted: true[\s\S]*subagents_available: true/i);
     expect(run.inputSchema.properties.action.description).toMatch(/initial call[\s\S]*explicit_invocation: true[\s\S]*hooks_trusted: true[\s\S]*subagents_available: true/i);
+    expect(run.inputSchema.properties.action.description).toMatch(/action status[\s\S]*only action and project_dir[\s\S]*never send run_id/i);
     for (const field of ['explicit_invocation', 'hooks_trusted', 'subagents_available']) {
       expect(run.inputSchema.properties[field].description).toMatch(/initial Codex probe call/i);
     }

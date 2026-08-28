@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.23.7 — 2026-08-27
+
+Made post-spawn Codex binding confirmation machine-copyable. Both the shared run protocol and every
+returned dispatch now require `ape_run status` with only `action` and `project_dir`, explicitly
+forbid `run_id` on status, and direct the caller to wait only after the dispatch is `active-bound`.
+This removes the invalid status-call self-correction exposed by the first 2.23.6 mechanical canary.
+
 ## 2.23.6 — 2026-08-27
 
 Aligned the hook-injected Codex worker guidance with APE's positive shell-character policy. Workers

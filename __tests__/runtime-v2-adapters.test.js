@@ -193,7 +193,7 @@ describe('APE v2 adapter conformance', () => {
     expect(codex.spawn_args.message).not.toContain(ticket.ticket_id);
     expect(codex.next_control).toBe(CODEX_DISPATCH_NEXT_CONTROL);
     expect(codex.next_control).toBe(
-      'Record each returned receipt unchanged with ape_run action "record"; after the group is fully recorded, call ape_run action "next".',
+      'After native spawn returns, call ape_run action "status" with only action and project_dir; never send run_id on status. When the dispatch is active-bound, wait for its original receipt. Record each returned receipt unchanged with ape_run action "record"; after the group is fully recorded, call ape_run action "next".',
     );
 
     // Compatibility and diagnostics stay available, but no installed-package

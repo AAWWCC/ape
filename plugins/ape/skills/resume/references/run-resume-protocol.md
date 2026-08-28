@@ -34,10 +34,12 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    `dispatch.model` object into the native `model` string argument. On Claude, use the returned
    plugin agent wrapper, which loads the same prompt files, and append the ticket. On Antigravity,
    compose its prompt from the complete common prompt, complete role prompt, and immutable ticket.
-4. Launch distinct tickets as returned. On Codex and Antigravity, finish each spawn call and confirm
-   its dispatch is bound before launching the next; bound agents may then run concurrently. Never launch two
-   physical agents for one ticket. Wait through the host's native primitive; do not poll unchanged
-   status.
+4. Launch distinct tickets as returned. On Codex, after each native spawn returns, call `ape_run`
+   action `status` with only `action` and `project_dir`; never send `run_id` on status. Confirm that
+   dispatch is `active-bound` before launching the next. On Antigravity, likewise finish each spawn
+   and confirm binding before the next launch. Bound agents may then run concurrently. Never launch
+   two physical agents for one ticket. Wait through the host's native primitive; do not poll
+   unchanged status.
 5. Require exactly one receipt JSON matching the ticket's `output_schema`, including the exact
    injected `receipt_capability`. Call `ape_run` with `action: "record"` and place that complete
    receipt inside `receipt`. At the control-call top level send only `action`, `project_dir`, and
