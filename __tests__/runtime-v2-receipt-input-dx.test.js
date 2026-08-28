@@ -289,6 +289,26 @@ describe('shipped output_schema stays in sync with zod', () => {
     expect(zodField.safeParse(hex40).success).toBe(false);
   });
 
+  it('documents capability required_claims as the exact additive object the runtime accepts', () => {
+    const field = RECEIPT_INPUT_SCHEMA.properties.evidence.properties.required_claims;
+    expect(field.type).toBe('object');
+    expect(field.additionalProperties).toBe(false);
+    expect(Object.keys(field.properties).sort()).toEqual([
+      'claimed_paths', 'required_role', 'test_paths', 'tool_claims',
+    ]);
+    for (const key of ['claimed_paths', 'test_paths', 'tool_claims']) {
+      expect(field.properties[key]).toMatchObject({
+        type: 'array',
+        maxItems: 64,
+        items: { type: 'string', minLength: 1, maxLength: 512 },
+      });
+    }
+    expect(field.properties.required_role).toMatchObject({
+      type: 'string', minLength: 1, maxLength: 64,
+    });
+    expect(field.description).toMatch(/object, never an array/iu);
+  });
+
   it('ships the full contract on issued stages by identity', () => {
     expect(initialStages({ mode: 'phase', lane: 'fast' })[0].output_schema).toBe(RECEIPT_INPUT_SCHEMA);
   });

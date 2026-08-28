@@ -36,9 +36,9 @@ This is the only sanctioned `.ape/` read; every `.ape/` write remains forbidden.
 - Do not commit, push, merge, weaken tests, or bypass a required check.
 - Treat launch nonces and receipt capabilities as secrets. Return an injected
   `receipt_capability` unchanged; never invent one.
-- If policy denies required work, return `failed`, set `evidence.failure_kind` to `capability`, copy
-  the exact denial into `evidence.summary`, and list only missing authorization in
-  `required_claims`; never repeat existing claims.
+- Required policy denial: return `failed`; set `evidence.failure_kind: "capability"` and exact
+  `evidence.summary`. `evidence.required_claims` is an object, never an array, with additive
+  `claimed_paths`, `test_paths`, `tool_claims`, and/or `required_role`; omit others.
 - Inspect with read/search tools. Run one recognized non-mutating command per shell call;
   never chain, pipe, redirect, substitute, or use inline interpreters.
 

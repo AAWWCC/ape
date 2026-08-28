@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 2.23.47 — 2026-08-28
+
+The first 2.23.46 full certification cycle exposed two host-contract defects and rejected that
+candidate. Codex's exec wrapper can render an argv vector as adjacent JSON-quoted tokens, so valid
+read-only review commands were refused by the shell policy's positive alphabet. The lifecycle
+boundary now canonicalizes only that complete, unambiguous spelling; mixed, malformed,
+whitespace-bearing, and metacharacter-bearing forms still fail closed. The same cycle showed that
+the shipped receipt output schema omitted the runtime's `evidence.required_claims` object shape,
+allowing a capability receipt to return an array. The exact additive object is now in the schema and
+common prompt. Version 2.23.47 restarts every source gate and live pipeline from fresh public
+source.
+
 ## 2.23.46 — 2026-08-28
 
 The first 2.23.45 protected-land attempt exposed a Codex orchestration boundary: the shipped run

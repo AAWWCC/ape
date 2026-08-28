@@ -55,6 +55,56 @@ describe('APE v2 lifecycle shell policy', () => {
     command,
   });
 
+  it('accepts the fully JSON-quoted argv spelling emitted by Codex exec wrappers', () => {
+    const cases = [
+      ['"git" "status" "--short"', 'git status --short'],
+      ['"git" "diff" "--stat"', 'git diff --stat'],
+      [
+        '"git" "diff" "--" "src/value.js" "__tests__/value.test.js"',
+        'git diff -- src/value.js __tests__/value.test.js',
+      ],
+      ['"cat" "package.json"', 'cat package.json'],
+    ];
+    for (const [wireCommand, canonicalCommand] of cases) {
+      const event = hooks.normalizeLifecycleEvent({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'run_command',
+        agent_id: 'reviewer-1',
+        tool_input: { command: wireCommand },
+      }, {});
+      expect(event.command, wireCommand).toBe(canonicalCommand);
+      const result = evaluateLifecyclePolicy(
+        { ...event, ape_managed: true },
+        { state, ticket: buildTicket },
+      );
+      expect(result.decision, wireCommand).toBe('allow');
+    }
+  });
+
+  it('fails closed for quoted argv that is mixed, malformed, escaped, or unsafe', () => {
+    for (const command of [
+      '"git" "diff" -- src/value.js',
+      '"git" "diff" "--" "src/value file.js"',
+      '"git" "diff" ";" "src/value.js"',
+      '"cat" "$(node evil.js)"',
+      '"\\u0067it" "status" "--short"',
+      '"git" "status" "--\\u0073hort"',
+      '"git" "status" "--short" trailing',
+    ]) {
+      const event = hooks.normalizeLifecycleEvent({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'run_command',
+        agent_id: 'reviewer-1',
+        tool_input: { command },
+      }, {});
+      const result = evaluateLifecyclePolicy(
+        { ...event, ape_managed: true },
+        { state, ticket: buildTicket },
+      );
+      expect(result.decision, command).toBe('deny');
+    }
+  });
+
   it('allows a bound test-writer to run its narrow test command', () => {
     const result = evaluateLifecyclePolicy(
       boundSubagent('npx vitest run runtime-v2-statusline'),
