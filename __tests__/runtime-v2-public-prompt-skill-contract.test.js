@@ -69,6 +69,15 @@ describe('public prompt contracts', () => {
     }
   });
 
+  it('teaches every stage to quote Next.js dynamic-route paths before shell inspection', async () => {
+    const common = await read('prompts', 'common.md');
+    expect(common).toContain("cat 'app/[id]/page.tsx'");
+    expect(common).toMatch(/Single-quote each Next\.js bracketed route operand/iu);
+    expect(common).toContain('`[name]`');
+    expect(common).toContain('`[...name]`');
+    expect(common).toContain('`[[...name]]`');
+  });
+
   it('keeps eleven Claude wrappers thin and common-before-role', async () => {
     const agentFiles = (await readdir(path.join(ROOT, 'agents'))).filter((name) => name.endsWith('.md')).sort();
     expect(agentFiles).toEqual(ROLES.map((role) => `${role.replaceAll('_', '-')}.md`).sort());

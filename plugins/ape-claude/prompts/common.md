@@ -39,8 +39,8 @@ This is the only sanctioned `.ape/` read; every `.ape/` write remains forbidden.
 - Required policy denial: return `failed`; set `evidence.failure_kind: "capability"` and exact
   `evidence.summary`. `evidence.required_claims` is an object, never an array, with additive
   `claimed_paths`, `test_paths`, `tool_claims`, and/or `required_role`; omit others.
-- Inspect with read/search tools. Run one recognized non-mutating command per shell call;
-  never chain, pipe, redirect, substitute, or use inline interpreters.
+- Inspect with read/search tools. Single-quote each Next.js bracketed route operand (`[name]`,
+  `[...name]`, `[[...name]]`), e.g. `cat 'app/[id]/page.tsx'`; use one non-mutating command only.
 
 ## Materiality
 

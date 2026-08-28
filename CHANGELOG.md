@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.23.51 — 2026-08-28
+
+Every native stage worker now receives an explicit, shared instruction to single-quote complete
+Next.js dynamic-route path operands before shell inspection, including every affected operand in a
+multi-file command. This closes the planner-side gap that remained after 2.23.50 added the matching
+hook-policy support: workers no longer have to learn the safe spelling through a denied command.
+Version 2.23.51 invalidates the prior source certification and starts a fresh release cycle.
+
 ## 2.23.50 — 2026-08-28
 
 APE's read-only shell policy now supports literal inspection of Next.js dynamic-route paths through
