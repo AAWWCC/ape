@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -185,6 +185,39 @@ describe('Codex freeform apply_patch hook authorization', () => {
     const { dir, ticket } = await boundProject();
     const response = await runHook(lifecycleCall(dir, ticket, multiFilePatch), dir);
     expect(decision(response)).toBe('allow');
+  });
+
+  it('allows a claimed new absolute path through an alias of the governed root', async () => {
+    const { dir, ticket } = await boundProject();
+    const aliasParent = await mkdtemp(path.join(tmpdir(), 'ape-codex-patch-alias-'));
+    cleanups.push(aliasParent);
+    const aliasRoot = path.join(aliasParent, 'project-link');
+    await symlink(dir, aliasRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    const target = path.join(aliasRoot, 'src', 'new-through-alias.js');
+    const patch = `*** Begin Patch
+*** Add File: ${target}
++export const throughAlias = true;
+*** End Patch`;
+
+    const response = await runHook(lifecycleCall(dir, ticket, patch), dir);
+    expect(decision(response)).toBe('allow');
+  });
+
+  it('still applies ticket claims to a new absolute path through a root alias', async () => {
+    const { dir, ticket } = await boundProject();
+    const aliasParent = await mkdtemp(path.join(tmpdir(), 'ape-codex-patch-alias-'));
+    cleanups.push(aliasParent);
+    const aliasRoot = path.join(aliasParent, 'project-link');
+    await symlink(dir, aliasRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    const target = path.join(aliasRoot, 'docs', 'outside-claim.md');
+    const patch = `*** Begin Patch
+*** Add File: ${target}
++outside claim
+*** End Patch`;
+
+    const response = await runHook(lifecycleCall(dir, ticket, patch), dir);
+    expect(decision(response)).toBe('deny');
+    expect(denyReason(response)).toMatch(/outside the ticket claims/);
   });
 
   it.each(['PostToolUse', 'PostToolUseFailure'])(

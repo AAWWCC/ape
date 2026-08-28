@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.23.11 — 2026-08-28
+
+Canonicalized alternate filesystem spellings before authorizing a host edit target. A claimed new
+file addressed through an alias of the governed root, including macOS `/tmp` and `/private/tmp`,
+now reaches the existing realpath-grade ticket-claim check instead of being rejected as a missing
+target. Unclaimed and genuinely out-of-project paths remain denied.
+
 ## 2.23.10 — 2026-08-27
 
 Made the live-certification preflight execute correctly through filesystem path aliases such as
