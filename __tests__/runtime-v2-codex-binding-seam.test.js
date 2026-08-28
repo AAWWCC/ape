@@ -386,6 +386,9 @@ describe('APE v2 native Codex dispatch handshake', () => {
     expect(start.hookSpecificOutput?.additionalContext).toContain(
       'APE trusted SubagentStart context (authoritative)',
     );
+    expect(start.hookSpecificOutput?.additionalContext).toContain(
+      'Never invoke rg, grep, sed, find, awk',
+    );
     expect(start.hookSpecificOutput?.additionalContext).toContain('APE common contract');
     expect(start.hookSpecificOutput?.additionalContext).toContain('APE implementer contract');
     expect(start.hookSpecificOutput?.additionalContext).toContain('Immutable StageTicket reference');

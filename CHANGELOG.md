@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.23.4 — 2026-08-27
+
+Made the hook-injected Codex worker bootstrap state the executable inspection-command boundary
+before the common contract: use native reads or `ls`, `cat`, `pwd`, `which`, and read-only `git`;
+never probe with unsupported shell tools such as `rg`, `grep`, `sed`, `find`, or `awk`. This removes
+the first bound-worker denial observed by the 2.23.3 mechanical canary.
+
 ## 2.23.3 — 2026-08-27
 
 Made Codex dispatch deterministic at the trusted lifecycle boundary. Native launch messages are now

@@ -175,6 +175,10 @@ describe('APE v2 adapter conformance', () => {
       message: CODEX_DISPATCH_BOOTSTRAP_MESSAGE,
     });
     expect(injected).toContain('APE trusted SubagentStart context (authoritative)');
+    expect(injected).toContain('Shell inspection permits only ls, cat, pwd, which, and read-only git.');
+    expect(injected).toContain('Never invoke rg, grep, sed, find, awk');
+    expect(injected.indexOf('Never invoke rg, grep, sed, find, awk'))
+      .toBeLessThan(injected.indexOf('APE common contract'));
     expect(injected).toContain('APE common contract');
     expect(injected).toContain('APE implementer contract');
     expect(injected).toContain('Immutable StageTicket reference');
