@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2.23.50 — 2026-08-28
+
+APE's read-only shell policy now supports literal inspection of Next.js dynamic-route paths through
+one shell-equivalent form: a complete single-quoted path operand containing `[name]`, `[...name]`,
+or `[[...name]]` route segments. The parser removes the exact outer quote pair before operand
+containment and executable checks. Unquoted brackets remain denied as glob syntax, and malformed,
+partial, double-quoted, embedded-quote, whitespace-bearing, and ordinary quoted forms still fail
+closed. Regression coverage includes the exact TRACE//OS inspection command that exposed the bug
+and the real hook binary. Version 2.23.50 invalidates the prior source certification and starts a
+fresh release cycle.
+
 ## 2.23.49 — 2026-08-28
 
 The first 2.23.48 full certification attempt exposed a missing read-only evidence spelling. An

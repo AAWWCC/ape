@@ -127,8 +127,8 @@ writable ticket, and write/execute effects trigger tree reconciliation.
 
 ### Token and character rules
 
-Admission is tokenize-then-allowlist. The command is de-quoted, parsed into tokens, checked against
-one recognized family, and then checked for containment and executable identity. Chaining,
+Admission is tokenize-then-allowlist. The command is parsed into tokens, checked against one
+recognized family, and then checked for containment and executable identity. Chaining,
 substitution, redirects, inline interpreters, control characters, and ambiguous tokenization fail
 closed.
 
@@ -143,6 +143,12 @@ or `^` at token start; `~` and `=` are also refused immediately after `=` or `:`
 equals expansion such as `=node` under the named assumptions and narrows `MAGIC_EQUAL_SUBST`
 exposure. A `cd` target additionally refuses `~` and `^` anywhere and a leading `-` or `+`; a name
 can still be reached as `./-build` or `./+build`.
+
+Next.js dynamic-route paths are the one narrow quote exception. A complete single-quoted operand
+whose bracket-bearing segments are `[name]`, `[...name]`, or `[[...name]]` is de-quoted before the
+same containment checks; for example, `cat 'app/trace/[traceId]/page.tsx'`. Unquoted brackets remain
+refused because zsh treats them as glob syntax. Double quotes, partial bracket segments, ordinary
+quoted paths, embedded quotes, and spaces inside the quoted token remain refused.
 
 Deletion is stricter: every target refuses `~`, `=`, and `^` in every position. The retired
 `DELETION_UNSAFE_CHARS` argument was monotone only for truncation; it did not cover substitution,

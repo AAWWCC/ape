@@ -1278,6 +1278,8 @@ describe('APE v2 evidence-command run-script allowlist (two-tier, role-aware)', 
       // path (invariant 6) and a regression against behavior verified live.
       expect(EVIDENCE_COMMAND_FAMILIES).toMatch(/allowlist/i);
       expect(EVIDENCE_COMMAND_FAMILIES).toMatch(/non-ASCII/i);
+      expect(EVIDENCE_COMMAND_FAMILIES).toContain("cat 'app/trace/[traceId]/page.tsx'");
+      expect(EVIDENCE_COMMAND_FAMILIES).toMatch(/unquoted brackets[^;]+refused/i);
 
       // (4) THE POSITIONAL REFUSALS, which are the whole security content: the
       // alphabet says which characters may appear, and the positions say where
@@ -1427,7 +1429,9 @@ function hookProject() {
   mkdirSync(path.join(dir, '.ape', 'runtime'), { recursive: true });
   mkdirSync(path.join(dir, '__tests__'), { recursive: true });
   mkdirSync(path.join(dir, 'sub'), { recursive: true });
+  mkdirSync(path.join(dir, 'app', 'trace', '[traceId]'), { recursive: true });
   writeFileSync(path.join(dir, '__tests__', 'x.test.mjs'), '// fixture\n', 'utf8');
+  writeFileSync(path.join(dir, 'app', 'trace', '[traceId]', 'page.tsx'), '// route fixture\n', 'utf8');
   writeFileSync(path.join(dir, 'package.json'), '{"name":"fixture"}\n', 'utf8');
   writeFileSync(
     path.join(dir, '.ape', 'runtime', 'active.json'),
@@ -1506,6 +1510,20 @@ describe('APE v2 hook binary evidence containment (cwd + operand precompute)', (
       const response = await invokeHook(boundBashCall(dir, command, dir), dir);
       expect(response.hookSpecificOutput.permissionDecision, command).toBe('allow');
     }
+  });
+
+  it('ALLOWS a single-quoted Next.js dynamic-route path end to end', async () => {
+    const dir = hookProject();
+    const command = "cat 'app/trace/[traceId]/page.tsx'";
+    const response = await invokeHook(boundBashCall(dir, command, dir), dir);
+    expect(response.hookSpecificOutput.permissionDecision).toBe('allow');
+  });
+
+  it('DENIES the same dynamic-route path when unquoted glob syntax reaches the hook', async () => {
+    const dir = hookProject();
+    const command = 'cat app/trace/[traceId]/page.tsx';
+    const response = await invokeHook(boundBashCall(dir, command, dir), dir);
+    expect(response.hookSpecificOutput.permissionDecision).toBe('deny');
   });
 
   it('ALLOWS the exact live reviewer `/dev/null` comparison through the async hook precompute', async () => {

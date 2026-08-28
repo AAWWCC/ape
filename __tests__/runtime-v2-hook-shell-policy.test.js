@@ -855,6 +855,29 @@ describe('APE v2 lifecycle shell policy', () => {
       expect(relocated.tokens).toEqual(['npx', 'vitest', 'run', 'x']);
     });
 
+    it('dequotes complete single-quoted Next.js dynamic-route path operands', () => {
+      expect(
+        hooks.parseEvidenceCommand("cat 'app/trace/[traceId]/page.tsx'"),
+      ).toEqual({
+        cdTarget: null,
+        tokens: ['cat', 'app/trace/[traceId]/page.tsx'],
+      });
+      expect(
+        hooks.parseEvidenceCommand(
+          "git diff -- 'app/blog/[...slug]/page.tsx' 'app/docs/[[...parts]]/page.tsx'",
+        ),
+      ).toEqual({
+        cdTarget: null,
+        tokens: [
+          'git',
+          'diff',
+          '--',
+          'app/blog/[...slug]/page.tsx',
+          'app/docs/[[...parts]]/page.tsx',
+        ],
+      });
+    });
+
     it('returns null for every command carrying a refused character', () => {
       // The DELETION_UNSAFE_CHARS shape, reused rather than re-authored: one
       // forbidden character rejects the WHOLE command, so there is no partial
@@ -915,6 +938,42 @@ describe('APE v2 lifecycle shell policy', () => {
           parsed = hooks.parseEvidenceCommand(input);
         }, label).not.toThrow();
         expect(parsed, label).toBe(null);
+      }
+    });
+  });
+
+  describe('single-quoted Next.js dynamic-route evidence paths', () => {
+    it('ALLOWS literal inspection of ordinary, catch-all, and optional catch-all route paths', () => {
+      for (const command of [
+        "cat 'app/trace/[traceId]/page.tsx'",
+        "cat 'app/blog/[...slug]/page.tsx'",
+        "cat 'app/docs/[[...parts]]/page.tsx'",
+        "git diff -- 'app/trace/[traceId]/page.tsx'",
+        "sha256sum 'app/trace/[traceId]/page.tsx'",
+        // The exact shape that blocked run-20260828192205807-7c62490a,
+        // corrected only by quoting the one dynamic-route operand.
+        "cat app/page.tsx components/landing.tsx 'app/trace/[traceId]/page.tsx' components/trace/trace-progress.tsx",
+      ]) {
+        expectAllow(command);
+      }
+    });
+
+    it('DENIES globbing, partial segments, and every broader quoting shape', () => {
+      for (const command of [
+        'cat app/trace/[traceId]/page.tsx',
+        'cat app/blog/[...slug]/page.tsx',
+        'cat app/docs/[[...parts]]/page.tsx',
+        'cat "app/trace/[traceId]/page.tsx"',
+        "cat 'app/trace/[traceId]x/page.tsx'",
+        "cat 'app/trace/x[traceId]/page.tsx'",
+        "cat 'app/trace/[]/page.tsx'",
+        "cat 'app/trace/[...]/page.tsx'",
+        "cat 'app/trace/[traceId]/page.tsx'tail",
+        "cat prefix'app/trace/[traceId]/page.tsx'",
+        "cat 'ordinary/path.tsx'",
+        "cat 'app/trace/[trace Id]/page.tsx'",
+      ]) {
+        expectDeny(command);
       }
     });
   });
