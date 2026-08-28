@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 2.23.42 — 2026-08-28
+
+The 2.23.41 campaign preflight rejected prompts whose version was updated before their old random
+campaign-directory suffix, leaving a stale project path. Live-certification prompts are now
+generated from the package version and one canonical campaign root; generation writes all twelve
+attempts into a new directory and refuses reuse. Regression coverage pins every attempt name,
+version, project root, and objective path. Version 2.23.42 restarts every source gate and live
+pipeline from fresh public source.
+
 ## 2.23.41 — 2026-08-28
 
 The first 2.23.40 focused source gate rejected a regression fixture that attempted to omit the

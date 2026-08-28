@@ -27,8 +27,13 @@ import {
   stopCertificationCatalogStub,
   validateCertificationCatalogAudit,
 } from '../scripts/run-live-certification-parent.mjs';
+import {
+  LiveCertificationPromptError,
+  buildLiveCertificationPrompt,
+  writeLiveCertificationPrompts,
+} from '../scripts/prepare-live-certification-prompts.mjs';
 
-const VERSION = '2.23.41';
+const VERSION = '2.23.42';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
@@ -411,6 +416,55 @@ describe('live certification Codex parent launcher', () => {
     expect(() => buildCodexParentInvocation(fixture)).toThrow(
       /does not resolve to an existing path/iu,
     );
+  });
+});
+
+describe('live certification prompt preparation', () => {
+  function promptCampaign() {
+    const root = mkdtempSync(path.join(tmpdir(), 'ape-live-prompts-'));
+    temporaryRepositories.push(root);
+    for (const pipeline of ['mechanical', 'fast', 'full', 'land']) {
+      mkdirSync(path.join(root, pipeline));
+    }
+    return realpathSync(root);
+  }
+
+  it('derives all attempt paths and version strings from one canonical campaign root', () => {
+    const root = promptCampaign();
+    const files = writeLiveCertificationPrompts(root);
+    expect(files).toHaveLength(12);
+    expect(files.map((file) => path.basename(file))).toEqual([
+      'mechanical-1.txt',
+      'mechanical-2.txt',
+      'mechanical-3.txt',
+      'fast-1.txt',
+      'fast-2.txt',
+      'fast-3.txt',
+      'full-1.txt',
+      'full-2.txt',
+      'full-3.txt',
+      'land-1.txt',
+      'land-2.txt',
+      'land-3.txt',
+    ]);
+    for (const file of files) {
+      const prompt = readFileSync(file, 'utf8');
+      expect(prompt).toContain(`APE ${VERSION}`);
+      expect(prompt).toContain(root);
+      expect(prompt).not.toMatch(/2\.23\.(?:3[0-9]|4[01])/u);
+    }
+    expect(readFileSync(path.join(root, 'prompts', 'fast-2.txt'), 'utf8'))
+      .toContain('src/is-even-2342-2.js');
+    expect(readFileSync(path.join(root, 'prompts', 'land-3.txt'), 'utf8'))
+      .toContain('docs/codex-2342-protected-land-3.md');
+  });
+
+  it('refuses stale prompt-directory reuse and non-canonical attempt inputs', () => {
+    const root = promptCampaign();
+    writeLiveCertificationPrompts(root);
+    expect(() => writeLiveCertificationPrompts(root)).toThrow(LiveCertificationPromptError);
+    expect(() => buildLiveCertificationPrompt(root, 'unknown', 1))
+      .toThrow(/pinned certification attempt/iu);
   });
 });
 
