@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.23.9 — 2026-08-27
+
+Made live-certification Git identity a checked precondition instead of ambient machine state.
+Disposable repositories must now carry a repository-local GitHub noreply identity, and the new
+`release:live-preflight` command verifies it without printing the identity. This prevents GitHub
+private-email protection from rejecting an otherwise clean first shipping cycle.
+
 ## 2.23.8 — 2026-08-27
 
 Made pre-run repository discovery fail-safe on its first execution. The run skill now requires

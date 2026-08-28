@@ -16,8 +16,11 @@ import {
   validateLiveCertificationDocument as validateDocument,
   verifyLiveCertificationRepository,
 } from '../scripts/verify-live-certification.mjs';
+import {
+  verifyLiveCertificationEnvironment,
+} from '../scripts/check-live-certification-environment.mjs';
 
-const VERSION = '2.23.8';
+const VERSION = '2.23.9';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
@@ -190,6 +193,21 @@ afterEach(() => {
 });
 
 describe('live release certification evidence', () => {
+  it('requires a repository-local GitHub noreply identity before live attempts', () => {
+    const { repo } = sourceRepository();
+    expect(() => verifyLiveCertificationEnvironment(repo))
+      .toThrow(/repository-local user\.name/u);
+    git(repo, 'config', '--local', 'user.name', 'APE Certification');
+    git(repo, 'config', '--local', 'user.email', 'developer@example.invalid');
+    expect(() => verifyLiveCertificationEnvironment(repo))
+      .toThrow(/repository-local GitHub noreply user\.email/u);
+    git(repo, 'config', '--local', 'user.email', 'ape-certification@users.noreply.github.com');
+    expect(verifyLiveCertificationEnvironment(repo)).toEqual({
+      identity_scope: 'repository-local',
+      email_domain: 'users.noreply.github.com',
+    });
+  });
+
   it('requires three clean completed raw attempts for every certified host and pipeline', () => {
     const result = validateLiveCertificationDocument(validLedger(), {
       packageVersion: VERSION,

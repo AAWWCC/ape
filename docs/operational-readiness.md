@@ -21,6 +21,12 @@ these canaries in a disposable repository on every host marked `required` for li
 packaged and receives pinned structural and marketplace validation, but authenticated Claude live
 operation is marked `unverified` and is not part of the release certificate.
 
+Before the first attempt, set `user.name` and a GitHub noreply `user.email` in each disposable
+repository's local Git config; never inherit release commit identity from global or system config.
+Run `npm run release:live-preflight -- --project-dir <disposable-repository>` from the exact source
+candidate and require it to pass before launching the host. This prevents GitHub private-email push
+protection from turning a clean APE run into a shipping failure.
+
 1. A non-behavioral mechanical phase.
 2. A bounded behavioral fast phase.
 3. A behavioral full phase with plan review.

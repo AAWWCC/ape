@@ -7,8 +7,8 @@ import { describe, expect, it } from 'vitest';
 const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.url), 'utf8');
 const readJson = (relative) => JSON.parse(read(relative));
 
-describe('release 2.23.8 public packaging', () => {
-  it('pins source and generated package surfaces to 2.23.8', () => {
+describe('release 2.23.9 public packaging', () => {
+  it('pins source and generated package surfaces to 2.23.9', () => {
     for (const relative of [
       'package.json',
       'plugins/ape/package.json',
@@ -16,9 +16,9 @@ describe('release 2.23.8 public packaging', () => {
       'plugins/ape-claude/package.json',
       'plugins/ape-claude/.claude-plugin/plugin.json',
     ]) {
-      expect(readJson(relative).version, relative).toBe('2.23.8');
+      expect(readJson(relative).version, relative).toBe('2.23.9');
     }
-    expect(read('bin/ape-mcp.mjs')).toContain("version: '2.23.8'");
+    expect(read('bin/ape-mcp.mjs')).toContain("version: '2.23.9'");
   });
 
   it('pins every executable that controls the public release', () => {
@@ -33,6 +33,8 @@ describe('release 2.23.8 public packaging', () => {
     expect(workflow).toContain('npm run release:live-certification');
     expect(packageJson.scripts['release:live-certification'])
       .toBe('node scripts/verify-live-certification.mjs');
+    expect(packageJson.scripts['release:live-preflight'])
+      .toBe('node scripts/check-live-certification-environment.mjs');
     expect(read('scripts/verify-live-certification.mjs'))
       .toContain("export const LIVE_CERTIFICATION_PATH = 'evals/live-certification.json'");
     expect(readJson('evals/live-certification.schema.json').additionalProperties).toBe(false);
