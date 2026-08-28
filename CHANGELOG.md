@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 2.23.44 — 2026-08-28
+
+The first 2.23.43 focused source gate rejected hardcoded prior-version objective filenames in the
+prompt generator regression. Those expectations now derive their suffix from the declared package
+version, so future version bumps cannot leave the generator test stale. Version 2.23.44 retains the
+exact optional-discovery command fix and restarts every source gate and live pipeline from fresh
+public source.
+
+## 2.23.43 — 2026-08-28
+
+The third 2.23.42 mechanical parent stopped before run creation after improvising malformed shell
+quoting for optional `AGENTS.md` discovery. The public run skill now supplies the exact standalone
+fail-closed discovery command and forbids wrapping or argument changes; its packaged-skill contract
+pins that command byte-for-byte. Version 2.23.43 restarts every source gate and live pipeline from
+fresh public source.
+
 ## 2.23.42 — 2026-08-28
 
 The 2.23.41 campaign preflight rejected prompts whose version was updated before their old random

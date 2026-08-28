@@ -8,7 +8,8 @@ Before `ape_run start`, inspect the repository and compose cold-reader-complete 
 Repository discovery is evidence, not an assertion that optional files exist. Run inspections
 separately. Where no match is valid (for example, no `AGENTS.md`), use `|| true`; never place
 optional discovery in an `&&` chain. Stop instead of retrying or self-correcting a failed inspection
-call.
+call. For optional `AGENTS.md` discovery, run this exact standalone command without wrapping it in
+another shell or changing its arguments: `rg --files -g 'AGENTS.md' -g '!**/.git/**' || true`.
 
 When the host is Google Antigravity / Gemini, pass the exact open project root as `project_dir` on
 this and every later APE MCP call.

@@ -33,7 +33,8 @@ import {
   writeLiveCertificationPrompts,
 } from '../scripts/prepare-live-certification-prompts.mjs';
 
-const VERSION = '2.23.42';
+const VERSION = '2.23.44';
+const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
@@ -454,9 +455,9 @@ describe('live certification prompt preparation', () => {
       expect(prompt).not.toMatch(/2\.23\.(?:3[0-9]|4[01])/u);
     }
     expect(readFileSync(path.join(root, 'prompts', 'fast-2.txt'), 'utf8'))
-      .toContain('src/is-even-2342-2.js');
+      .toContain(`src/is-even-${VERSION_SUFFIX}-2.js`);
     expect(readFileSync(path.join(root, 'prompts', 'land-3.txt'), 'utf8'))
-      .toContain('docs/codex-2342-protected-land-3.md');
+      .toContain(`docs/codex-${VERSION_SUFFIX}-protected-land-3.md`);
   });
 
   it('refuses stale prompt-directory reuse and non-canonical attempt inputs', () => {

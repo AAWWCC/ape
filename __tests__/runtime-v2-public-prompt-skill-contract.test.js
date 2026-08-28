@@ -276,6 +276,9 @@ describe('canonical skill sources', () => {
     expect(run).toMatch(/Omit it for[\s\S]*mechanical[\s\S]*non-phase modes[\s\S]*every resume/iu);
     expect(run).toMatch(/Repository discovery[\s\S]*no match is valid[\s\S]*`\|\| true`/iu);
     expect(run).toMatch(/never place[\s\S]*optional discovery[\s\S]*`&&` chain/iu);
+    expect(run).toContain(
+      "`rg --files -g 'AGENTS.md' -g '!**/.git/**' || true`",
+    );
     expect(run).toMatch(/Stop instead of[\s\S]*(?:retrying|self-correcting)[\s\S]*inspection[\s\S]*call/iu);
   });
 
