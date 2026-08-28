@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+## 2.23.29 — 2026-08-28
+
+The first 2.23.28 live-environment preflight was invoked in an unprepared source checkout and
+correctly refused the missing repository-local release identity. Release preparation now sets and
+verifies the GitHub noreply identity before the candidate begins. Version 2.23.29 restarts all
+source gates and live pipelines rather than reusing that environment-rejected candidate.
+
+## 2.23.28 — 2026-08-28
+
+The first 2.23.27 full suite rejected a stale root MCP bundle and a prompt compression that dropped
+the pinned adversarial timing phrase. Release preparation now regenerates both root and plugin
+bundles before any gate, and the 220-word test-writer contract retains the exact final-check-before-
+sink and crash-recovery requirements. Version 2.23.28 restarts every gate and live pipeline.
+
+## 2.23.27 — 2026-08-28
+
+The first 2.23.26 targeted gate rejected the expanded test-writer contract at 254 words against its
+220-word public prompt budget. The same runtime-only red-execution rule is now expressed in exactly
+220 words and the prompt regression pins its concise imperative. Version 2.23.27 restarts all source
+gates and live certification from zero.
+
+## 2.23.26 — 2026-08-28
+
+The first 2.23.25 source-gate command was rejected before TypeScript started because the fresh
+exact-source release checkout had not installed its development dependencies. Release preparation
+now installs the locked dependency graph before a candidate's first gate. Version 2.23.26 restarts
+the source gates and live campaign from zero instead of reusing the incompletely prepared candidate.
+
+## 2.23.25 — 2026-08-28
+
+The first 2.23.24 fast-lane certification cycle was rejected because the test-writer prompt made
+the worker duplicate APE's runtime-owned red-test admission, producing an expected exit-code-1
+worker tool result before the implementation stage. Test writers now author and statically inspect
+green-reachable tests without executing commands expected to fail, return an empty `tests` array,
+and leave both deterministic red executions and their sealed evidence exclusively to the runtime.
+The authoritative validator no longer demands redundant self-reported red output. Version 2.23.25
+restarts every certification pipeline from fresh exact public source.
+
 ## 2.23.24 — 2026-08-28
 
 The first 2.23.23 typecheck rejected an ambiguous tuple inference in the new certification-parent

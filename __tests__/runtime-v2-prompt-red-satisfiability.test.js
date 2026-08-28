@@ -14,16 +14,17 @@ describe('APE v2 test-writer red satisfiability contract', () => {
     expect(prompt).toMatch(/rewrite contradictory outcomes/i);
   });
 
-  it('requires the authored test itself to provide the observed red evidence', async () => {
+  it('leaves expected-nonzero red execution exclusively to the runtime', async () => {
     const prompt = (await read('prompts/test_writer.md')).replace(/\s+/g, ' ');
-    expect(prompt).toMatch(/Run the narrow authored test repeatedly/i);
+    expect(prompt).toMatch(/never execute authored tests or expected-nonzero commands/i);
+    expect(prompt).toMatch(/Return `tests: \[\]`/i);
+    expect(prompt).toMatch(/runtime exclusively executes exact authored paths twice/i);
     expect(prompt).toMatch(/Zero collection[\s\S]*unrelated or pre-existing failure[\s\S]*not red evidence/i);
-    for (const evidence of ['command', 'tree SHA', 'exit code', 'repetition count', 'red result', 'green result', 'output hash', 'gate']) {
+    for (const evidence of ['command', 'tree SHA', 'exit codes', 'repetition count', 'red result', 'green result', 'output hashes', 'gate']) {
       expect(prompt).toContain(evidence);
     }
-    expect(prompt).toMatch(/optional output hash/i);
-    expect(prompt).toMatch(/never pipe, redirect, or run a standalone checksum probe/i);
-    expect(prompt).toMatch(/identical command alternates fail\/pass[\s\S]*nondeterministic[\s\S]*rewrite/i);
+    expect(prompt).toMatch(/optional output hashes/i);
+    expect(prompt).toMatch(/Statically inspect the assertions and fixtures/i);
   });
 
   it('keeps analyzer defects in synthetic fixtures and live-tree checks green-only', async () => {

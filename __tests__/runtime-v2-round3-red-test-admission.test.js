@@ -138,7 +138,9 @@ describe('runtime-owned red-test execution at test-writer admission (F12)', () =
     const ticket = started.run.tickets[0];
 
     await writeFile(path.join(dir, 'tests', 'value.test.js'), 'throw new Error("still red");\n');
-    const result = await recordReceipt(dir, rawReceipt(ticket));
+    // The worker does not duplicate the expected-nonzero execution. Runtime
+    // admission owns both red runs and seals their evidence.
+    const result = await recordReceipt(dir, rawReceipt(ticket, { tests: [] }));
     expect(result.ok).toBe(true);
     const observation = result.receipt.evidence.red_test;
     expect(observation).toMatchObject({

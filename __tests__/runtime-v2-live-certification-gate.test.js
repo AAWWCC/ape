@@ -25,7 +25,7 @@ import {
   buildCodexParentInvocation,
 } from '../scripts/run-live-certification-parent.mjs';
 
-const VERSION = '2.23.24';
+const VERSION = '2.23.29';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
