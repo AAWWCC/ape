@@ -8,7 +8,10 @@ is never project authority. Use one native `invoke_subagent` call per returned t
 `TypeName`, `Model`, and prompt; keep `Workspace` as `inherit`. The child's supported
 `PreInvocation` hook binds its conversation before the first model turn.
 
-1. Before a Codex `start`, complete the runtime's binding probe: call `ape_run probe`, launch the
+1. Before a Codex `start`, complete the runtime's binding probe: call `ape_run probe` with
+   `host: "codex"`, `explicit_invocation: true`, `hooks_trusted: true`, and
+   `subagents_available: true` (plus the governed `project_dir` when required). These attestations
+   are mandatory on the probe call itself; do not make a partial probe call and retry it. Launch the
    returned `dispatch_probe` with its exact native agent name, model, reasoning effort, and message,
    confirm `probe-status` is bound, then acknowledge the returned probe capability with `probe-ack`.
    The returned agent type is APE's logical role, not a Multi-Agent V2 native argument. Stop on any

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2.23.5 — 2026-08-27
+
+Made the Codex binding-probe contract complete at every model-visible surface. The run protocol and
+MCP tool schema now require `host: "codex"`, `explicit_invocation: true`, `hooks_trusted: true`, and
+`subagents_available: true` on the initial probe call and explicitly forbid a partial-call retry.
+This removes the pre-run self-correction exposed by the first 2.23.4 mechanical canary.
+
+Capped adaptive filesystem-latency scaling so event-loop starvation cannot inflate a directory
+lock's configured `busyMs` into an effectively unbounded wait, while retaining the Windows
+contention floor.
+
 ## 2.23.4 — 2026-08-27
 
 Made the hook-injected Codex worker bootstrap state the executable inspection-command boundary

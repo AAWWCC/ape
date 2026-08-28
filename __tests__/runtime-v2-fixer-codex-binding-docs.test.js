@@ -17,6 +17,10 @@ describe('APE v2 Codex ticket-binding docs', () => {
     expect(protocol).toMatch(/host-native tool[\s\S]*generated\s+name[\s\S]*dispatch intent/i);
     expect(protocol).toMatch(/binding probe[\s\S]*probe-status[\s\S]*probe-ack/i);
     expect(protocol).toMatch(/fresh, single-use proof/i);
+    expect(protocol).toMatch(
+      /ape_run probe[\s\S]*host: "codex"[\s\S]*explicit_invocation: true[\s\S]*hooks_trusted: true[\s\S]*subagents_available: true/i,
+    );
+    expect(protocol).toMatch(/mandatory on the probe call itself[\s\S]*do not make a partial probe call and retry/i);
     expect(protocol).toMatch(/receipt_capability[\s\S]*action: "record"/i);
   });
 

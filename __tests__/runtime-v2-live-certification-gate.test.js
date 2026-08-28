@@ -17,7 +17,7 @@ import {
   verifyLiveCertificationRepository,
 } from '../scripts/verify-live-certification.mjs';
 
-const VERSION = '2.23.4';
+const VERSION = '2.23.5';
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];

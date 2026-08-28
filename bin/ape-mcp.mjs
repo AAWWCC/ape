@@ -64,12 +64,16 @@ const resolveMcpRoot = (explicitDir = null) => resolveGovernedRoot({ explicitDir
 const TOOLS = Object.freeze([
   {
     name: 'ape_run',
-    description: 'Start and advance the deterministic APE runtime. Codex start is fail-closed until probe, native canary launch, probe-status, and probe-ack prove live child binding; the completed proof is consumed exactly once before Git mutation.',
+    description: 'Start and advance the deterministic APE runtime. For a Codex probe, the first call must include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. Codex start is fail-closed until probe, native canary launch, probe-status, and probe-ack prove live child binding; the completed proof is consumed exactly once before Git mutation.',
     inputSchema: {
       type: 'object',
       required: ['action'],
       properties: {
-        action: { type: 'string', enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'] },
+        action: {
+          type: 'string',
+          enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'],
+          description: 'For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true.',
+        },
         project_dir: {
           type: 'string',
           description: 'Exact governed project root.',
@@ -133,9 +137,9 @@ const TOOLS = Object.freeze([
           type: 'boolean',
           description: 'True when the change alters runtime behavior (needs a failing-then-passing test). False for docs/config/generated-only scopes; behavioral:true always escalates a mechanical request.',
         },
-        hooks_trusted: { type: 'boolean' },
-        subagents_available: { type: 'boolean' },
-        explicit_invocation: { type: 'boolean' },
+        hooks_trusted: { type: 'boolean', description: 'Required true on the initial Codex probe call after the operator has trusted the installed hooks.' },
+        subagents_available: { type: 'boolean', description: 'Required true on the initial Codex probe call after confirming native subagents are available.' },
+        explicit_invocation: { type: 'boolean', description: 'Required true on the initial Codex probe call and start call only after an explicit operator invocation.' },
         wait_ms: { type: 'number', description: 'Optional on next: best-effort max ms to server-side wait for a run resting in gating/shipping to resolve in one call; clamped to GATE_NEXT_MAX_WAIT_MS (300000); the receipt lock is released between internal polls; a non-number/<=0/omitted value = one poll (unchanged). A gating run that resolves into required-remote-checks shipping stops at shipping_started; call next again (with wait_ms) to drive shipping to merged.' },
         receipt: { type: 'object' },
         probe_id: {
@@ -326,7 +330,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.23.4' };
+    return { name: 'ape', version: '2.23.5' };
   }
 }
 

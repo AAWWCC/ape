@@ -4,7 +4,13 @@ import { mkdir, mkdtemp, open, readdir, rm, stat, utimes, writeFile } from 'node
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acquireRunLock, releaseRunLock, stealLockFileByRename, withDirLock } from '../lib/runtime/lock.js';
+import {
+  acquireRunLock,
+  computeFsLatencyMultiplier,
+  releaseRunLock,
+  stealLockFileByRename,
+  withDirLock,
+} from '../lib/runtime/lock.js';
 import { overrideRun, startRun } from '../lib/runtime/service.js';
 import { atomicWriteJson, replaceFile } from '../lib/runtime/storage.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
@@ -434,6 +440,13 @@ describe('APE v2 shared dir lock: busyMs bounds the acquisition spin (invariant 
     // Disable churn interception between tests; the module mock reverts to a
     // transparent passthrough whenever churn.lockPath is null.
     churn.lockPath = null;
+  });
+
+  it('caps scheduler-inflated filesystem calibration while preserving the Windows floor', () => {
+    expect(computeFsLatencyMultiplier(100_000, 'darwin')).toBe(8);
+    expect(computeFsLatencyMultiplier(100_000, 'linux')).toBe(8);
+    expect(computeFsLatencyMultiplier(1, 'win32')).toBe(6);
+    expect(computeFsLatencyMultiplier(100_000, 'win32')).toBe(8);
   });
 
   // Under pathological create/remove churn on the lock dir — mkdir perpetually
