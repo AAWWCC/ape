@@ -274,6 +274,9 @@ describe('canonical skill sources', () => {
     expect(run).toMatch(/input_required[\s\S]*answer-preflight/iu);
     expect(run).toMatch(/complete exact answers[\s\S]*additive/iu);
     expect(run).toMatch(/Omit it for[\s\S]*mechanical[\s\S]*non-phase modes[\s\S]*every resume/iu);
+    expect(run).toMatch(/Repository discovery[\s\S]*no match is valid[\s\S]*`\|\| true`/iu);
+    expect(run).toMatch(/never place[\s\S]*optional discovery[\s\S]*`&&` chain/iu);
+    expect(run).toMatch(/Stop instead of[\s\S]*(?:retrying|self-correcting)[\s\S]*inspection[\s\S]*call/iu);
   });
 
   it('shares one synchronized run/resume protocol reference', async () => {

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.23.8 — 2026-08-27
+
+Made pre-run repository discovery fail-safe on its first execution. The run skill now requires
+independent inspection calls, explicitly treats an empty optional search such as a missing
+`AGENTS.md` as valid evidence, forbids placing that search in an `&&` chain, and stops instead of
+retrying a failed inspection. This removes the parent-command self-correction exposed by the third
+2.23.7 mechanical canary.
+
 ## 2.23.7 — 2026-08-27
 
 Made post-spawn Codex binding confirmation machine-copyable. Both the shared run protocol and every
