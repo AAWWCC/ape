@@ -207,6 +207,37 @@ describe('versioned structured plan contract', () => {
     ).valid).toBe(true);
   });
 
+  it('validates candidate commands against the planning view without widening execution authority', () => {
+    const planned = structuredClone(PLAN);
+    planned.workstreams[0].evidence_commands = ['npm run typecheck'];
+    const executionCommands = ['node --test tests/value.test.js'];
+    const planningCommands = [...executionCommands, 'npm run typecheck'];
+
+    expect(candidatePlanForScope(planned, ['src/value.js', 'tests/value.test.js'], null, {
+      allowed_evidence_commands: executionCommands,
+      plannable_evidence_commands: planningCommands,
+    })).toMatchObject({ valid: true });
+
+    // Legacy immutable tickets have no separate planning view.
+    expect(candidatePlanForScope(planned, ['src/value.js', 'tests/value.test.js'], null, {
+      allowed_evidence_commands: planningCommands,
+    })).toMatchObject({ valid: true });
+
+    const rejected = candidatePlanForScope(
+      planned,
+      ['src/value.js', 'tests/value.test.js'],
+      null,
+      {
+        allowed_evidence_commands: planningCommands,
+        plannable_evidence_commands: executionCommands,
+      },
+    );
+    expect(rejected.valid).toBe(false);
+    expect(rejected.errors.join(' ')).toMatch(
+      /ticket\.capability_manifest\.plannable_evidence_commands.*npm run typecheck/u,
+    );
+  });
+
   it('admits a declared build script as future writable evidence without admitting arbitrary scripts', async () => {
     const dir = await project();
     const build = structuredClone(PLAN);

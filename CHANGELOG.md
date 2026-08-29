@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2.24.4 — 2026-08-29
+
+Planning now publishes a frozen cross-role capability view separately from each ticket's execution
+authority. Planner, checker, critic, judge, and directed replan tickets can assess typecheck, lint,
+and other evidence authorized for reachable downstream roles without gaining permission to execute
+or claim those commands themselves. Candidate-plan validation and schemas consume the planning
+view, while hooks, preflight baselines, and receipt tests remain bound to the current role's exact
+allowlist. End-to-end coverage reproduces the former ten-dispatch reviewer loop, proves unanimous
+review advances to a writer, and preserves the planning view through a legitimate judge/replan.
+Version 2.24.4 invalidates the prior source certification and starts a fresh release cycle.
+
 ## 2.24.3 — 2026-08-29
 
 The Claude statusline no longer labels valid v2 runs corrupt when dispatch liveness is stored in

@@ -7,7 +7,7 @@ import {
 
 const HASH = 'a'.repeat(64);
 
-function contractTicket(overrides = {}) {
+function contractTicket(overrides = {}, capabilityManifestOverrides = {}) {
   const objective = overrides.objective ?? 'Produce a complete exact contract artifact';
   const base = {
     ticket_id: 'run-contract:plan:ticket-1',
@@ -44,6 +44,7 @@ function contractTicket(overrides = {}) {
       preflight_hash: HASH,
       risk_triggers: [],
       design_assurance_required: false,
+      ...capabilityManifestOverrides,
       receipt_schema: { ref: 'ticket.output_schema', hash: sha256(outputSchema) },
       field_bounds: {
         validation_attempts_per_worker: 3,
@@ -110,6 +111,32 @@ describe('canonical receipt draft validator', () => {
     expect(profileResult.valid).toBe(false);
     expect(profileResult.corrections.map((entry) => entry.issue).join(' '))
       .toMatch(/required.*profile|profile.*unit/i);
+  });
+
+  it('uses the planning command view without letting receipt tests borrow its authority', () => {
+    const ticket = contractTicket({}, {
+      allowed_evidence_commands: ['npm test'],
+      plannable_evidence_commands: ['npm test', 'npm run typecheck'],
+    });
+    const candidate = candidatePlan();
+    candidate.workstreams[0].evidence_commands = ['npm run typecheck'];
+
+    expect(validateReceiptDraft(ticket, draft(ticket, { candidate_plan: candidate })))
+      .toMatchObject({ valid: true, corrections: [] });
+
+    const borrowedTest = [{
+      command: 'npm run typecheck',
+      passed: true,
+      exit_code: 0,
+      duration_ms: 10,
+    }];
+    const rejected = validateReceiptDraft(
+      ticket,
+      draft(ticket, { candidate_plan: candidate }, borrowedTest),
+    );
+    expect(rejected.valid).toBe(false);
+    expect(rejected.corrections.map((entry) => entry.issue).join(' '))
+      .toMatch(/allowed_evidence_commands|allowed evidence command/i);
   });
 
   it('reports exact UTF-8 candidate-plan used/max/remaining bytes at the 16,384-byte boundary', () => {

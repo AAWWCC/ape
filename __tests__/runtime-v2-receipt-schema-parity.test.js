@@ -223,7 +223,8 @@ describe('new-run receipt schema parity', () => {
       role: 'planner',
       plan_contract_version: 2,
       capability_manifest: {
-        allowed_evidence_commands: ['npm test', 'npm run typecheck'],
+        allowed_evidence_commands: ['npm test'],
+        plannable_evidence_commands: ['npm test', 'npm run typecheck'],
         verification_profiles: [{ id: 'unit', required: true }, { id: 'types' }],
         preflight_hash: 'b'.repeat(64),
         risk_triggers: [],
@@ -235,6 +236,11 @@ describe('new-run receipt schema parity', () => {
     expect(workstream.evidence_commands.items.enum)
       .toEqual(['npm test', 'npm run typecheck']);
     expect(workstream.verification_profiles.items.enum).toEqual(['unit', 'types']);
+    expect(planner.output_schema.properties.tests.items.properties.command.enum)
+      .toEqual(['npm test']);
+    expect(planner.output_schema.properties.evidence.properties.candidate_plan
+      ['x-ape-command-enum-ref'])
+      .toBe('ticket.capability_manifest.plannable_evidence_commands');
 
     const preflight = contractTicket({
       ticket_id: 'run-schema:preflight:ticket-specialized',
@@ -244,6 +250,7 @@ describe('new-run receipt schema parity', () => {
       plan_contract_version: 2,
       capability_manifest: {
         allowed_evidence_commands: ['npm test'],
+        plannable_evidence_commands: ['npm test', 'npm run typecheck'],
         verification_profiles: [{ id: 'unit' }],
         risk_triggers: [],
         design_assurance_required: false,
@@ -252,6 +259,8 @@ describe('new-run receipt schema parity', () => {
     const artifact = preflight.output_schema.properties.evidence.properties.preflight_artifact;
     expect(artifact.properties.objective.const).toBe('Inspect this exact objective');
     expect(artifact.properties.baseline.items.properties.command.enum).toEqual(['npm test']);
+    expect(preflight.output_schema.properties.tests.items.properties.command.enum)
+      .toEqual(['npm test']);
     expect(artifact.properties.verification_profiles.items.properties.id.enum).toEqual(['unit']);
   });
 

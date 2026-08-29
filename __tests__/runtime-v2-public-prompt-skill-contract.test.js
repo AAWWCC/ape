@@ -115,6 +115,12 @@ describe('public prompt contracts', () => {
     expect(common).toMatch(/Do not commit, push, merge, weaken tests/u);
     expect(common).toMatch(/unmet\s+objective[\s\S]*security[\s\S]*unauthorized scope[\s\S]*missing required evidence/iu);
     expect(common).toMatch(/Style preferences[\s\S]*equally valid[\s\S]*advisory only/iu);
+    expect(common).toMatch(
+      /`allowed_evidence_commands`[\s\S]*`command_profiles`[\s\S]*`required_capabilities`[\s\S]*execution[\s\S]*`tests`/iu,
+    );
+    expect(common).toMatch(
+      /future-stage feasibility[\s\S]*`plannable_evidence_commands`[\s\S]*fallback[\s\S]*`planning_command_profiles`[\s\S]*`planning_required_capabilities`[\s\S]*Planning fields grant no execution authority/iu,
+    );
 
     for (const field of ['ticket_id', 'status', 'tests', 'findings', 'evidence']) {
       expect(common, `receipt field ${field}`).toContain(`\`${field}\``);
@@ -162,6 +168,11 @@ describe('public prompt contracts', () => {
     expect(prompts.plan_critic).toMatch(/own feasibility review/u);
     expect(prompts.plan_critic).toMatch(/hidden scope[\s\S]*failure modes/u);
     expect(prompts.plan_judge).toMatch(/independently[\s\S]*Do not count votes/u);
+    for (const role of ['plan_checker', 'plan_critic', 'plan_judge']) {
+      expect(prompts[role]).toMatch(
+        /`plannable_evidence_commands`[\s\S]*`planning_command_profiles`[\s\S]*`planning_required_capabilities`[\s\S]*execution view[\s\S]*no execution or[\s\S]*`tests` authority/iu,
+      );
+    }
     expect(prompts.test_writer).toMatch(/public behavior[\s\S]*mutually consistent[\s\S]*synthetic fixture/iu);
     expect(prompts.test_writer).toMatch(/Red must not depend on a defect remaining in live source/u);
     expect(prompts.test_writer).toMatch(/approved_plan[\s\S]*material deviation[\s\S]*plan_deviation[\s\S]*workstream_id[\s\S]*acceptance_impact[\s\S]*otherwise omit/iu);

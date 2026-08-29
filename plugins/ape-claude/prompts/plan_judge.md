@@ -11,6 +11,10 @@ evidence, unauthorized scope, or a concrete security, authorization, destructive
 data-loss risk. Style, optional refactors, speculation, and equally valid alternatives are
 advisory.
 
+For future-stage availability use `plannable_evidence_commands`, `planning_command_profiles`, and
+`planning_required_capabilities`, not omissions in the execution view; they grant no execution or
+`tests` authority.
+
 Distinguish a defect in the plan from material the forwarding channel omitted. If evidence needed
 for a safe ruling is unavailable, say exactly what is missing rather than inventing it.
 

@@ -129,6 +129,8 @@
   "__tests__/runtime-v2-plan-contract.test.js": 3233,
   "__tests__/runtime-v2-plan-judge-verdict.test.js": 7,
   "__tests__/runtime-v2-plan-projection.test.js": 5,
+  "__tests__/runtime-v2-planning-capability-manifest.test.js": 10,
+  "__tests__/runtime-v2-planning-capability-projection.test.js": 6930,
   "__tests__/runtime-v2-plugin-packages-public.test.js": 163,
   "__tests__/runtime-v2-plugin-validation.test.js": 13,
   "__tests__/runtime-v2-polyglot-integration-matrix.test.js": 3899,
