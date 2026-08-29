@@ -289,6 +289,12 @@ describe('shipped output_schema stays in sync with zod', () => {
     expect(zodField.safeParse(hex40).success).toBe(false);
   });
 
+  it('publishes every supported failed-stage classification', () => {
+    expect(RECEIPT_INPUT_SCHEMA.properties.evidence.properties.failure_kind.enum).toEqual([
+      'capability', 'command-shape', 'test-contradiction',
+    ]);
+  });
+
   it('documents capability required_claims as the exact additive object the runtime accepts', () => {
     const field = RECEIPT_INPUT_SCHEMA.properties.evidence.properties.required_claims;
     expect(field.type).toBe('object');

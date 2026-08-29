@@ -177,6 +177,8 @@ describe('APE v2 adapter conformance', () => {
     expect(injected).toContain('APE trusted SubagentStart context (authoritative)');
     expect(injected).toContain('Shell inspection permits only ls, cat, pwd, which, and these read-only git verbs:');
     expect(injected).toContain('ls-files, and ls-tree.');
+    expect(injected).toContain('Keep recognized command heads unquoted.');
+    expect(injected).toContain("cat 'app/[id]/page.tsx'");
     expect(injected).toContain('exact sha256sum and shasum command heads');
     expect(injected).toContain('optional output_hash, omit it');
     expect(injected).toContain('never pipe, redirect, or run a standalone checksum probe');
@@ -188,6 +190,8 @@ describe('APE v2 adapter conformance', () => {
     expect(injected).toContain('Never invoke rg, grep, sed, find, awk');
     expect(injected.indexOf('Never invoke rg, grep, sed, find, awk'))
       .toBeLessThan(injected.indexOf('APE common contract'));
+    expect(injected).toMatch(/first denied non-mutating read[\s\S]*retry once in this same stage/iu);
+    expect(injected).toMatch(/correction is denied[\s\S]*stage failed[\s\S]*never probe further/iu);
     expect(injected).toContain('APE common contract');
     expect(injected).toContain('APE implementer contract');
     expect(injected).toContain('Immutable StageTicket reference');

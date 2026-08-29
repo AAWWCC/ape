@@ -78,6 +78,12 @@ describe('public prompt contracts', () => {
     expect(common).toContain('`[[...name]]`');
   });
 
+  it('permits one bounded same-stage correction for a denied harmless read', async () => {
+    const common = await read('prompts', 'common.md');
+    expect(common).toMatch(/first non-mutating-read shape denial[\s\S]*correct syntax[\s\S]*retry[\s\S]*once in-stage/iu);
+    expect(common).toMatch(/If denied again[\s\S]*return `failed`[\s\S]*failure_kind: "command-shape"/iu);
+  });
+
   it('keeps eleven Claude wrappers thin and common-before-role', async () => {
     const agentFiles = (await readdir(path.join(ROOT, 'agents'))).filter((name) => name.endsWith('.md')).sort();
     expect(agentFiles).toEqual(ROLES.map((role) => `${role.replaceAll('_', '-')}.md`).sort());
@@ -158,6 +164,7 @@ describe('public prompt contracts', () => {
     expect(prompts.planner).toMatch(/evidence\.candidate_plan[\s\S]*"version": 2[\s\S]*preflight_hash[\s\S]*verification_profiles/iu);
     expect(prompts.planner).toMatch(/untrusted[\s\S]*preflight/iu);
     expect(prompts.implementer).toMatch(/approved_plan[\s\S]*smallest complete change[\s\S]*plan_deviation[\s\S]*test-contradiction/u);
+    expect(prompts.implementer).toMatch(/policy denials[\s\S]*command-shape[\s\S]*capability/iu);
     expect(prompts.implementer).toMatch(/approved_plan[\s\S]*materially deviates[\s\S]*plan_deviation[\s\S]*otherwise omit/iu);
     expect(prompts.implementer).toMatch(/test\s+path and location[\s\S]*reproducing command and result[\s\S]*no conforming implementation can pass/u);
     for (const risk of ['injection', 'secret', 'supply-chain', 'integrity', 'availability']) {

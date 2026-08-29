@@ -7,8 +7,8 @@
     "suite_version": {"type": "integer", "enum": [1]},
     "case_results": {
       "type": "array",
-      "minItems": 36,
-      "maxItems": 36,
+      "minItems": 37,
+      "maxItems": 37,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -25,6 +25,7 @@
               "fixture-pair", "live-source-dependency", "accept-red-evidence",
               "reject-red-evidence", "accept-contradiction", "reject-contradiction",
               "scope-expansion", "authored-test-remediation", "write-fix", "refuse",
+              "retry-command-shape",
               "execute", "invoke-control-plane", "invoke-status", "invoke-run",
               "invoke-resume", "invoke-config", "invoke-history", "invoke-roadmap",
               "invoke-override", "do-not-invoke"
@@ -63,7 +64,7 @@
             "properties": {
               "selected_skill": {"type": ["string", "null"], "enum": ["status", "run", "resume", "config", "history", "roadmap", "override", null]},
               "plan_action": {"type": "string", "enum": ["none", "follow-exact", "report-deviation"]},
-              "failure_kind": {"type": "string", "enum": ["none", "capability", "invalid-red-evidence", "test-contradiction"]},
+              "failure_kind": {"type": "string", "enum": ["none", "capability", "command-shape", "invalid-red-evidence", "test-contradiction"]},
               "test_strategy": {"type": "string", "enum": ["none", "public-behavior", "source-text", "synthetic-fixture-pair", "live-source"]},
               "scope_expansion_paths": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
               "test_remediation_paths": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},

@@ -1349,14 +1349,16 @@ describe('APE v2 evidence-command run-script allowlist (two-tier, role-aware)', 
       expect(denied.reason).toContain('typecheck');
     });
 
-    it('leaves the deny reason for an unrecognized non-run-script command unchanged', () => {
-      // No collateral: a command that never reached the run-script arm keeps
-      // the standard recognized-evidence deny reason.
+    it('routes an unrecognized non-run-script command to the host edit channel', () => {
+      // A generic command is not necessarily a harmless read shape, so it must
+      // not spend the bounded syntax retry or masquerade as new authority.
       const dir = project({});
       const denied = decide('make bespoke-target', { projectDir: dir });
       expect(denied.decision).toBe('deny');
-      expect(denied.reason).toContain('read-only git');
-      expect(denied.reason).toContain('cargo test');
+      expect(denied.reason).toContain('APE shell denied');
+      expect(denied.reason).toContain('production edits must use the host edit tool');
+      expect(denied.reason).not.toContain('command-shape');
+      expect(denied.reason).not.toContain('read-only git');
     });
   });
 

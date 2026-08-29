@@ -504,25 +504,13 @@ describe('APE v2 evidence commands: a POSITIVE per-token character allowlist', (
       }
     });
 
-    it('carries the published rule in the deny reason, so the refusal is discoverable', () => {
-      // FRICTION #8. A POSITIONAL CHARACTER refusal is the least discoverable
-      // rule in the whole gate: an agent that tries `ls -l =node`, gets a
-      // denial, and tries `ls -l =other` learns nothing, because the character
-      // and not the path is what refused it. So the denial has to carry
-      // EVIDENCE_COMMAND_FAMILIES — the string that names the admitted alphabet
-      // and the positional refusals.
-      //
-      // The two pinned substrings are members of that constant, which is the
-      // idiom both sibling suites already use for this assertion. Pinning the
-      // CONSTANT rather than one refusal path is deliberate: it holds whether
-      // the implementation refuses the expansion position in the TOKENIZER (a
-      // null parse, the unrecognized-command reason) or in CONTAINMENT, so it
-      // constrains what the agent is TOLD without dictating where the check
-      // lives.
+    it('points a positional refusal back to the published token alphabet', () => {
+      // The full family contract remains in the immutable ticket; the hook
+      // keeps its denial compact so retry summaries retain the exact command.
       const denied = decide('ls -l =node');
       expect(denied.decision).toBe('deny');
-      expect(denied.reason).toContain('read-only git');
-      expect(denied.reason).toContain('cargo test');
+      expect(denied.reason).toContain('APE command-shape denied');
+      expect(denied.reason).toContain('published token alphabet');
     });
 
     it('ALLOWS every MID-TOKEN `=`, so the refusal is provably positional', () => {

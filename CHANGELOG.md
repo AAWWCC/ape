@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.23.53 — 2026-08-28
+
+APE now canonicalizes complete uniformly single-quoted argv wrappers such as
+`'cat' 'tests/unit/graph.test.ts'` under the same positive alphabet as its evidence parser, while
+mixed quoting, shell operators, nested quotes, escapes, and unsafe heads remain fail-closed. A first
+harmless read command-shape denial receives one corrected same-stage retry before failure; retry
+receipts preserve the exact denied command, and the published receipt and prompt-eval schemas now
+include `command-shape`. Version 2.23.53 invalidates the prior source certification and starts a
+fresh release cycle.
+
 ## 2.23.52 — 2026-08-28
 
 APE now treats harmless static quoting on `cat` and `ls` operands as command shape rather than new

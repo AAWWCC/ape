@@ -135,7 +135,9 @@ closed.
 Command-family recognition precedes executable-pinning diagnostics. An unrecognized mutation such
 as `cp` is therefore refused as outside the non-mutating evidence allowlist, rather than being
 misreported as a missing trusted-start executable. Recognized evidence heads still fail closed when
-their pinned executable is missing, replaced, or PATH-shadowed.
+their pinned executable is missing, replaced, or PATH-shadowed. Only an obvious file-inspection or
+read-only Git intent receives the correctable `command-shape` diagnostic; arbitrary or potentially
+mutating heads retain the shell denial and host-edit-tool remedy.
 
 The character allowlist admits ASCII letters/digits, non-ASCII code points by range, plain spaces
 as separators, and the punctuation `- _ . / : = @ ~ , % ^ +`. Positional rules refuse `~`, `=`,
@@ -145,9 +147,16 @@ exposure. A `cd` target additionally refuses `~` and `^` anywhere and a leading 
 can still be reached as `./-build` or `./+build`.
 
 Static `cat` and `ls` operands may use one complete pair of single or double quotes. The de-quoted
-content must use the ordinary token alphabet and may not contain spaces; quoted heads, partial quote
-concatenation, quoted package-script names, and embedded quotes remain refused. This admits harmless
-shell spellings such as `cat 'eslint.config.mjs'` without expanding the executable or script surface.
+content must use the ordinary token alphabet and may not contain spaces; partial quote concatenation,
+quoted package-script names, and embedded quotes remain refused. This admits harmless shell spellings
+such as `cat 'eslint.config.mjs'` without expanding the executable or script surface.
+
+A complete argv vector serialized as uniformly single- or double-quoted, escape-free tokens is
+canonicalized before policy checks only when every de-quoted token uses the ordinary positive
+alphabet, so `'cat' 'tests/unit/graph.test.ts'` has the same verdict as its plain argv. Mixed or
+partial quoting, quoted whitespace, shell operators, opposite nested quotes, escapes, and
+unrecognized de-quoted heads remain refused. Single-quoted bracketed route operands retain their
+quote provenance for the route validation below.
 
 Next.js dynamic-route paths are a separate bracket-aware quote exception. A complete single-quoted
 operand whose bracket-bearing segments are `[name]`, `[...name]`, or `[[...name]]` is de-quoted before

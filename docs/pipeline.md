@@ -66,8 +66,11 @@ contract requires a schedulable preflight.
   remains in the final group when armed, and all three paths spend one cycle per writer sequence. Versioned
   remediation-test tickets carry `test_scope: "exact"`; lifecycle and receipt/tree validation deny
   sibling writes, while unversioned legacy remediation tickets retain their historical widening.
-- `failure_kind: command-shape` receives the ordinary single bounded retry, with the exact denial in
-  `prior_attempts` so the replacement can correct syntax without new authority.
+- On the first denied non-mutating read, the worker may correct only its command shape and retry it
+  once in the same stage. A second denial fails that stage. If the worker returns
+  `failure_kind: command-shape`, the runtime still applies its ordinary single stage retry and puts a
+  compact copy of the exact denied command in `prior_attempts`; the replacement can correct syntax
+  without gaining new authority.
 - `failure_kind: capability` means the immutable ticket truly lacks required authority and blocks
   immediately with exact additive claims and structured successor guidance.
 - `failure_kind: test-contradiction` also blocks immediately. The marker is an implementer claim,

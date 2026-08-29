@@ -52,6 +52,7 @@ const REQUIRED_CASE_IDS = Object.freeze([
   'red-nondeterministic',
   'contradiction-valid',
   'contradiction-invalid',
+  'command-shape-read-retry',
   'review-scope-expansion',
   'review-authored-test-remediation',
   'security-reachable-defect',
@@ -76,6 +77,7 @@ const DISPOSITIONS = new Set([
   'fixture-pair', 'live-source-dependency', 'accept-red-evidence',
   'reject-red-evidence', 'accept-contradiction', 'reject-contradiction',
   'scope-expansion', 'authored-test-remediation', 'write-fix', 'refuse',
+  'retry-command-shape',
   'execute', 'invoke-control-plane', 'invoke-status', 'invoke-run',
   'invoke-resume', 'invoke-config', 'invoke-history', 'invoke-roadmap',
   'invoke-override', 'do-not-invoke',
@@ -327,7 +329,7 @@ export function validateResponse(response, suite) {
     if (!['none', 'follow-exact', 'report-deviation'].includes(details.plan_action)) {
       errors.push(`${prefix}.details.plan_action is invalid`);
     }
-    if (!['none', 'capability', 'invalid-red-evidence', 'test-contradiction'].includes(details.failure_kind)) {
+    if (!['none', 'capability', 'command-shape', 'invalid-red-evidence', 'test-contradiction'].includes(details.failure_kind)) {
       errors.push(`${prefix}.details.failure_kind is invalid`);
     }
     if (!['none', 'public-behavior', 'source-text', 'synthetic-fixture-pair', 'live-source'].includes(details.test_strategy)) {

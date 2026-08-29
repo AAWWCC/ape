@@ -1,7 +1,7 @@
 # Prompt release evaluation
 
 This suite evaluates the shipped Claude and Codex prompt/skill surfaces against synthetic evidence.
-One provider call contains all 36 independent cases. The release matrix is two hosts by three
+One provider call contains all 37 independent cases. The release matrix is two hosts by three
 configured model tiers by three repetitions: 18 paid calls total.
 
 No live call is the default:

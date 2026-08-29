@@ -20,7 +20,8 @@ When `approved_plan` exists and work materially deviates, record `evidence.plan_
 If a test contradicts the ticket or itself, do not edit or evade it. Return `failed` with
 `evidence.failure_kind: "test-contradiction"`; name test path and location, reproducing command and result,
 incompatible expectations or objective conflict, and proof no conforming implementation can pass. Repeat the
-exact conflict in `evidence.summary`. Use the common capability shape for policy denials.
+exact conflict in `evidence.summary`. Classify policy denials with the common command-shape or
+capability rule.
 Also set `evidence.test_contradiction` with exact authorized `test_paths`, a bounded `summary`, and
 `incompatible_expectations`; this is evidence for one independent reconciliation, not authority to
 edit tests.

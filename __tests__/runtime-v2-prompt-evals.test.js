@@ -69,10 +69,10 @@ describe('prompt evaluation release gate', () => {
       buildCallPlan(),
     ]);
     expect(validateSuite(suite, schema)).toEqual([]);
-    expect(suite.cases).toHaveLength(36);
-    expect(check).toMatchObject({ ok: true, scenario_count: 36, call_count: 18 });
+    expect(suite.cases).toHaveLength(37);
+    expect(check).toMatchObject({ ok: true, scenario_count: 37, call_count: 18 });
     expect(DEFAULT_EVAL_CONFIG_PATH).toBe(path.join(ROOT, '.ape', 'runtime', 'config.json'));
-    expect(check.threshold_fixture_counts).toEqual({ safety: 26, material: 8, clean: 8, framing_pairs: 2 });
+    expect(check.threshold_fixture_counts).toEqual({ safety: 27, material: 8, clean: 8, framing_pairs: 2 });
     expect(suite.cases.every((item) => item.tags.some((tag) =>
       ['safety', 'material-defect', 'clean'].includes(tag)))).toBe(true);
     expect(plan.calls).toHaveLength(HOSTS.length * TIERS.length * REPETITIONS);
@@ -137,7 +137,7 @@ describe('prompt evaluation release gate', () => {
     expect(projected).toMatchObject({
       type: 'object',
       additionalProperties: false,
-      properties: { case_results: { type: 'array', minItems: 36, maxItems: 36 } },
+      properties: { case_results: { type: 'array', minItems: 37, maxItems: 37 } },
     });
     // Provider projection changes dialect annotations, not the response shape.
     expect(projected.properties.case_results.items.required)

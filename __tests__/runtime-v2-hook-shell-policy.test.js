@@ -55,7 +55,7 @@ describe('APE v2 lifecycle shell policy', () => {
     command,
   });
 
-  it('accepts the fully JSON-quoted argv spelling emitted by Codex exec wrappers', () => {
+  it('accepts complete uniformly quoted argv spellings emitted by Codex wrappers', () => {
     const cases = [
       ['"git" "status" "--short"', 'git status --short'],
       ['"git" "diff" "--stat"', 'git diff --stat'],
@@ -64,6 +64,12 @@ describe('APE v2 lifecycle shell policy', () => {
         'git diff -- src/value.js __tests__/value.test.js',
       ],
       ['"cat" "package.json"', 'cat package.json'],
+      ["'git' 'diff' '--stat'", 'git diff --stat'],
+      ["'cat' 'tests/unit/graph.test.ts'", 'cat tests/unit/graph.test.ts'],
+      [
+        "'cat' 'app/dashboard/[traceId]/timeline/page.tsx'",
+        "cat 'app/dashboard/[traceId]/timeline/page.tsx'",
+      ],
     ];
     for (const [wireCommand, canonicalCommand] of cases) {
       const event = hooks.normalizeLifecycleEvent({
@@ -90,6 +96,16 @@ describe('APE v2 lifecycle shell policy', () => {
       '"\\u0067it" "status" "--short"',
       '"git" "status" "--\\u0073hort"',
       '"git" "status" "--short" trailing',
+      '"cd" "src" "&&" "cat" "index.js"',
+      '"cat" "\'package.json\'"',
+      "'git' \"diff\" '--stat'",
+      "'cat' 'src/value file.js'",
+      "'cat' ';'",
+      "'cat' '$(node evil.js)'",
+      "'cat' 'src/value.js' trailing",
+      "'cd' 'src' '&&' 'cat' 'index.js'",
+      "'cat' '\"package.json\"'",
+      "'cp' 'src/value.js' 'src/copy.js'",
     ]) {
       const event = hooks.normalizeLifecycleEvent({
         hook_event_name: 'PreToolUse',
@@ -135,7 +151,10 @@ describe('APE v2 lifecycle shell policy', () => {
       { state, ticket: buildTicket },
     );
     expect(result.decision).toBe('deny');
+    expect(result.reason).toContain('APE shell denied');
     expect(result.reason).toContain('may run only recognized non-mutating evidence commands');
+    expect(result.reason).toContain('production edits must use the host edit tool');
+    expect(result.reason).not.toContain('command-shape');
     expect(result.reason).not.toContain('missing from the trusted-start snapshot');
   });
 
@@ -538,21 +557,16 @@ describe('APE v2 lifecycle shell policy', () => {
     }
   });
 
-  it('names the recognized evidence families in the bound-subagent deny reason', () => {
-    // Friction #8: agents must be able to read the allowlist out of the
-    // denial instead of rediscovering it by trial and error.
-    //
-    // PIN CORRECTION: 'cargo test' is pinned HERE, not by the unclaimed
-    // __tests__/runtime-v2-service.test.js (which pins only 'read-only git',
-    // plus a trailing `Run objective:` anchor that makes newline-freeness and
-    // position load-bearing for EVIDENCE_COMMAND_FAMILIES).
-    const result = evaluateLifecyclePolicy(boundSubagent('make bespoke-target'), {
+  it('returns a compact actionable bound-subagent command-shape denial', () => {
+    const result = evaluateLifecyclePolicy(boundSubagent('cat app/dashboard/[traceId]/page.tsx'), {
       state,
       ticket: buildTicket,
     });
     expect(result.decision).toBe('deny');
-    expect(result.reason).toContain('read-only git');
-    expect(result.reason).toContain('cargo test');
+    expect(result.reason).toContain('APE command-shape denied');
+    expect(result.reason).toContain('recognized non-mutating evidence commands');
+    expect(result.reason).toContain('command head unquoted');
+    expect(result.reason).not.toContain('read-only git');
   });
 
   // `env` command-head escape in the bound-subagent evidence allowlist. `env`
@@ -564,8 +578,8 @@ describe('APE v2 lifecycle shell policy', () => {
   // Only the BARE inspection form of `env` (no operands) stays recognized:
   // allowed alone and after the single permitted leading `cd <dir> &&` prefix;
   // `env` followed by ANY operand (a command, a NAME=VALUE assignment, or a
-  // flag) is denied exactly like any unrecognized command, returning the
-  // standard evidence-command deny reason. All other evidence families
+  // flag) is denied exactly like any unrecognized non-read command, returning
+  // the shell/edit-channel remedy. All other evidence families
   // (ls/pwd/cat/echo/true/which, the runners, read-only git, linters) unchanged.
   describe('bound-subagent env launcher policy', () => {
     it('denies `env` followed by any operand (command, assignment, or flag)', () => {
@@ -584,9 +598,8 @@ describe('APE v2 lifecycle shell policy', () => {
           ticket: buildTicket,
         });
         expect(result.decision, command).toBe('deny');
-        // The standard recognized-evidence-command deny reason, same substring
-        // the family-naming deny assertion above pins.
-        expect(result.reason, command).toContain('read-only git');
+        expect(result.reason, command).toContain('APE shell denied');
+        expect(result.reason, command).toContain('production edits must use the host edit tool');
       }
     });
 
@@ -600,7 +613,8 @@ describe('APE v2 lifecycle shell policy', () => {
           ticket: buildTicket,
         });
         expect(result.decision, command).toBe('deny');
-        expect(result.reason, command).toContain('read-only git');
+        expect(result.reason, command).toContain('APE shell denied');
+        expect(result.reason, command).toContain('production edits must use the host edit tool');
       }
     });
 
@@ -2516,9 +2530,7 @@ describe('APE v2 lifecycle shell policy', () => {
       for (const probe of INLINE_LITERAL_SLOTS) {
         for (const suffix of ['-pwn', '.pwn', ':pwn']) {
           const command = render(probe, suffix);
-          expect(decide(command).reason, command).toContain(
-            'may run only recognized non-mutating evidence commands',
-          );
+          expect(decide(command).reason, command).toContain('APE shell denied');
         }
       }
     });

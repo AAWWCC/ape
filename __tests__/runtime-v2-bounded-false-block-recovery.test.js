@@ -6,7 +6,7 @@ import path from 'node:path';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { SCHEMA_VERSION } from '../lib/runtime/constants.js';
 import { reduceRun } from '../lib/runtime/scheduler.js';
-import { reviewFindings } from '../lib/runtime/review-evidence.js';
+import { attemptSummaryList, reviewFindings } from '../lib/runtime/review-evidence.js';
 import { recordReceipt, startRun, statusRun } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { finalizeTicket, validateTicket } from '../lib/runtime/schemas.js';
@@ -735,6 +735,37 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
 });
 
 describe('APE v2 bounded recovery receipt admission', () => {
+  it('compacts the first hook command marker without losing nested text or inventing an empty command', () => {
+    const state = {
+      tickets: [
+        { ticket_id: 'nested', stage_id: 'plan', attempt: 1 },
+        { ticket_id: 'empty', stage_id: 'build', attempt: 1 },
+      ],
+      receipts: [
+        {
+          ticket_id: 'nested',
+          evidence: {
+            failure_kind: 'command-shape',
+            summary: 'Command blocked by PreToolUse hook: denied. Command: cat Command: fake',
+          },
+        },
+        {
+          ticket_id: 'empty',
+          evidence: {
+            failure_kind: 'command-shape',
+            summary: 'Command blocked by PreToolUse hook: denied. Command:',
+          },
+        },
+      ],
+    };
+    expect(attemptSummaryList(state, 'plan').entries).toEqual([
+      'attempt 1: command-shape denied: cat Command: fake',
+    ]);
+    expect(attemptSummaryList(state, 'build').entries).toEqual([
+      'attempt 1: Command blocked by PreToolUse hook: denied. Command:',
+    ]);
+  });
+
   it('accepts a correctable command-shape denial without invented authority and schedules one retry', async () => {
     const dir = await integrationProject();
     const started = await startRun(dir, {
@@ -756,7 +787,7 @@ describe('APE v2 bounded recovery receipt admission', () => {
       status: 'failed',
       evidence: {
         failure_kind: 'command-shape',
-        summary: "APE denied `cat 'eslint.config.mjs'`; retry with an admitted static path form.",
+        summary: 'Command blocked by PreToolUse hook: APE command-shape denied: a bound subagent may run only recognized non-mutating evidence commands. Command: cat app/dashboard/[traceId]/timeline/page.tsx',
       },
     }));
     expect(recorded.ok, JSON.stringify(recorded.errors)).toBe(true);
@@ -765,7 +796,9 @@ describe('APE v2 bounded recovery receipt admission', () => {
     expect(recorded.run.tickets.at(-1)).toMatchObject({
       stage_id: 'plan',
       attempt: 2,
-      prior_attempts: [expect.stringMatching(/eslint\.config\.mjs/)],
+      prior_attempts: [
+        'attempt 1: command-shape denied: cat app/dashboard/[traceId]/timeline/page.tsx',
+      ],
     });
   }, 30_000);
 
