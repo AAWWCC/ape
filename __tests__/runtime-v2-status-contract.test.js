@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,6 +70,7 @@ describe('APE v2 compact status and resume liveness contract', () => {
       pending: { ticket_id: startedTicketId(before.run) },
       gate: { state: 'not_run' },
       last_receipt: null,
+      next_action: { kind: 'wait' },
       next_safe_action: 'ape_run resume',
       diagnostic: {
         reason_code: 'dispatch_pending',
@@ -91,6 +92,7 @@ describe('APE v2 compact status and resume liveness contract', () => {
     expect(liveStatus.dispatch_state).toBe('live');
     expect(await compactStatus(dir)).toMatchObject({
       dispatch_state: 'live',
+      next_action: { kind: 'wait' },
       next_safe_action: 'wait for pending receipt',
       diagnostic: {
         reason_code: 'dispatch_live',
@@ -112,9 +114,42 @@ describe('APE v2 compact status and resume liveness contract', () => {
     expect(alreadyLive.actions.some((action) => action.type === 'dispatch_agent')).toBe(false);
   }, 30_000);
 
+  it('surfaces the one authorized same-ticket worker replacement after first contract exhaustion', async () => {
+    const dir = await project();
+    const started = await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    const ticketId = started.run.tickets[0].ticket_id;
+    const state = await readJson(paths.active, null);
+    state.receipt_contract_exhaustions = { [ticketId]: 1 };
+    await atomicWriteJson(paths.active, state);
+
+    const [intentName] = (await readdir(paths.dispatchIntents))
+      .filter((name) => name.endsWith('.json'));
+    const intentPath = path.join(paths.dispatchIntents, intentName);
+    const intent = await readJson(intentPath, null);
+    await atomicWriteJson(intentPath, {
+      ...intent,
+      status: 'expired',
+      agent_stopped_at: '2026-08-29T00:00:00.000Z',
+      expired_at: '2026-08-29T00:00:01.000Z',
+    });
+
+    expect(await compactStatus(dir)).toMatchObject({
+      dispatch_state: 'needs-redispatch',
+      next_action: {
+        kind: 'redispatch_same_ticket',
+        ticket_id: ticketId,
+        failure_domain: 'orchestration',
+      },
+      failure_domain: 'orchestration',
+      next_safe_action: 'ape_run resume',
+    });
+  }, 30_000);
+
   it('reports an inactive project without inventing run or ticket detail', async () => {
     const dir = await project();
-    expect(await compactStatus(dir)).toMatchObject({
+    const compact = await compactStatus(dir);
+    expect(compact).toMatchObject({
       ok: true,
       active: false,
       dispatch_state: 'none',
@@ -128,6 +163,7 @@ describe('APE v2 compact status and resume liveness contract', () => {
         next_safe_action: 'ape_run start',
       },
     });
+    expect(compact).not.toHaveProperty('next_action');
   });
 
   it('uses a deterministic id list instead of duplicating parallel ticket bodies', async () => {
@@ -202,6 +238,8 @@ describe('APE v2 compact status and resume liveness contract', () => {
         stage_id: state.tickets[0].stage_id,
         status: 'passed',
       },
+      next_action: { kind: 'blocked' },
+      failure_domain: 'configuration',
       next_safe_action: 'ape_run ship',
       diagnostic: {
         reason_code: 'shipping_hold',

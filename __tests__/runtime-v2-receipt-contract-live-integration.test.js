@@ -1,0 +1,1594 @@
+import { createHash } from 'node:crypto';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, it } from 'vitest';
+import { emptyOrchestrationTelemetry } from '../lib/runtime/orchestration-telemetry.js';
+import { readDispatchReceiptAttestation } from '../lib/runtime/claude-dispatch.js';
+import { runtimePaths } from '../lib/runtime/paths.js';
+import { receiptOutputSchemaForTicket } from '../lib/runtime/receipt-validator.js';
+import { receiptInputHash } from '../lib/runtime/receipt-input.js';
+import {
+  configAction,
+  extendBudget,
+  nextRun,
+  recordReceipt,
+  resumeRun,
+  validateReceiptForDispatch,
+} from '../lib/runtime/service.js';
+import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
+import { canonicalJson, sha256 } from '../lib/runtime/canonical.js';
+import { finalizeTicket } from '../lib/runtime/schemas.js';
+import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
+import { applyActions } from '../lib/runtime/receipt-service.js';
+import { reduceRun } from '../lib/runtime/scheduler.js';
+import { initializeExecutionBudget } from '../lib/runtime/execution-budget.js';
+
+const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const cleanups = [];
+
+afterEach(async () => {
+  await Promise.all(cleanups.splice(0).map((directory) =>
+    rm(directory, { recursive: true, force: true })));
+});
+
+function rawDigest(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function runProcess(file, input, env = {}) {
+  return new Promise((resolve, reject) => {
+    const childEnv = { ...process.env, ...env };
+    delete childEnv.CLAUDE_PROJECT_DIR;
+    delete childEnv.CODEX_CWD;
+    Object.assign(childEnv, env);
+    const child = spawn(process.execPath, [path.join(repoRoot, file)], {
+      cwd: repoRoot,
+      env: childEnv,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) reject(new Error(stderr));
+      else resolve(stdout.trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line)));
+    });
+    const messages = Array.isArray(input) ? input : [input];
+    child.stdin.end(`${messages.map((entry) => JSON.stringify(entry)).join('\n')}\n`);
+  });
+}
+
+async function fixture(host = 'codex', options = {}) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'ape-receipt-contract-'));
+  cleanups.push(directory);
+  execFileSync('git', ['init', '-q'], { cwd: directory });
+  execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: directory });
+  execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: directory });
+  await writeFile(path.join(directory, 'value.js'), 'export const value = 1;\n');
+  execFileSync('git', ['add', 'value.js'], { cwd: directory });
+  execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: directory });
+  const baseBranch = execFileSync('git', ['branch', '--show-current'], {
+    cwd: directory,
+    encoding: 'utf8',
+  }).trim();
+  const runBranch = 'ape/receipt-contract-live';
+  execFileSync('git', ['switch', '-qc', runBranch], { cwd: directory });
+  const treeSha = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+    cwd: directory,
+    encoding: 'utf8',
+  }).trim();
+
+  const paths = runtimePaths(directory);
+  const capability = 'receipt-capability-secret-1234567890';
+  const runId = 'run-receipt-live';
+  const stageId = options.stage_id ?? 'build';
+  const role = options.role ?? 'implementer';
+  const ticketId = `${runId}:${stageId}:ticket-1`;
+  const objective = options.objective ?? 'Return one exact validated receipt';
+  const claimedPaths = options.claimed_paths ?? ['value.js'];
+  const testPaths = options.test_paths ?? [];
+  const allowedEvidenceCommands = options.allowed_evidence_commands ?? [];
+  const verificationProfiles = options.verification_profiles ?? [];
+  const preflightArtifact = options.preflight_artifact ?? null;
+  const preflightHash = preflightArtifact ? sha256(preflightArtifact) : null;
+  const manifestBase = {
+    allowed_evidence_commands: allowedEvidenceCommands,
+    verification_profiles: verificationProfiles,
+    preflight_hash: preflightHash,
+    risk_triggers: [],
+    design_assurance_required: false,
+  };
+  const ticketBase = {
+    schema_version: '2.0.0',
+    ticket_id: ticketId,
+    run_id: runId,
+    stage_id: stageId,
+    parallel_group: null,
+    role,
+    objective,
+    claimed_paths: claimedPaths,
+    test_paths: testPaths,
+    tool_claims: [],
+    risk_triggers: [],
+    model_tier: 'balanced',
+    model: { model: 'gpt-5.4', reasoning_effort: 'medium' },
+    deadline_at: options.deadline_at ?? new Date(Date.now() + 3_600_000).toISOString(),
+    required_checks: options.required_checks ?? [],
+    writable: options.writable ?? role === 'implementer',
+    base_tree_sha: treeSha,
+    parent_hash: null,
+    attempt: 1,
+    issued_at: new Date().toISOString(),
+    receipt_contract_version: 1,
+    ...(options.plan_contract_version
+      ? { plan_contract_version: options.plan_contract_version }
+      : {}),
+    ...(preflightArtifact
+      ? {
+          preflight: {
+            artifact_hash: preflightHash,
+            artifact: preflightArtifact,
+            trust: 'untrusted-evidence',
+          },
+        }
+      : {}),
+    capability_manifest: manifestBase,
+  };
+  const outputSchema = receiptOutputSchemaForTicket(ticketBase);
+  const ticket = finalizeTicket({
+    ...ticketBase,
+    output_schema: outputSchema,
+    capability_manifest: {
+      version: 1,
+      config_hash: 'c'.repeat(64),
+      required_capabilities: [],
+      allowed_evidence_commands: allowedEvidenceCommands,
+      command_profiles: [],
+      verification_profiles: verificationProfiles,
+      objective_hash: sha256(objective),
+      preflight_hash: preflightHash,
+      risk_triggers: [],
+      design_assurance_required: false,
+      receipt_schema: { ref: 'ticket.output_schema', hash: sha256(outputSchema) },
+      field_bounds: {
+        validation_attempts_per_worker: 3,
+        max_physical_workers_per_ticket: 2,
+        corrections_per_validation: 20,
+        ...(options.manifest_growth_contract_version === 1
+          ? {
+              dynamic_test_paths: {
+                max_items: 64,
+                max_serialized_utf8_bytes: 4_096,
+              },
+            }
+          : {}),
+      },
+      byte_budgets: {
+        candidate_plan_utf8_bytes: 16_384,
+        preflight_artifact_utf8_bytes: 65_536,
+        mcp_projection_utf8_bytes: 48_000,
+      },
+    },
+  });
+  const createdAt = new Date(Date.now() - 1_000).toISOString();
+  const state = {
+    run_id: runId,
+    status: 'running',
+    stage: stageId,
+    host,
+    binding_protocol: 'native-v1',
+    objective,
+    mode: 'phase',
+    lane: options.lane ?? 'fast',
+    ...(options.plan_contract_version
+      ? { plan_contract_version: options.plan_contract_version }
+      : {}),
+    claimed_paths: claimedPaths,
+    test_paths: testPaths,
+    tool_claims: [],
+    requirements: [],
+    risk_triggers: [],
+    ...(options.manifest_growth_contract_version === 1
+      ? {
+          capability_snapshot: {
+            version: 1,
+            manifest_growth_contract_version: 1,
+            manifest_roles: options.manifest_roles ?? [role],
+            config_hash: 'c'.repeat(64),
+            required_capabilities: [],
+            evidence_scripts: [],
+            command_profiles: [],
+            verification_profiles: verificationProfiles,
+            runners: [],
+            test_commands: {
+              targeted_template: 'npm test -- {paths}',
+              full: 'npm test',
+            },
+          },
+        }
+      : {}),
+    ...(preflightArtifact
+      ? {
+          preflight: {
+            version: 1,
+            artifact_hash: preflightHash,
+            artifact: preflightArtifact,
+            receipt_hash: 'e'.repeat(64),
+          },
+        }
+      : {}),
+    tickets: [ticket],
+    receipts: [],
+    expired_tickets: [],
+    attempts: {},
+    remediation_cycles: 0,
+    tree_sha: treeSha,
+    branch: runBranch,
+    base_branch: baseBranch,
+    base_commit_sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: directory, encoding: 'utf8' }).trim(),
+    checkout_cleanup: {
+      status: 'pending',
+      base_branch: baseBranch,
+      run_branch: runBranch,
+      retained: true,
+      deleted: false,
+      updated_at: createdAt,
+    },
+    orchestration: emptyOrchestrationTelemetry(),
+    ...(options.execution_budget
+      ? { execution_budget: structuredClone(options.execution_budget) }
+      : {}),
+    created_at: createdAt,
+    updated_at: createdAt,
+  };
+  await atomicWriteJson(paths.active, state);
+  await atomicWriteJson(path.join(paths.runs, `${runId}.json`), state);
+  await atomicWriteJson(
+    path.join(paths.dispatchIntents, `${rawDigest(ticketId)}.json`),
+    {
+      version: 2,
+      host,
+      run_id: runId,
+      ticket_id: ticketId,
+      ticket_hash: ticket.ticket_hash,
+      agent_type: role,
+      ...(host === 'codex'
+        ? { binding_agent_type: 'default', bound_session_id: 'session-1' }
+        : { parent_session_id: 'session-1' }),
+      status: 'bound',
+      bound_agent_id: 'agent-1',
+      capability_hash: rawDigest(capability),
+      prepared_at: createdAt,
+      bound_at: createdAt,
+      expires_at: ticket.deadline_at,
+      launch_attempts: 1,
+      physical_worker_dispatches: 1,
+    },
+  );
+  return { directory, paths, state, ticket, capability };
+}
+
+function draft(ticket, capability, status = 'passed') {
+  return {
+    ticket_id: ticket.ticket_id,
+    status,
+    tests: [],
+    findings: [],
+    evidence: { summary: 'complete' },
+    receipt_capability: capability,
+  };
+}
+
+function maximalPlannerPlan(preflightHash, targetBytes = 16_384) {
+  const filled = () => Array.from({ length: 16 }, () => 'x');
+  const plan = {
+    version: 2,
+    preflight_hash: preflightHash,
+    requirements: [{ id: 'requirement', requirement: 'synthetic requirement', workstreams: ['work'] }],
+    workstreams: [{
+      id: 'work',
+      outcome: 'implement the synthetic requirement',
+      paths: [{ path: 'value.js', action: 'modify' }],
+      steps: filled(),
+      acceptance: filled(),
+      evidence_commands: ['git diff --check'],
+      verification_profiles: [],
+    }],
+    risks: [],
+    assurances: [],
+    non_goals: filled(),
+  };
+  let bytes = Buffer.byteLength(canonicalJson(plan), 'utf8');
+  for (const values of [plan.workstreams[0].steps, plan.workstreams[0].acceptance, plan.non_goals]) {
+    for (let index = 0; index < values.length && bytes < targetBytes; index += 1) {
+      while (values[index].length < 500 && bytes < targetBytes) {
+        values[index] += targetBytes - bytes === 1 ? 'x' : 'é';
+        bytes = Buffer.byteLength(canonicalJson(plan), 'utf8');
+      }
+    }
+  }
+  if (bytes !== targetBytes) throw new Error(`could not build ${targetBytes}-byte plan`);
+  return plan;
+}
+
+describe('live receipt contract integration', () => {
+  it('returns canonical corrections from the real MCP validation tool', async () => {
+    const value = await fixture();
+    const responses = await runProcess('bin/ape-mcp.mjs', {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'ape_validate_receipt',
+        arguments: {
+          project_dir: value.directory,
+          ticket_id: value.ticket.ticket_id,
+          draft: draft(value.ticket, value.capability, 'not-a-status'),
+        },
+      },
+    });
+    const payload = JSON.parse(responses[0].result.content[0].text);
+    expect(payload).toMatchObject({
+      ok: true,
+      valid: false,
+      validation: { attempt: 1, max_attempts: 3, exhausted: false },
+      failure_domain: 'orchestration',
+      next_action: { kind: 'continue_same_agent', failure_domain: 'orchestration' },
+    });
+    expect(payload.corrections).toContainEqual(expect.objectContaining({ field: 'status' }));
+  });
+
+  it('charges each identical malformed MCP submission and reaches bounded exhaustion', async () => {
+    const value = await fixture();
+    const invalid = draft(value.ticket, value.capability, 'same-invalid-status');
+    const call = (id) => ({
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: {
+        name: 'ape_validate_receipt',
+        arguments: {
+          project_dir: value.directory,
+          ticket_id: value.ticket.ticket_id,
+          draft: invalid,
+        },
+      },
+    });
+    const responses = await runProcess('bin/ape-mcp.mjs', [call(1), call(2), call(3)]);
+    const payloads = responses.map((response) =>
+      JSON.parse(response.result.content[0].text));
+
+    expect(payloads.map((payload) => payload.validation.attempt)).toEqual([1, 2, 3]);
+    expect(payloads.slice(0, 2)).toEqual([
+      expect.objectContaining({
+        valid: false,
+        idempotent: false,
+        next_action: { kind: 'continue_same_agent', failure_domain: 'orchestration' },
+      }),
+      expect.objectContaining({
+        valid: false,
+        idempotent: false,
+        next_action: { kind: 'continue_same_agent', failure_domain: 'orchestration' },
+      }),
+    ]);
+    expect(payloads[2]).toMatchObject({
+      valid: false,
+      idempotent: false,
+      recovery_kind: 'receipt_validation_exhausted',
+      validation: { attempt: 3, max_attempts: 3, exhausted: true },
+      next_action: {
+        kind: 'redispatch_same_ticket',
+        ticket_id: value.ticket.ticket_id,
+      },
+    });
+    expect(await readJson(
+      path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`),
+      null,
+    )).toMatchObject({
+      validation_attempts: 3,
+      receipt_validation_exhaustions: 1,
+      receipt_validation: {
+        attempts: 3,
+        exhausted: true,
+        last_input_hash: receiptInputHash(invalid),
+      },
+    });
+  });
+
+  it('binds an exact-draft attestation and safely replays its successful MCP response', async () => {
+    const value = await fixture();
+    const exactDraft = draft(value.ticket, value.capability);
+    const call = (id) => ({
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: {
+        name: 'ape_validate_receipt',
+        arguments: {
+          project_dir: value.directory,
+          ticket_id: value.ticket.ticket_id,
+          draft: exactDraft,
+        },
+      },
+    });
+    const responses = await runProcess('bin/ape-mcp.mjs', [call(1), call(2)]);
+    expect(JSON.parse(responses[0].result.content[0].text)).toMatchObject({
+      ok: true,
+      valid: true,
+      attested: true,
+      validation_performed: true,
+      idempotent: false,
+      validation: { attempt: 1 },
+    });
+    expect(JSON.parse(responses[1].result.content[0].text)).toMatchObject({
+      ok: true,
+      valid: true,
+      attested: true,
+      validation_performed: false,
+      idempotent: true,
+      validation: { attempt: 1 },
+    });
+
+    const binding = {
+      contract_version: 1,
+      ticket_hash: value.ticket.ticket_hash,
+      output_schema_hash: value.ticket.capability_manifest.receipt_schema.hash,
+    };
+    const exactHash = receiptInputHash(exactDraft);
+    expect(await readDispatchReceiptAttestation(
+      value.paths,
+      value.ticket.ticket_id,
+      exactHash,
+      value.capability,
+      binding,
+    )).toMatchObject({
+      valid: true,
+      attested_contract_version: 1,
+      attested_ticket_hash: value.ticket.ticket_hash,
+      attested_output_schema_hash: binding.output_schema_hash,
+    });
+
+    const modified = structuredClone(exactDraft);
+    modified.evidence.summary = 'changed after validation';
+    expect((await readDispatchReceiptAttestation(
+      value.paths,
+      value.ticket.ticket_id,
+      receiptInputHash(modified),
+      value.capability,
+      binding,
+    )).valid).toBe(false);
+
+    const intentFile = path.join(
+      value.paths.dispatchIntents,
+      `${rawDigest(value.ticket.ticket_id)}.json`,
+    );
+    const intent = await readJson(intentFile, null);
+    await atomicWriteJson(intentFile, {
+      ...intent,
+      receipt_validation: {
+        ...intent.receipt_validation,
+        attested_output_schema_hash: '0'.repeat(64),
+      },
+    });
+    expect((await readDispatchReceiptAttestation(
+      value.paths,
+      value.ticket.ticket_id,
+      exactHash,
+      value.capability,
+      binding,
+    )).valid).toBe(false);
+  });
+
+  it('accepts a plain exact draft with string braces and escaped quotes at the first SubagentStop', async () => {
+    const value = await fixture();
+    const exactDraft = {
+      ...draft(value.ticket, value.capability),
+      evidence: {
+        summary: 'expected } but observed { { near "quoted" and \\escaped text',
+      },
+    };
+
+    const [stopped] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'SubagentStop',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(exactDraft),
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+
+    expect(stopped).toEqual({});
+    expect(await readJson(
+      path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`),
+      null,
+    )).toMatchObject({
+      validation_attempts: 1,
+      valid_draft_observed: true,
+      agent_stopped_at: expect.any(String),
+      receipt_validation: {
+        attempts: 1,
+        exhausted: false,
+        attested_input_hash: receiptInputHash(exactDraft),
+        last_result: { valid: true },
+      },
+    });
+  });
+
+  it('validates and records a maximal compliant planner receipt on its first submission', async () => {
+    const objective = 'Create a bounded synthetic plan without project-specific material';
+    const preflightArtifact = {
+      version: 1,
+      objective,
+      acceptance: ['The synthetic plan is complete and bounded'],
+      non_goals: [],
+      baseline: [{ command: 'git diff --check', observation: 'The synthetic tree is clean' }],
+      impacted_paths: { read: ['value.js'], write: ['value.js'] },
+      compatibility: 'Preserve the synthetic public behavior',
+      rollback: 'Revert the synthetic change',
+      verification_profiles: [],
+      questions: [],
+    };
+    const preflightHash = sha256(preflightArtifact);
+    const value = await fixture('codex', {
+      stage_id: 'plan',
+      role: 'planner',
+      writable: false,
+      plan_contract_version: 2,
+      lane: 'full',
+      preflight_artifact: preflightArtifact,
+      allowed_evidence_commands: ['git diff --check'],
+      objective,
+    });
+    const candidatePlan = maximalPlannerPlan(preflightHash);
+    expect(Buffer.byteLength(canonicalJson(candidatePlan), 'utf8')).toBe(16_384);
+    const exactDraft = {
+      ...draft(value.ticket, value.capability),
+      evidence: { candidate_plan: candidatePlan },
+    };
+
+    const validation = await validateReceiptForDispatch(
+      value.directory,
+      exactDraft,
+      value.ticket.ticket_id,
+    );
+    expect(validation).toMatchObject({
+      ok: true,
+      valid: true,
+      attested: true,
+      validation: { attempt: 1 },
+      budgets: {
+        candidate_plan_utf8_bytes: {
+          used_bytes: 16_384,
+          max_bytes: 16_384,
+          remaining_bytes: 0,
+        },
+      },
+    });
+    expect(validation).not.toHaveProperty('next_action');
+
+    const recorded = await recordReceipt(value.directory, exactDraft);
+    expect(recorded).toMatchObject({
+      ok: true,
+      receipt: {
+        ticket_id: value.ticket.ticket_id,
+        evidence: { candidate_plan: candidatePlan },
+      },
+    });
+    expect(recorded.run.receipts).toHaveLength(1);
+    expect(recorded.run.orchestration).toMatchObject({
+      receipt_record_attempts: 1,
+      receipt_accepts: 1,
+      receipt_first_pass_accepts: 1,
+    });
+  }, 30_000);
+
+  it('returns identical pre-submit growth corrections and never attests or persists an oversized runtime test diff', async () => {
+    const value = await fixture('codex', {
+      stage_id: 'test',
+      role: 'test_writer',
+      writable: true,
+      claimed_paths: ['tests'],
+      test_paths: ['tests'],
+      manifest_growth_contract_version: 1,
+      manifest_roles: ['test_writer', 'implementer', 'reviewer'],
+    });
+    await mkdir(path.join(value.directory, 'tests'), { recursive: true });
+    await Promise.all(Array.from({ length: 65 }, (_, index) =>
+      writeFile(
+        path.join(value.directory, 'tests', `generated-${index}.test.js`),
+        'export {};\n',
+      )));
+    const exactDraft = draft(value.ticket, value.capability);
+
+    const [stopped] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'SubagentStop',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(exactDraft),
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    expect(stopped).toMatchObject({ decision: 'block' });
+    expect(stopped.reason).toMatch(/runtime\.test_paths.*contains 66 items.*at most 64/i);
+
+    const validation = await validateReceiptForDispatch(
+      value.directory,
+      exactDraft,
+      value.ticket.ticket_id,
+    );
+    expect(validation).toMatchObject({
+      ok: true,
+      valid: false,
+      attested: false,
+      failure_domain: 'orchestration',
+      next_action: { kind: 'continue_same_agent', failure_domain: 'orchestration' },
+      dynamic_test_paths: { used_items: 66, max_items: 64 },
+      corrections: [expect.objectContaining({
+        field: 'runtime.test_paths',
+        issue: expect.stringMatching(/contains 66 items.*at most 64/i),
+      })],
+    });
+    const correctionErrors = validation.corrections.map(
+      (entry) => `${entry.field}: ${entry.issue}`,
+    );
+
+    const recorded = await recordReceipt(value.directory, exactDraft);
+    expect(recorded).toMatchObject({
+      ok: false,
+      rejected: true,
+      failure_domain: 'orchestration',
+      next_action: { kind: 'continue_same_agent', failure_domain: 'orchestration' },
+      dynamic_test_paths: { used_items: 66, max_items: 64 },
+    });
+    expect(recorded.errors).toEqual(correctionErrors);
+
+    const active = await readJson(value.paths.active, null);
+    expect(active.receipts).toEqual([]);
+    expect(active.test_paths).toEqual(['tests']);
+    expect(await readdir(value.paths.receipts).catch((error) =>
+      error?.code === 'ENOENT' ? [] : Promise.reject(error))).toEqual([]);
+    expect(await readdir(value.paths.receiptTransactions).catch((error) =>
+      error?.code === 'ENOENT' ? [] : Promise.reject(error))).toEqual([]);
+  }, 30_000);
+
+  it('durably resumes accepted receipt consequences after an explicit budget extension', async () => {
+    const objective = 'Resume one bounded synthetic plan after operator authorization';
+    const preflightArtifact = {
+      version: 1,
+      objective,
+      acceptance: ['The bounded plan resumes without a duplicate receipt'],
+      non_goals: [],
+      baseline: [{ command: 'git diff --check', observation: 'The synthetic tree is clean' }],
+      impacted_paths: { read: ['value.js'], write: ['value.js'] },
+      compatibility: 'Preserve the synthetic public behavior',
+      rollback: 'Revert the synthetic change',
+      verification_profiles: [],
+      questions: [],
+    };
+    const value = await fixture('codex', {
+      stage_id: 'plan',
+      role: 'planner',
+      writable: false,
+      plan_contract_version: 2,
+      lane: 'full',
+      preflight_artifact: preflightArtifact,
+      allowed_evidence_commands: ['git diff --check'],
+      objective,
+    });
+    const exactDraft = {
+      ...draft(value.ticket, value.capability),
+      evidence: { candidate_plan: maximalPlannerPlan(sha256(preflightArtifact), 2_000) },
+    };
+    expect((await validateReceiptForDispatch(
+      value.directory,
+      exactDraft,
+      value.ticket.ticket_id,
+    )).valid).toBe(true);
+
+    const active = await readJson(value.paths.active, null);
+    active.execution_budget = initializeExecutionBudget(
+      { max_worker_dispatches: 8, max_active_seconds: 1 },
+      new Date(Date.now() - 5_000).toISOString(),
+    );
+    await atomicWriteJson(value.paths.active, active);
+
+    const recorded = await recordReceipt(value.directory, exactDraft);
+    expect(recorded).toMatchObject({
+      ok: true,
+      run: {
+        status: 'input_required',
+        input_required: { kind: 'execution_budget', code: 'active-time-exhausted' },
+        budget_continuation: { version: 1 },
+      },
+    });
+    expect(recorded.run.receipts).toHaveLength(1);
+    expect(recorded.run.tickets).toHaveLength(1);
+    const continuationHash = recorded.run.budget_continuation.actions_hash;
+    const attemptsBeforeResume = structuredClone(recorded.run.attempts);
+
+    const replay = await recordReceipt(value.directory, exactDraft);
+    expect(replay).toMatchObject({ ok: true, idempotent: true, actions: [] });
+    expect(replay.run.receipts).toHaveLength(1);
+    expect(replay.run.budget_continuation.actions_hash).toBe(continuationHash);
+
+    const extended = await extendBudget(value.directory, {
+      max_active_seconds: 30,
+      reason: 'authorize the exact queued planner consequences',
+    });
+    expect(extended).toMatchObject({ ok: true, run: { status: 'running' } });
+    const resumed = await nextRun(value.directory);
+    expect(resumed.ok).toBe(true);
+    expect(resumed.run.budget_continuation).toBeUndefined();
+    expect(resumed.run.receipts).toHaveLength(1);
+    expect(resumed.run.tickets.length).toBeGreaterThan(1);
+    expect(resumed.run.attempts).toEqual(attemptsBeforeResume);
+    expect(resumed.actions.filter((action) => action.type === 'dispatch_agent').length)
+      .toBeGreaterThan(0);
+  }, 30_000);
+
+  it('durably resumes the exact post-branch START chain instead of stranding an empty run', async () => {
+    const value = await fixture('codex');
+    const startedAt = new Date(Date.now() - 5_000).toISOString();
+    const startState = {
+      ...structuredClone(value.state),
+      status: 'starting',
+      stage: 'start',
+      mode: 'mechanical',
+      lane: 'mechanical',
+      behavioral: false,
+      tickets: [],
+      receipts: [],
+      attempts: {},
+      execution_budget: initializeExecutionBudget(
+        { max_worker_dispatches: 4, max_active_seconds: 1 },
+        startedAt,
+      ),
+      created_at: startedAt,
+      updated_at: startedAt,
+    };
+    const startActions = reduceRun(null, { type: 'START', run: startState })
+      .filter((action) => action.type !== 'acquire_lock');
+    const paused = await applyActions(
+      value.paths,
+      startState,
+      startActions,
+      DEFAULT_CONFIG,
+    );
+    expect(paused).toContainEqual(expect.objectContaining({
+      type: 'budget_paused',
+      code: 'active-time-exhausted',
+    }));
+    expect(startState).toMatchObject({
+      status: 'input_required',
+      input_required: { resume_status: 'starting', resume_stage: 'start' },
+      budget_continuation: { version: 1 },
+      tickets: [],
+    });
+
+    await configAction(value.directory, 'set', {
+      key: 'models.codex.balanced.model',
+      value: 'gpt-5.4-mini',
+    });
+    await extendBudget(value.directory, {
+      max_active_seconds: 30,
+      reason: 'resume the exact START action chain',
+    });
+    const resumed = await nextRun(value.directory);
+    expect(resumed.ok).toBe(true);
+    expect(resumed.run.status).toBe('running');
+    expect(resumed.run.budget_continuation).toBeUndefined();
+    expect(resumed.run.tickets).toHaveLength(1);
+    expect(resumed.run.tickets[0].model.model)
+      .toBe(DEFAULT_CONFIG.models.codex.balanced.model);
+    expect(resumed.actions).toContainEqual(expect.objectContaining({ type: 'dispatch_agent' }));
+  }, 30_000);
+
+  it('lets the real PreToolUse hook expose the same bounded field correction', async () => {
+    const value = await fixture('claude');
+    const [response] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'PreToolUse',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'implementer',
+      tool_name: 'mcp__ape__ape_validate_receipt',
+      tool_input: {
+        ticket_id: value.ticket.ticket_id,
+        draft: draft(value.ticket, value.capability, 'not-a-status'),
+      },
+    }, { APE_HOST: 'claude', CLAUDECODE: '1' });
+    expect(response.hookSpecificOutput).toMatchObject({
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'allow',
+    });
+    expect(response.hookSpecificOutput.permissionDecisionReason).toMatch(/status.*not-a-status/i);
+  });
+
+  it('keeps validation, real hook, and record corrections identical', async () => {
+    const value = await fixture('claude');
+    const invalid = draft(value.ticket, value.capability, 'same-invalid-status');
+    const validation = await validateReceiptForDispatch(
+      value.directory,
+      invalid,
+      value.ticket.ticket_id,
+    );
+    const [hook] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'PreToolUse',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'implementer',
+      tool_name: 'mcp__ape__ape_validate_receipt',
+      tool_input: { ticket_id: value.ticket.ticket_id, draft: invalid },
+    }, { APE_HOST: 'claude', CLAUDECODE: '1' });
+    const recorded = await recordReceipt(value.directory, invalid);
+
+    expect(validation.valid).toBe(false);
+    expect(recorded).toMatchObject({ ok: false, rejected: true });
+    expect(recorded).toMatchObject({
+      failure_domain: 'orchestration',
+      next_action: { kind: 'continue_same_agent', failure_domain: 'orchestration' },
+    });
+    expect(recorded.corrections).toEqual(validation.corrections);
+    for (const correction of validation.corrections) {
+      expect(hook.hookSpecificOutput.permissionDecisionReason).toContain(correction.field);
+      expect(hook.hookSpecificOutput.permissionDecisionReason).toContain(correction.issue);
+    }
+  });
+
+  it('keeps nested plan, recovery, and scope errors identical across validation, hook, and record', async () => {
+    async function plannerVariant({ objective, mutate, verificationProfiles = [] }) {
+      const preflightArtifact = {
+        version: 1,
+        objective,
+        acceptance: ['The synthetic plan stays mechanically valid'],
+        non_goals: [],
+        baseline: [{ command: 'git diff --check', observation: 'The synthetic tree is clean' }],
+        impacted_paths: { read: ['value.js'], write: ['value.js'] },
+        compatibility: 'Preserve the synthetic public behavior',
+        rollback: 'Revert the synthetic change',
+        verification_profiles: [],
+        questions: [],
+      };
+      const value = await fixture('claude', {
+        stage_id: 'plan',
+        role: 'planner',
+        writable: false,
+        plan_contract_version: 2,
+        lane: 'full',
+        preflight_artifact: preflightArtifact,
+        allowed_evidence_commands: ['git diff --check'],
+        verification_profiles: verificationProfiles,
+        objective,
+      });
+      const candidate = maximalPlannerPlan(
+        sha256(preflightArtifact),
+        mutate === 'oversized' ? 16_385 : 2_000,
+      );
+      if (mutate === 'command-profile') {
+        candidate.workstreams[0].evidence_commands = ['npm run drifted-command'];
+        candidate.workstreams[0].verification_profiles = ['unknown-profile'];
+      }
+      return {
+        value,
+        invalid: {
+          ...draft(value.ticket, value.capability),
+          evidence: { candidate_plan: candidate },
+        },
+      };
+    }
+
+    const variants = [
+      await plannerVariant({
+        objective: 'Reject a synthetic plan one byte above its contract',
+        mutate: 'oversized',
+      }),
+      await plannerVariant({
+        objective: 'Reject drifted command and verification profile identifiers',
+        mutate: 'command-profile',
+        verificationProfiles: [{ id: 'unit', required: true }],
+      }),
+    ];
+    const recovery = await fixture('claude');
+    variants.push({
+      value: recovery,
+      invalid: {
+        ...draft(recovery.ticket, recovery.capability, 'failed'),
+        evidence: {
+          failure_kind: 'capability',
+          required_claims: { claimed_paths: ['value.js'] },
+        },
+      },
+    });
+    const scope = await fixture('claude');
+    variants.push({
+      value: scope,
+      invalid: {
+        ...draft(scope.ticket, scope.capability),
+        evidence: {
+          summary: 'This role must not grow scope',
+          scope_expansion: { claimed_paths: ['src/new.js'], reason: 'not authorized here' },
+        },
+      },
+    });
+
+    for (const { value, invalid } of variants) {
+      const validation = await validateReceiptForDispatch(
+        value.directory,
+        invalid,
+        value.ticket.ticket_id,
+      );
+      const [hook] = await runProcess('bin/ape-hook.mjs', {
+        hook_event_name: 'PreToolUse',
+        project_dir: value.directory,
+        session_id: 'session-1',
+        agent_id: 'agent-1',
+        agent_type: value.ticket.role,
+        tool_name: 'mcp__ape__ape_validate_receipt',
+        tool_input: { ticket_id: value.ticket.ticket_id, draft: invalid },
+      }, { APE_HOST: 'claude', CLAUDECODE: '1' });
+      const recorded = await recordReceipt(value.directory, invalid);
+
+      expect(validation.valid).toBe(false);
+      expect(validation.corrections.length).toBeGreaterThan(0);
+      expect(recorded).toMatchObject({
+        ok: false,
+        rejected: true,
+        failure_domain: 'orchestration',
+      });
+      expect(recorded.corrections).toEqual(validation.corrections);
+      expect(hook.hookSpecificOutput.permissionDecisionReason)
+        .toContain(validation.corrections[0].field);
+      expect(hook.hookSpecificOutput.permissionDecisionReason)
+        .toContain(validation.corrections[0].issue);
+    }
+  }, 30_000);
+
+  it('refuses a valid receipt modified after exact-draft attestation', async () => {
+    const value = await fixture();
+    const exact = draft(value.ticket, value.capability);
+    const validation = await validateReceiptForDispatch(
+      value.directory,
+      exact,
+      value.ticket.ticket_id,
+    );
+    expect(validation).toMatchObject({ ok: true, valid: true, attested: true });
+
+    const modified = {
+      ...exact,
+      evidence: { ...exact.evidence, summary: 'modified after validation' },
+    };
+    const recorded = await recordReceipt(value.directory, modified);
+    expect(recorded).toMatchObject({
+      ok: false,
+      rejected: true,
+      next_action: { kind: 'continue_same_agent' },
+    });
+    expect(recorded.errors).toContain(
+      'receipt draft was not pre-validated and attested byte-for-byte for this physical dispatch',
+    );
+    expect(recorded.input_hash).not.toBe(recorded.attested_input_hash);
+  });
+
+  it('blocks an identical malformed final draft twice, then retires and redispatches the same ticket once', async () => {
+    const value = await fixture();
+    const stop = (status) => ({
+      hook_event_name: 'SubagentStop',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(draft(value.ticket, value.capability, status)),
+  });
+
+    for (const status of ['same-invalid-status', 'same-invalid-status']) {
+      const [response] = await runProcess(
+        'bin/ape-hook.mjs',
+        stop(status),
+        { APE_HOST: 'codex', CODEX_CWD: value.directory },
+      );
+      expect(response).toMatchObject({ decision: 'block' });
+      expect(response.reason).toMatch(/status.*invalid-/i);
+    }
+    const intentFile = path.join(
+      value.paths.dispatchIntents,
+      `${rawDigest(value.ticket.ticket_id)}.json`,
+    );
+    expect(await readJson(intentFile, null)).toMatchObject({
+      status: 'bound',
+      validation_attempts: 2,
+      valid_draft_observed: false,
+    });
+
+    const [third] = await runProcess(
+      'bin/ape-hook.mjs',
+      stop('same-invalid-status'),
+      { APE_HOST: 'codex', CODEX_CWD: value.directory },
+    );
+    expect(third).toEqual({});
+    expect(await readJson(intentFile, null)).toMatchObject({
+      status: 'bound',
+      receipt_validation_exhaustions: 1,
+      validation_attempts: 3,
+      valid_draft_observed: false,
+      agent_stopped_at: expect.any(String),
+    });
+    const exhaustedRecord = await recordReceipt(
+      value.directory,
+      draft(value.ticket, value.capability, 'same-invalid-status'),
+    );
+    expect(exhaustedRecord).toMatchObject({
+      ok: false,
+      rejected: true,
+      recovery_kind: 'receipt_validation_exhausted',
+      failure_domain: 'orchestration',
+      next_action: {
+        kind: 'redispatch_same_ticket',
+        ticket_id: value.ticket.ticket_id,
+      },
+    });
+    expect(exhaustedRecord.next_action.kind).not.toBe('continue_same_agent');
+
+    // RESUME must reconcile the durable stopped-worker exhaustion exactly as
+    // NEXT does; a host restart between SubagentStop and parent recovery must
+    // not lose the same-ticket redispatch allowance.
+    const recovery = await resumeRun(value.directory);
+    const dispatch = recovery.actions.find((entry) => entry.type === 'dispatch_agent');
+    expect(dispatch).toMatchObject({
+      ticket: { ticket_id: value.ticket.ticket_id },
+      recovery_kind: 'redispatch_same_ticket',
+      source_ticket_id: value.ticket.ticket_id,
+      failure_domain: 'orchestration',
+    });
+    expect(recovery.run.tickets).toHaveLength(1);
+    expect(recovery.run.tickets[0]).toEqual(value.ticket);
+    expect(await readJson(intentFile, null)).toMatchObject({
+      status: 'prepared',
+      receipt_validation_exhaustions: 1,
+      launch_attempts: 0,
+    });
+
+    const prepared = await readJson(intentFile, null);
+    await atomicWriteJson(intentFile, {
+      ...prepared,
+      status: 'bound',
+      binding_agent_type: 'default',
+      bound_session_id: 'session-2',
+      bound_agent_id: 'agent-2',
+      capability_hash: rawDigest(value.capability),
+      bound_at: new Date().toISOString(),
+    });
+    const secondStop = (status) => ({
+      ...stop(status),
+      session_id: 'session-2',
+      agent_id: 'agent-2',
+    });
+    for (const status of ['invalid-four', 'invalid-five']) {
+      const [response] = await runProcess(
+        'bin/ape-hook.mjs',
+        secondStop(status),
+        { APE_HOST: 'codex', CODEX_CWD: value.directory },
+      );
+      expect(response).toMatchObject({ decision: 'block' });
+      expect(response.reason).toMatch(/status.*invalid-/i);
+    }
+    const [finalStop] = await runProcess(
+      'bin/ape-hook.mjs',
+      secondStop('invalid-six'),
+      { APE_HOST: 'codex', CODEX_CWD: value.directory },
+    );
+    expect(finalStop).toEqual({});
+    const terminalRecord = await recordReceipt(
+      value.directory,
+      draft(value.ticket, value.capability, 'invalid-six'),
+    );
+    expect(terminalRecord).toMatchObject({
+      ok: false,
+      rejected: true,
+      recovery_kind: 'receipt_validation_exhausted',
+      failure_domain: 'orchestration',
+      next_action: {
+        kind: 'blocked',
+        failure_domain: 'orchestration',
+        automatic_successor: false,
+      },
+    });
+    const terminal = await nextRun(value.directory);
+    expect(terminal).toMatchObject({ ok: false, reason: 'run is blocked' });
+    expect(terminal).not.toHaveProperty('actions');
+    expect(await readJson(value.paths.active, null)).toMatchObject({
+      status: 'blocked',
+      terminal_reason_code: 'worker_protocol_failure',
+      failure_domain: 'orchestration',
+      receipt_contract_exhaustions: { [value.ticket.ticket_id]: 2 },
+      orchestration: {
+        receipt_record_attempts: 6,
+        receipt_rejections: 6,
+        protocol_redispatches: 1,
+      },
+    });
+    expect((await readJson(value.paths.active, null)).tickets).toHaveLength(1);
+    const blockedNext = await nextRun(value.directory);
+    expect(blockedNext).toMatchObject({ ok: false, reason: 'run is blocked' });
+    expect(blockedNext).not.toHaveProperty('actions');
+  }, 30_000);
+
+  it('gives stopped-worker receipt recovery precedence over the immutable ticket deadline', async () => {
+    const value = await fixture('codex', {
+      deadline_at: new Date(Date.now() - 1_000).toISOString(),
+    });
+    const originalTicket = structuredClone(value.ticket);
+    const firstStop = (status) => ({
+      hook_event_name: 'SubagentStop',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(draft(value.ticket, value.capability, status)),
+    });
+
+    for (const status of ['invalid-deadline-one', 'invalid-deadline-two']) {
+      const [response] = await runProcess(
+        'bin/ape-hook.mjs',
+        firstStop(status),
+        { APE_HOST: 'codex', CODEX_CWD: value.directory },
+      );
+      expect(response).toMatchObject({ decision: 'block' });
+    }
+    const [firstExhausted] = await runProcess(
+      'bin/ape-hook.mjs',
+      firstStop('invalid-deadline-three'),
+      { APE_HOST: 'codex', CODEX_CWD: value.directory },
+    );
+    expect(firstExhausted).toEqual({});
+
+    const recovery = await nextRun(value.directory);
+    const recoveryDispatch = recovery.actions.find((entry) => entry.type === 'dispatch_agent');
+    expect(recoveryDispatch).toMatchObject({
+      ticket: { ticket_id: value.ticket.ticket_id },
+      recovery_kind: 'redispatch_same_ticket',
+      source_ticket_id: value.ticket.ticket_id,
+      failure_domain: 'orchestration',
+    });
+    expect(recovery.run).toMatchObject({
+      status: 'running',
+      attempts: {},
+      expired_tickets: [],
+      receipt_contract_exhaustions: { [value.ticket.ticket_id]: 1 },
+      receipt_contract_pending_redispatches: [value.ticket.ticket_id],
+    });
+    expect(recovery.run.tickets).toEqual([originalTicket]);
+
+    const intentFile = path.join(
+      value.paths.dispatchIntents,
+      `${rawDigest(value.ticket.ticket_id)}.json`,
+    );
+    const recoveryIntent = await readJson(intentFile, null);
+    expect(recoveryIntent).toMatchObject({
+      status: 'prepared',
+      physical_worker_dispatches: 2,
+      receipt_validation_exhaustions: 1,
+      receipt_protocol_recovery: true,
+      immutable_ticket_deadline_at: value.ticket.deadline_at,
+    });
+    expect(Date.parse(recoveryIntent.expires_at)).toBeGreaterThan(Date.now());
+    expect(Date.parse(value.ticket.deadline_at)).toBeLessThanOrEqual(Date.now());
+
+    // The recovery intent has its own bounded host-dispatch horizon, while the
+    // immutable ticket (including its elapsed deadline and hash) remains exact.
+    const [launch] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'PreToolUse',
+      project_dir: value.directory,
+      session_id: 'recovery-parent-session',
+      tool_use_id: 'spawn-recovery-worker',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: {
+        ...recoveryDispatch.dispatch.spawn_args,
+        message: 'gAAAAABencrypted-v2-message',
+      },
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    expect(launch).toEqual({});
+    const [start] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'SubagentStart',
+      project_dir: value.directory,
+      session_id: 'session-2',
+      agent_id: 'agent-2',
+      agent_type: 'default',
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    const context = start.hookSpecificOutput?.additionalContext ?? '';
+    const recoveryCapability = /APE_RECEIPT_CAPABILITY=([A-Za-z0-9_-]{32,256})/.exec(context)?.[1];
+    expect(recoveryCapability).toBeTruthy();
+
+    const secondStop = (status) => ({
+      ...firstStop(status),
+      session_id: 'session-2',
+      agent_id: 'agent-2',
+      last_assistant_message: JSON.stringify(
+        draft(value.ticket, recoveryCapability, status),
+      ),
+    });
+    for (const status of ['invalid-deadline-four', 'invalid-deadline-five']) {
+      const [response] = await runProcess(
+        'bin/ape-hook.mjs',
+        secondStop(status),
+        { APE_HOST: 'codex', CODEX_CWD: value.directory },
+      );
+      expect(response).toMatchObject({ decision: 'block' });
+    }
+    const [secondExhausted] = await runProcess(
+      'bin/ape-hook.mjs',
+      secondStop('invalid-deadline-six'),
+      { APE_HOST: 'codex', CODEX_CWD: value.directory },
+    );
+    expect(secondExhausted).toEqual({});
+
+    const terminal = await nextRun(value.directory);
+    expect(terminal).toEqual({ ok: false, reason: 'run is blocked' });
+    const blocked = await readJson(value.paths.active, null);
+    expect(blocked).toMatchObject({
+      status: 'blocked',
+      terminal_reason_code: 'worker_protocol_failure',
+      failure_domain: 'orchestration',
+      receipt_contract_exhaustions: { [value.ticket.ticket_id]: 2 },
+      attempts: {},
+      expired_tickets: [],
+    });
+    expect(blocked.receipt_contract_pending_redispatches).toBeUndefined();
+    expect(blocked.tickets).toEqual([originalTicket]);
+    expect(await nextRun(value.directory)).toEqual({ ok: false, reason: 'run is blocked' });
+    expect((await readJson(intentFile, null)).physical_worker_dispatches).toBe(2);
+  }, 30_000);
+
+  it('does not authorize a same-agent correction past active time and resumes the same ticket after extension', async () => {
+    const value = await fixture('codex', {
+      // Real new-run tickets clamp this absolute deadline to the active budget.
+      // Keep it expired through the operator pause to prove recovery bypasses
+      // logical stage-timeout handling and redispatches the same ticket.
+      deadline_at: new Date(Date.now() - 1_000).toISOString(),
+    });
+    const state = await readJson(value.paths.active, null);
+    const activeSince = new Date(Date.now() - 2_000).toISOString();
+    state.execution_budget = {
+      version: 1,
+      max_worker_dispatches: 2,
+      max_active_seconds: 1,
+      worker_dispatches_used: 1,
+      active_started_at: state.created_at,
+      active_elapsed_ms: 0,
+      overrun_ms: 0,
+      active_since: activeSince,
+      active_deadline_at: new Date(Date.parse(activeSince) + 1_000).toISOString(),
+    };
+    await atomicWriteJson(value.paths.active, state);
+    await atomicWriteJson(path.join(value.paths.runs, `${state.run_id}.json`), state);
+
+    const invalid = draft(value.ticket, value.capability, 'invalid-after-budget');
+    const validation = await validateReceiptForDispatch(
+      value.directory,
+      invalid,
+      value.ticket.ticket_id,
+    );
+    expect(validation).toMatchObject({
+      ok: true,
+      valid: false,
+      budget_paused: true,
+      next_action: { kind: 'extend_budget' },
+      after_budget_extension: { kind: 'continue_same_agent' },
+    });
+    let persisted = await readJson(value.paths.active, null);
+    expect(persisted).toMatchObject({
+      status: 'input_required',
+      input_required: { kind: 'execution_budget', code: 'active-time-exhausted' },
+      budget_continuation: { source: 'receipt-protocol-budget-recovery' },
+      attempts: {},
+    });
+    expect(persisted.execution_budget.overrun_ms).toBeGreaterThan(0);
+
+    const [stopped] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'SubagentStop',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(invalid),
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    expect(stopped).toEqual({});
+
+    const paused = await nextRun(value.directory);
+    expect(paused.run).toMatchObject({
+      status: 'input_required',
+      attempts: {},
+    });
+    const intentFile = path.join(
+      value.paths.dispatchIntents,
+      `${rawDigest(value.ticket.ticket_id)}.json`,
+    );
+    expect(await readJson(intentFile, null)).toMatchObject({ status: 'expired' });
+
+    const extended = await extendBudget(value.directory, {
+      max_active_seconds: 10,
+      reason: 'explicitly continue the same bounded receipt ticket',
+    });
+    expect(extended.run).toMatchObject({ status: 'running', attempts: {} });
+    const resumed = await nextRun(value.directory);
+    expect(resumed.actions.find((entry) => entry.type === 'dispatch_agent')).toMatchObject({
+      ticket: { ticket_id: value.ticket.ticket_id },
+      recovery_kind: 'redispatch_same_ticket',
+      failure_domain: 'orchestration',
+    });
+    expect(resumed.run).toMatchObject({
+      attempts: {},
+      execution_budget: { worker_dispatches_used: 2 },
+    });
+    expect(resumed.run.expired_tickets).toEqual([]);
+    expect(resumed.run.tickets).toHaveLength(1);
+    expect(await readJson(intentFile, null)).toMatchObject({
+      status: 'prepared',
+      physical_worker_dispatches: 2,
+    });
+  }, 30_000);
+
+  it('routes an invalid RECORD after budget-expired SubagentStop through extension and one fresh same-ticket worker', async () => {
+    const value = await fixture('codex', {
+      deadline_at: new Date(Date.now() - 1_000).toISOString(),
+    });
+    const state = await readJson(value.paths.active, null);
+    const activeSince = new Date(Date.now() - 2_000).toISOString();
+    state.execution_budget = {
+      version: 1,
+      max_worker_dispatches: 2,
+      max_active_seconds: 1,
+      worker_dispatches_used: 1,
+      active_started_at: state.created_at,
+      active_elapsed_ms: 0,
+      overrun_ms: 0,
+      active_since: activeSince,
+      active_deadline_at: new Date(Date.parse(activeSince) + 1_000).toISOString(),
+    };
+    await atomicWriteJson(value.paths.active, state);
+    await atomicWriteJson(path.join(value.paths.runs, `${state.run_id}.json`), state);
+
+    const invalid = draft(value.ticket, value.capability, 'invalid-at-stopped-budget');
+    const [stopped] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'SubagentStop',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(invalid),
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    expect(stopped).toEqual({});
+
+    const binding = {
+      contract_version: 1,
+      ticket_hash: value.ticket.ticket_hash,
+      output_schema_hash: value.ticket.capability_manifest.receipt_schema.hash,
+    };
+    const attestation = await readDispatchReceiptAttestation(
+      value.paths,
+      value.ticket.ticket_id,
+      receiptInputHash(invalid),
+      value.capability,
+      binding,
+    );
+    expect(attestation).toMatchObject({
+      worker_stopped_at: expect.any(String),
+      physical_worker_dispatches: 1,
+      validation: {
+        attempt: 1,
+        exhausted: false,
+        continuation_blocked: { code: 'active-time-exhausted' },
+      },
+    });
+
+    const recorded = await recordReceipt(value.directory, invalid);
+    expect(recorded).toMatchObject({
+      ok: false,
+      rejected: true,
+      failure_domain: 'orchestration',
+      recovery_kind: 'receipt_budget_interrupted',
+      budget_paused: true,
+      next_action: { kind: 'extend_budget', failure_domain: 'operator' },
+      after_budget_extension: {
+        kind: 'redispatch_same_ticket',
+        ticket_id: value.ticket.ticket_id,
+        failure_domain: 'orchestration',
+      },
+    });
+    expect(recorded.next_action.kind).not.toBe('continue_same_agent');
+    const intentFile = path.join(
+      value.paths.dispatchIntents,
+      `${rawDigest(value.ticket.ticket_id)}.json`,
+    );
+    expect(await readJson(intentFile, null)).toMatchObject({ status: 'expired' });
+    expect(await readJson(value.paths.active, null)).toMatchObject({
+      status: 'input_required',
+      input_required: { kind: 'execution_budget', code: 'active-time-exhausted' },
+      budget_continuation: { source: 'receipt-protocol-budget-recovery' },
+      receipt_contract_pending_redispatches: [value.ticket.ticket_id],
+      attempts: {},
+    });
+
+    await extendBudget(value.directory, {
+      max_active_seconds: 10,
+      reason: 'authorize the one bounded replacement for the stopped worker',
+    });
+    const resumed = await nextRun(value.directory);
+    const recoveryDispatch = resumed.actions.find((entry) => entry.type === 'dispatch_agent');
+    expect(recoveryDispatch).toMatchObject({
+      ticket: { ticket_id: value.ticket.ticket_id },
+      recovery_kind: 'redispatch_same_ticket',
+      source_ticket_id: value.ticket.ticket_id,
+      failure_domain: 'orchestration',
+    });
+    expect(resumed.run).toMatchObject({
+      attempts: {},
+      expired_tickets: [],
+      receipt_contract_pending_redispatches: [value.ticket.ticket_id],
+      execution_budget: { worker_dispatches_used: 2 },
+    });
+    expect(resumed.run.tickets).toHaveLength(1);
+    expect(await readJson(intentFile, null)).toMatchObject({
+      status: 'prepared',
+      physical_worker_dispatches: 2,
+      receipt_protocol_recovery: true,
+      receipt_budget_interrupted_recovery: true,
+      immutable_ticket_deadline_at: value.ticket.deadline_at,
+    });
+
+    const [launch] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'PreToolUse',
+      project_dir: value.directory,
+      session_id: 'budget-recovery-parent',
+      tool_use_id: 'spawn-budget-recovery-worker',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: {
+        ...recoveryDispatch.dispatch.spawn_args,
+        message: 'gAAAAABencrypted-budget-recovery',
+      },
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    expect(launch).toEqual({});
+  }, 30_000);
+
+  it('never tells a stopped worker to continue when dynamic capability growth is invalid at the budget boundary', async () => {
+    const value = await fixture('codex', {
+      stage_id: 'test',
+      role: 'test_writer',
+      writable: true,
+      claimed_paths: ['tests'],
+      test_paths: ['tests'],
+      manifest_growth_contract_version: 1,
+      manifest_roles: ['test_writer', 'implementer', 'reviewer'],
+    });
+    await mkdir(path.join(value.directory, 'tests'), { recursive: true });
+    await Promise.all(Array.from({ length: 65 }, (_, index) =>
+      writeFile(
+        path.join(value.directory, 'tests', `budget-growth-${index}.test.js`),
+        'export {};\n',
+      )));
+    const state = await readJson(value.paths.active, null);
+    const activeSince = new Date(Date.now() - 2_000).toISOString();
+    state.execution_budget = {
+      version: 1,
+      max_worker_dispatches: 2,
+      max_active_seconds: 1,
+      worker_dispatches_used: 1,
+      active_started_at: state.created_at,
+      active_elapsed_ms: 0,
+      overrun_ms: 0,
+      active_since: activeSince,
+      active_deadline_at: new Date(Date.parse(activeSince) + 1_000).toISOString(),
+    };
+    await atomicWriteJson(value.paths.active, state);
+    const exactDraft = draft(value.ticket, value.capability);
+
+    const [stopped] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'SubagentStop',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(exactDraft),
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    expect(stopped).toEqual({});
+
+    const recorded = await recordReceipt(value.directory, exactDraft);
+    expect(recorded).toMatchObject({
+      ok: false,
+      rejected: true,
+      failure_domain: 'orchestration',
+      recovery_kind: 'receipt_budget_interrupted',
+      budget_paused: true,
+      next_action: { kind: 'extend_budget', failure_domain: 'operator' },
+      after_budget_extension: {
+        kind: 'redispatch_same_ticket',
+        ticket_id: value.ticket.ticket_id,
+      },
+      dynamic_test_paths: { used_items: 66, max_items: 64 },
+    });
+    expect(recorded.next_action.kind).not.toBe('continue_same_agent');
+  }, 30_000);
+
+  it('blocks once instead of authorizing a third worker after a second-worker budget interruption', async () => {
+    const value = await fixture('codex', {
+      deadline_at: new Date(Date.now() - 1_000).toISOString(),
+    });
+    const state = await readJson(value.paths.active, null);
+    const activeSince = new Date(Date.now() - 2_000).toISOString();
+    state.execution_budget = {
+      version: 1,
+      max_worker_dispatches: 3,
+      max_active_seconds: 1,
+      worker_dispatches_used: 2,
+      active_started_at: state.created_at,
+      active_elapsed_ms: 0,
+      overrun_ms: 0,
+      active_since: activeSince,
+      active_deadline_at: new Date(Date.parse(activeSince) + 1_000).toISOString(),
+    };
+    await atomicWriteJson(value.paths.active, state);
+    const intentFile = path.join(
+      value.paths.dispatchIntents,
+      `${rawDigest(value.ticket.ticket_id)}.json`,
+    );
+    const intent = await readJson(intentFile, null);
+    await atomicWriteJson(intentFile, { ...intent, physical_worker_dispatches: 2 });
+
+    const invalid = draft(value.ticket, value.capability, 'invalid-second-budget-stop');
+    const validation = await validateReceiptForDispatch(
+      value.directory,
+      invalid,
+      value.ticket.ticket_id,
+    );
+    expect(validation).toMatchObject({
+      valid: false,
+      budget_paused: true,
+      next_action: { kind: 'extend_budget' },
+    });
+    const [stopped] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'SubagentStop',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(invalid),
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    expect(stopped).toEqual({});
+    expect(await readJson(intentFile, null)).toMatchObject({
+      agent_stopped_at: expect.any(String),
+      physical_worker_dispatches: 2,
+      receipt_validation: {
+        continuation_blocked: { code: 'active-time-exhausted' },
+      },
+    });
+
+    const next = await nextRun(value.directory);
+    expect(next).toEqual({ ok: false, reason: 'run is blocked' });
+    const blocked = await readJson(value.paths.active, null);
+    expect(blocked).toMatchObject({
+      status: 'blocked',
+      terminal_reason_code: 'worker_protocol_failure',
+      failure_domain: 'orchestration',
+      attempts: {},
+      tickets: [expect.objectContaining({ ticket_id: value.ticket.ticket_id })],
+    });
+    expect(blocked.budget_continuation).toBeUndefined();
+    expect(blocked.tickets).toHaveLength(1);
+    expect(await readJson(intentFile, null)).toMatchObject({ physical_worker_dispatches: 2 });
+  }, 30_000);
+});

@@ -104,10 +104,11 @@ behavior. Use:
 npm run bundle:reach -- lib/runtime/runner.js
 ```
 
-The command uses esbuild metadata. For example, `lib/runtime/runner.js` contributes to the MCP and
-LARP bundles, not the hooks bundle.
+The command uses esbuild metadata. For example, `lib/runtime/runner.js` now contributes to all three
+bundles: MCP execution and LARP use it directly, while the hooks bundle reaches its exact command
+renderer through the shared receipt-capability manifest kernel.
 
-Release validation checks all eleven domain owners through this metadata, then copies the three
+Release validation checks every declared domain owner through this metadata, then copies the three
 root bundles into both plugin distributions. This proves that the owners required by an entry
 point are actually reachable without relying on symbol names surviving tree-shaking.
 

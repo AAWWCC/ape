@@ -4,11 +4,18 @@ The parent orchestrator owns every APE control call. It never performs stage wor
 
 ## Start readiness
 
-Before `ape_run start`, call `ape_config doctor` and `get`. For behavioral work, if
-`test_commands.full` or `test_commands.targeted_template` is unset, call `ape_config init` for a
-repository-grounded proposal. Apply only a complete proposal with operator approval; otherwise
-stop and report the missing slots before any agent dispatch.
+Before `ape_run start`, call `ape_config doctor`, `get`, and then `ape_run preview` with the exact
+prospective run facts and additive `required_capabilities`. Preview and start use the same
+deterministic readiness evaluator. Report the minimum/worst-case dispatch bounds and obtain explicit
+`execution_budget.max_worker_dispatches` and `execution_budget.max_active_seconds`; start refuses a
+worker-dispatch cap below the deterministic minimum and writes no run state on any readiness
+failure. Active-time minimum feasibility is honestly unknown (`minimum.active_seconds` and
+`covers_minimum_path` are null), so treat the seconds value as an authorization cap rather than a
+completion estimate. For behavioral work,
+if grounded gate commands are missing, call `ape_config init` for a repository-grounded proposal.
+Apply only a complete proposal with operator approval; otherwise stop before any agent dispatch.
 
+Behavioral readiness requires a grounded `test_commands.full` command.
 When acceptance requires browser or visual inspection, require either a configured
 `verification.profiles` command that records the evidence or an actually callable
 browser/Playwright provider covered by least-privilege `tool_claims`. A doctor warning or provider
@@ -51,32 +58,41 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    action `status` with only `action` and `project_dir`; never send `run_id` on status. Confirm that
    dispatch is `active-bound` before launching the next. On Antigravity, likewise finish each spawn
    and confirm binding before the next launch. Bound agents may then run concurrently. Never launch
-   two physical agents for one ticket. Wait through the host's native primitive; do not poll
-   unchanged status.
+   two physical agents for one ticket unless the runtime explicitly returns
+   `next_action: {"kind":"redispatch_same_ticket", ...}`; only that action authorizes one fresh worker on the same
+   immutable ticket. Wait through the host's native primitive; do not poll unchanged status.
 5. Require exactly one receipt JSON matching the ticket's `output_schema`, including the exact
-   injected `receipt_capability`. Call `ape_run` with `action: "record"` and place that complete
+   injected `receipt_capability`. Before returning it, the worker must call `ape_validate_receipt`
+   with `ticket_id` set to the immutable ticket ID and `draft` set to the exact complete receipt. A
+   valid result attests the normalized draft hash; the worker must
+   return that draft unchanged. Invalid results carry bounded field corrections, plan byte usage,
+   and remaining attempts. Each physical worker gets an initial validation plus at most two
+   corrections. Call `ape_run` with `action: "record"` and place that complete
    receipt inside `receipt`. At the control-call top level send only `action`, `project_dir`, and
    `receipt`; never send `run_id` on a record call. Never repair,
    fabricate, or omit agent evidence. A ticket with
    `review_contract_version` uses bounded structured findings: advisory entries omit remediation;
    blocking entries declare `production`, `test`, or `both` ownership and exact authorized
    `test_paths` when test-owned. Do not translate these into legacy `evidence.test_remediation`.
-   If `record` rejects the receipt with bounded validation errors or corrections, do not repair it
-   in the parent and do not launch another physical agent. Use the host's native continuation or
-   follow-up primitive for the same physical agent, pass the exact returned errors, and require one
-   complete replacement receipt. Record that replacement unchanged. Allow at most two such
-   correction continuations for one ticket; if continuation is unavailable or the second
-   replacement is still rejected, stop and report the validation block without calling `next`.
-   The Codex dispatch's `next_control` states the same handoff compactly: record the returned
-   receipt unchanged; on rejection, continue the same agent with the exact errors and record the
-   replacement unchanged; then call `ape_run next` after the returned dispatch group is fully
-   recorded.
+   If `record` rejects because exact validation or attestation is absent, do not repair in the
+   parent: continue the same physical agent with the exact errors. It has at most two correction
+   submissions after its initial validation and must return a complete replacement.
+   If `next_action.kind` is `redispatch_same_ticket`, wait for the observed SubagentStop, call
+   `ape_run next` (or `resume` during recovery), and launch only the returned same-ticket dispatch;
+   this does not consume a logical stage attempt. If that worker exhausts its
+   correction allowance, the runtime blocks as `worker_protocol_failure`. Never translate a receipt
+   contract or infrastructure failure into a reviewer vote, product remediation, directed replan,
+   abort, or successor. Call `next` only after the returned dispatch group is fully recorded.
 6. If recording preflight returns `input_required`, obtain complete exact answers for all question
    ids and submit one aimed `answer-preflight` action with the exact hash, a bounded audit `reason`,
    and additive-only `claimed_paths`, `test_paths`, and canonical `risk_triggers`. Do not dispatch a
    writer while the hold remains.
 7. After all receipts in the returned group are recorded, call `ape_run next` and repeat until the
-runtime reports `completed` or `blocked`. When it reports `gating_pending` or `shipping_pending`,
+runtime reports `completed`, `blocked`, or a budget pause. `next_action: {"kind":"extend_budget"}` requires
+an explicit operator-approved monotonic budget extension; send a nonblank audit `reason` and at
+least one new top-level `max_worker_dispatches` or `max_active_seconds` value. Never start a
+successor automatically.
+When it reports `gating_pending` or `shipping_pending`,
 make the next call with `wait_ms: 300000` so APE performs bounded server-side polling with progress
 heartbeats. On Codex, do not sleep inside a `functions.exec` wrapper before the APE call: starting an
 MCP call at the wrapper's yield boundary can expose a host transport retry. If a gating wait returns

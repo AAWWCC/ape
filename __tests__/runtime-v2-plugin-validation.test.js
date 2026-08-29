@@ -39,6 +39,19 @@ async function pluginDir({ claude, codex } = {}) {
 }
 
 describe('APE v2 plugin package validation', () => {
+  it('pins the package smoke to the complete five-tool public MCP surface', () => {
+    const smoke = readFileSync(path.join(root, 'scripts', 'smoke-plugin-mcp.mjs'), 'utf8');
+    const declaration = smoke.match(/const EXPECTED_TOOLS = Object\.freeze\(\[([\s\S]*?)\]\);/u);
+    expect(declaration).not.toBeNull();
+    expect([...declaration[1].matchAll(/'([^']+)'/gu)].map((match) => match[1])).toEqual([
+      'ape_run',
+      'ape_validate_receipt',
+      'ape_status',
+      'ape_history',
+      'ape_config',
+    ]);
+  });
+
   it('validates the checked-in Codex package without user-specific paths', async () => {
     const result = await validateCodexPlugin(codexPackage);
     expect(result.errors).toEqual([]);

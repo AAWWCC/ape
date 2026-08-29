@@ -15,8 +15,13 @@ On Google Antigravity / Gemini, pass the exact open project root as `project_dir
 - `set`: write the requested dot-path value. Preserve unrelated sparse overrides.
 - `doctor`: diagnose runtime, git, hook, bundle, lock, and statusline readiness. Supply run-start
   facts only when validating a prospective run.
-- `init`: inspect project manifests and propose test commands without writing. Apply only after
-  explicit approval, using `apply: true`; user-supplied `values` override proposed slots.
+- `init`: inspect project manifests and propose test commands/evidence scripts without writing. It
+  may also propose a small managed APE orientation block for the effective project instruction
+  file; `AGENTS.override.md` takes precedence over `AGENTS.md`. Applying config requires explicit
+  approval and `apply: true`; user-supplied `values` override proposed slots. Applying the
+  orientation is a separate explicit action using `apply_agents: true`, the exact proposed
+  `agents_path`, and its matching `agents_expected_hash`. Never apply a stale proposal or write the
+  non-effective instruction file.
 - `wire` / `unwire`: change statusline integration for an explicitly named host.
 
 Do not translate host-neutral test commands into platform-specific shell strings. Do not claim the

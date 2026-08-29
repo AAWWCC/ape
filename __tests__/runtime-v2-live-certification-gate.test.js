@@ -33,7 +33,7 @@ import {
   writeLiveCertificationPrompts,
 } from '../scripts/prepare-live-certification-prompts.mjs';
 
-const VERSION = '2.23.53';
+const VERSION = '2.24.0';
 const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
@@ -448,6 +448,22 @@ describe('live certification prompt preparation', () => {
       .toContain(`src/is-even-${VERSION_SUFFIX}-1.js`);
     expect(readFileSync(path.join(root, 'prompts', 'land-1.txt'), 'utf8'))
       .toContain(`docs/codex-${VERSION_SUFFIX}-protected-land-1.md`);
+  });
+
+  it('pins a first-pass execution budget sufficient for every synthetic cohort', () => {
+    const root = promptCampaign();
+    const expectedBudgets = {
+      mechanical: { max_worker_dispatches: 1, max_active_seconds: 3_600 },
+      fast: { max_worker_dispatches: 4, max_active_seconds: 14_400 },
+      full: { max_worker_dispatches: 7, max_active_seconds: 25_200 },
+      land: { max_worker_dispatches: 1, max_active_seconds: 3_600 },
+    };
+
+    for (const [pipeline, budget] of Object.entries(expectedBudgets)) {
+      const prompt = buildLiveCertificationPrompt(root, pipeline, 1);
+      expect(prompt).toContain(`Pass execution_budget ${JSON.stringify(budget)}`);
+      expect(prompt.match(/\bexecution_budget\b/gu)).toHaveLength(1);
+    }
   });
 
   it('refuses stale prompt-directory reuse and non-canonical attempt inputs', () => {

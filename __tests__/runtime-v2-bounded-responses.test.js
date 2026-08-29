@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   OUTPUT_SCHEMA_REFERENCE,
+  RESPONSE_BUDGET_BYTES,
   RUN_OBJECTIVE_REFERENCE,
   compactPendingTicket,
   projectRunResponse,
@@ -21,6 +22,10 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const OBJECTIVE = `Bound the wire, keep the disk complete. ${'x'.repeat(10_000)}`;
 const ISSUED_AT = '2026-07-06T00:00:00.000Z';
+const EXECUTION_BUDGET = {
+  max_worker_dispatches: 10_000,
+  max_active_seconds: 2_592_000,
+};
 
 function makeTicket(stageId, role, id, overrides = {}) {
   return {
@@ -114,6 +119,108 @@ function countOccurrences(haystack, needle) {
 }
 
 describe('APE v2 bounded MCP responses: projection unit behavior', () => {
+  it('keeps oversized read-only preview facts inline without a fake artifact reference', () => {
+    const configHash = 'a'.repeat(64);
+    const catalogHash = 'b'.repeat(64);
+    const executionBudget = {
+      required: true,
+      provided: { max_worker_dispatches: 8, max_active_seconds: 3_600 },
+      minimum: {
+        worker_dispatches: 4,
+        active_seconds: null,
+        active_seconds_observed: false,
+        active_seconds_basis: 'unknown',
+      },
+      worst_case: {
+        logical_ticket_dispatches: 41,
+        worker_dispatches: 82,
+        maximum_receipt_submissions: 246,
+        active_seconds: 221_400,
+      },
+      covers_minimum_worker_dispatches: true,
+      covers_minimum_path: null,
+      covers_worst_case: false,
+    };
+    const response = {
+      ok: true,
+      advisory: true,
+      blueprint: {
+        lane: 'full',
+        lane_reasons: ['requested full lane'],
+        stages: [{ id: 'plan', prompt: 'x'.repeat(RESPONSE_BUDGET_BYTES * 2) }],
+        dispatch_bounds: {
+          total: 41,
+          by_stage: { plan: 2, build: 2 },
+          by_role: { planner: 2, implementer: 2 },
+          by_model_tier: { deep: 2, balanced: 2 },
+        },
+        readiness: {
+          healthy: false,
+          ready: false,
+          blocking: [{
+            code: 'missing-command-profile',
+            capability: { kind: 'command_profile', id: 'editor.batch', role: 'implementer' },
+          }],
+          warnings: [{ code: 'worker-budget-below-worst-case', worst_case: 82, provided: 8 }],
+          requested_capabilities: [
+            { kind: 'command_profile', id: 'editor.batch', role: 'implementer' },
+          ],
+          derived_capability_requirements: {
+            stage_roles: ['planner', 'implementer', 'reviewer'],
+            stage_checks: ['red-test', 'targeted-tests'],
+            test_runner_profiles: ['targeted', 'full'],
+          },
+          available_capability_catalog: {
+            version: 1,
+            config_hash: configHash,
+            catalog_hash: catalogHash,
+            evidence_scripts: ['test'],
+            command_profiles: [{ id: 'editor.batch', command: 'x'.repeat(60_000) }],
+            verification_profiles: [{ id: 'integration', command: 'npm test' }],
+            runners: [{ root: '.', profile: { full: 'npm test' } }],
+            test_commands: { targeted: 'npm test -- value.test.js', full: 'npm test' },
+            declared_tool_claims: ['browser.read'],
+          },
+          capabilities: { unbounded_legacy_snapshot: 'x'.repeat(60_000) },
+          execution_budget: executionBudget,
+          doctor: { unbounded_diagnostics: 'x'.repeat(60_000) },
+        },
+        verification_gates: { unbounded: 'x'.repeat(60_000) },
+      },
+    };
+    expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeGreaterThan(RESPONSE_BUDGET_BYTES);
+
+    const projected = projectRunResponse(response);
+    expect(Buffer.byteLength(JSON.stringify(projected), 'utf8')).toBeLessThanOrEqual(RESPONSE_BUDGET_BYTES);
+    expect(projected).toMatchObject({
+      ok: true,
+      advisory: true,
+      blueprint: {
+        lane: 'full',
+        dispatch_bounds: response.blueprint.dispatch_bounds,
+        readiness: {
+          healthy: false,
+          ready: false,
+          blocking_count: 1,
+          warning_count: 1,
+          requested_capabilities: response.blueprint.readiness.requested_capabilities,
+          derived_capability_requirements: response.blueprint.readiness.derived_capability_requirements,
+          available_capability_catalog: {
+            config_hash: configHash,
+            catalog_hash: catalogHash,
+            command_profiles: { count: 1, ids: ['editor.batch'], truncated: false },
+            verification_profiles: { count: 1, ids: ['integration'], truncated: false },
+          },
+          execution_budget: executionBudget,
+        },
+      },
+      projection: { kind: 'bounded-inline-v1' },
+    });
+    expect(projected.projection).not.toHaveProperty('authoritative_ref');
+    expect(JSON.stringify(projected)).not.toContain('unbounded_diagnostics');
+    expect(JSON.stringify(projected)).not.toContain('unbounded_legacy_snapshot');
+  });
+
   it('dedupes only the objective suffix and output_schema on pending tickets', () => {
     const state = unitState();
     const original = state.tickets[2];
@@ -459,7 +566,7 @@ async function project() {
   const paths = runtimePaths(dir);
   await atomicWriteJson(paths.config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
   });
   return dir;
 }
@@ -507,6 +614,7 @@ async function callApe(name, args) {
 }
 
 const apeRun = (args) => callApe('ape_run', args);
+const apeValidateReceipt = (args) => callApe('ape_validate_receipt', args);
 const apeHistory = (args) => callApe('ape_history', args);
 
 function receipt(ticket, overrides = {}) {
@@ -625,6 +733,7 @@ describe('APE v2 bounded MCP responses over a live run', () => {
       hooks_trusted: true,
       subagents_available: true,
       explicit_invocation: true,
+      execution_budget: EXECUTION_BUDGET,
     });
 
     expect(started.ok).toBe(true);
@@ -652,6 +761,7 @@ describe('APE v2 bounded MCP responses over a live run', () => {
       subagents_available: true,
       explicit_invocation: true,
       plan_contract_version: 1,
+      execution_budget: EXECUTION_BUDGET,
     });
     expect(started.ok).toBe(true);
     expect(started.run.objective).toBe('Change behavior');
@@ -674,13 +784,20 @@ describe('APE v2 bounded MCP responses over a live run', () => {
     expect(wireTest.output_schema).toEqual(OUTPUT_SCHEMA_REFERENCE);
 
     await writeFile(path.join(dir, 'tests', 'value.test.js'), 'throw new Error("still red");\n');
+    const testDraft = receipt(testTicket, {
+      receipt_capability: receiptCapability,
+      tests: [{ command: 'node --test tests/value.test.js', passed: false, exit_code: 1, duration_ms: 1 }],
+    });
+    const validated = await apeValidateReceipt({
+      project_dir: dir,
+      ticket_id: testTicket.ticket_id,
+      draft: testDraft,
+    });
+    expect(validated).toMatchObject({ ok: true, valid: true, attested: true });
     const recorded = await apeRun({
       action: 'record',
       project_dir: dir,
-      receipt: receipt(testTicket, {
-        receipt_capability: receiptCapability,
-        tests: [{ command: 'node tests/value.test.js', passed: false, exit_code: 1, duration_ms: 1 }],
-      }),
+      receipt: testDraft,
     });
     expect(recorded.ok).toBe(true);
     expect(Object.keys(recorded.receipt).sort()).toEqual(TOP_LEVEL_RECEIPT_KEYS);

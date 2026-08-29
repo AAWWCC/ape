@@ -85,7 +85,7 @@ function runTool(args) {
 // substring — every dist/ entry-point label ('mcp', 'hooks', 'larp') the path
 // contributes bytes to, and names none of the labels it does not reach.
 describe('bundle reachability aid (scripts/bundle-reach.mjs)', () => {
-  it('reports larp for a lib/runtime/runner.js change and does not report hooks', () => {
+  it('reports every current bundle reached by lib/runtime/runner.js', () => {
     const target = 'lib/runtime/runner.js';
 
     // Ground truth, independently derived (see WHY THIS EXISTS in the run
@@ -93,22 +93,19 @@ describe('bundle reachability aid (scripts/bundle-reach.mjs)', () => {
     // bin/ape-larp.mjs -> lib/runtime/config.js -> lib/runtime/runner.js, and
     // runner.js's top-level `if (invokedAsGateRunner()) {...}` defeats
     // tree-shaking, so the whole module lands regardless of which export is
-    // used. It also contributes to the mcp bundle (bin/ape-mcp.mjs also
-    // imports lib/runtime/config.js). Nothing imports it on the path to the
-    // hooks entry. Pin the FULL expected set (mcp AND larp, not hooks, in
-    // ENTRIES order) rather than a partial substring check: docs/architecture.md
-    // enshrines this as a two-part fact, and a check that only confirms
-    // 'contains larp' / 'excludes hooks' would stay green even if the mcp half
-    // silently went stale.
+    // used. It contributes to the mcp bundle through config/receipt execution,
+    // and the receipt stop hook now reaches its template renderer through the
+    // shared capability-manifest kernel. Pin the FULL expected set in ENTRIES
+    // order rather than checking one incidental symbol in a minified bundle.
     const reached = reachedLabels(target);
-    expect(reached).toEqual(['mcp', 'larp']);
+    expect(reached).toEqual(['mcp', 'hooks', 'larp']);
 
     const result = runTool([target]);
     expect(result.status).toBe(0);
     const stdout = (result.stdout ?? '').toLowerCase();
     expect(stdout).toMatch(/mcp/);
+    expect(stdout).toMatch(/hooks/);
     expect(stdout).toMatch(/larp/);
-    expect(stdout).not.toMatch(/hooks/);
   });
 
   it('matches an independent out-of-tree rebuild for a hooks-only path (bin/ape-hook.mjs)', () => {

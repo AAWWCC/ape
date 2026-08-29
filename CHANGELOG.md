@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 2.24.0 — 2026-08-29
+
+APE now gives every new run an immutable, role-filtered receipt contract and validates the exact
+final draft through one kernel shared by the validation tool, stop hook, and authoritative record
+path. Receipt and command-contract failures use bounded same-agent correction plus one fresh worker
+on the same ticket; they can no longer vote as product dissent or trigger remediation, replanning,
+aborts, or successor loops. Preview, start, and doctor now share deterministic readiness checks,
+capability snapshots, and mandatory dispatch and active-time budgets with explicit monotonic
+extension. Status reports typed failure domains and next actions, while telemetry separates
+orchestration repair from product work and records tokens only when the host supplies exact counts.
+Candidate plans remain capped at 16,384 UTF-8 bytes with explicit byte accounting and bounded
+projections, and legacy runs retain their prior contract. Version 2.24.0 invalidates the previous
+source certification and starts a fresh release cycle.
+
 ## 2.23.53 — 2026-08-28
 
 APE now canonicalizes complete uniformly single-quoted argv wrappers such as

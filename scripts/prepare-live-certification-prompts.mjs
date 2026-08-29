@@ -7,6 +7,17 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const RELEASE_VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 const PIPELINES = Object.freeze(['mechanical', 'fast', 'full', 'land']);
+// Release certification is first-pass-perfect: the dispatch caps authorize
+// exactly the deterministic happy path for each cohort, while the active-time
+// caps allow one hour per required worker. A retry, remediation cycle, or
+// replacement worker must therefore fail the candidate instead of extending a
+// synthetic certification run into an unbounded recovery loop.
+const EXECUTION_BUDGETS = Object.freeze({
+  mechanical: Object.freeze({ max_worker_dispatches: 1, max_active_seconds: 3_600 }),
+  fast: Object.freeze({ max_worker_dispatches: 4, max_active_seconds: 14_400 }),
+  full: Object.freeze({ max_worker_dispatches: 7, max_active_seconds: 25_200 }),
+  land: Object.freeze({ max_worker_dispatches: 1, max_active_seconds: 3_600 }),
+});
 
 export class LiveCertificationPromptError extends Error {
   constructor(message) {
@@ -68,13 +79,14 @@ export function buildLiveCertificationPrompt(campaignRoot, pipeline, repetition)
     throw new LiveCertificationPromptError(`campaign project does not resolve exactly: ${projectDir}`);
   }
   const contract = attemptContract(pipeline, repetition);
+  const executionBudget = JSON.stringify(EXECUTION_BUDGETS[pipeline]);
   return `$ape:run
 
 Conduct authorized APE ${RELEASE_VERSION} live-certification attempt codex-${pipeline}-${repetition} in this disposable repository. The operator explicitly invokes APE and authorizes this exact run to ${contract.authorization}.
 
 Start one run with this complete objective: ${contract.objective}
 
-${contract.run} Pass explicit_invocation true, hooks_trusted true, subagents_available true, and auto_merge_authorized true. Pass project_dir "${projectDir}" on every APE MCP call.
+${contract.run} Pass execution_budget ${executionBudget}, explicit_invocation true, hooks_trusted true, subagents_available true, and auto_merge_authorized true. Pass project_dir "${projectDir}" on every APE MCP call.
 
 Follow the installed APE run skill and every returned control action exactly through terminal completion. Begin every functions.exec wrapper that can return APE MCP or control output with \`// @exec: {"max_output_tokens": 30000}\`. Complete the required Codex binding probe. Pass each returned spawn_args object directly and unchanged to native collaboration spawn_agent. The native message is transport-only: do not add, reconstruct, normalize, reserialize, or relay stage content through it. Require the trusted SubagentStart context before stage work. Record each original receipt unchanged exactly once. Do not edit from the parent, assemble replacement prompts, repair receipts, duplicate or relaunch agents, expire dispatches, regate, resume a started run, create a successor, inspect session logs to recover a receipt, or weaken gates. Abort rather than reconstruct unavailable or invalid evidence. Continue bounded next calls through terminal completion and report the run id and result, including whether spawn_args remained byte-for-byte unchanged and authoritative context was hook-injected.
 `;

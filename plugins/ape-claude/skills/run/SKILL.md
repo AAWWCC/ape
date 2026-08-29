@@ -10,39 +10,39 @@ disable-model-invocation: true
 Use this skill only when the user explicitly asks to run APE. Never infer consent from a coding
 request or plugin availability.
 
-Before `ape_run start`, inspect the repository and compose complete inputs:
-
-Repository discovery is evidence, not an assertion that optional files exist. Run inspections
-separately. Where no match is valid (for example, no `AGENTS.md`), use `|| true`; never place
-optional discovery in an `&&` chain. Stop instead of retrying or self-correcting a failed inspection
-call. For optional `AGENTS.md` discovery, run this exact standalone command without wrapping it in
-another shell or changing its arguments: `rg --files -g 'AGENTS.md' -g '!**/.git/**' || true`.
+Before `ape_run start`, inspect the repository and compose complete inputs. Repository discovery is
+evidence; no match is valid. Use `|| true`; never place optional discovery in an `&&` chain.
+Stop instead of retrying or self-correcting a failed inspection call. Discover optional `AGENTS.md` only
+with the standalone command `rg --files -g 'AGENTS.md' -g '!**/.git/**' || true`.
 
 On Google Antigravity / Gemini, pass the exact open project root as `project_dir` on every APE MCP
 call.
 
 - `objective`: the observable outcome and acceptance criteria.
-- `mode`: `phase`, `debug`, `spike`, or `land` for an already-finished diff.
-- `lane`: normally `auto`; `mechanical` is non-behavioral docs/config/generated work, `fast` is
-  bounded behavioral change, and `full` is planned multi-stage work.
+- `mode`: `phase`, `debug`, `spike`, or `land`; `lane`: normally `auto`.
 - `claimed_paths`: production paths only. Include generated artifacts or
   documentation only when the objective may require them.
 - `test_paths`: independently authored test paths for behavioral work; never put them in
   `claimed_paths`.
 - `behavioral`, `requirements`, `completes`, `risk_triggers`, and least-privilege `tool_claims`.
+- `required_capabilities`: only exact additionally required capability IDs; never infer availability.
+- `execution_budget.max_worker_dispatches` and `execution_budget.max_active_seconds`: explicit hard
+  authorization for this run, not an estimate of likely token use.
 - `plan_contract_version: 2` for every newly started behavioral fast/full `phase` run. Omit it for
   mechanical, non-phase modes, and every resume; version 1 is legacy-only.
 
-Before starting, call `ape_config` with `action: "doctor"` and `action: "get"`, then complete the
-gate-command and visual-evidence readiness checks in the run/resume protocol below.
+Call `ape_config` actions `doctor` and `get`, then `ape_run preview` with complete facts. Report
+readiness failures and minimum/worst-case dispatch bounds. Require explicit worker-dispatch and
+active-seconds limits; token totals are host-attested only. Complete the
+gate-command and visual-evidence readiness checks in the run/resume protocol.
 
 Inspect `shipping.auto_merge`. If true, explain the run may push, open a pull request, and merge;
 obtain run-specific authorization before including `auto_merge_authorized: true`.
 Never infer consent from invocation, prior runs, or configuration. Without authorization, stop
 before start and offer `shipping.auto_merge: false` so the run ends at the audited shipping hold.
 
-Do not invent product choices. Ask only for decisions that change the outcome. If the
-work clearly spans multiple runs, offer a roadmap; registration still requires explicit approval.
+Do not invent product choices. Ask only for outcome-changing decisions. Offer a roadmap for work
+that clearly spans runs; registration requires explicit approval.
 
 Treat concurrency, destructive persistence, migration, schema compatibility, authentication, and
 security as independent high-risk subsystems unless they share a threat model, platform primitive,
@@ -50,11 +50,10 @@ rollback, and executable evidence. Otherwise offer a dependency-ordered roadmap 
 oversized run. Path-based check-then-rename atomicity is a feasibility question, not an
 implementation detail.
 
-Confirm native subagents and APE hooks are available, then call `ape_run` with `action: "start"`,
-the host, and `explicit_invocation: true`. Accept the runtime's lane escalation and model choices;
-report its reasons instead of retrying with weaker facts.
+Confirm native subagents and APE hooks, then call `ape_run` action `start` with the host and
+`explicit_invocation: true`. Accept runtime lane/model choices and report their reasons.
 
-Host invocation policy is the human-intent boundary. `explicit_invocation: true` is only a
+Host invocation policy is the human-intent boundary. `explicit_invocation: true` is a
 caller-attested defense-in-depth signal, not proof of human intent.
 
 Follow [`references/run-resume-protocol.md`](references/run-resume-protocol.md) for every

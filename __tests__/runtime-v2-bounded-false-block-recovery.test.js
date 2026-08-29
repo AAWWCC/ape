@@ -599,6 +599,8 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
       status: 'blocked',
       stage: 'build',
       terminal_reason_code: 'capability_blocked',
+      failure_domain: 'configuration',
+      failure_domain_taxonomy_version: 1,
       blocked_recovery: {
         reason_code: 'capability_denied',
         source_ticket_id: ticket.ticket_id,
@@ -766,7 +768,7 @@ describe('APE v2 bounded recovery receipt admission', () => {
     ]);
   });
 
-  it('accepts a correctable command-shape denial without invented authority and schedules one retry', async () => {
+  it('accepts a correctable command-shape denial and reissues the same contract without a stage attempt', async () => {
     const dir = await integrationProject();
     const started = await startRun(dir, {
       objective: 'Retry one correctable policy command shape',
@@ -792,10 +794,11 @@ describe('APE v2 bounded recovery receipt admission', () => {
     }));
     expect(recorded.ok, JSON.stringify(recorded.errors)).toBe(true);
     expect(recorded.run.status).toBe('running');
-    expect(recorded.run.attempts.plan).toBe(2);
+    expect(recorded.run.attempts.plan).toBeUndefined();
+    expect(recorded.run.worker_protocol_redispatches).toEqual({ plan: 1 });
     expect(recorded.run.tickets.at(-1)).toMatchObject({
       stage_id: 'plan',
-      attempt: 2,
+      attempt: 1,
       prior_attempts: [
         'attempt 1: command-shape denied: cat app/dashboard/[traceId]/timeline/page.tsx',
       ],

@@ -911,6 +911,67 @@ describe('APE v2 exact command profiles', () => {
     }])).rejects.toThrow(/single-line command/);
     expect(DEFAULT_CONFIG.policy.command_profiles).toEqual([]);
   });
+
+  it('uses immutable ticket/state profiles for a native receipt-contract run and live config for legacy', async () => {
+    const dir = await project();
+    const snapshotCommand = '/Applications/Unity/Unity -batchmode -quit -runTests';
+    const liveCommand = '/Applications/Unity/Unity -batchmode -quit -buildTarget WebGL';
+    const snapshotProfile = {
+      id: 'unity-snapshot', command: snapshotCommand, roles: ['implementer'], effect: 'execute',
+    };
+    const liveProfile = {
+      id: 'unity-live', command: liveCommand, roles: ['implementer'], effect: 'execute',
+    };
+    await writeFile(runtimePaths(dir).config, JSON.stringify({
+      policy: { command_profiles: [liveProfile] },
+    }));
+    const immutableState = {
+      ...state,
+      binding_protocol: 'native-v1',
+      capability_snapshot: {
+        version: 1,
+        config_hash: 'a'.repeat(64),
+        command_profiles: [snapshotProfile],
+      },
+    };
+    const immutableTicket = {
+      ...ticket,
+      receipt_contract_version: 1,
+      capability_manifest: {
+        version: 1,
+        config_hash: 'a'.repeat(64),
+        command_profiles: [snapshotProfile],
+        allowed_evidence_commands: [snapshotCommand],
+      },
+    };
+    const event = (command) => normalizeLifecycleEvent({
+      hook_event_name: 'PreToolUse', project_dir: dir, tool_name: 'Bash',
+      tool_input: { command }, agent_id: 'native-agent',
+    }, {});
+
+    expect(evaluateLifecyclePolicy(event(snapshotCommand), {
+      state: immutableState, ticket: immutableTicket,
+    }).decision).toBe('allow');
+    expect(evaluateLifecyclePolicy(event(liveCommand), {
+      state: immutableState, ticket: immutableTicket,
+    }).decision).toBe('deny');
+    expect(evaluateLifecyclePolicy(event(liveCommand), { state, ticket }).decision).toBe('allow');
+    expect(evaluateLifecyclePolicy(event(snapshotCommand), { state, ticket }).decision).toBe('deny');
+
+    expect(driftGuardApplies(event(snapshotCommand), {
+      state: immutableState, ticket: immutableTicket,
+    })).toBe(true);
+    expect(driftGuardApplies(event(liveCommand), {
+      state: immutableState, ticket: immutableTicket,
+    })).toBe(false);
+    expect(driftGuardApplies(event(snapshotCommand), {
+      state: immutableState, ticket: null,
+    })).toBe(true);
+    expect(driftGuardApplies(event(liveCommand), {
+      state: immutableState, ticket: null,
+    })).toBe(false);
+    expect(driftGuardApplies(event(liveCommand))).toBe(true);
+  });
 });
 
 describe('APE v2 external-tool schema surfaces', () => {

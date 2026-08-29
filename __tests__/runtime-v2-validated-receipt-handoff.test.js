@@ -331,6 +331,20 @@ describe('extractReceiptDraftFromText', () => {
     expect(result.ticket_id).toBe('run-1:test:t1');
   });
 
+  it('ignores unmatched braces and escaped quotes inside plain JSON string values', () => {
+    const draft = {
+      ticket_id: 'run-1:test:t1',
+      status: 'passed',
+      tests: [],
+      findings: [],
+      evidence: {
+        summary: 'expected } but observed { { near "quoted" and \\escaped text',
+      },
+    };
+    const result = receiptInput.extractReceiptDraftFromText(JSON.stringify(draft));
+    expect(result).toEqual(draft);
+  });
+
   it('finds a JSON receipt wrapped in prose', () => {
     const draft = { ticket_id: 'run-1:test:t1', status: 'passed', tests: [], findings: [], evidence: {} };
     const text = `Here is my receipt:\n\`\`\`json\n${JSON.stringify(draft)}\n\`\`\`\nDone.`;
@@ -395,111 +409,16 @@ describe('formatDraftCorrections', () => {
 });
 
 // ---------------------------------------------------------------------------
-// W2: Lifecycle enforcement - evaluateStopValidation
+// W2: Lifecycle validation ownership
 // ---------------------------------------------------------------------------
 
-describe('evaluateStopValidation', () => {
-  it('is exported as a function from lifecycle-policy (hooks)', () => {
-    expect(typeof lifecyclePolicy.evaluateStopValidation).toBe('function');
-  });
-
-  it('returns continue with corrections for a Stop with an invalid draft on first attempt', () => {
-    const ticket = makeTicket();
-    const event = {
-      host: 'claude',
-      event: 'Stop',
-      tool_name: '',
-      is_subagent: true,
-    };
-    const context = {
-      state: { status: 'running' },
-      ticket,
-      draft: makeValidDraft(ticket, { status: 'maybe' }),
-      validation_attempts: 0,
-    };
-    const result = lifecyclePolicy.evaluateStopValidation(event, context);
-    expect(result).toBeDefined();
-    expect(result.decision).toBe('continue');
-    expect(result.corrections).toBeDefined();
-    expect(result.corrections.length).toBeGreaterThan(0);
-  });
-
-  it('returns allow for a Stop with a valid draft', () => {
-    const ticket = makeTicket();
-    const event = {
-      host: 'claude',
-      event: 'Stop',
-      tool_name: '',
-      is_subagent: true,
-    };
-    const context = {
-      state: { status: 'running' },
-      ticket,
-      draft: makeValidDraft(ticket),
-      validation_attempts: 0,
-    };
-    const result = lifecyclePolicy.evaluateStopValidation(event, context);
-    expect(result).toBeDefined();
-    expect(result.decision).toBe('allow');
-  });
-
-  it('allows Stop regardless after 2 correction attempts', () => {
-    const ticket = makeTicket();
-    const event = {
-      host: 'claude',
-      event: 'Stop',
-      tool_name: '',
-      is_subagent: true,
-    };
-    const context = {
-      state: { status: 'running' },
-      ticket,
-      draft: makeValidDraft(ticket, { status: 'maybe' }),
-      validation_attempts: 2,
-    };
-    const result = lifecyclePolicy.evaluateStopValidation(event, context);
-    expect(result).toBeDefined();
-    expect(result.decision).toBe('allow');
-  });
-
-  it('works the same for SubagentStop events', () => {
-    const ticket = makeTicket();
-    const event = {
-      host: 'claude',
-      event: 'SubagentStop',
-      tool_name: '',
-      is_subagent: true,
-    };
-    const context = {
-      state: { status: 'running' },
-      ticket,
-      draft: makeValidDraft(ticket),
-      validation_attempts: 0,
-    };
-    const result = lifecyclePolicy.evaluateStopValidation(event, context);
-    expect(result).toBeDefined();
-    expect(result.decision).toBe('allow');
-  });
-
-  it('works across Claude and Codex hosts', () => {
-    for (const host of ['claude', 'codex']) {
-      const ticket = makeTicket();
-      const event = {
-        host,
-        event: 'Stop',
-        tool_name: '',
-        is_subagent: true,
-      };
-      const context = {
-        state: { status: 'running' },
-        ticket,
-        draft: makeValidDraft(ticket),
-        validation_attempts: 0,
-      };
-      const result = lifecyclePolicy.evaluateStopValidation(event, context);
-      expect(result).toBeDefined();
-      expect(result.decision).toBe('allow');
-    }
+describe('lifecycle validation ownership', () => {
+  it('does not restore the removed shadow stop validator', () => {
+    // The real SubagentStop correction/exhaustion behavior is exercised through
+    // bin/ape-hook.mjs in runtime-v2-receipt-contract-live-integration.test.js.
+    // hooks.js must not regain a second validator that can drift from the
+    // canonical receipt-validator kernel used by hook, MCP, and record paths.
+    expect(lifecyclePolicy.evaluateStopValidation).toBeUndefined();
   });
 });
 
@@ -514,36 +433,6 @@ describe('dispatch draft validation tracking', () => {
 
   it('markDispatchInfrastructureFailure is exported from claude-dispatch', () => {
     expect(typeof claudeDispatch.markDispatchInfrastructureFailure).toBe('function');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// W2: SubagentStop infrastructure failure detection
-// ---------------------------------------------------------------------------
-
-describe('SubagentStop infrastructure failure', () => {
-  it('marks infrastructure failure when valid_draft_observed is false at SubagentStop', () => {
-    const ticket = makeTicket();
-    const event = {
-      host: 'claude',
-      event: 'SubagentStop',
-      tool_name: '',
-      is_subagent: true,
-    };
-    const context = {
-      state: { status: 'running' },
-      ticket,
-      valid_draft_observed: false,
-      validation_attempts: 0,
-    };
-    const result = lifecyclePolicy.evaluateStopValidation(event, context);
-    expect(result).toBeDefined();
-    // When no valid draft was observed at SubagentStop, an infrastructure
-    // failure should be marked rather than silently completing
-    expect(
-      result.infrastructure_failure === true ||
-      result.decision === 'allow',
-    ).toBe(true);
   });
 });
 

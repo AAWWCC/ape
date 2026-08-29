@@ -6,11 +6,15 @@ import path from 'node:path';
 import * as service from '../lib/runtime/service.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
+import {
+  appendPreflightRunContract,
+  initializeRunContractManifest,
+} from '../lib/runtime/run-contract.js';
 
 const cleanups = [];
 afterEach(async () => Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
 
-async function heldProject() {
+async function heldProject({ runContract = false } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-preflight-answer-'));
   cleanups.push(dir);
   await mkdir(path.join(dir, 'src'));
@@ -29,7 +33,7 @@ async function heldProject() {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
     test_commands: { full: 'node --test' },
   });
-  await atomicWriteJson(runtimePaths(dir).active, {
+  const state = {
     schema_version: '2.0.0', run_id: 'run-answer', status: 'input_required', stage: 'preflight',
     mode: 'phase', lane: 'fast', behavioral: true, plan_contract_version: 2,
     objective: 'Answer the material preflight questions', host: 'codex',
@@ -51,7 +55,37 @@ async function heldProject() {
       },
     },
     input_required: { preflight_hash: 'a'.repeat(64), question_ids: ['api-name', 'migration'] },
-  });
+  };
+  if (runContract) {
+    state.binding_protocol = 'native-v1';
+    state.capability_snapshot = {
+      version: 1,
+      config_hash: 'c'.repeat(64),
+      required_capabilities: [],
+      evidence_scripts: [],
+      command_profiles: [],
+      verification_profiles: [],
+      runners: [],
+      test_commands: { full: 'node --test' },
+    };
+    // Model the ordinary chain: START seals a null preflight hash, then the
+    // accepted preflight artifact exists before the successor ticket appends
+    // its receipt-schema/role view.
+    const acceptedPreflight = state.preflight;
+    delete state.preflight;
+    await initializeRunContractManifest(
+      runtimePaths(dir),
+      state,
+      '2026-01-01T00:00:00.000Z',
+    );
+    state.preflight = acceptedPreflight;
+    await appendPreflightRunContract(
+      runtimePaths(dir),
+      state,
+      '2026-01-01T00:00:01.000Z',
+    );
+  }
+  await atomicWriteJson(runtimePaths(dir).active, state);
   return dir;
 }
 
@@ -203,7 +237,7 @@ describe('audited preflight answers', () => {
   });
 
   it('recovers exactly one successor when active-state persistence is lost after ticket creation', async () => {
-    const dir = await heldProject();
+    const dir = await heldProject({ runContract: true });
     const paths = runtimePaths(dir);
     const held = await readJson(paths.active);
     const accepted = valid();
@@ -215,6 +249,21 @@ describe('audited preflight answers', () => {
     const firstSuccessor = first.run.tickets.find((ticket) => ticket.stage_id === 'test');
     expect(firstSuccessor).toBeTruthy();
     expect(firstSuccessor.claimed_paths).toEqual(['tests/value.test.js']);
+    const firstContract = await readJson(path.join(dir, firstSuccessor.capability_manifest.run_contract.ref));
+    expect(firstContract).toMatchObject({
+      revision: 3,
+      preflight_hash: 'a'.repeat(64),
+      receipt_contract: { ticket_contracts: [expect.objectContaining({
+        ticket_id: firstSuccessor.ticket_id,
+        role: firstSuccessor.role,
+      })] },
+    });
+    const preflightContract = await readJson(path.join(dir, firstContract.previous.ref));
+    expect(preflightContract).toMatchObject({ revision: 2, preflight_hash: 'a'.repeat(64) });
+    const repeatedPointer = await appendPreflightRunContract(paths, first.run, '2026-01-01T00:00:02.000Z');
+    expect(repeatedPointer).toEqual(firstSuccessor.capability_manifest.run_contract);
+    const baseContract = await readJson(path.join(dir, preflightContract.previous.ref));
+    expect(baseContract).toMatchObject({ revision: 1, preflight_hash: null });
 
     // Model a crash after the successor ticket was made durable but before
     // active.json recorded PREFLIGHT_ANSWERED. The immutable ticket remains.
@@ -223,11 +272,15 @@ describe('audited preflight answers', () => {
     const recoveredSuccessors = replay.run.tickets.filter((ticket) => ticket.stage_id === 'test');
     expect(recoveredSuccessors).toHaveLength(1);
     expect(recoveredSuccessors[0].ticket_id).toBe(firstSuccessor.ticket_id);
+    expect(recoveredSuccessors[0].capability_manifest.run_contract)
+      .toEqual(replay.run.run_contract);
 
     const ticketFiles = (await readdir(paths.tickets)).filter((file) => file.endsWith('.json'));
     expect(ticketFiles).toHaveLength(1);
     const intentFiles = (await readdir(paths.dispatchIntents)).filter((file) => file.endsWith('.json'));
     expect(intentFiles).toHaveLength(1);
+    const contractFiles = (await readdir(paths.contracts)).filter((file) => file.endsWith('.json'));
+    expect(contractFiles).toHaveLength(3);
     const replayDispatchIds = replay.actions
       .filter((action) => action.type === 'dispatch_agent')
       .map((action) => action.ticket.ticket_id);

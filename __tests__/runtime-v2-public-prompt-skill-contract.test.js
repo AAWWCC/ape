@@ -130,6 +130,7 @@ describe('public prompt contracts', () => {
     expect(common).toMatch(/plan_deviation[\s\S]*only[\s\S]*material deviation[\s\S]*approved_plan[\s\S]*otherwise omit/iu);
     expect(common).toMatch(/Plan review[\s\S]*"passed"[\s\S]*"agree"[\s\S]*"disagree"/u);
     expect(common).toMatch(/Code\/security review[\s\S]*"passed"[\s\S]*"pass"[\s\S]*"fail"/u);
+    expect(common).toMatch(/ape_validate_receipt[\s\S]*exact complete\s+`draft`[\s\S]*corrections_remaining/iu);
   });
 
   it('gives each role a distinct evidence-producing responsibility', async () => {
@@ -163,6 +164,7 @@ describe('public prompt contracts', () => {
     expect(prompts.test_writer).toMatch(/approved_plan[\s\S]*material deviation[\s\S]*plan_deviation[\s\S]*workstream_id[\s\S]*acceptance_impact[\s\S]*otherwise omit/iu);
     expect(prompts.planner).toMatch(/evidence\.candidate_plan[\s\S]*"version": 2[\s\S]*preflight_hash[\s\S]*verification_profiles/iu);
     expect(prompts.planner).toMatch(/untrusted[\s\S]*preflight/iu);
+    expect(prompts.planner).toMatch(/16,384 UTF-8 bytes[\s\S]*receipt_contract[\s\S]*ape_validate_receipt/iu);
     expect(prompts.implementer).toMatch(/approved_plan[\s\S]*smallest complete change[\s\S]*plan_deviation[\s\S]*test-contradiction/u);
     expect(prompts.implementer).toMatch(/policy denials[\s\S]*command-shape[\s\S]*capability/iu);
     expect(prompts.implementer).toMatch(/approved_plan[\s\S]*materially deviates[\s\S]*plan_deviation[\s\S]*otherwise omit/iu);

@@ -172,7 +172,12 @@ function configFile(dir) {
 // `null` omits the field entirely (the no-project_dir event shape).
 // `evidence` is the realpath-grade verdict bin/ape-hook.mjs precomputes; when
 // omitted the event carries none, which is the fail-closed shape.
-function decide(command, { ticket = readOnlyTicket, projectDir = null, evidence } = {}) {
+function decide(command, {
+  ticket = readOnlyTicket,
+  projectDir = null,
+  evidence,
+  runState = state,
+} = {}) {
   return evaluateLifecyclePolicy(
     {
       host: 'claude',
@@ -183,7 +188,7 @@ function decide(command, { ticket = readOnlyTicket, projectDir = null, evidence 
       ...(projectDir === null ? {} : { project_dir: projectDir }),
       ...(evidence === undefined ? {} : { evidence }),
     },
-    { state, ticket },
+    { state: runState, ticket },
   );
 }
 
@@ -208,6 +213,116 @@ describe('APE v2 evidence-command run-script allowlist (two-tier, role-aware)', 
   });
 
   describe('read-only tier: only operator-declared script names', () => {
+    it('keeps receipt-contract script authority on the immutable ticket after live config drifts', () => {
+      const dir = project({ policy: { evidence_scripts: ['live-only'] } });
+      const immutableState = {
+        status: 'running',
+        binding_protocol: 'native-v1',
+        capability_snapshot: {
+          version: 1,
+          config_hash: 'a'.repeat(64),
+          evidence_scripts: ['snapshot-only'],
+          command_profiles: [],
+          runners: [],
+          test_commands: {},
+        },
+      };
+      const immutableTicket = {
+        ...readOnlyTicket,
+        receipt_contract_version: 1,
+        capability_manifest: {
+          version: 1,
+          config_hash: 'a'.repeat(64),
+          allowed_evidence_commands: ['npm run snapshot-only'],
+          command_profiles: [],
+        },
+      };
+
+      expectAllow('npm run snapshot-only', {
+        projectDir: dir,
+        ticket: immutableTicket,
+        runState: immutableState,
+      });
+      expectDeny('npm run live-only', {
+        projectDir: dir,
+        ticket: immutableTicket,
+        runState: immutableState,
+      });
+
+      // Pre-upgrade tickets intentionally retain the live-config contract.
+      expectAllow('npm run live-only', { projectDir: dir });
+      expectDeny('npm run snapshot-only', { projectDir: dir });
+    });
+
+    it('fails closed instead of borrowing live scripts when a receipt-contract manifest is malformed', () => {
+      const dir = project({ policy: { evidence_scripts: ['live-only'] } });
+      const malformedTicket = {
+        ...readOnlyTicket,
+        receipt_contract_version: 1,
+        capability_manifest: { version: 1 },
+      };
+      expectDeny('npm run live-only', {
+        projectDir: dir,
+        ticket: malformedTicket,
+        runState: {
+          status: 'running',
+          binding_protocol: 'native-v1',
+          capability_snapshot: {
+            version: 1,
+            config_hash: 'a'.repeat(64),
+            evidence_scripts: ['state-only'],
+            command_profiles: [],
+            runners: [],
+            test_commands: {},
+          },
+        },
+      });
+      expectAllow('npm run test', {
+        projectDir: dir,
+        ticket: malformedTicket,
+      });
+    });
+
+    it('does not widen an exact write command profile into read-only package-script authority', () => {
+      const dir = project({ policy: { evidence_scripts: ['live-only'] } });
+      const configHash = 'b'.repeat(64);
+      const writeProfile = {
+        id: 'dangerous-build',
+        command: 'npm run dangerous',
+        roles: ['reviewer'],
+        effect: 'write',
+      };
+      const immutableState = {
+        status: 'running',
+        binding_protocol: 'native-v1',
+        capability_snapshot: {
+          version: 1,
+          config_hash: configHash,
+          evidence_scripts: [],
+          command_profiles: [writeProfile],
+          runners: [],
+          test_commands: {},
+        },
+      };
+      const immutableTicket = {
+        ...readOnlyTicket,
+        receipt_contract_version: 1,
+        capability_manifest: {
+          version: 1,
+          config_hash: configHash,
+          allowed_evidence_commands: [writeProfile.command],
+          command_profiles: [writeProfile],
+        },
+      };
+      for (const command of ['npm run dangerous', 'npm run dangerous -- --check']) {
+        expectDeny(command, {
+          projectDir: dir,
+          ticket: immutableTicket,
+          runState: immutableState,
+        });
+      }
+    });
+
     it('DENIES an undeclared package.json script to a read-only ticket, for every package manager', () => {
       // (a) The escalation itself. `validate` executes code outside the tree,
       // `bundle` writes dist/, `typecheck` is merely undeclared — none is in
@@ -1506,6 +1621,74 @@ function boundBashCall(dir, command, cwd) {
 }
 
 describe('APE v2 hook binary evidence containment (cwd + operand precompute)', () => {
+  it('uses the immutable receipt-contract command surface after config changes on the real hook path', async () => {
+    const dir = hookProject();
+    const snapshotProfile = {
+      id: 'snapshot-command',
+      command: '/opt/tool --snapshot-command',
+      roles: ['reviewer'],
+      effect: 'read',
+    };
+    const liveProfile = {
+      id: 'live-command',
+      command: '/opt/tool --live-command',
+      roles: ['reviewer'],
+      effect: 'read',
+    };
+    writeFileSync(
+      configFile(dir),
+      JSON.stringify({
+        policy: {
+          evidence_scripts: ['live-only'],
+          command_profiles: [liveProfile],
+        },
+      }),
+      'utf8',
+    );
+    writeFileSync(
+      path.join(dir, '.ape', 'runtime', 'active.json'),
+      JSON.stringify({
+        run_id: 'run-evidence',
+        status: 'running',
+        binding_protocol: 'native-v1',
+        capability_snapshot: {
+          version: 1,
+          config_hash: 'a'.repeat(64),
+          evidence_scripts: ['snapshot-only'],
+          command_profiles: [snapshotProfile],
+          runners: [],
+          test_commands: {},
+        },
+        tickets: [{
+          ticket_id: 'run-evidence:review:r',
+          role: 'reviewer',
+          writable: false,
+          claimed_paths: [],
+          test_paths: ['__tests__'],
+          receipt_contract_version: 1,
+          capability_manifest: {
+            version: 1,
+            config_hash: 'a'.repeat(64),
+            allowed_evidence_commands: ['npm run snapshot-only'],
+            command_profiles: [snapshotProfile],
+          },
+        }],
+        receipts: [],
+      }),
+      'utf8',
+    );
+
+    for (const command of ['npm run snapshot-only', snapshotProfile.command]) {
+      const response = await invokeHook(boundBashCall(dir, command, dir), dir);
+      expect(response.hookSpecificOutput?.permissionDecision, command).not.toBe('deny');
+      expect(response.decision, JSON.stringify(response)).not.toBe('block');
+    }
+    for (const command of ['npm run live-only', liveProfile.command]) {
+      const response = await invokeHook(boundBashCall(dir, command, dir), dir);
+      expect(response.hookSpecificOutput.permissionDecision, command).toBe('deny');
+    }
+  });
+
   it('allows an in-tree evidence command when the session cwd is inside the governed root', async () => {
     const dir = hookProject();
     for (const command of ['npm test', 'node --test __tests__/x.test.mjs']) {

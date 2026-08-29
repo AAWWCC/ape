@@ -43,4 +43,16 @@ describe('APE prevents late blocker discovery', () => {
     expect(protocol).toMatch(/supersedes_run/);
     expect(protocol).toMatch(/carr(?:y|ies).*tree.*findings|tree.*findings.*carr/is);
   });
+
+  it('makes readiness, spend bounds, and receipt repair runtime-owned', () => {
+    const run = read('plugin-src/skills/run/body.md');
+    const resume = read('plugin-src/skills/resume/body.md');
+    const protocol = read('plugin-src/skills/references/run-resume-protocol.md');
+    expect(run).toMatch(/ape_run preview/i);
+    expect(run).toMatch(/max_worker_dispatches[\s\S]*max_active_seconds/i);
+    expect(protocol).toMatch(/ape_validate_receipt/i);
+    expect(protocol).toMatch(/initial validation plus at most two[\s\S]*corrections/i);
+    expect(protocol).toMatch(/redispatch_same_ticket[\s\S]*worker_protocol_failure/i);
+    expect(resume).toMatch(/redispatch_same_ticket/i);
+  });
 });

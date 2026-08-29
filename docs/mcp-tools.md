@@ -1,14 +1,15 @@
 # MCP tools
 
-APE exposes exactly four tools. Skills are the normal user interface; these actions are the
+APE exposes five tools. Skills are the normal user interface; these actions are the
 machine contract behind them.
 
 | Tool | Actions |
 | --- | --- |
-| `ape_run` | `probe`, `probe-status`, `probe-ack`, `start`, `next`, `record`, `status`, `resume`, `regate`, `ship`, `expire-dispatch`, `abort`, `override` |
+| `ape_run` | `probe`, `probe-status`, `probe-ack`, `preview`, `start`, `next`, `record`, `answer-preflight`, `status`, `resume`, `regate`, `ship`, `expire-dispatch`, `extend-budget`, `abort`, `override` |
 | `ape_status` | Dedicated read-only current-run, pending-ticket, lane, and gate snapshot. |
 | `ape_history` | `query`, `explain`, `metrics`, `import`, `maintenance-status`, `compact-artifacts`, `roadmap-status`, `roadmap-register`, `roadmap-supersede`, `roadmap-attest` |
 | `ape_config` | `get`, `set`, `doctor`, `wire`, `unwire`, `init` |
+| `ape_validate_receipt` | Validate and attest one bound worker's exact final receipt draft without advancing the run. |
 
 Inputs are bounded at 64 KiB UTF-8. Responses use bounded summaries; full tickets, receipts, and
 run records remain under `.ape/runtime/`.
@@ -35,6 +36,12 @@ for Claude runs rather than as missing legacy telemetry. Each version-cohort map
 16 most populous cohorts and preserves exact coverage with `omitted_cohorts` and `omitted_runs`; use
 an exact cohort filter to inspect an omitted version.
 
+The `orchestration` metrics block reports first-pass receipt acceptance and first-pass-perfect run
+rates, validation/correction/redispatch and budget-pause counts, time to first writer, and repair
+time. Token totals are included only for host-attested exact counters. Coverage always separates
+`token_dispatches`, `token_attested_dispatches`, and unobserved dispatches; APE never estimates a
+missing token count.
+
 `lineage_outcomes` collapses recovery history at every unsuperseded effective leaf: a predecessor with
 multiple durable successors contributes each successor leaf, rather than causing the entire component
 to disappear. Cohort filters apply to those leaves. Coverage separately discloses missing, invalid,
@@ -59,8 +66,19 @@ metrics calls do not mutate that cache or send telemetry anywhere.
   contract v2 is limited to behavioral fast/full phase runs. `land` additionally requires a
   non-empty default-tip-to-working-tree diff entirely inside `claimed_paths` and `test_paths`, with
   HEAD equal to or descended from the resolved default tip.
+- New public starts require an explicit dispatch/active-time execution budget. `preview` uses the
+  same readiness resolver and reports derived capability requirements, minimum/worst-case worker
+  dispatches, receipt-submission bounds, and deterministic dispatch feasibility before any run
+  state is written. `covers_minimum_worker_dispatches` is boolean. Model/host duration has no
+  defensible lower bound, so `minimum.active_seconds` and `covers_minimum_path` are `null`; the
+  active-time value is an authorization cap, not a promise or estimate of completion time.
+- `extend-budget` may only increase the active run's limits. Send a nonblank `reason` and at least
+  one new top-level cap, for example
+  `{action:"extend-budget", reason:"operator approved continuation", max_active_seconds:7200}`.
+  Exhaustion pauses the same run and never creates a successor automatically.
 - `record` accepts an agent receipt draft. The runtime adds and verifies identity, tree/test
-  evidence, observed external-tool effects, hashes, and the next transition.
+  evidence, observed external-tool effects, hashes, and the next transition. New-contract tickets
+  also require a matching `ape_validate_receipt` attestation for the normalized exact draft.
 - `next` advances one pending transition or polls a `gating`/`shipping` watch.
 - `ape_status` is the canonical read-only status tool. The `ape_run` `status` action remains a
   deprecated compatibility alias. `resume` returns the action needed to continue an interrupted
@@ -68,6 +86,46 @@ metrics calls do not mutate that cache or send telemetry anywhere.
 
 `ok: false` is a runtime refusal and means the action changed nothing. A refused lever never hides
 the error inside a successful `actions` array.
+
+### Receipt validation and recovery
+
+`ape_validate_receipt` is the only APE tool callable by a bound worker. It applies the same complete
+role-specific mechanical contract used by `record`, including structured planning, profile IDs,
+recognized evidence commands, and the 16,384-byte canonical candidate-plan ceiling. It returns
+field-specific corrections plus used/maximum/remaining plan bytes. Call it with
+`{ ticket_id, draft }`, where `ticket_id` exactly matches `draft.ticket_id` and `draft` is the complete
+object that will later be placed in `ape_run record`'s `receipt` field. The 16,384-byte ceiling bounds
+the immutable ticket/receipt artifact, MCP response projection, and worker model-context use; it is
+not a content-quality judgment. A valid call binds the normalized
+draft hash to that physical dispatch; changing the draft invalidates the attestation.
+Candidate-plan usage is returned at
+`budgets.candidate_plan_utf8_bytes.{used_bytes,max_bytes,remaining_bytes}`.
+
+Each physical worker receives an initial validation and two corrections. One fresh worker may then
+be authorized on the same immutable ticket without consuming a stage attempt. A second exhaustion
+blocks as `worker_protocol_failure`; it cannot vote in review or trigger product remediation,
+directed replan, abort, or successor creation.
+
+### Immutable run contract
+
+Every newly created native receipt-contract run stores a compact `run_contract` pointer with
+`{version, revision, ref, hash}`. The content-addressed manifest under `.ape/runtime/contracts/`
+binds the run configuration/objective/preflight hashes, requested and available capability
+catalogs, command and verification allowlists, recognized commands, field bounds, byte budgets,
+and each ticket's role-filtered receipt contract. Role-specific JSON Schemas are retained as
+content-addressed schema artifacts referenced by the manifest, so ticket compaction does not erase
+the contract. Tickets carry the matching pointer; wire projections refer to it instead of repeating
+the full catalog. Existing runs and historical ticket hashes are unchanged.
+
+### Typed recovery status
+
+Control responses use `next_action.kind` from this closed vocabulary:
+`continue_same_agent`, `redispatch_same_ticket`, `stage_retry`, `directed_replan`,
+`remediate_product_finding`, `wait`, `answer_preflight`, `extend_budget`, or `blocked`.
+Failures use `failure_domain`: `product`, `orchestration`, `configuration`, `infrastructure`,
+`operator`, or `unknown`. Protocol and infrastructure failures do not become reviewer dissent or
+product remediation. A blocked response states `automatic_successor:false`; starting another run
+or extending a budget always requires explicit operator authorization.
 
 ### Long-running calls
 

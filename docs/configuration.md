@@ -7,8 +7,9 @@ Common actions:
 
 - `get`: return the effective configuration.
 - `set`: validate and store one dotted key.
-- `init`: inspect project manifests and propose test commands; `apply: true` persists an approved
-  proposal.
+- `init`: inspect project manifests and propose grounded test commands/evidence scripts. It may
+  separately propose a managed APE orientation block for the effective project instruction file;
+  config and instruction changes require explicit, separate approval.
 - `doctor`: check git, state, locks, configuration, bundles, host preconditions, and known external
   editor declarations.
 - `wire` / `unwire`: opt a host statusline in or out.
@@ -84,6 +85,15 @@ in [MCP tools](mcp-tools.md#history-observability-and-metrics).
 Run `ape_config init` first. It recognizes common JavaScript, Python, Go, Rust, Ruby, Maven,
 Gradle, and `script/test` layouts and proposes only commands grounded in project files. The proposal
 is not applied unless the operator approves it.
+
+`init` may also propose a small managed orientation block so future model sessions know to use APE
+through its skills and immutable ticket contracts. APE resolves `AGENTS.override.md` before
+`AGENTS.md`; it never writes the shadowed file. Apply this proposal separately with
+`apply_agents:true`, the exact proposed `agents_path`, and the matching `agents_expected_hash`.
+The runtime rechecks path precedence and the file hash under its config lock immediately before an
+atomic replacement. A stale or concurrent edit rejects without partially applying config. Dynamic
+receipt schemas, profile allowlists, and byte bounds remain in tickets/manifests rather than
+Markdown.
 
 Important rules:
 

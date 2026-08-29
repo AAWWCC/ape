@@ -98,7 +98,7 @@ describe('APE v2 adapter conformance', () => {
     expect(role).toBeLessThan(ticket);
     expect(protocol).toMatch(/On Codex,[\s\S]*transport-only\s+bootstrap/);
     expect(protocol).toContain('`ticket_projection: "hook-injected"`');
-    expect(protocol).toMatch(/record the returned[\s\S]*receipt unchanged[\s\S]*ape_run next/);
+    expect(protocol).toMatch(/return that draft unchanged[\s\S]*Call `next`/);
 
     for (const role of roles) {
       const rolePrompt = await readFile(path.join(root, 'prompts', `${role}.md`), 'utf8');
@@ -201,7 +201,7 @@ describe('APE v2 adapter conformance', () => {
     expect(codex.spawn_args.message).not.toContain(ticket.ticket_id);
     expect(codex.next_control).toBe(CODEX_DISPATCH_NEXT_CONTROL);
     expect(codex.next_control).toBe(
-      'After native spawn returns, call ape_run action "status" with only action and project_dir; never send run_id on status. When the dispatch is active-bound, wait for its original receipt. Record each returned receipt unchanged with ape_run action "record"; if record rejects it, continue the same physical agent with the exact errors and record its complete replacement unchanged (at most two corrections, never a second agent); after the group is fully recorded, call ape_run action "next".',
+      'After native spawn returns, call ape_run action "status" with only action and project_dir; never send run_id on status. When active-bound, wait for the worker to validate its exact final draft with ape_validate_receipt and return it unchanged. Record it unchanged. Follow the runtime next_action exactly: continue_same_agent carries exact corrections; redispatch_same_ticket alone authorizes one fresh worker on the same ticket; receipt-contract failures never authorize product remediation, replan, abort, or a successor. After the group is fully recorded, call ape_run action "next".',
     );
 
     // Compatibility and diagnostics stay available, but no installed-package

@@ -12,7 +12,9 @@ On Google Antigravity / Gemini, pass the exact open project root as `project_dir
 call.
 
 Follow [`references/run-resume-protocol.md`](references/run-resume-protocol.md) for dispatch,
-receipt recording, waiting, and advancement. Never spawn a replacement for an already-bound ticket.
+receipt recording, waiting, and advancement. Never spawn a replacement for an already-bound ticket
+unless the runtime returns `next_action: {"kind":"redispatch_same_ticket", ...}`; that action authorizes at most
+one fresh worker on the same immutable ticket after receipt-contract correction exhaustion.
 When a dispatch remains active, wait through the host's native agent primitive. Use
 `expire-dispatch` only for a genuinely orphaned or wedged flight, with the exact pending ticket ID
 and a non-empty user-provided audit reason.

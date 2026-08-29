@@ -14,6 +14,7 @@ const verificationProfiles = [{
   command: 'node --test',
   timeout_ms: 30_000,
 }];
+const executionBudget = { max_worker_dispatches: 10_000, max_active_seconds: 2_592_000 };
 
 function session(messages) {
   return new Promise((resolve, reject) => {
@@ -55,6 +56,7 @@ describe('APE v2 MCP public surface', () => {
     expect(responses[0].result.serverInfo.version).toBe(pkg.version);
     expect(responses[1].result.tools.map((tool) => tool.name)).toEqual([
       'ape_run',
+      'ape_validate_receipt',
       'ape_status',
       'ape_history',
       'ape_config',
@@ -64,6 +66,17 @@ describe('APE v2 MCP public surface', () => {
     expect(status.inputSchema).toMatchObject({
       type: 'object',
       additionalProperties: false,
+    });
+    const receiptValidator = responses[1].result.tools.find(
+      (tool) => tool.name === 'ape_validate_receipt',
+    );
+    expect(receiptValidator.inputSchema).toMatchObject({
+      required: ['ticket_id', 'draft'],
+      additionalProperties: false,
+      properties: {
+        ticket_id: { type: 'string' },
+        draft: { type: 'object' },
+      },
     });
   });
 
@@ -117,8 +130,50 @@ describe('APE v2 MCP public surface', () => {
       'probe',
       'probe-status',
       'probe-ack',
+      'preview',
       'start',
+      'extend-budget',
     ]));
+    expect(run.inputSchema.allOf).toContainEqual({
+      if: {
+        properties: { action: { const: 'start' } },
+        required: ['action'],
+      },
+      then: { required: ['execution_budget'] },
+    });
+    expect(run.inputSchema.allOf).toContainEqual({
+      if: {
+        properties: { action: { const: 'extend-budget' } },
+        required: ['action'],
+      },
+      then: {
+        required: ['reason'],
+        anyOf: [
+          { required: ['max_worker_dispatches'] },
+          { required: ['max_active_seconds'] },
+        ],
+      },
+    });
+    expect(run.inputSchema.properties.execution_budget).toMatchObject({
+      required: ['max_worker_dispatches', 'max_active_seconds'],
+    });
+    expect(run.inputSchema.properties.execution_budget.description)
+      .toMatch(/covers_minimum_path are null/i);
+    const capabilityVariants = run.inputSchema.properties.required_capabilities.items.oneOf;
+    expect(capabilityVariants.map((variant) => variant.properties.kind.const)).toEqual([
+      'command_profile',
+      'verification_profile',
+      'evidence_command',
+      'tool_claim',
+    ]);
+    const toolClaim = capabilityVariants.find(
+      (variant) => variant.properties.kind.const === 'tool_claim',
+    );
+    expect(toolClaim.properties.id).toMatchObject({
+      minLength: 3,
+      maxLength: 4096,
+      pattern: expect.stringContaining('read|write|execute'),
+    });
     expect(run.inputSchema.properties.probe_id).toMatchObject({ type: 'string' });
     expect(run.inputSchema.properties.probe_capability).toMatchObject({ type: 'string' });
     expect(run.description).toMatch(/first call must include[\s\S]*explicit_invocation: true[\s\S]*hooks_trusted: true[\s\S]*subagents_available: true/i);
@@ -209,7 +264,7 @@ describe('APE v2 MCP public surface', () => {
       child.stdin.end('{bad json}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n');
     });
     expect(responses[0].error.code).toBe(-32700);
-    expect(responses[1].result.tools).toHaveLength(4);
+    expect(responses[1].result.tools).toHaveLength(5);
   });
 
   it.each(['claude', 'codex'])('applies the correct native binding precondition for %s', async (host) => {
@@ -240,6 +295,7 @@ describe('APE v2 MCP public surface', () => {
               hooks_trusted: true,
               subagents_available: true,
               explicit_invocation: true,
+              execution_budget: executionBudget,
             },
           },
         },
@@ -299,6 +355,7 @@ describe('APE v2 MCP public surface', () => {
             hooks_trusted: true,
             subagents_available: true,
             explicit_invocation: true,
+            execution_budget: executionBudget,
           },
         },
       }]);
@@ -356,6 +413,7 @@ describe('APE v2 MCP public surface', () => {
             hooks_trusted: true,
             subagents_available: true,
             explicit_invocation: true,
+            execution_budget: executionBudget,
           },
         },
       }]);
@@ -419,6 +477,7 @@ describe('APE v2 MCP public surface', () => {
             subagents_available: true,
             explicit_invocation: true,
             plan_contract_version: 1,
+            execution_budget: executionBudget,
           },
         },
       }]);

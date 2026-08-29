@@ -87,6 +87,7 @@
         "preflight_failed",
         "test_contradiction",
         "capability_blocked",
+        "worker_protocol_failure",
         "dispatch_expired",
         "test_failed",
         "implementation_failed",

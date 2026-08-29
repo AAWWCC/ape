@@ -14,7 +14,7 @@ const OWNER_MANIFEST = [
     facade: 'lib/runtime/service.js',
     symbols: [
       'prepareNativeBindingProbe', 'nativeBindingProbeStatus', 'ackNativeBindingProbe',
-      'shouldTaskWrapApeRun', 'cleanupAttributedTaskGate', 'startRun', 'nextRun',
+      'shouldTaskWrapApeRun', 'cleanupAttributedTaskGate', 'previewRun', 'startRun', 'nextRun', 'extendBudget',
       'executeApeRunTaskOperation', 'answerPreflight', 'resumeRun', 'abortRun', 'regateRun', 'shipRun',
       'expireDispatch', 'overrideRun',
     ],
@@ -24,7 +24,49 @@ const OWNER_MANIFEST = [
     domain: 'receipt admission and finalization',
     owner: 'lib/runtime/receipt-service.js',
     facade: 'lib/runtime/service.js',
-    symbols: ['recordReceipt', 'executeTaskOperationTransaction', 'withReceiptLock'],
+    symbols: [
+      'recordReceipt', 'validateReceiptForDispatch', 'settleReceiptValidationSubagentStop',
+      'executeTaskOperationTransaction', 'withReceiptLock',
+    ],
+  },
+  {
+    domain: 'run capability and feasibility readiness',
+    owner: 'lib/runtime/readiness.js',
+    facade: 'lib/runtime/service.js',
+    symbols: ['evaluateRunReadiness', 'minimumWorkerDispatches', 'snapshotRunCapabilities'],
+    consumes: ['lib/runtime/config.js'],
+  },
+  {
+    domain: 'bounded run execution accounting',
+    owner: 'lib/runtime/execution-budget.js',
+    facade: 'lib/runtime/service.js',
+    symbols: ['executionBudgetGuard'],
+  },
+  {
+    domain: 'immutable run contract manifest',
+    owner: 'lib/runtime/run-contract.js',
+    facade: 'lib/runtime/service.js',
+    symbols: ['readRunContractManifest', 'runContractByteBudgets', 'runContractFieldBounds'],
+  },
+  {
+    domain: 'canonical receipt validation kernel',
+    owner: 'lib/runtime/receipt-validator.js',
+    facade: 'lib/runtime/service.js',
+    symbols: ['validateReceiptDraft'],
+    consumes: ['lib/runtime/receipt-draft-schema.js'],
+  },
+  {
+    domain: 'worker receipt JSON Schema generation',
+    owner: 'lib/runtime/receipt-draft-schema.js',
+    facade: 'lib/runtime/service.js',
+    symbols: ['receiptDraftJsonSchemaForTicket'],
+    consumes: ['lib/runtime/orchestration-telemetry.js'],
+  },
+  {
+    domain: 'orchestration telemetry validation',
+    owner: 'lib/runtime/orchestration-telemetry.js',
+    facade: 'lib/runtime/service.js',
+    symbols: ['isFailureDomain', 'validatedOrchestrationTelemetry'],
   },
   {
     domain: 'service-facing status and query orchestration',
@@ -63,7 +105,7 @@ const OWNER_MANIFEST = [
     symbols: [
       'SAFE_SUBAGENT_TOOLS', 'SAFE_CLAUDE_SUBAGENT_TOOLS', 'CONTROL_PLANE_TOOLS',
       'isAgentDispatchTool', 'normalizeLifecycleEvent', 'evaluateLifecyclePolicy',
-      'evaluateStartBinding', 'evaluateStopValidation', 'formatHookResponse',
+      'evaluateStartBinding', 'formatHookResponse',
     ],
     consumes: ['lib/runtime/evidence-policy.js', 'lib/runtime/write-policy.js'],
   },
@@ -123,13 +165,63 @@ const OWNER_MANIFEST = [
   },
 ];
 
-const REQUIRED_OWNER_FILES = OWNER_MANIFEST
-  .filter((entry) => entry.requiredOwner !== false)
-  .map((entry) => entry.owner);
+// These dependency kernels are genuine internal owners, but are intentionally
+// not service-facade operations. Exact export and local-import surfaces keep
+// them from quietly becoming catch-alls while preserving the narrow public
+// facade above.
+const INTERNAL_OWNER_ASSERTIONS = [
+  {
+    domain: 'capability manifest growth bounds',
+    owner: 'lib/runtime/capability-contract.js',
+    exports: [
+      'CAPABILITY_MANIFEST_GROWTH_CONTRACT_VERSION',
+      'capabilityDynamicTestPathBounds',
+      'capabilityTestPathBoundErrors',
+      'capabilityTestPathUsage',
+      'worstCaseCapabilityTestPathSets',
+    ],
+    dependencies: [
+      'lib/runtime/constants.js',
+      'lib/runtime/path-scope.js',
+    ],
+  },
+  {
+    domain: 'immutable ticket capability manifest derivation',
+    owner: 'lib/runtime/capability-manifest.js',
+    exports: [
+      'capabilityManifestGrowthEnabled',
+      'mergeReceiptCapabilityGrowthResult',
+      'prospectiveReceiptCapabilityGrowth',
+      'prospectiveReceiptCapabilityGrowthFromTree',
+      'ticketCapabilityManifest',
+      'validateCapabilityManifestGrowth',
+    ],
+    dependencies: [
+      'lib/runtime/canonical.js',
+      'lib/runtime/capability-contract.js',
+      'lib/runtime/constants.js',
+      'lib/runtime/git.js',
+      'lib/runtime/lane-policy.js',
+      'lib/runtime/path-scope.js',
+      'lib/runtime/pipeline.js',
+      'lib/runtime/receipt-validator.js',
+      'lib/runtime/run-contract.js',
+      'lib/runtime/runner.js',
+      'lib/runtime/schemas.js',
+    ],
+  },
+];
+
+const REQUIRED_OWNER_FILES = [
+  ...OWNER_MANIFEST
+    .filter((entry) => entry.requiredOwner !== false)
+    .map((entry) => entry.owner),
+  ...INTERNAL_OWNER_ASSERTIONS.map((entry) => entry.owner),
+];
 
 const FACADE_EXPORT_COUNTS = Object.freeze({
-  'lib/runtime/service.js': 22,
-  'lib/runtime/hooks.js': 35,
+  'lib/runtime/service.js': 37,
+  'lib/runtime/hooks.js': 34,
   'lib/runtime/gates.js': 12,
   'lib/runtime/scheduler.js': 3,
 });
@@ -814,13 +906,46 @@ describe('runtime-v2 module boundaries: expected GREEN is reachable', () => {
 
 describe('runtime-v2 module boundaries: required physical owners', () => {
   const input = productionInput();
-  it('declares exactly eleven new genuine owner files', () => {
-    expect(REQUIRED_OWNER_FILES).toHaveLength(11);
-    expect(new Set(REQUIRED_OWNER_FILES).size).toBe(11);
+  it('declares exactly twenty genuine owner files', () => {
+    expect(REQUIRED_OWNER_FILES).toHaveLength(19);
+    expect(new Set(REQUIRED_OWNER_FILES).size).toBe(19);
   });
   for (const entry of OWNER_MANIFEST) {
     it(`${entry.owner} exists as the ${entry.domain} owner`, () => {
       expect(input.missing, `missing required owner: ${entry.owner}`).not.toContain(entry.owner);
+    });
+  }
+  for (const entry of INTERNAL_OWNER_ASSERTIONS) {
+    it(`${entry.owner} exists as the internal ${entry.domain} owner`, () => {
+      expect(input.missing, `missing required owner: ${entry.owner}`).not.toContain(entry.owner);
+    });
+  }
+});
+
+describe('runtime-v2 module boundaries: narrow internal capability owners', () => {
+  const input = productionInput();
+  const service = input.files.has('lib/runtime/service.js')
+    ? inspectSource('lib/runtime/service.js', input.files.get('lib/runtime/service.js'))
+    : null;
+  const serviceExports = new Set(service?.reexports.map((entry) => entry.exported) ?? []);
+
+  for (const entry of INTERNAL_OWNER_ASSERTIONS) {
+    it(`${entry.owner} preserves its exact internal API and dependency surface`, () => {
+      const source = input.files.get(entry.owner);
+      expect(source, `missing required owner: ${entry.owner}`).toBeTypeOf('string');
+      const inspection = inspectSource(entry.owner, source);
+      const actualExports = [...inspection.directExports.keys()].sort();
+      const actualDependencies = [...new Set(
+        inspection.importEntries
+          .map((item) => resolveLocal(entry.owner, item.from))
+          .filter(Boolean),
+      )].sort();
+      expect(actualExports).toEqual([...entry.exports].sort());
+      expect(actualDependencies).toEqual([...entry.dependencies].sort());
+      for (const symbol of entry.exports) {
+        expect(serviceExports, `${symbol} must remain an internal capability-owner API`)
+          .not.toContain(symbol);
+      }
     });
   }
 });

@@ -13,6 +13,7 @@ import {
   cleanupAttributedTaskGate,
   executeApeRunTaskOperation,
   expireDispatch,
+  extendBudget,
   historyAction,
   nextRun,
   nativeBindingProbeStatus,
@@ -25,6 +26,7 @@ import {
   shouldTaskWrapApeRun,
   startRun,
   statusRun,
+  validateReceiptForDispatch,
 } from '../lib/runtime/service.js';
 import { previewRun } from '../lib/runtime/lifecycle-service.js';
 import {
@@ -68,10 +70,32 @@ const TOOLS = Object.freeze([
     inputSchema: {
       type: 'object',
       required: ['action'],
+      allOf: [
+        {
+          if: {
+            properties: { action: { const: 'start' } },
+            required: ['action'],
+          },
+          then: { required: ['execution_budget'] },
+        },
+        {
+          if: {
+            properties: { action: { const: 'extend-budget' } },
+            required: ['action'],
+          },
+          then: {
+            required: ['reason'],
+            anyOf: [
+              { required: ['max_worker_dispatches'] },
+              { required: ['max_active_seconds'] },
+            ],
+          },
+        },
+      ],
       properties: {
         action: {
           type: 'string',
-          enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'],
+          enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'extend-budget', 'abort', 'override'],
           description: 'For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
         },
         project_dir: {
@@ -124,6 +148,60 @@ const TOOLS = Object.freeze([
           enum: [1, 2],
           description: 'Structured planning contract version. New behavioral fast/full phase runs default to 2; explicit 1 retains the legacy planner-first contract.',
         },
+        required_capabilities: {
+          type: 'array',
+          maxItems: 64,
+          description: 'Optional additive capabilities that must exist before start. Every entry names one exact configured command profile, verification profile, evidence command, or declared tool claim.',
+          items: {
+            oneOf: [
+              {
+                type: 'object', additionalProperties: false, required: ['kind', 'id'],
+                properties: {
+                  kind: { const: 'command_profile' },
+                  id: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' },
+                  role: { type: 'string', minLength: 1 },
+                },
+              },
+              {
+                type: 'object', additionalProperties: false, required: ['kind', 'id'],
+                properties: {
+                  kind: { const: 'verification_profile' },
+                  id: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9._-]{0,63}$' },
+                },
+              },
+              {
+                type: 'object', additionalProperties: false, required: ['kind', 'id'],
+                properties: {
+                  kind: { const: 'evidence_command' },
+                  id: { type: 'string', minLength: 1 },
+                },
+              },
+              {
+                type: 'object', additionalProperties: false, required: ['kind', 'id'],
+                properties: {
+                  kind: { const: 'tool_claim' },
+                  id: {
+                    type: 'string',
+                    minLength: 3,
+                    maxLength: 4096,
+                    pattern: '^[a-z0-9][a-z0-9._-]*:(?:\\*|[^\\u0000-\\u001f\\u007f\\s*](?:[^\\u0000-\\u001f\\u007f*]*[^\\u0000-\\u001f\\u007f\\s*])?|[^\\u0000-\\u001f\\u007f\\s*][^\\u0000-\\u001f\\u007f*]*\\*):(read|write|execute)$',
+                    description: 'Exact provider:resource:read|write|execute claim.',
+                  },
+                },
+              },
+            ],
+          },
+        },
+        execution_budget: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['max_worker_dispatches', 'max_active_seconds'],
+          properties: {
+            max_worker_dispatches: { type: 'integer', minimum: 1, maximum: 10000 },
+            max_active_seconds: { type: 'integer', minimum: 1, maximum: 2592000 },
+          },
+          description: 'Required on every new public start. Preview reports deterministic minimum/worst-case dispatch bounds and whether max_worker_dispatches covers the minimum. Because model/host duration has no defensible lower bound, minimum.active_seconds and covers_minimum_path are null; max_active_seconds is an explicit authorization cap, not a completion estimate.',
+        },
         preflight_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
         answers: {
           type: 'array',
@@ -152,10 +230,46 @@ const TOOLS = Object.freeze([
         },
         operation: { type: 'string', enum: ['abort', 'reset'] },
         ticket_id: { type: 'string' },
-        reason: { type: 'string' },
+        reason: {
+          type: 'string',
+          minLength: 1,
+          description: 'Nonblank bounded audit reason. Required for extend-budget and other reason-audited actions.',
+        },
+        max_worker_dispatches: {
+          type: 'integer', minimum: 1, maximum: 10000,
+          description: 'extend-budget only: a new run-total worker-dispatch cap; it must be greater than or equal to the current cap.',
+        },
+        max_active_seconds: {
+          type: 'integer', minimum: 1, maximum: 2592000,
+          description: 'extend-budget only: a new run-total active-time cap; it must be greater than or equal to the current cap.',
+        },
         run_id: {
           type: 'string',
           description: 'Optional CONFIRMATION for the abort/override levers only (roadmap id abort-cannot-be-aimed) — never a selector, since at most one run is ever active. Key-absent is unaimed and byte-identical to today. A value matching the active run proceeds exactly as today; one that does not, refuses fail-closed before any effect and names both ids. An explicit null is an INVALID AIM, not an omission, and is refused the same way. Corrupt/schema-invalid active.json and an aimed override reset against an orphaned lock cannot be confirmed and always refuse when aimed — retry without run_id. Sending run_id on any action other than abort/override is rejected before the action runs.',
+        },
+      },
+    },
+  },
+  {
+    name: 'ape_validate_receipt',
+    description: 'Validate one complete StageReceipt draft against its immutable, role-specific StageTicket contract before record. Call as ape_validate_receipt(ticket_id, draft). For receipt_contract_version:1 tickets this performs at most three validations per physical dispatch (initial plus two corrections), does not consume the receipt capability or a stage attempt, and attests the exact normalized draft hash required by ape_run record. On exhaustion, stop correcting and return control to the parent using recovery_kind/next_action.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['ticket_id', 'draft'],
+      properties: {
+        project_dir: {
+          type: 'string',
+          description: 'Exact governed project root.',
+        },
+        ticket_id: {
+          type: 'string',
+          minLength: 1,
+          description: 'Exact immutable StageTicket identifier; it must also match draft.ticket_id.',
+        },
+        draft: {
+          type: 'object',
+          description: 'The complete draft exactly as it will be sent to ape_run action record, including ticket_id and receipt_capability.',
         },
       },
     },
@@ -279,6 +393,25 @@ const TOOLS = Object.freeze([
         explicit_invocation: { type: 'boolean' },
         behavioral: { type: 'boolean' },
         test_paths: { type: 'array', items: { type: 'string' } },
+        evidence_scripts: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'init apply only: the exact discovered package-script IDs the operator explicitly accepts as evidence commands.',
+        },
+        apply_agents: {
+          type: 'boolean',
+          description: 'init only: explicitly apply the separately proposed managed APE orientation block using the proposal hash and target path.',
+        },
+        agents_path: {
+          type: 'string',
+          enum: ['AGENTS.md', 'AGENTS.override.md'],
+          description: 'init apply_agents only: exact effective instruction file from the proposal.',
+        },
+        agents_expected_hash: {
+          type: 'string',
+          pattern: '^[0-9a-fA-F]{64}$',
+          description: 'init apply_agents only: compare-and-swap source hash returned by the proposal.',
+        },
       },
     },
   },
@@ -330,7 +463,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.23.53' };
+    return { name: 'ape', version: '2.24.0' };
   }
 }
 
@@ -491,6 +624,9 @@ async function dispatchApeRun(projectDir, input) {
       hooks_trusted: input.hooks_trusted ?? false,
       subagents_available: input.subagents_available ?? false,
       explicit_invocation: input.explicit_invocation ?? false,
+      required_capabilities: input.required_capabilities ?? [],
+      execution_budget_required: true,
+      ...(input.execution_budget !== undefined ? { execution_budget: input.execution_budget } : {}),
     });
   }
   if (action === 'start') {
@@ -520,6 +656,9 @@ async function dispatchApeRun(projectDir, input) {
       subagents_available: input.subagents_available ?? false,
       explicit_invocation: input.explicit_invocation ?? false,
       binding_protocol: 'native-v1',
+      required_capabilities: input.required_capabilities ?? [],
+      execution_budget_required: true,
+      ...(input.execution_budget !== undefined ? { execution_budget: input.execution_budget } : {}),
       // Codex must prove the live host actually delivers APE's launch and
       // child-binding lifecycle before a real run may mutate Git or state.
       // Claude uses its separately attested native binding path.
@@ -533,6 +672,17 @@ async function dispatchApeRun(projectDir, input) {
   if (action === 'regate') return regateRun(projectDir);
   if (action === 'ship') return shipRun(projectDir, input.reason);
   if (action === 'expire-dispatch') return expireDispatch(projectDir, input.ticket_id, input.reason);
+  if (action === 'extend-budget') {
+    return extendBudget(projectDir, {
+      ...(input.max_worker_dispatches !== undefined
+        ? { max_worker_dispatches: input.max_worker_dispatches }
+        : {}),
+      ...(input.max_active_seconds !== undefined
+        ? { max_active_seconds: input.max_active_seconds }
+        : {}),
+      reason: input.reason,
+    });
+  }
   if (action === 'abort') {
     // operation is override's parameter; silently dropping it would misroute a
     // requested reset into a bare abort (or worse, a no-op the caller trusts).
@@ -556,6 +706,9 @@ async function callTool(name, input) {
     // Every ape_run result crosses the wire through the bounded projection
     // exactly once (friction #26); the internal service result stays full.
     return projectRunResponse(await dispatchApeRun(projectDir, input));
+  }
+  if (name === 'ape_validate_receipt') {
+    return validateReceiptForDispatch(projectDir, input.draft ?? {}, input.ticket_id);
   }
   if (name === 'ape_status') return compactStatus(projectDir);
   if (name === 'ape_history') {

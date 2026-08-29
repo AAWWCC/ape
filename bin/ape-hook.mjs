@@ -36,12 +36,14 @@ import {
   isCodexDispatchTaskName,
   launchClaudeIntent,
   launchCodexIntent,
+  inspectDispatchSubagentStop,
   resolveCodexBindingOutcome,
   resolveClaudeBindingOutcome,
   resolveSealedCodexBinding,
   resolveSealedClaudeBinding,
   observeClaudeSubagentStop,
   observeCodexSubagentStop,
+  validateAndAttestDispatchReceiptDraftAtStop,
 } from '../lib/runtime/claude-dispatch.js';
 import {
   bindBindingProbe,
@@ -49,6 +51,23 @@ import {
   launchBindingProbe,
   resolvesBindingProbeIdentity,
 } from '../lib/runtime/binding-probe.js';
+import {
+  RECEIPT_CONTRACT_VERSION,
+  RECEIPT_VALIDATION_TOOL,
+  validateReceiptDraft,
+} from '../lib/runtime/receipt-validator.js';
+import {
+  extractReceiptDraftFromText,
+  formatDraftCorrections,
+  normalizeReceiptInput,
+  receiptInputHash,
+} from '../lib/runtime/receipt-input.js';
+import { executionBudgetGuard } from '../lib/runtime/execution-budget.js';
+import {
+  capabilityManifestGrowthEnabled,
+  mergeReceiptCapabilityGrowthResult,
+  prospectiveReceiptCapabilityGrowthFromTree,
+} from '../lib/runtime/capability-manifest.js';
 
 // Hard bound on hook input. 8 MB clears every legitimate host payload seen in
 // the field (an Edit to package-lock.json carries the whole hunk inline) while
@@ -274,11 +293,77 @@ try {
   // deny, so it is left posture-unchanged and reports no cause.
   let dispatchBindingDenialCause = null;
   let stoppedBinding = null;
+  let stopReceiptValidation = null;
   if (
     state &&
     event.event === 'SubagentStop' &&
     event.agent_identity
   ) {
+    const inspection = await inspectDispatchSubagentStop(paths, state, input, event.host);
+    const inspectedTicket = inspection.record
+      ? state.tickets.find((entry) => entry.ticket_id === inspection.record.ticket_id) ?? null
+      : null;
+    if (inspectedTicket?.receipt_contract_version === RECEIPT_CONTRACT_VERSION) {
+      const assistantMessage = input.last_assistant_message ?? input.lastAssistantMessage;
+      const extractedDraft = assistantMessage && typeof assistantMessage === 'object'
+        ? assistantMessage
+        : extractReceiptDraftFromText(assistantMessage);
+      const { input: normalizedDraft } = normalizeReceiptInput(extractedDraft);
+      // A denied SubagentStop is a real continuation authorization: the same
+      // physical model keeps working to correct its draft. Check the active
+      // time cap at this boundary. A worker already in flight may finish and
+      // stop, but once the cap is spent APE must not deny that stop to grant
+      // more correction work.
+      const continuationBudget = executionBudgetGuard(state, {
+        at: new Date().toISOString(),
+        dispatches: 0,
+      });
+      let stopDraftResult = validateReceiptDraft(inspectedTicket, normalizedDraft);
+      if (stopDraftResult.valid === true && capabilityManifestGrowthEnabled(state)) {
+        const growth = await prospectiveReceiptCapabilityGrowthFromTree(
+          paths.root,
+          state,
+          inspectedTicket,
+          normalizedDraft,
+        );
+        stopDraftResult = mergeReceiptCapabilityGrowthResult(stopDraftResult, growth);
+      }
+      stopReceiptValidation = await validateAndAttestDispatchReceiptDraftAtStop(
+        paths,
+        state,
+        input,
+        event.host,
+        {
+          input_hash: receiptInputHash(normalizedDraft ?? null),
+          continuation_budget: {
+            allowed: continuationBudget.allowed,
+            ...(continuationBudget.code ? { code: continuationBudget.code } : {}),
+          },
+          validate: () => stopDraftResult,
+        },
+      );
+      if (!stopReceiptValidation.observed) {
+        process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+          decision: 'deny',
+          reason: `APE SubagentStop receipt validation failed closed: ${stopReceiptValidation.reason}`,
+        }))}\n`);
+        process.exit(0);
+      }
+      if (
+        stopReceiptValidation.result?.valid !== true &&
+        stopReceiptValidation.validation?.exhausted !== true &&
+        continuationBudget.allowed
+      ) {
+        process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+          decision: 'deny',
+          reason: formatDraftCorrections(
+            stopReceiptValidation.result?.corrections ?? [],
+            inspectedTicket,
+          ),
+        }))}\n`);
+        process.exit(0);
+      }
+    }
     const observation = event.host === 'codex'
       ? await observeCodexSubagentStop(paths, state, input)
       : await observeClaudeSubagentStop(paths, state, input);
@@ -318,6 +403,51 @@ try {
     }
   } else if (state && event.ticket_id) {
     ticket = state.tickets.find((entry) => entry.ticket_id === event.ticket_id) ?? null;
+  }
+  // Worker-owned protocol tool: unlike ape_run/status/config/history, receipt
+  // validation is intentionally callable only by the exact bound worker. The
+  // hook invokes the same pure validator used by the MCP service and record
+  // boundary, but never blocks an INVALID draft here—the MCP call must run so
+  // it can durably charge the physical dispatch attempt and return corrections.
+  // Binding/ticket mismatch is authorization failure and is denied before the
+  // service can attest another worker's ticket.
+  if (RECEIPT_VALIDATION_TOOL.test(event.tool_name)) {
+    let receiptValidation = null;
+    const receiptInput = toolInput?.draft ?? toolInput?.receipt;
+    const requestedTicketId = toolInput?.ticket_id ?? receiptInput?.ticket_id;
+    const bound = Boolean(
+      state?.status === 'running' &&
+      event.is_subagent &&
+      event.ape_managed === true &&
+      ticket?.receipt_contract_version === RECEIPT_CONTRACT_VERSION &&
+      receiptInput &&
+      typeof receiptInput === 'object' &&
+      !Array.isArray(receiptInput) &&
+      requestedTicketId === ticket.ticket_id &&
+      receiptInput.ticket_id === ticket.ticket_id
+    );
+    if (bound && event.event === 'PreToolUse') {
+      const { input: normalizedReceipt } = normalizeReceiptInput(receiptInput);
+      receiptValidation = validateReceiptDraft(ticket, normalizedReceipt);
+      if (receiptValidation.valid === true && capabilityManifestGrowthEnabled(state)) {
+        const growth = await prospectiveReceiptCapabilityGrowthFromTree(
+          paths.root,
+          state,
+          ticket,
+          normalizedReceipt,
+        );
+        receiptValidation = mergeReceiptCapabilityGrowthResult(receiptValidation, growth);
+      }
+    }
+    process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+      decision: bound ? 'allow' : 'deny',
+      reason: bound
+        ? receiptValidation?.valid === true
+          ? 'APE bound receipt validation call admitted (draft valid)'
+          : `APE bound receipt validation call admitted; ${formatDraftCorrections(receiptValidation?.corrections ?? [], ticket)}`
+        : 'APE receipt validation denied: no exact active bound receipt-contract ticket matches receipt.ticket_id',
+    }))}\n`);
+    process.exit(0);
   }
   // Generic Codex plugins are not trusted merely because they are installed.
   // Once the immutable ticket is resolved, an exact per-operation read claim
@@ -605,7 +735,7 @@ try {
   if (
     state?.status === 'running' &&
     reconcileEvents.has(event.event) &&
-    driftGuardApplies(event)
+    driftGuardApplies(event, { state, ticket })
   ) {
     const tree = await currentTreeSha(paths.root);
     const baseline =

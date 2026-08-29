@@ -27,6 +27,7 @@ import { queryHistory } from '../lib/runtime/history.js';
 import { acquireRunLock } from '../lib/runtime/lock.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
+import { initializeExecutionBudget } from '../lib/runtime/execution-budget.js';
 
 function exists(file) {
   return access(file).then(() => true, () => false);
@@ -282,6 +283,11 @@ describe('APE v2 service integration', () => {
     const state = await readJson(paths.active);
     state.status = 'completed';
     state.stage = 'complete';
+    const expiredAt = new Date(Date.now() - 10_000).toISOString();
+    state.execution_budget = initializeExecutionBudget(
+      { max_worker_dispatches: 1, max_active_seconds: 1 },
+      expiredAt,
+    );
     state.checkout_cleanup = {
       status: 'returned',
       base_branch: state.base_branch,
@@ -295,6 +301,11 @@ describe('APE v2 service integration', () => {
     // Aborting a sealed completed run is refused and changes nothing on disk.
     const aborted = await abortRun(dir, 'try to rewrite a sealed run');
     expect(aborted).toEqual({ ok: false, reason: 'run is completed' });
+    expect(await readJson(paths.active)).toEqual(before);
+
+    // Terminal refusal precedes budget admission: an elapsed cap can never
+    // rewrite or resurrect a sealed run as execution-budget input.
+    expect(await nextRun(dir)).toEqual({ ok: false, reason: 'run is completed' });
     expect(await readJson(paths.active)).toEqual(before);
 
     // Override abort of a completed run is refused, naming the real lever.
@@ -340,6 +351,43 @@ describe('APE v2 service integration', () => {
     const blocked = await statusRun(dir);
     expect(blocked).toMatchObject({ ok: true, active: true });
     expect(blocked).not.toHaveProperty('sealed');
+  });
+
+  it('preserves preflight questions when NEXT observes an expired active-time budget', async () => {
+    const dir = await project();
+    const started = await startRun(dir, {
+      objective: 'Change behavior',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'codex',
+      claimed_paths: ['src/value.js'],
+      test_paths: ['tests/value.test.js'],
+      requirements: [],
+      risk_triggers: [],
+      behavioral: true,
+      hooks_trusted: true,
+      subagents_available: true,
+      explicit_invocation: true,
+    });
+    expect(started.ok).toBe(true);
+    const paths = runtimePaths(dir);
+    const state = await readJson(paths.active);
+    state.status = 'input_required';
+    state.stage = 'preflight';
+    state.input_required = {
+      preflight_hash: 'f'.repeat(64),
+      questions: [{ id: 'scope', question: 'Confirm the exact scope' }],
+    };
+    state.execution_budget = initializeExecutionBudget(
+      { max_worker_dispatches: 2, max_active_seconds: 1 },
+      new Date(Date.now() - 10_000).toISOString(),
+    );
+    await atomicWriteJson(paths.active, state);
+    const before = await readJson(paths.active);
+
+    const result = await nextRun(dir);
+    expect(result).toMatchObject({ ok: true, run: { status: 'input_required' } });
+    expect(await readJson(paths.active)).toEqual(before);
   });
 });
 

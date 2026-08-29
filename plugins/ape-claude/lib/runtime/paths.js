@@ -84,6 +84,9 @@ export function runtimePaths(projectDir) {
     runs: path.join(runtime, 'runs'),
     history: path.join(runtime, 'history'),
     tickets: path.join(runtime, 'tickets'),
+    // Immutable, content-addressed run-contract manifests. Active state and
+    // tickets retain only a compact ref/hash pointer into this directory.
+    contracts: path.join(runtime, 'contracts'),
     receipts: path.join(runtime, 'receipts'),
     receiptTransactions: path.join(runtime, 'receipt-transactions'),
     receiptLock: path.join(runtime, 'receipt-effects.lock'),

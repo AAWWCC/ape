@@ -3,7 +3,8 @@ import { reduceRun } from '../lib/runtime/scheduler.js';
 
 // A capability failure means the immutable ticket lacks required authority, so
 // it blocks honestly. A correctable policy syntax mistake uses command-shape
-// and gets one bounded evidence-backed retry. Review-group capability denials
+// and gets one bounded same-contract redispatch without consuming a logical
+// stage attempt. Review-group capability denials
 // wait for convergence, and the capability marker is inert on a pass.
 
 function run(overrides = {}) {
@@ -47,7 +48,7 @@ describe('APE v2 capability-blocked failure (reducer)', () => {
     expect(actions[0].patch.block_reason).toBe(`stage build capability-blocked: attempt 1: ${DENIAL}`);
   });
 
-  it('issues one evidence-backed retry for a correctable command-shape denial', () => {
+  it('issues one evidence-backed same-contract redispatch for a correctable command-shape denial', () => {
     const state = run({
       attempts: { build: 1 },
       tickets: [{ ticket_id: 't1', stage_id: 'build' }],
@@ -59,8 +60,14 @@ describe('APE v2 capability-blocked failure (reducer)', () => {
       stage: { id: 'build', role: 'implementer', parallel_group: null },
     });
     expect(actions.map((entry) => entry.type)).toEqual(['transition', 'issue_ticket', 'persist_state']);
-    expect(actions[0].patch.attempts.build).toBe(2);
-    expect(actions[1].retry_of).toBe('t1');
+    expect(actions[0].patch).not.toHaveProperty('attempts');
+    expect(actions[0].patch.worker_protocol_redispatches).toEqual({ build: 1 });
+    expect(actions[1]).toMatchObject({
+      recovery_kind: 'reissue_same_contract',
+      source_ticket_id: 't1',
+      failure_domain: 'orchestration',
+    });
+    expect(actions[1]).not.toHaveProperty('retry_of');
     expect(actions[1].prior_attempts).toEqual([`attempt 1: ${DENIAL}`]);
   });
 
