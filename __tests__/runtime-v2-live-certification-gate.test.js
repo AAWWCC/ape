@@ -416,6 +416,34 @@ describe('live certification Codex parent launcher', () => {
       /does not resolve to an existing path/iu,
     );
   });
+
+  it('accepts the exact governed root in both prose and quoted JSON call templates', () => {
+    const fixture = certificationParentFixture();
+    const preview = JSON.stringify({
+      action: 'preview',
+      project_dir: fixture.projectDir,
+      objective: 'synthetic certification fixture',
+      host: 'codex',
+    });
+    const start = JSON.stringify({
+      action: 'start',
+      project_dir: fixture.projectDir,
+      objective: 'synthetic certification fixture',
+      host: 'codex',
+    });
+    writeFileSync(
+      fixture.promptPath,
+      [
+        '$ape:run',
+        `Pass project_dir "${fixture.projectDir}" on every APE MCP call.`,
+        `APE_PREVIEW_CALL=${preview}`,
+        `APE_START_CALL=${start}`,
+      ].join('\n'),
+    );
+
+    expect(buildCodexParentInvocation(fixture).input)
+      .toContain(`"project_dir":"${fixture.projectDir}"`);
+  });
 });
 
 describe('live certification prompt preparation', () => {

@@ -134,7 +134,15 @@ function requireReleaseShippingPolicy(project) {
 }
 
 function requireExactPromptProject(prompt, project) {
-  const directives = [...prompt.matchAll(/\bproject_dir\b\s*(?::|=)?\s*"([^"\r\n]+)"/gu)];
+  // The prompt deliberately contains both a prose directive (`project_dir
+  // "/path"`) and exact JSON call templates (`"project_dir":"/path"`). A
+  // regex beginning at the word inside the quoted JSON key mistakes the key's
+  // closing quote for the value's opening quote and captures `:` as a path.
+  // Keep the prose arm from starting immediately after a quote and recognize
+  // the complete JSON key/value shape independently.
+  const directives = [...prompt.matchAll(
+    /(?:(?<!")\bproject_dir\b\s*(?::|=)?\s*|"project_dir"\s*:\s*)"([^"\r\n]+)"/gu,
+  )];
   if (directives.length === 0) {
     throw new LiveCertificationParentError(
       '--prompt must declare the exact project_dir used for every APE control call',
