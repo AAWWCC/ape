@@ -90,7 +90,7 @@ describe('2.17 deterministic release artifacts', () => {
 
   it('ships one sound-free ustar package for each host with normalized modes', async () => {
     for (const [host, rootName] of [['codex', 'ape'], ['claude', 'ape-claude']]) {
-      const archive = await readFile(path.join(RELEASE, `ape-${host}-2.24.2.tar.gz`));
+      const archive = await readFile(path.join(RELEASE, `ape-${host}-2.24.3.tar.gz`));
       expect(archive.readUInt32LE(4)).toBe(0);
       const entries = tarEntries(archive);
       expect(entries[0]).toMatchObject({ name: `${rootName}/`, size: 0, mode: 0o755, type: '5' });
@@ -114,14 +114,14 @@ describe('2.17 deterministic release artifacts', () => {
     const manifest = JSON.parse(await readFile(path.join(RELEASE, 'release-manifest.json'), 'utf8'));
     expect(manifest).toMatchObject({
       version: 1,
-      release: '2.24.2',
+      release: '2.24.3',
       source_date_epoch: 0,
       transport: 'local-stdio',
     });
     expect(manifest.artifacts.map((artifact) => artifact.name)).toEqual([
-      'ape-codex-2.24.2.tar.gz',
-      'ape-claude-2.24.2.tar.gz',
-      'ape-2.24.2.spdx.json',
+      'ape-codex-2.24.3.tar.gz',
+      'ape-claude-2.24.3.tar.gz',
+      'ape-2.24.3.spdx.json',
     ]);
     for (const artifact of manifest.artifacts) {
       const bytes = await readFile(path.join(RELEASE, artifact.name));
@@ -136,7 +136,7 @@ describe('2.17 deterministic release artifacts', () => {
   });
 
   it('publishes an SPDX 2.3 SBOM with both package inventories', async () => {
-    const sbom = JSON.parse(await readFile(path.join(RELEASE, 'ape-2.24.2.spdx.json'), 'utf8'));
+    const sbom = JSON.parse(await readFile(path.join(RELEASE, 'ape-2.24.3.spdx.json'), 'utf8'));
     const lock = JSON.parse(await readFile(path.join(ROOT, 'package-lock.json'), 'utf8'));
     expect(sbom).toMatchObject({ spdxVersion: 'SPDX-2.3', dataLicense: 'CC0-1.0' });
     expect(sbom.packages.map((item) => item.name).sort()).toEqual(['ape-claude', 'ape-codex', 'zod']);

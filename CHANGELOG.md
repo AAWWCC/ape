@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.24.3 — 2026-08-29
+
+The Claude statusline no longer labels valid v2 runs corrupt when dispatch liveness is stored in
+the runtime's lock and dispatch-intent artifacts instead of denormalized into `active.json`. Initial
+validation now uses the existing v2 missing-field compatibility arm without inspecting artifacts
+before the durable state is trusted; the later projection still derives the truthful pending, live,
+or stopped state. Regression coverage persists the real key-absent v2 shape and exercises all three
+derived dispatch outcomes. Version 2.24.3 invalidates the prior source certification and starts a
+fresh release cycle.
+
 ## 2.24.2 — 2026-08-29
 
 The 2.24.1 certification cycle first exposed and fixed an exact-root guard that mistook the quoted
