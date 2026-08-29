@@ -13,7 +13,6 @@ import {
   cleanupAttributedTaskGate,
   executeApeRunTaskOperation,
   expireDispatch,
-  extendBudget,
   historyAction,
   nextRun,
   nativeBindingProbeStatus,
@@ -78,31 +77,11 @@ const TOOLS = Object.freeze([
           },
           then: { required: ['objective', 'host'] },
         },
-        {
-          if: {
-            properties: { action: { const: 'start' } },
-            required: ['action'],
-          },
-          then: { required: ['execution_budget'] },
-        },
-        {
-          if: {
-            properties: { action: { const: 'extend-budget' } },
-            required: ['action'],
-          },
-          then: {
-            required: ['reason'],
-            anyOf: [
-              { required: ['max_worker_dispatches'] },
-              { required: ['max_active_seconds'] },
-            ],
-          },
-        },
       ],
       properties: {
         action: {
           type: 'string',
-          enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'extend-budget', 'abort', 'override'],
+          enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'],
           description: 'Preview and start require identical complete prospective facts, including objective and host; only action differs. For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
         },
         project_dir: {
@@ -199,16 +178,6 @@ const TOOLS = Object.freeze([
             ],
           },
         },
-        execution_budget: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['max_worker_dispatches', 'max_active_seconds'],
-          properties: {
-            max_worker_dispatches: { type: 'integer', minimum: 1, maximum: 10000 },
-            max_active_seconds: { type: 'integer', minimum: 1, maximum: 2592000 },
-          },
-          description: 'Required on every new public start. Preview reports deterministic minimum/worst-case dispatch bounds and whether max_worker_dispatches covers the minimum. Because model/host duration has no defensible lower bound, minimum.active_seconds and covers_minimum_path are null; max_active_seconds is an explicit authorization cap, not a completion estimate.',
-        },
         preflight_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
         answers: {
           type: 'array',
@@ -240,15 +209,7 @@ const TOOLS = Object.freeze([
         reason: {
           type: 'string',
           minLength: 1,
-          description: 'Nonblank bounded audit reason. Required for extend-budget and other reason-audited actions.',
-        },
-        max_worker_dispatches: {
-          type: 'integer', minimum: 1, maximum: 10000,
-          description: 'extend-budget only: a new run-total worker-dispatch cap; it must be greater than or equal to the current cap.',
-        },
-        max_active_seconds: {
-          type: 'integer', minimum: 1, maximum: 2592000,
-          description: 'extend-budget only: a new run-total active-time cap; it must be greater than or equal to the current cap.',
+          description: 'Nonblank bounded audit reason for reason-audited actions.',
         },
         run_id: {
           type: 'string',
@@ -470,7 +431,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.24.4' };
+    return { name: 'ape', version: '2.24.5' };
   }
 }
 
@@ -631,9 +592,8 @@ async function dispatchApeRun(projectDir, input) {
       hooks_trusted: input.hooks_trusted ?? false,
       subagents_available: input.subagents_available ?? false,
       explicit_invocation: input.explicit_invocation ?? false,
+      capability_contract_required: true,
       required_capabilities: input.required_capabilities ?? [],
-      execution_budget_required: true,
-      ...(input.execution_budget !== undefined ? { execution_budget: input.execution_budget } : {}),
     });
   }
   if (action === 'start') {
@@ -663,9 +623,8 @@ async function dispatchApeRun(projectDir, input) {
       subagents_available: input.subagents_available ?? false,
       explicit_invocation: input.explicit_invocation ?? false,
       binding_protocol: 'native-v1',
+      capability_contract_required: true,
       required_capabilities: input.required_capabilities ?? [],
-      execution_budget_required: true,
-      ...(input.execution_budget !== undefined ? { execution_budget: input.execution_budget } : {}),
       // Codex must prove the live host actually delivers APE's launch and
       // child-binding lifecycle before a real run may mutate Git or state.
       // Claude uses its separately attested native binding path.
@@ -679,17 +638,6 @@ async function dispatchApeRun(projectDir, input) {
   if (action === 'regate') return regateRun(projectDir);
   if (action === 'ship') return shipRun(projectDir, input.reason);
   if (action === 'expire-dispatch') return expireDispatch(projectDir, input.ticket_id, input.reason);
-  if (action === 'extend-budget') {
-    return extendBudget(projectDir, {
-      ...(input.max_worker_dispatches !== undefined
-        ? { max_worker_dispatches: input.max_worker_dispatches }
-        : {}),
-      ...(input.max_active_seconds !== undefined
-        ? { max_active_seconds: input.max_active_seconds }
-        : {}),
-      reason: input.reason,
-    });
-  }
   if (action === 'abort') {
     // operation is override's parameter; silently dropping it would misroute a
     // requested reset into a bare abort (or worse, a no-op the caller trusts).

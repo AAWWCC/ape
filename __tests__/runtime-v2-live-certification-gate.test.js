@@ -33,7 +33,7 @@ import {
   writeLiveCertificationPrompts,
 } from '../scripts/prepare-live-certification-prompts.mjs';
 
-const VERSION = '2.24.4';
+const VERSION = '2.24.5';
 const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
@@ -495,7 +495,6 @@ describe('live certification prompt preparation', () => {
         behavioral: false,
         claimed_paths: [`docs/codex-${VERSION_SUFFIX}-mechanical-1.md`],
         test_paths: [],
-        execution_budget: { max_worker_dispatches: 1, max_active_seconds: 3_600 },
       },
       fast: {
         mode: 'phase',
@@ -504,7 +503,6 @@ describe('live certification prompt preparation', () => {
         plan_contract_version: 2,
         claimed_paths: [`src/is-even-${VERSION_SUFFIX}-1.js`],
         test_paths: [`test/is-even-${VERSION_SUFFIX}-1.test.js`],
-        execution_budget: { max_worker_dispatches: 4, max_active_seconds: 14_400 },
       },
       full: {
         mode: 'phase',
@@ -513,7 +511,6 @@ describe('live certification prompt preparation', () => {
         plan_contract_version: 2,
         claimed_paths: [`src/normalize-label-${VERSION_SUFFIX}-1.js`],
         test_paths: [`test/normalize-label-${VERSION_SUFFIX}-1.test.js`],
-        execution_budget: { max_worker_dispatches: 7, max_active_seconds: 25_200 },
       },
       land: {
         mode: 'land',
@@ -521,7 +518,6 @@ describe('live certification prompt preparation', () => {
         behavioral: false,
         claimed_paths: [`docs/codex-${VERSION_SUFFIX}-protected-land-1.md`],
         test_paths: [],
-        execution_budget: { max_worker_dispatches: 1, max_active_seconds: 3_600 },
       },
     };
     const forbidden = ['run_id', 'supersedes_run', 'binding_protocol', 'binding_probe'];
@@ -571,12 +567,10 @@ describe('live certification prompt preparation', () => {
         subagents_available: true,
         explicit_invocation: true,
         auto_merge_authorized: true,
-        execution_budget: cohort.execution_budget,
       });
       const expectedKeys = [
         ...exactBaseKeys,
         ...('plan_contract_version' in cohort ? ['plan_contract_version'] : []),
-        'execution_budget',
       ];
       expect(Object.keys(preview)).toEqual(expectedKeys);
       expect(Object.keys(start)).toEqual(expectedKeys);

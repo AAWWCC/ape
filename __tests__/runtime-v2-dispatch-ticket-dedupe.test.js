@@ -717,12 +717,7 @@ async function apeValidateReceipt(args) {
 // A 24,000-char operator objective: long, but well inside the 64 KB
 // input-guard ceiling. This is the shape that overflowed live.
 const LONG_OBJECTIVE = `Close the ape_run response size cap. ${'y'.repeat(24_000)}`;
-const EXECUTION_BUDGET = {
-  max_worker_dispatches: 100,
-  max_active_seconds: 3_600,
-};
-
-async function startLongRun(dir, executionBudget = EXECUTION_BUDGET) {
+async function startLongRun(dir) {
   await completeCodexBindingProbe(root, dir);
   const started = await apeRun({
     action: 'start',
@@ -739,7 +734,6 @@ async function startLongRun(dir, executionBudget = EXECUTION_BUDGET) {
     subagents_available: true,
     explicit_invocation: true,
     plan_contract_version: 1,
-    execution_budget: executionBudget,
   });
   expect(started.value.ok).toBe(true);
   expect(started.value.run.lane).toBe('full');
@@ -805,7 +799,6 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
       hooks_trusted: true,
       subagents_available: true,
       explicit_invocation: true,
-      execution_budget: EXECUTION_BUDGET,
     });
     expect(started.value.ok).toBe(true);
     expect(started.value.run.plan_contract_version).toBe(2);
@@ -916,12 +909,9 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
     expect(persistedTicket.output_schema.properties.receipt_capability).toBeTruthy();
   }, 30_000);
 
-  it('does not recharge the prepared sibling when NEXT sees a partial live parallel group', async () => {
+  it('re-emits the prepared sibling when NEXT sees a partial live parallel group', async () => {
     const dir = await project();
-    const started = await startLongRun(dir, {
-      max_worker_dispatches: 6,
-      max_active_seconds: 3_600,
-    });
+    const started = await startLongRun(dir);
     const planTicket = started.value.actions.find(
       (action) => action.type === 'dispatch_agent',
     ).ticket;
@@ -934,16 +924,12 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
     const recorded = await apeRun({ action: 'record', project_dir: dir, receipt: draft });
     const pair = recorded.value.actions.filter((action) => action.type === 'dispatch_agent');
     expect(pair).toHaveLength(2);
-    expect(recorded.value.run.execution_budget.worker_dispatches_used).toBe(3);
 
     // Bind only one member. The MCP test harness uses short-lived child
     // processes, so re-stamp the persistent run lock with this live test pid;
     // production's long-lived host process already supplies that liveness.
     await bindCodexDispatchContext(root, dir, pair[0], 11);
     const paths = runtimePaths(dir);
-    const active = await readJson(paths.active);
-    active.execution_budget.worker_dispatches_used = 5;
-    await atomicWriteJson(paths.active, active);
     await atomicWriteJson(paths.lock, {
       version: 1,
       run_id: recorded.value.run.run_id,
@@ -952,13 +938,11 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
     });
 
     const next = await apeRun({ action: 'next', project_dir: dir });
-    expect(next.value.run.execution_budget.worker_dispatches_used).toBe(5);
     expect(next.value.actions.filter((action) => action.type === 'dispatch_agent')).toHaveLength(1);
     expect(next.value.actions.filter((action) => action.type === 'dispatch_pending')).toHaveLength(1);
-    expect(next.value.actions.some((action) => action.type === 'budget_paused')).toBe(false);
   }, 30_000);
 
-  it('replays lost START and record dispatch responses without charging a second physical worker', async () => {
+  it('replays lost START and record dispatch responses idempotently', async () => {
     const startDir = await project();
     await completeCodexBindingProbe(root, startDir);
     const started = await apeRun({
@@ -976,24 +960,17 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
       subagents_available: true,
       explicit_invocation: true,
       plan_contract_version: 1,
-      execution_budget: { max_worker_dispatches: 2, max_active_seconds: 3_600 },
     });
-    expect(started.value.run.execution_budget.worker_dispatches_used).toBe(1);
 
     // Simulate a caller losing the successful START response before invoking
     // the native spawn. The persisted intent is prepared with zero launches,
-    // and NEXT must re-emit it even though the exact dispatch budget is full.
+    // and NEXT must re-emit it without creating a second physical worker.
     const replayedStart = await apeRun({ action: 'next', project_dir: startDir });
     expect(replayedStart.value.actions.filter((action) => action.type === 'dispatch_agent'))
       .toEqual([expect.objectContaining({ idempotent_replay: true })]);
-    expect(replayedStart.value.actions.some((action) => action.type === 'budget_paused')).toBe(false);
-    expect(replayedStart.value.run.execution_budget.worker_dispatches_used).toBe(1);
 
     const recordDir = await project();
-    const plannerStart = await startLongRun(recordDir, {
-      max_worker_dispatches: 6,
-      max_active_seconds: 3_600,
-    });
+    const plannerStart = await startLongRun(recordDir);
     const planTicket = plannerStart.value.actions.find(
       (action) => action.type === 'dispatch_agent',
     ).ticket;
@@ -1005,7 +982,6 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
     })).toMatchObject({ ok: true, valid: true });
     const recorded = await apeRun({ action: 'record', project_dir: recordDir, receipt: draft });
     expect(recorded.value.actions.filter((action) => action.type === 'dispatch_agent')).toHaveLength(2);
-    expect(recorded.value.run.execution_budget.worker_dispatches_used).toBe(3);
 
     // Now lose that successful record response before either review worker is
     // launched. Both prepared intents are response replays, not new workers.
@@ -1013,7 +989,5 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
     const replayedPair = replayedRecord.value.actions.filter((action) => action.type === 'dispatch_agent');
     expect(replayedPair).toHaveLength(2);
     expect(replayedPair.every((action) => action.idempotent_replay === true)).toBe(true);
-    expect(replayedRecord.value.actions.some((action) => action.type === 'budget_paused')).toBe(false);
-    expect(replayedRecord.value.run.execution_budget.worker_dispatches_used).toBe(3);
   }, 30_000);
 });

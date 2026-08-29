@@ -22,10 +22,6 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const OBJECTIVE = `Bound the wire, keep the disk complete. ${'x'.repeat(10_000)}`;
 const ISSUED_AT = '2026-07-06T00:00:00.000Z';
-const EXECUTION_BUDGET = {
-  max_worker_dispatches: 10_000,
-  max_active_seconds: 2_592_000,
-};
 
 function makeTicket(stageId, role, id, overrides = {}) {
   return {
@@ -122,25 +118,6 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
   it('keeps oversized read-only preview facts inline without a fake artifact reference', () => {
     const configHash = 'a'.repeat(64);
     const catalogHash = 'b'.repeat(64);
-    const executionBudget = {
-      required: true,
-      provided: { max_worker_dispatches: 8, max_active_seconds: 3_600 },
-      minimum: {
-        worker_dispatches: 4,
-        active_seconds: null,
-        active_seconds_observed: false,
-        active_seconds_basis: 'unknown',
-      },
-      worst_case: {
-        logical_ticket_dispatches: 41,
-        worker_dispatches: 82,
-        maximum_receipt_submissions: 246,
-        active_seconds: 221_400,
-      },
-      covers_minimum_worker_dispatches: true,
-      covers_minimum_path: null,
-      covers_worst_case: false,
-    };
     const response = {
       ok: true,
       advisory: true,
@@ -161,7 +138,7 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
             code: 'missing-command-profile',
             capability: { kind: 'command_profile', id: 'editor.batch', role: 'implementer' },
           }],
-          warnings: [{ code: 'worker-budget-below-worst-case', worst_case: 82, provided: 8 }],
+          warnings: [{ code: 'unapplied-runner-proposal' }],
           requested_capabilities: [
             { kind: 'command_profile', id: 'editor.batch', role: 'implementer' },
           ],
@@ -182,7 +159,6 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
             declared_tool_claims: ['browser.read'],
           },
           capabilities: { unbounded_legacy_snapshot: 'x'.repeat(60_000) },
-          execution_budget: executionBudget,
           doctor: { unbounded_diagnostics: 'x'.repeat(60_000) },
         },
         verification_gates: { unbounded: 'x'.repeat(60_000) },
@@ -211,7 +187,6 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
             command_profiles: { count: 1, ids: ['editor.batch'], truncated: false },
             verification_profiles: { count: 1, ids: ['integration'], truncated: false },
           },
-          execution_budget: executionBudget,
         },
       },
       projection: { kind: 'bounded-inline-v1' },
@@ -501,6 +476,35 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
     expect(projected.run.run_id).toBe('run-project-root');
   });
 
+  it('keeps a budget-neutral next signal while hiding a retained legacy continuation', () => {
+    const projected = projectRunResponse({
+      ok: true,
+      run: {
+        run_id: 'run-legacy-continuation',
+        status: 'input_required',
+        stage: 'execution-budget',
+        input_required: {
+          kind: 'execution_budget',
+          resume_status: 'running',
+          resume_stage: 'build',
+        },
+        execution_budget: { max_worker_dispatches: 8, max_active_seconds: 4800 },
+        budget_continuation: { version: 1, actions: [{ type: 'persist_state' }] },
+        tickets: [],
+        receipts: [],
+      },
+    });
+
+    expect(projected).toMatchObject({
+      run: { status: 'running', stage: 'build' },
+      next_action: { kind: 'wait', state: 'continuation_pending' },
+    });
+    expect(projected.run).not.toHaveProperty('input_required');
+    expect(projected.run).not.toHaveProperty('execution_budget');
+    expect(projected.run).not.toHaveProperty('budget_continuation');
+    expect(JSON.stringify(projected)).not.toContain('execution_budget');
+  });
+
   it('compacts untrusted preflight evidence to bounded hashes, counts, and ids', () => {
     const state = unitState();
     state.status = 'input_required';
@@ -733,7 +737,6 @@ describe('APE v2 bounded MCP responses over a live run', () => {
       hooks_trusted: true,
       subagents_available: true,
       explicit_invocation: true,
-      execution_budget: EXECUTION_BUDGET,
     });
 
     expect(started.ok).toBe(true);
@@ -761,7 +764,6 @@ describe('APE v2 bounded MCP responses over a live run', () => {
       subagents_available: true,
       explicit_invocation: true,
       plan_contract_version: 1,
-      execution_budget: EXECUTION_BUDGET,
     });
     expect(started.ok).toBe(true);
     expect(started.run.objective).toBe('Change behavior');

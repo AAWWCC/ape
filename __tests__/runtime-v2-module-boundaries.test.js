@@ -14,7 +14,7 @@ const OWNER_MANIFEST = [
     facade: 'lib/runtime/service.js',
     symbols: [
       'prepareNativeBindingProbe', 'nativeBindingProbeStatus', 'ackNativeBindingProbe',
-      'shouldTaskWrapApeRun', 'cleanupAttributedTaskGate', 'previewRun', 'startRun', 'nextRun', 'extendBudget',
+      'shouldTaskWrapApeRun', 'cleanupAttributedTaskGate', 'previewRun', 'startRun', 'nextRun',
       'executeApeRunTaskOperation', 'answerPreflight', 'resumeRun', 'abortRun', 'regateRun', 'shipRun',
       'expireDispatch', 'overrideRun',
     ],
@@ -33,14 +33,8 @@ const OWNER_MANIFEST = [
     domain: 'run capability and feasibility readiness',
     owner: 'lib/runtime/readiness.js',
     facade: 'lib/runtime/service.js',
-    symbols: ['evaluateRunReadiness', 'minimumWorkerDispatches', 'snapshotRunCapabilities'],
+    symbols: ['evaluateRunReadiness', 'snapshotRunCapabilities'],
     consumes: ['lib/runtime/config.js'],
-  },
-  {
-    domain: 'bounded run execution accounting',
-    owner: 'lib/runtime/execution-budget.js',
-    facade: 'lib/runtime/service.js',
-    symbols: ['executionBudgetGuard'],
   },
   {
     domain: 'immutable run contract manifest',
@@ -220,7 +214,7 @@ const REQUIRED_OWNER_FILES = [
 ];
 
 const FACADE_EXPORT_COUNTS = Object.freeze({
-  'lib/runtime/service.js': 37,
+  'lib/runtime/service.js': 34,
   'lib/runtime/hooks.js': 34,
   'lib/runtime/gates.js': 12,
   'lib/runtime/scheduler.js': 3,
@@ -906,9 +900,9 @@ describe('runtime-v2 module boundaries: expected GREEN is reachable', () => {
 
 describe('runtime-v2 module boundaries: required physical owners', () => {
   const input = productionInput();
-  it('declares exactly twenty genuine owner files', () => {
-    expect(REQUIRED_OWNER_FILES).toHaveLength(19);
-    expect(new Set(REQUIRED_OWNER_FILES).size).toBe(19);
+  it('declares exactly eighteen genuine owner files', () => {
+    expect(REQUIRED_OWNER_FILES).toHaveLength(18);
+    expect(new Set(REQUIRED_OWNER_FILES).size).toBe(18);
   });
   for (const entry of OWNER_MANIFEST) {
     it(`${entry.owner} exists as the ${entry.domain} owner`, () => {

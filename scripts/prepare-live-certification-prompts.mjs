@@ -7,17 +7,6 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const RELEASE_VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 const PIPELINES = Object.freeze(['mechanical', 'fast', 'full', 'land']);
-// Release certification is first-pass-perfect: the dispatch caps authorize
-// exactly the deterministic happy path for each cohort, while the active-time
-// caps allow one hour per required worker. A retry, remediation cycle, or
-// replacement worker must therefore fail the candidate instead of extending a
-// synthetic certification run into an unbounded recovery loop.
-const EXECUTION_BUDGETS = Object.freeze({
-  mechanical: Object.freeze({ max_worker_dispatches: 1, max_active_seconds: 3_600 }),
-  fast: Object.freeze({ max_worker_dispatches: 4, max_active_seconds: 14_400 }),
-  full: Object.freeze({ max_worker_dispatches: 7, max_active_seconds: 25_200 }),
-  land: Object.freeze({ max_worker_dispatches: 1, max_active_seconds: 3_600 }),
-});
 
 export class LiveCertificationPromptError extends Error {
   constructor(message) {
@@ -85,7 +74,7 @@ function attemptContract(pipeline, repetition) {
   };
 }
 
-function exactRunCall(action, projectDir, contract, executionBudget) {
+function exactRunCall(action, projectDir, contract) {
   return Object.freeze({
     action,
     project_dir: projectDir,
@@ -108,7 +97,6 @@ function exactRunCall(action, projectDir, contract, executionBudget) {
     ...(contract.planContractVersion === undefined
       ? {}
       : { plan_contract_version: contract.planContractVersion }),
-    execution_budget: executionBudget,
   });
 }
 
@@ -125,10 +113,10 @@ export function buildLiveCertificationPrompt(campaignRoot, pipeline, repetition)
   }
   const contract = attemptContract(pipeline, repetition);
   const previewCall = JSON.stringify(
-    exactRunCall('preview', projectDir, contract, EXECUTION_BUDGETS[pipeline]),
+    exactRunCall('preview', projectDir, contract),
   );
   const startCall = JSON.stringify(
-    exactRunCall('start', projectDir, contract, EXECUTION_BUDGETS[pipeline]),
+    exactRunCall('start', projectDir, contract),
   );
   return `$ape:run
 

@@ -139,11 +139,7 @@ describe('planning capability manifests', () => {
       explicit_invocation: true,
       binding_protocol: 'native-v1',
       plan_contract_version: 2,
-      execution_budget_required: true,
-      execution_budget: {
-        max_worker_dispatches: 100,
-        max_active_seconds: 100_000,
-      },
+      capability_contract_required: true,
     });
     const classification = { lane: 'full', risk_triggers: [], reasons: [] };
     const projection = projectedPipeline({

@@ -302,7 +302,6 @@ describe('typed and hard-bounded response projection', () => {
       'remediate_product_finding',
       'wait',
       'answer_preflight',
-      'extend_budget',
       'blocked',
     ]);
     const ticket = stageTicket('ticket-retry', 'plan-check', 'plan_checker', 'plan-review');
@@ -323,16 +322,6 @@ describe('typed and hard-bounded response projection', () => {
       consumes_product_attempt: false,
       failure_domain: 'orchestration',
     });
-
-    const budget = projectRunResponse({
-      ok: true,
-      run: {
-        run_id: 'run-budget',
-        status: 'input_required',
-        input_required: { kind: 'execution_budget' },
-      },
-    });
-    expect(budget.next_action).toEqual({ kind: 'extend_budget' });
 
     const capability = projectRunResponse({
       ok: true,

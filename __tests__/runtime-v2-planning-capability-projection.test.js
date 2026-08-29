@@ -159,8 +159,6 @@ function startInput() {
     explicit_invocation: true,
     binding_protocol: 'native-v1',
     plan_contract_version: 2,
-    execution_budget_required: true,
-    execution_budget: { max_worker_dispatches: 10, max_active_seconds: 3_600 },
   };
 }
 
@@ -328,11 +326,7 @@ describe('native full-phase planning capability projection', () => {
     const writer = criticized.run.tickets.at(-1);
     expect(writer).toMatchObject({ stage_id: 'test', role: 'test_writer', writable: true });
     const unanimouslyAdvanced = await readJson(runtimePaths(directory).active);
-    expect(unanimouslyAdvanced.execution_budget).toMatchObject({
-      max_worker_dispatches: 10,
-      worker_dispatches_used: expect.any(Number),
-    });
-    expect(unanimouslyAdvanced.execution_budget.worker_dispatches_used).toBeLessThan(10);
+    expect(unanimouslyAdvanced).not.toHaveProperty('execution_budget');
     expect(unanimouslyAdvanced.status).toBe('running');
 
     await writeFile(

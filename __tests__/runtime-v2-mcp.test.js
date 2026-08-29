@@ -14,7 +14,6 @@ const verificationProfiles = [{
   command: 'node --test',
   timeout_ms: 30_000,
 }];
-const executionBudget = { max_worker_dispatches: 10_000, max_active_seconds: 2_592_000 };
 
 function session(messages) {
   return new Promise((resolve, reject) => {
@@ -135,7 +134,6 @@ describe('APE v2 MCP public surface', () => {
       'probe-ack',
       'preview',
       'start',
-      'extend-budget',
     ]));
     expect(run.inputSchema.allOf).toContainEqual({
       if: {
@@ -144,31 +142,10 @@ describe('APE v2 MCP public surface', () => {
       },
       then: { required: ['objective', 'host'] },
     });
-    expect(run.inputSchema.allOf).toContainEqual({
-      if: {
-        properties: { action: { const: 'start' } },
-        required: ['action'],
-      },
-      then: { required: ['execution_budget'] },
-    });
-    expect(run.inputSchema.allOf).toContainEqual({
-      if: {
-        properties: { action: { const: 'extend-budget' } },
-        required: ['action'],
-      },
-      then: {
-        required: ['reason'],
-        anyOf: [
-          { required: ['max_worker_dispatches'] },
-          { required: ['max_active_seconds'] },
-        ],
-      },
-    });
-    expect(run.inputSchema.properties.execution_budget).toMatchObject({
-      required: ['max_worker_dispatches', 'max_active_seconds'],
-    });
-    expect(run.inputSchema.properties.execution_budget.description)
-      .toMatch(/covers_minimum_path are null/i);
+    expect(run.inputSchema.properties).not.toHaveProperty('execution_budget');
+    expect(run.inputSchema.properties).not.toHaveProperty('max_worker_dispatches');
+    expect(run.inputSchema.properties).not.toHaveProperty('max_active_seconds');
+    expect(run.inputSchema.properties.action.enum).not.toContain('extend-budget');
     const capabilityVariants = run.inputSchema.properties.required_capabilities.items.oneOf;
     expect(capabilityVariants.map((variant) => variant.properties.kind.const)).toEqual([
       'command_profile',
@@ -308,7 +285,6 @@ describe('APE v2 MCP public surface', () => {
               hooks_trusted: true,
               subagents_available: true,
               explicit_invocation: true,
-              execution_budget: executionBudget,
             },
           },
         },
@@ -368,7 +344,6 @@ describe('APE v2 MCP public surface', () => {
             hooks_trusted: true,
             subagents_available: true,
             explicit_invocation: true,
-            execution_budget: executionBudget,
           },
         },
       }]);
@@ -426,7 +401,6 @@ describe('APE v2 MCP public surface', () => {
             hooks_trusted: true,
             subagents_available: true,
             explicit_invocation: true,
-            execution_budget: executionBudget,
           },
         },
       }]);
@@ -490,7 +464,6 @@ describe('APE v2 MCP public surface', () => {
             subagents_available: true,
             explicit_invocation: true,
             plan_contract_version: 1,
-            execution_budget: executionBudget,
           },
         },
       }]);

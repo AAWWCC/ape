@@ -27,7 +27,6 @@ import { queryHistory } from '../lib/runtime/history.js';
 import { acquireRunLock } from '../lib/runtime/lock.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
-import { initializeExecutionBudget } from '../lib/runtime/execution-budget.js';
 
 function exists(file) {
   return access(file).then(() => true, () => false);
@@ -283,11 +282,6 @@ describe('APE v2 service integration', () => {
     const state = await readJson(paths.active);
     state.status = 'completed';
     state.stage = 'complete';
-    const expiredAt = new Date(Date.now() - 10_000).toISOString();
-    state.execution_budget = initializeExecutionBudget(
-      { max_worker_dispatches: 1, max_active_seconds: 1 },
-      expiredAt,
-    );
     state.checkout_cleanup = {
       status: 'returned',
       base_branch: state.base_branch,
@@ -303,8 +297,7 @@ describe('APE v2 service integration', () => {
     expect(aborted).toEqual({ ok: false, reason: 'run is completed' });
     expect(await readJson(paths.active)).toEqual(before);
 
-    // Terminal refusal precedes budget admission: an elapsed cap can never
-    // rewrite or resurrect a sealed run as execution-budget input.
+    // Terminal refusal cannot rewrite or resurrect a sealed run.
     expect(await nextRun(dir)).toEqual({ ok: false, reason: 'run is completed' });
     expect(await readJson(paths.active)).toEqual(before);
 
@@ -353,7 +346,7 @@ describe('APE v2 service integration', () => {
     expect(blocked).not.toHaveProperty('sealed');
   });
 
-  it('preserves preflight questions when NEXT observes an expired active-time budget', async () => {
+  it('preserves preflight questions when NEXT is called during an input hold', async () => {
     const dir = await project();
     const started = await startRun(dir, {
       objective: 'Change behavior',
@@ -378,16 +371,59 @@ describe('APE v2 service integration', () => {
       preflight_hash: 'f'.repeat(64),
       questions: [{ id: 'scope', question: 'Confirm the exact scope' }],
     };
-    state.execution_budget = initializeExecutionBudget(
-      { max_worker_dispatches: 2, max_active_seconds: 1 },
-      new Date(Date.now() - 10_000).toISOString(),
-    );
     await atomicWriteJson(paths.active, state);
     const before = await readJson(paths.active);
 
     const result = await nextRun(dir);
     expect(result).toMatchObject({ ok: true, run: { status: 'input_required' } });
     expect(await readJson(paths.active)).toEqual(before);
+  });
+
+  it('automatically retires a legacy execution-budget pause on NEXT', async () => {
+    const dir = await project();
+    const started = await startRun(dir, {
+      objective: 'Change behavior',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'codex',
+      claimed_paths: ['src/value.js'],
+      test_paths: ['tests/value.test.js'],
+      requirements: [],
+      risk_triggers: [],
+      behavioral: true,
+      hooks_trusted: true,
+      subagents_available: true,
+      explicit_invocation: true,
+    });
+    expect(started.ok).toBe(true);
+    const paths = runtimePaths(dir);
+    const state = await readJson(paths.active);
+    state.status = 'input_required';
+    state.stage = 'execution-budget';
+    state.execution_budget = {
+      version: 1,
+      max_worker_dispatches: 1,
+      max_active_seconds: 1,
+      worker_dispatches_used: 1,
+      active_elapsed_ms: 1_000,
+    };
+    state.input_required = {
+      kind: 'execution_budget',
+      code: 'worker-dispatches-exhausted',
+      resume_status: 'running',
+      resume_stage: state.tickets[0].stage_id,
+    };
+    await atomicWriteJson(paths.active, state);
+
+    const resumed = await nextRun(dir);
+    expect(resumed.ok).toBe(true);
+    expect(resumed.run.status).toBe('running');
+    expect(resumed.run).not.toHaveProperty('execution_budget');
+    expect(resumed.run).not.toHaveProperty('input_required');
+    const persisted = await readJson(paths.active);
+    expect(persisted.status).toBe('running');
+    expect(persisted).not.toHaveProperty('execution_budget');
+    expect(persisted).not.toHaveProperty('input_required');
   });
 });
 

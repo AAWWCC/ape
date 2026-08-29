@@ -6,18 +6,10 @@ import { execFileSync } from 'node:child_process';
 import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
 import { projectedPipeline } from '../lib/runtime/pipeline.js';
 import { RunStartInputSchema } from '../lib/runtime/schemas.js';
-import { configAction, extendBudget, previewRun, startRun } from '../lib/runtime/service.js';
+import { configAction, previewRun, startRun } from '../lib/runtime/service.js';
 import { evaluateRunReadiness } from '../lib/runtime/readiness.js';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { projectRunState } from '../lib/runtime/projection.js';
-import {
-  clampToExecutionDeadline,
-  executionBudgetGuard,
-  extendExecutionBudgetState,
-  initializeExecutionBudget,
-  pauseForExecutionBudget,
-  syncExecutionBudgetClock,
-} from '../lib/runtime/execution-budget.js';
 
 function runInput(overrides = {}) {
   return RunStartInputSchema.parse({
@@ -60,17 +52,16 @@ function readinessFor(input, config = DEFAULT_CONFIG) {
   });
 }
 
-describe('run readiness and execution budgets', () => {
+describe('run readiness and capability manifests', () => {
   const dirs = [];
   afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
-  it('reports discovered-but-unapplied runners and a missing required budget as blockers', () => {
-    const readiness = readinessFor(runInput({ execution_budget_required: true }));
+  it('reports discovered-but-unapplied runners as blockers', () => {
+    const readiness = readinessFor(runInput());
     expect(readiness.ready).toBe(false);
     expect(readiness.blocking.map((entry) => entry.code)).toEqual(expect.arrayContaining([
       'missing-targeted-test-runner',
       'missing-full-test-runner',
-      'missing-execution-budget',
     ]));
     expect(readiness.warnings.map((entry) => entry.code)).toContain('unapplied-runner-proposal');
   });
@@ -88,8 +79,6 @@ describe('run readiness and execution budgets', () => {
     ];
     const input = runInput({
       required_capabilities: [{ kind: 'command_profile', id: 'editor.batch', role: 'implementer' }],
-      execution_budget_required: true,
-      execution_budget: { max_worker_dispatches: 8, max_active_seconds: 3_600 },
     });
     const readiness = readinessFor(input, config);
     expect(readiness.ready).toBe(true);
@@ -114,19 +103,7 @@ describe('run readiness and execution budgets', () => {
       manifest_roles: expect.arrayContaining(['preflight_analyst', 'test_writer', 'implementer', 'reviewer']),
     });
     expect(readiness.capabilities.command_profiles.map((entry) => entry.id)).toEqual(['editor.batch', 'audit.read']);
-    expect(readiness.execution_budget.minimum.worker_dispatches).toBe(4);
-    expect(readiness.execution_budget.minimum).toMatchObject({
-      active_seconds: null,
-      active_seconds_observed: false,
-      active_seconds_basis: 'unknown',
-    });
-    expect(readiness.execution_budget.worst_case.worker_dispatches).toBeGreaterThan(4);
-    expect(readiness.execution_budget.worst_worker_dispatches)
-      .toBe(readiness.execution_budget.worst_case.logical_ticket_dispatches * 2);
-    expect(readiness.execution_budget.maximum_receipt_submissions)
-      .toBe(readiness.execution_budget.worst_worker_dispatches * 3);
-    expect(readiness.execution_budget.covers_minimum_worker_dispatches).toBe(true);
-    expect(readiness.execution_budget.covers_minimum_path).toBeNull();
+    expect(readiness).not.toHaveProperty('execution_budget');
   });
 
   it('sizes every reachable role for maximal dynamic test paths, required preflight profiles, and late risks', () => {
@@ -139,10 +116,7 @@ describe('run readiness and execution budgets', () => {
       command: 'node integration.js',
       timeout_ms: 1_000,
     }];
-    const readiness = readinessFor(runInput({
-      execution_budget_required: true,
-      execution_budget: { max_worker_dispatches: 8, max_active_seconds: 3_600 },
-    }), config);
+    const readiness = readinessFor(runInput({ capability_contract_required: true }), config);
 
     expect(readiness.ready).toBe(false);
     expect(readiness.blocking).toContainEqual(expect.objectContaining({
@@ -156,103 +130,6 @@ describe('run readiness and execution budgets', () => {
         risk_triggers: expect.arrayContaining(['security', 'schema', 'concurrency']),
       },
     });
-  });
-
-  it('freezes active time on an input hold, resumes only on explicit extension, and enforces groups atomically', () => {
-    const created = '2026-01-01T00:00:00.000Z';
-    const state = {
-      status: 'running',
-      stage: 'build',
-      created_at: created,
-      execution_budget: initializeExecutionBudget(
-        { max_worker_dispatches: 2, max_active_seconds: 10 },
-        created,
-      ),
-    };
-    const atFive = '2026-01-01T00:00:05.000Z';
-    expect(executionBudgetGuard(state, { at: atFive, dispatches: 3 }).code).toBe('worker-dispatches-exhausted');
-    pauseForExecutionBudget(state, executionBudgetGuard(state, { at: atFive, dispatches: 3 }), atFive);
-    expect(state.status).toBe('input_required');
-    expect(state.execution_budget.active_elapsed_ms).toBe(5_000);
-    expect(state.execution_budget.active_since).toBeUndefined();
-    expect(state.orchestration.budget_pauses).toBe(1);
-    const repeated = pauseForExecutionBudget(
-      state,
-      { allowed: false, code: 'worker-dispatches-exhausted', reason: 'still paused' },
-      '2026-01-01T00:00:06.000Z',
-    );
-    expect(repeated.idempotent).toBe(true);
-    expect(state.orchestration.budget_pauses).toBe(1);
-    expect(state.input_required.resume_stage).toBe('build');
-    expect(state.input_required.resume_status).toBe('running');
-    expect(executionBudgetGuard(state, { at: '2026-01-01T01:00:00.000Z' }).remaining_active_seconds).toBe(5);
-
-    extendExecutionBudgetState(state, { max_worker_dispatches: 4, max_active_seconds: 20 }, '2026-01-01T01:00:00.000Z');
-    expect(state.status).toBe('running');
-    expect(state.execution_budget.active_since).toBe('2026-01-01T01:00:00.000Z');
-    expect(() => extendExecutionBudgetState(
-      state,
-      { max_worker_dispatches: 3, max_active_seconds: 20 },
-      '2026-01-01T01:00:01.000Z',
-    )).toThrow(/cannot decrease/);
-  });
-
-  it('clamps ticket deadlines to the remaining active budget', () => {
-    const now = new Date();
-    const state = {
-      status: 'running',
-      execution_budget: initializeExecutionBudget(
-        { max_worker_dispatches: 2, max_active_seconds: 5 },
-        now.toISOString(),
-      ),
-    };
-    const candidate = new Date(now.getTime() + 60_000).toISOString();
-    expect(Date.parse(clampToExecutionDeadline(state, candidate))).toBeLessThanOrEqual(now.getTime() + 5_100);
-  });
-
-  it('preserves and reports active-time overrun instead of clamping elapsed at the cap', () => {
-    const created = '2026-01-01T00:00:00.000Z';
-    const state = {
-      status: 'running',
-      execution_budget: initializeExecutionBudget(
-        { max_worker_dispatches: 1, max_active_seconds: 10 },
-        created,
-      ),
-    };
-    syncExecutionBudgetClock(state, '2026-01-01T00:00:15.000Z');
-    expect(state.execution_budget.active_elapsed_ms).toBe(15_000);
-    expect(state.execution_budget.overrun_ms).toBe(5_000);
-    expect(executionBudgetGuard(state, { at: '2026-01-01T00:00:15.000Z' }).code)
-      .toBe('active-time-exhausted');
-  });
-
-  it('never pauses or extends a terminal run', () => {
-    const created = '2026-01-01T00:00:00.000Z';
-    const state = {
-      status: 'completed',
-      stage: 'complete',
-      execution_budget: initializeExecutionBudget(
-        { max_worker_dispatches: 1, max_active_seconds: 1 },
-        created,
-      ),
-    };
-    const before = structuredClone(state);
-    const guard = executionBudgetGuard(state, { at: '2026-01-01T00:00:02.000Z' });
-    expect(pauseForExecutionBudget(state, guard, '2026-01-01T00:00:02.000Z')).toBeNull();
-    expect(state).toEqual(before);
-    expect(() => extendExecutionBudgetState(
-      state,
-      { max_worker_dispatches: 2, max_active_seconds: 2 },
-      '2026-01-01T00:00:02.000Z',
-    )).toThrow(/terminal run completed/);
-  });
-
-  it('rejects a new-contract start before creating runtime state', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ape-readiness-zero-effect-'));
-    dirs.push(dir);
-    const result = await startRun(dir, runInput({ execution_budget_required: true }));
-    expect(result).toMatchObject({ ok: false, blocked: true, attempts_consumed: 0 });
-    expect(existsSync(join(dir, '.ape', 'runtime', 'active.json'))).toBe(false);
   });
 
   it('reports every unrepresentable capability collection in preview and rejects start with zero side effects', async () => {
@@ -301,8 +178,7 @@ describe('run readiness and execution budgets', () => {
       host: 'claude',
       binding_protocol: 'native-v1',
       tool_claims: Array.from({ length: 65 }, (_, index) => `provider:resource-${index}:read`),
-      execution_budget_required: true,
-      execution_budget: { max_worker_dispatches: 100, max_active_seconds: 100_000 },
+      required_capabilities: [{ kind: 'tool_claim', id: 'provider:resource-0:read' }],
     });
 
     const preview = await previewRun(dir, input);
@@ -349,8 +225,7 @@ describe('run readiness and execution budgets', () => {
       },
     }));
     const readiness = readinessFor(runInput({
-      execution_budget_required: true,
-      execution_budget: { max_worker_dispatches: 100, max_active_seconds: 100_000 },
+      required_capabilities: [{ kind: 'evidence_command', id: 'runner-0 full' }],
     }), config);
     expect(readiness.blocking).toContainEqual(expect.objectContaining({
       code: 'capability-evidence-commands-over-limit',
@@ -360,7 +235,7 @@ describe('run readiness and execution budgets', () => {
       .not.toContain('capability-runners-over-limit');
   });
 
-  it('keeps oversized catalog checks informational for a legacy start contract', () => {
+  it('keeps oversized catalog checks informational when no capability contract is requested', () => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.test_commands.targeted_template = 'npm test -- {paths}';
     config.test_commands.full = 'npm test';
@@ -403,7 +278,7 @@ describe('run readiness and execution budgets', () => {
     expect(existsSync(join(dir, '.ape', 'runtime', 'config.json'))).toBe(false);
   });
 
-  it('admits a configured bounded run with a capability manifest and clamped ticket deadline', async () => {
+  it('admits a configured run with a capability manifest and ordinary ticket deadline', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ape-readiness-admit-'));
     dirs.push(dir);
     execFileSync('git', ['init', '-b', 'main'], { cwd: dir, stdio: 'ignore' });
@@ -414,15 +289,18 @@ describe('run readiness and execution budgets', () => {
     execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
     await configAction(dir, 'set', { key: 'test_commands.targeted_template', value: 'npm test -- {paths}' });
     await configAction(dir, 'set', { key: 'test_commands.full', value: 'npm test' });
+    await configAction(dir, 'set', {
+      key: 'policy.command_profiles',
+      value: [{ id: 'audit.read', command: 'true', roles: ['preflight_analyst'], effect: 'read' }],
+    });
 
     const result = await startRun(dir, runInput({
       host: 'claude',
       binding_protocol: 'native-v1',
-      execution_budget_required: true,
-      execution_budget: { max_worker_dispatches: 8, max_active_seconds: 30 },
+      required_capabilities: [{ kind: 'command_profile', id: 'audit.read', role: 'preflight_analyst' }],
     }));
     expect(result.ok).toBe(true);
-    expect(result.run.execution_budget.worker_dispatches_used).toBe(1);
+    expect(result.run).not.toHaveProperty('execution_budget');
     expect(result.run.capability_snapshot.config_hash).toMatch(/^[0-9a-f]{64}$/);
     const ticket = result.run.tickets[0];
     expect(ticket.receipt_contract_version).toBe(1);
@@ -492,34 +370,7 @@ describe('run readiness and execution budgets', () => {
       run_contract: result.run.run_contract,
     });
     expect(projected.tickets[0].capability_manifest).not.toHaveProperty('command_profiles');
-    expect(Date.parse(ticket.deadline_at)).toBeLessThanOrEqual(Date.parse(result.run.execution_budget.active_deadline_at));
-
-    const activePath = join(dir, '.ape', 'runtime', 'active.json');
-    const paused = JSON.parse(readFileSync(activePath, 'utf8'));
-    paused.status = 'input_required';
-    paused.stage = 'execution-budget';
-    paused.input_required = {
-      kind: 'execution_budget',
-      code: 'worker-dispatches-exhausted',
-      reason: 'fixture pause',
-      resume_stage: 'preflight',
-      paused_at: paused.updated_at,
-    };
-    delete paused.execution_budget.active_since;
-    delete paused.execution_budget.active_deadline_at;
-    writeFileSync(activePath, `${JSON.stringify(paused, null, 2)}\n`);
-    const extended = await extendBudget(dir, {
-      max_worker_dispatches: 10,
-      max_active_seconds: 60,
-      reason: 'continue the bounded fixture after operator review',
-    });
-    expect(extended.ok).toBe(true);
-    expect(extended.run.status).toBe('running');
-    expect(extended.run.execution_budget).toMatchObject({
-      max_worker_dispatches: 10,
-      max_active_seconds: 60,
-      extension_count: 1,
-    });
+    expect(Date.parse(ticket.deadline_at)).toBeGreaterThan(Date.parse(ticket.issued_at));
   });
 
   it('proposes scripts and a managed AGENTS block, then appends only with an exact expected hash', async () => {

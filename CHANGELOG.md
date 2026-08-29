@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.24.5 — 2026-08-29
+
+APE no longer asks operators to predict dispatch or active-time budgets before a run can start, and
+it no longer pauses otherwise healthy work to request budget extensions. New runs continue until an
+actual terminal outcome, while persisted legacy budget pauses and continuations retire or replay
+automatically on the next control call. Capability readiness, receipt enforcement, bounded response
+contracts, and terminal-state safeguards remain intact; only the artificial execution-budget gate
+and its extension ceremony are removed. Version 2.24.5 invalidates the prior source certification
+and starts a fresh release cycle.
+
 ## 2.24.4 — 2026-08-29
 
 Planning now publishes a frozen cross-role capability view separately from each ticket's execution

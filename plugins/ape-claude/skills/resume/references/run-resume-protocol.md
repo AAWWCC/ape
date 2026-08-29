@@ -7,12 +7,8 @@ The parent orchestrator owns every APE control call. It never performs stage wor
 Before `ape_run start`, call `ape_config doctor`, `get`, and then `ape_run preview` with the exact
 prospective run facts, exact `host`, and additive `required_capabilities`. Preview and start carry
 identical complete prospective fields except `action` and use the same
-deterministic readiness evaluator. Report the minimum/worst-case dispatch bounds and obtain explicit
-`execution_budget.max_worker_dispatches` and `execution_budget.max_active_seconds`; start refuses a
-worker-dispatch cap below the deterministic minimum and writes no run state on any readiness
-failure. Active-time minimum feasibility is honestly unknown (`minimum.active_seconds` and
-`covers_minimum_path` are null), so treat the seconds value as an authorization cap rather than a
-completion estimate. For behavioral work,
+deterministic readiness evaluator. Report readiness failures and the pipeline's deterministic
+dispatch bounds. For behavioral work,
 if grounded gate commands are missing, call `ape_config init` for a repository-grounded proposal.
 Apply only a complete proposal with operator approval; otherwise stop before any agent dispatch.
 
@@ -89,10 +85,7 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    and additive-only `claimed_paths`, `test_paths`, and canonical `risk_triggers`. Do not dispatch a
    writer while the hold remains.
 7. After all receipts in the returned group are recorded, call `ape_run next` and repeat until the
-runtime reports `completed`, `blocked`, or a budget pause. `next_action: {"kind":"extend_budget"}` requires
-an explicit operator-approved monotonic budget extension; send a nonblank audit `reason` and at
-least one new top-level `max_worker_dispatches` or `max_active_seconds` value. Never start a
-successor automatically.
+runtime reports `completed` or `blocked`. Never start a successor automatically.
 When it reports `gating_pending` or `shipping_pending`,
 make the next call with `wait_ms: 300000` so APE performs bounded server-side polling with progress
 heartbeats. On Codex, do not sleep inside a `functions.exec` wrapper before the APE call: starting an

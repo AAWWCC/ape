@@ -62,7 +62,6 @@ import {
   normalizeReceiptInput,
   receiptInputHash,
 } from '../lib/runtime/receipt-input.js';
-import { executionBudgetGuard } from '../lib/runtime/execution-budget.js';
 import {
   capabilityManifestGrowthEnabled,
   mergeReceiptCapabilityGrowthResult,
@@ -309,15 +308,6 @@ try {
         ? assistantMessage
         : extractReceiptDraftFromText(assistantMessage);
       const { input: normalizedDraft } = normalizeReceiptInput(extractedDraft);
-      // A denied SubagentStop is a real continuation authorization: the same
-      // physical model keeps working to correct its draft. Check the active
-      // time cap at this boundary. A worker already in flight may finish and
-      // stop, but once the cap is spent APE must not deny that stop to grant
-      // more correction work.
-      const continuationBudget = executionBudgetGuard(state, {
-        at: new Date().toISOString(),
-        dispatches: 0,
-      });
       let stopDraftResult = validateReceiptDraft(inspectedTicket, normalizedDraft);
       if (stopDraftResult.valid === true && capabilityManifestGrowthEnabled(state)) {
         const growth = await prospectiveReceiptCapabilityGrowthFromTree(
@@ -335,10 +325,6 @@ try {
         event.host,
         {
           input_hash: receiptInputHash(normalizedDraft ?? null),
-          continuation_budget: {
-            allowed: continuationBudget.allowed,
-            ...(continuationBudget.code ? { code: continuationBudget.code } : {}),
-          },
           validate: () => stopDraftResult,
         },
       );
@@ -351,8 +337,7 @@ try {
       }
       if (
         stopReceiptValidation.result?.valid !== true &&
-        stopReceiptValidation.validation?.exhausted !== true &&
-        continuationBudget.allowed
+        stopReceiptValidation.validation?.exhausted !== true
       ) {
         process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
           decision: 'deny',

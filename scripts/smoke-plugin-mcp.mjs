@@ -26,55 +26,17 @@ function assertContract(condition, host, message) {
   if (!condition) throw new Error(`${host} package MCP contract mismatch: ${message}`);
 }
 
-function conditionalForAction(schema, action) {
-  return (schema?.allOf ?? []).find((entry) =>
-    entry?.if?.properties?.action?.const === action &&
-    entry?.if?.required?.includes('action'))?.then;
-}
-
 function assertToolContract(host, tools) {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   const runSchema = byName.get('ape_run')?.inputSchema;
   assertContract(runSchema?.type === 'object', host, 'ape_run has no object input schema');
   const actions = runSchema?.properties?.action?.enum ?? [];
-  for (const action of ['preview', 'start', 'extend-budget']) {
+  for (const action of ['preview', 'start']) {
     assertContract(actions.includes(action), host, `ape_run action enum is missing ${action}`);
   }
-
-  const start = conditionalForAction(runSchema, 'start');
-  assertContract(start?.required?.includes('execution_budget'), host, 'start does not require execution_budget');
-  const budget = runSchema?.properties?.execution_budget;
-  assertContract(budget?.type === 'object' && budget?.additionalProperties === false, host, 'execution_budget is not a closed object');
-  assertContract(
-    JSON.stringify([...(budget?.required ?? [])].sort()) ===
-      JSON.stringify(['max_active_seconds', 'max_worker_dispatches']),
-    host,
-    'execution_budget does not require both max_worker_dispatches and max_active_seconds',
-  );
-  assertContract(
-    budget?.properties?.max_worker_dispatches?.minimum === 1 &&
-      budget?.properties?.max_active_seconds?.minimum === 1,
-    host,
-    'execution_budget caps are not positive integers',
-  );
-
-  const extend = conditionalForAction(runSchema, 'extend-budget');
-  assertContract(extend?.required?.includes('reason'), host, 'extend-budget does not require reason');
-  const extensionAlternatives = extend?.anyOf ?? [];
-  const extensionFields = extensionAlternatives
-    .flatMap((entry) => entry?.required ?? [])
-    .sort();
-  assertContract(
-    JSON.stringify(extensionFields) ===
-      JSON.stringify(['max_active_seconds', 'max_worker_dispatches']),
-    host,
-    'extend-budget does not require at least one replacement cap',
-  );
-  assertContract(runSchema?.properties?.reason?.minLength === 1, host, 'extend-budget reason is not nonblank');
-  for (const field of ['max_worker_dispatches', 'max_active_seconds']) {
-    const cap = runSchema?.properties?.[field];
-    assertContract(cap?.type === 'integer' && cap?.minimum === 1, host, `${field} is not a positive integer`);
-    assertContract(/current cap/i.test(cap?.description ?? ''), host, `${field} does not publish its monotonic current-cap contract`);
+  assertContract(!actions.includes('extend-budget'), host, 'ape_run still exposes extend-budget');
+  for (const field of ['execution_budget', 'max_worker_dispatches', 'max_active_seconds']) {
+    assertContract(runSchema?.properties?.[field] === undefined, host, `ape_run still exposes ${field}`);
   }
 
   const capabilities = runSchema?.properties?.required_capabilities;
@@ -153,15 +115,6 @@ function assertPreviewContract(host, response) {
       Array.isArray(readiness.derived_capability_requirements.test_runner_profiles),
     host,
     'preview omits derived capability requirements',
-  );
-  const forecast = readiness?.execution_budget;
-  assertContract(
-    Number.isInteger(forecast?.minimum?.worker_dispatches) &&
-      Number.isInteger(forecast?.worst_case?.worker_dispatches) &&
-      Number.isInteger(forecast?.maximum_receipt_submissions) &&
-      typeof forecast?.covers_minimum_worker_dispatches === 'boolean',
-    host,
-    'preview omits the bounded execution-budget forecast',
   );
 }
 
@@ -243,10 +196,6 @@ async function smoke(host, pluginRoot) {
               subagents_available: true,
               explicit_invocation: true,
               required_capabilities: [],
-              execution_budget: {
-                max_worker_dispatches: 4,
-                max_active_seconds: 3_600,
-              },
             },
           },
         },

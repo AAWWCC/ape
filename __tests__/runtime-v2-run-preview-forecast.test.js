@@ -507,8 +507,6 @@ describe('previewRun blueprint shape', () => {
     const result = await previewRun(sharedProjectDir, previewInput({
       tool_claims: ['browser:page:read'],
       required_capabilities: requested,
-      execution_budget_required: true,
-      execution_budget: { max_worker_dispatches: 100, max_active_seconds: 3_600 },
     }));
     const readiness = result.blueprint.readiness;
     expect(readiness.requested_capabilities).toEqual(requested);
@@ -522,15 +520,7 @@ describe('previewRun blueprint shape', () => {
       catalog_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
       declared_tool_claims: ['browser:page:read'],
     });
-    expect(readiness.execution_budget).toMatchObject({
-      minimum: {
-        active_seconds: null,
-        active_seconds_observed: false,
-        active_seconds_basis: 'unknown',
-      },
-      covers_minimum_worker_dispatches: true,
-      covers_minimum_path: null,
-    });
+    expect(readiness).not.toHaveProperty('execution_budget');
   });
 });
 

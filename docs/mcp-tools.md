@@ -5,7 +5,7 @@ machine contract behind them.
 
 | Tool | Actions |
 | --- | --- |
-| `ape_run` | `probe`, `probe-status`, `probe-ack`, `preview`, `start`, `next`, `record`, `answer-preflight`, `status`, `resume`, `regate`, `ship`, `expire-dispatch`, `extend-budget`, `abort`, `override` |
+| `ape_run` | `probe`, `probe-status`, `probe-ack`, `preview`, `start`, `next`, `record`, `answer-preflight`, `status`, `resume`, `regate`, `ship`, `expire-dispatch`, `abort`, `override` |
 | `ape_status` | Dedicated read-only current-run, pending-ticket, lane, and gate snapshot. |
 | `ape_history` | `query`, `explain`, `metrics`, `import`, `maintenance-status`, `compact-artifacts`, `roadmap-status`, `roadmap-register`, `roadmap-supersede`, `roadmap-attest` |
 | `ape_config` | `get`, `set`, `doctor`, `wire`, `unwire`, `init` |
@@ -37,7 +37,7 @@ for Claude runs rather than as missing legacy telemetry. Each version-cohort map
 an exact cohort filter to inspect an omitted version.
 
 The `orchestration` metrics block reports first-pass receipt acceptance and first-pass-perfect run
-rates, validation/correction/redispatch and budget-pause counts, time to first writer, and repair
+rates, validation/correction/redispatch counts, time to first writer, and repair
 time. Token totals are included only for host-attested exact counters. Coverage always separates
 `token_dispatches`, `token_attested_dispatches`, and unobserved dispatches; APE never estimates a
 missing token count.
@@ -66,16 +66,8 @@ metrics calls do not mutate that cache or send telemetry anywhere.
   contract v2 is limited to behavioral fast/full phase runs. `land` additionally requires a
   non-empty default-tip-to-working-tree diff entirely inside `claimed_paths` and `test_paths`, with
   HEAD equal to or descended from the resolved default tip.
-- New public starts require an explicit dispatch/active-time execution budget. `preview` uses the
-  same readiness resolver and reports derived capability requirements, minimum/worst-case worker
-  dispatches, receipt-submission bounds, and deterministic dispatch feasibility before any run
-  state is written. `covers_minimum_worker_dispatches` is boolean. Model/host duration has no
-  defensible lower bound, so `minimum.active_seconds` and `covers_minimum_path` are `null`; the
-  active-time value is an authorization cap, not a promise or estimate of completion time.
-- `extend-budget` may only increase the active run's limits. Send a nonblank `reason` and at least
-  one new top-level cap, for example
-  `{action:"extend-budget", reason:"operator approved continuation", max_active_seconds:7200}`.
-  Exhaustion pauses the same run and never creates a successor automatically.
+- `preview` uses the same readiness resolver and reports derived capability requirements and the
+  pipeline's deterministic dispatch bounds before any run state is written.
 - `record` accepts an agent receipt draft. The runtime adds and verifies identity, tree/test
   evidence, observed external-tool effects, hashes, and the next transition. New-contract tickets
   also require a matching `ape_validate_receipt` attestation for the normalized exact draft.
@@ -121,11 +113,11 @@ the full catalog. Existing runs and historical ticket hashes are unchanged.
 
 Control responses use `next_action.kind` from this closed vocabulary:
 `continue_same_agent`, `redispatch_same_ticket`, `stage_retry`, `directed_replan`,
-`remediate_product_finding`, `wait`, `answer_preflight`, `extend_budget`, or `blocked`.
+`remediate_product_finding`, `wait`, `answer_preflight`, or `blocked`.
 Failures use `failure_domain`: `product`, `orchestration`, `configuration`, `infrastructure`,
 `operator`, or `unknown`. Protocol and infrastructure failures do not become reviewer dissent or
 product remediation. A blocked response states `automatic_successor:false`; starting another run
-or extending a budget always requires explicit operator authorization.
+always requires explicit operator authorization.
 
 ### Long-running calls
 
@@ -134,7 +126,7 @@ suite in a detached process. The call waits for `gates.inline_grace_ms`; if the 
 it returns with the run in `gating` instead of holding the tool call indefinitely.
 
 `next` accepts optional `wait_ms` while a run rests in `gating` or `shipping`. It repeats the same
-bounded poll with the receipt lock released between polls. The budget is clamped by
+bounded poll with the receipt lock released between polls. The requested wait duration is clamped by
 `GATE_NEXT_MAX_WAIT_MS` (300000 ms) and sleeps are floored by `GATE_NEXT_POLL_FLOOR_MS` (250 ms).
 A gating watch that enters required-check `shipping` stops there; call `next` again to drive the
 second watch.

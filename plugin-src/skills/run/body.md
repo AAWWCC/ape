@@ -20,15 +20,12 @@ call.
   `claimed_paths`.
 - `behavioral`, `requirements`, `completes`, `risk_triggers`, and least-privilege `tool_claims`.
 - `required_capabilities`: only exact additionally required capability IDs; never infer availability.
-- `execution_budget.max_worker_dispatches` and `execution_budget.max_active_seconds`: explicit hard
-  authorization for this run, not an estimate of likely token use.
 - `plan_contract_version: 2` for every newly started behavioral fast/full `phase` run. Omit it for
   mechanical, non-phase modes, and every resume; version 1 is legacy-only.
 
 Call `ape_config` `doctor` and `get`, then `ape_run preview`. Preview and start carry identical
-complete facts except `action`. Report
-readiness failures and minimum/worst-case dispatch bounds. Require explicit worker-dispatch and
-active-seconds limits; token totals are host-attested only. Complete the
+complete facts except `action`. Report readiness failures and deterministic dispatch bounds; token
+totals are host-attested only. Complete the
 gate-command and visual-evidence readiness checks in the run/resume protocol.
 
 Inspect `shipping.auto_merge`. If true, explain the run may push, open a pull request, and merge;

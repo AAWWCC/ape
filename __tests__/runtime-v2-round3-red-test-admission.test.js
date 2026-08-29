@@ -3,7 +3,7 @@ import { access, mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { extendBudget, nextRun, recordReceipt, startRun } from '../lib/runtime/service.js';
+import { recordReceipt, startRun } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { receiptExecutionConfig } from '../lib/runtime/receipt-service.js';
@@ -207,7 +207,7 @@ describe('runtime-owned red-test execution at test-writer admission (F12)', () =
     });
   });
 
-  it('pauses before a runtime-owned red-test command when active time is exhausted', async () => {
+  it('runs the runtime-owned red test without an execution-budget pause', async () => {
     const dir = await project();
     const sentinel = path.join(tmpdir(), `${path.basename(dir)}-red-test-command-ran`);
     cleanups.push(sentinel);
@@ -216,60 +216,16 @@ describe('runtime-owned red-test execution at test-writer admission (F12)', () =
       shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
       test_commands: { full: 'node --test', targeted: command },
     });
-    const started = await startRun(dir, startInput({
-      execution_budget: { max_worker_dispatches: 8, max_active_seconds: 30 },
-    }));
+    const started = await startRun(dir, startInput());
     expect(started.ok).toBe(true);
     const ticket = started.run.tickets[0];
     await writeFile(path.join(dir, 'tests', 'value.test.js'), 'throw new Error("budgeted red");\n');
 
     const paths = runtimePaths(dir);
-    const expired = await readJson(paths.active, null);
-    expired.execution_budget.active_elapsed_ms = 30_000;
-    expired.execution_budget.overrun_ms = 0;
-    delete expired.execution_budget.active_since;
-    delete expired.execution_budget.active_deadline_at;
-    await atomicWriteJson(paths.active, expired);
-
-    const paused = await recordReceipt(dir, rawReceipt(ticket, { tests: [] }));
-    expect(paused).toMatchObject({
-      ok: false,
-      paused: true,
-      receipt_retry_required: true,
-      failure_domain: 'orchestration',
-      next_action: { kind: 'extend_budget' },
-    });
-    expect(await readdir(paths.receipts).catch(() => [])).toHaveLength(0);
-    expect(await readdir(paths.receiptTransactions).catch(() => [])).toHaveLength(0);
-    await expect(access(sentinel)).rejects.toMatchObject({ code: 'ENOENT' });
-
-    const extended = await extendBudget(dir, {
-      max_active_seconds: 60,
-      reason: 'authorize the runtime-owned red-test after inspecting the overrun',
-    });
-    expect(extended.next_safe_action).toMatch(/retry ape_run record.*identical attested receipt/);
-    expect(extended.run).toMatchObject({
-      status: 'input_required',
-      stage: 'receipt-retry',
-      input_required: {
-        kind: 'receipt_retry',
-        ticket_id: ticket.ticket_id,
-      },
-    });
-    const skippedRetry = await nextRun(dir);
-    expect(skippedRetry).toMatchObject({
-      ok: false,
-      failure_domain: 'orchestration',
-      next_action: {
-        kind: 'continue_same_agent',
-        ticket_id: ticket.ticket_id,
-        required_control_action: 'record_exact_attested_receipt',
-      },
-    });
-    await expect(access(sentinel)).rejects.toMatchObject({ code: 'ENOENT' });
     const recorded = await recordReceipt(dir, rawReceipt(ticket, { tests: [] }));
     expect(recorded.ok).toBe(true);
     await expect(access(sentinel)).resolves.toBeUndefined();
+    expect((await readJson(paths.active, null))).not.toHaveProperty('execution_budget');
   });
 
   it('a deadline-killed red-test execution is no-verdict, never an observed red', async () => {
