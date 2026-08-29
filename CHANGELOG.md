@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2.24.1 — 2026-08-29
+
+The first 2.24.0 live-certification candidate was rejected because its generated fast-cohort prompt
+did not pin `host` in the exact preview facts, allowing the parent to issue an incomplete call and
+repair it only after the runtime refused it. Live certification now supplies complete, parseable
+preview and start objects that differ only by action, pins every control fact including the Codex
+host and empty capability set, and fails the candidate immediately instead of correcting or retrying
+a rejected control call. The shipped run skill and MCP schema also require the same prospective
+objective and host across preview and start. Version 2.24.1 starts a fresh exact-source certification
+cycle; no failed 2.24.0 attempt is reused as release evidence.
+
 ## 2.24.0 — 2026-08-29
 
 APE now gives every new run an immutable, role-filtered receipt contract and validates the exact

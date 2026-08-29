@@ -5,7 +5,8 @@ The parent orchestrator owns every APE control call. It never performs stage wor
 ## Start readiness
 
 Before `ape_run start`, call `ape_config doctor`, `get`, and then `ape_run preview` with the exact
-prospective run facts and additive `required_capabilities`. Preview and start use the same
+prospective run facts, exact `host`, and additive `required_capabilities`. Preview and start carry
+identical complete prospective fields except `action` and use the same
 deterministic readiness evaluator. Report the minimum/worst-case dispatch bounds and obtain explicit
 `execution_budget.max_worker_dispatches` and `execution_budget.max_active_seconds`; start refuses a
 worker-dispatch cap below the deterministic minimum and writes no run state on any readiness

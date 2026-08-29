@@ -33,7 +33,7 @@ import {
   writeLiveCertificationPrompts,
 } from '../scripts/prepare-live-certification-prompts.mjs';
 
-const VERSION = '2.24.0';
+const VERSION = '2.24.1';
 const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
@@ -419,6 +419,14 @@ describe('live certification Codex parent launcher', () => {
 });
 
 describe('live certification prompt preparation', () => {
+  function exactControlCall(prompt, label) {
+    const matches = [...prompt.matchAll(
+      new RegExp(`^APE_${label}_CALL=(\\{[^\\r\\n]+\\})$`, 'gmu'),
+    )];
+    expect(matches).toHaveLength(1);
+    return JSON.parse(matches[0][1]);
+  }
+
   function promptCampaign() {
     const root = mkdtempSync(path.join(tmpdir(), 'ape-live-prompts-'));
     temporaryRepositories.push(root);
@@ -450,19 +458,111 @@ describe('live certification prompt preparation', () => {
       .toContain(`docs/codex-${VERSION_SUFFIX}-protected-land-1.md`);
   });
 
-  it('pins a first-pass execution budget sufficient for every synthetic cohort', () => {
+  it('pins complete identical first-pass preview and start calls for every synthetic cohort', () => {
     const root = promptCampaign();
-    const expectedBudgets = {
-      mechanical: { max_worker_dispatches: 1, max_active_seconds: 3_600 },
-      fast: { max_worker_dispatches: 4, max_active_seconds: 14_400 },
-      full: { max_worker_dispatches: 7, max_active_seconds: 25_200 },
-      land: { max_worker_dispatches: 1, max_active_seconds: 3_600 },
+    const expected = {
+      mechanical: {
+        mode: 'phase',
+        lane: 'mechanical',
+        behavioral: false,
+        claimed_paths: [`docs/codex-${VERSION_SUFFIX}-mechanical-1.md`],
+        test_paths: [],
+        execution_budget: { max_worker_dispatches: 1, max_active_seconds: 3_600 },
+      },
+      fast: {
+        mode: 'phase',
+        lane: 'fast',
+        behavioral: true,
+        plan_contract_version: 2,
+        claimed_paths: [`src/is-even-${VERSION_SUFFIX}-1.js`],
+        test_paths: [`test/is-even-${VERSION_SUFFIX}-1.test.js`],
+        execution_budget: { max_worker_dispatches: 4, max_active_seconds: 14_400 },
+      },
+      full: {
+        mode: 'phase',
+        lane: 'full',
+        behavioral: true,
+        plan_contract_version: 2,
+        claimed_paths: [`src/normalize-label-${VERSION_SUFFIX}-1.js`],
+        test_paths: [`test/normalize-label-${VERSION_SUFFIX}-1.test.js`],
+        execution_budget: { max_worker_dispatches: 7, max_active_seconds: 25_200 },
+      },
+      land: {
+        mode: 'land',
+        lane: 'mechanical',
+        behavioral: false,
+        claimed_paths: [`docs/codex-${VERSION_SUFFIX}-protected-land-1.md`],
+        test_paths: [],
+        execution_budget: { max_worker_dispatches: 1, max_active_seconds: 3_600 },
+      },
     };
+    const forbidden = ['run_id', 'supersedes_run', 'binding_protocol', 'binding_probe'];
+    const exactBaseKeys = [
+      'action',
+      'project_dir',
+      'objective',
+      'mode',
+      'lane',
+      'host',
+      'claimed_paths',
+      'test_paths',
+      'requirements',
+      'completes',
+      'risk_triggers',
+      'tool_claims',
+      'required_capabilities',
+      'behavioral',
+      'hooks_trusted',
+      'subagents_available',
+      'explicit_invocation',
+      'auto_merge_authorized',
+    ];
 
-    for (const [pipeline, budget] of Object.entries(expectedBudgets)) {
+    for (const [pipeline, cohort] of Object.entries(expected)) {
       const prompt = buildLiveCertificationPrompt(root, pipeline, 1);
-      expect(prompt).toContain(`Pass execution_budget ${JSON.stringify(budget)}`);
-      expect(prompt.match(/\bexecution_budget\b/gu)).toHaveLength(1);
+      const preview = exactControlCall(prompt, 'PREVIEW');
+      const start = exactControlCall(prompt, 'START');
+      expect(start).toEqual({ ...preview, action: 'start' });
+      expect(preview.action).toBe('preview');
+      expect(preview.project_dir).toBe(path.join(root, pipeline));
+      expect(preview.objective).toBeTruthy();
+      expect(prompt).toContain(`Start one run with this complete objective: ${preview.objective}`);
+      expect(preview).toMatchObject({
+        mode: cohort.mode,
+        lane: cohort.lane,
+        host: 'codex',
+        claimed_paths: cohort.claimed_paths,
+        test_paths: cohort.test_paths,
+        requirements: [],
+        completes: [],
+        risk_triggers: [],
+        tool_claims: [],
+        required_capabilities: [],
+        behavioral: cohort.behavioral,
+        hooks_trusted: true,
+        subagents_available: true,
+        explicit_invocation: true,
+        auto_merge_authorized: true,
+        execution_budget: cohort.execution_budget,
+      });
+      const expectedKeys = [
+        ...exactBaseKeys,
+        ...('plan_contract_version' in cohort ? ['plan_contract_version'] : []),
+        'execution_budget',
+      ];
+      expect(Object.keys(preview)).toEqual(expectedKeys);
+      expect(Object.keys(start)).toEqual(expectedKeys);
+      if ('plan_contract_version' in cohort) {
+        expect(preview.plan_contract_version).toBe(2);
+      } else {
+        expect(preview).not.toHaveProperty('plan_contract_version');
+      }
+      for (const field of forbidden) {
+        expect(preview).not.toHaveProperty(field);
+        expect(start).not.toHaveProperty(field);
+      }
+      expect(prompt).toMatch(/preview exactly once[\s\S]*start exactly once/iu);
+      expect(prompt).toMatch(/stop immediately[\s\S]*Never correct or retry one of those control calls/iu);
     }
   });
 

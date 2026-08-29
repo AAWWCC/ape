@@ -66,11 +66,18 @@ const resolveMcpRoot = (explicitDir = null) => resolveGovernedRoot({ explicitDir
 const TOOLS = Object.freeze([
   {
     name: 'ape_run',
-    description: 'Start and advance the deterministic APE runtime. For a Codex probe, the first call must include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. Codex start is fail-closed until probe, native canary launch, probe-status, and probe-ack prove live child binding; the completed proof is consumed exactly once before Git mutation.',
+    description: 'Start and advance the deterministic APE runtime. Preview and start require the same complete prospective run facts, including objective and host; only action differs. For a Codex probe, the first call must include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. Codex start is fail-closed until probe, native canary launch, probe-status, and probe-ack prove live child binding; the completed proof is consumed exactly once before Git mutation.',
     inputSchema: {
       type: 'object',
       required: ['action'],
       allOf: [
+        {
+          if: {
+            properties: { action: { enum: ['preview', 'start'] } },
+            required: ['action'],
+          },
+          then: { required: ['objective', 'host'] },
+        },
         {
           if: {
             properties: { action: { const: 'start' } },
@@ -96,7 +103,7 @@ const TOOLS = Object.freeze([
         action: {
           type: 'string',
           enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'extend-budget', 'abort', 'override'],
-          description: 'For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
+          description: 'Preview and start require identical complete prospective facts, including objective and host; only action differs. For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
         },
         project_dir: {
           type: 'string',
@@ -463,7 +470,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.24.0' };
+    return { name: 'ape', version: '2.24.1' };
   }
 }
 

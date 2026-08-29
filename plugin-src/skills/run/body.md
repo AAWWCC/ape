@@ -12,6 +12,7 @@ On Google Antigravity / Gemini, pass the exact open project root as `project_dir
 call.
 
 - `objective`: the observable outcome and acceptance criteria.
+- Exact `host` (`codex` or `claude`); include it in preview and start.
 - `mode`: `phase`, `debug`, `spike`, or `land`; `lane`: normally `auto`.
 - `claimed_paths`: production paths only. Include generated artifacts or
   documentation only when the objective may require them.
@@ -24,7 +25,8 @@ call.
 - `plan_contract_version: 2` for every newly started behavioral fast/full `phase` run. Omit it for
   mechanical, non-phase modes, and every resume; version 1 is legacy-only.
 
-Call `ape_config` actions `doctor` and `get`, then `ape_run preview` with complete facts. Report
+Call `ape_config` `doctor` and `get`, then `ape_run preview`. Preview and start carry identical
+complete facts except `action`. Report
 readiness failures and minimum/worst-case dispatch bounds. Require explicit worker-dispatch and
 active-seconds limits; token totals are host-attested only. Complete the
 gate-command and visual-evidence readiness checks in the run/resume protocol.

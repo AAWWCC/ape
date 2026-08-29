@@ -43,28 +43,73 @@ function attemptContract(pipeline, repetition) {
     return {
       authorization: 'push its APE branch, open a pull request, and squash-merge it',
       objective: `Create docs/codex-${suffix}-mechanical-${repetition}.md containing a concise heading and one sentence identifying it as synthetic Codex mechanical certification attempt ${repetition} for APE ${RELEASE_VERSION}.`,
-      run: `Use mode phase, lane mechanical, behavioral false, claimed_paths ["docs/codex-${suffix}-mechanical-${repetition}.md"], test_paths [], and empty requirements, completes, risk_triggers, and tool_claims. Omit plan_contract_version.`,
+      mode: 'phase',
+      lane: 'mechanical',
+      behavioral: false,
+      claimedPaths: [`docs/codex-${suffix}-mechanical-${repetition}.md`],
+      testPaths: [],
     };
   }
   if (pipeline === 'fast') {
     return {
       authorization: 'push its APE branch, open a pull request, and squash-merge it',
       objective: `Create src/is-even-${suffix}-${repetition}.js exporting isEven(value). It accepts only primitive finite integer numbers and returns true exactly for even integers, including zero and negative values. For every non-number, NaN, positive or negative infinity, or fractional number, it throws TypeError with the exact message "value must be a finite integer". Create independent tests at test/is-even-${suffix}-${repetition}.test.js covering zero, positive and negative odd and even integers, and every invalid input class.`,
-      run: `Use mode phase, lane fast, behavioral true, plan_contract_version 2, claimed_paths ["src/is-even-${suffix}-${repetition}.js"], test_paths ["test/is-even-${suffix}-${repetition}.test.js"], and empty requirements, completes, risk_triggers, and tool_claims.`,
+      mode: 'phase',
+      lane: 'fast',
+      behavioral: true,
+      planContractVersion: 2,
+      claimedPaths: [`src/is-even-${suffix}-${repetition}.js`],
+      testPaths: [`test/is-even-${suffix}-${repetition}.test.js`],
     };
   }
   if (pipeline === 'full') {
     return {
       authorization: 'push its APE branch, open a pull request, and squash-merge it',
       objective: `Create src/normalize-label-${suffix}-${repetition}.js exporting normalizeLabel(value). It accepts only primitive strings. It trims leading and trailing ECMAScript whitespace, collapses every remaining run of ECMAScript whitespace to one ASCII space, and returns the result lowercased with String.prototype.toLowerCase(). For any non-string, it throws TypeError with the exact message "value must be a string". If the input contains only whitespace, it throws RangeError with the exact message "value must contain non-whitespace characters". Create independent tests at test/normalize-label-${suffix}-${repetition}.test.js covering unchanged lowercase text, mixed case, surrounding whitespace, internal spaces, tabs, newlines, non-breaking spaces, whitespace-only input, and representative primitive and object non-string inputs.`,
-      run: `Use mode phase, lane full, behavioral true, plan_contract_version 2, claimed_paths ["src/normalize-label-${suffix}-${repetition}.js"], test_paths ["test/normalize-label-${suffix}-${repetition}.test.js"], and empty requirements, completes, risk_triggers, and tool_claims.`,
+      mode: 'phase',
+      lane: 'full',
+      behavioral: true,
+      planContractVersion: 2,
+      claimedPaths: [`src/normalize-label-${suffix}-${repetition}.js`],
+      testPaths: [`test/normalize-label-${suffix}-${repetition}.test.js`],
     };
   }
   return {
     authorization: 'push its APE branch, open a pull request, enable protected auto-merge, and squash-merge it after every required remote check passes',
     objective: `Review and land the already-finished committed feature diff that creates docs/codex-${suffix}-protected-land-${repetition}.md as synthetic protected Codex land certification attempt ${repetition} for APE ${RELEASE_VERSION}.`,
-    run: `Use mode land, lane mechanical, behavioral false, claimed_paths ["docs/codex-${suffix}-protected-land-${repetition}.md"], test_paths [], and empty requirements, completes, risk_triggers, and tool_claims. Omit plan_contract_version.`,
+    mode: 'land',
+    lane: 'mechanical',
+    behavioral: false,
+    claimedPaths: [`docs/codex-${suffix}-protected-land-${repetition}.md`],
+    testPaths: [],
   };
+}
+
+function exactRunCall(action, projectDir, contract, executionBudget) {
+  return Object.freeze({
+    action,
+    project_dir: projectDir,
+    objective: contract.objective,
+    mode: contract.mode,
+    lane: contract.lane,
+    host: 'codex',
+    claimed_paths: contract.claimedPaths,
+    test_paths: contract.testPaths,
+    requirements: [],
+    completes: [],
+    risk_triggers: [],
+    tool_claims: [],
+    required_capabilities: [],
+    behavioral: contract.behavioral,
+    hooks_trusted: true,
+    subagents_available: true,
+    explicit_invocation: true,
+    auto_merge_authorized: true,
+    ...(contract.planContractVersion === undefined
+      ? {}
+      : { plan_contract_version: contract.planContractVersion }),
+    execution_budget: executionBudget,
+  });
 }
 
 export function buildLiveCertificationPrompt(campaignRoot, pipeline, repetition) {
@@ -79,14 +124,25 @@ export function buildLiveCertificationPrompt(campaignRoot, pipeline, repetition)
     throw new LiveCertificationPromptError(`campaign project does not resolve exactly: ${projectDir}`);
   }
   const contract = attemptContract(pipeline, repetition);
-  const executionBudget = JSON.stringify(EXECUTION_BUDGETS[pipeline]);
+  const previewCall = JSON.stringify(
+    exactRunCall('preview', projectDir, contract, EXECUTION_BUDGETS[pipeline]),
+  );
+  const startCall = JSON.stringify(
+    exactRunCall('start', projectDir, contract, EXECUTION_BUDGETS[pipeline]),
+  );
   return `$ape:run
 
 Conduct authorized APE ${RELEASE_VERSION} live-certification attempt codex-${pipeline}-${repetition} in this disposable repository. The operator explicitly invokes APE and authorizes this exact run to ${contract.authorization}.
 
 Start one run with this complete objective: ${contract.objective}
 
-${contract.run} Pass execution_budget ${executionBudget}, explicit_invocation true, hooks_trusted true, subagents_available true, and auto_merge_authorized true. Pass project_dir "${projectDir}" on every APE MCP call.
+Pass project_dir "${projectDir}" on every APE MCP call. After ape_config doctor and get, call ape_run preview exactly once with the exact JSON object on the next line:
+APE_PREVIEW_CALL=${previewCall}
+
+After the required binding probe succeeds, call ape_run start exactly once with the exact JSON object on the next line:
+APE_START_CALL=${startCall}
+
+The preview and start objects are complete and differ only in action. Do not add, remove, infer, default, or modify any field. In particular, never send run_id, supersedes_run, binding_protocol, or binding_probe on either call. If doctor, get, preview, probe, probe-status, probe-ack, or start rejects, returns malformed output, or otherwise fails, stop immediately and report that the certification candidate failed. Never correct or retry one of those control calls.
 
 Follow the installed APE run skill and every returned control action exactly through terminal completion. Begin every functions.exec wrapper that can return APE MCP or control output with \`// @exec: {"max_output_tokens": 30000}\`. Complete the required Codex binding probe. Pass each returned spawn_args object directly and unchanged to native collaboration spawn_agent. The native message is transport-only: do not add, reconstruct, normalize, reserialize, or relay stage content through it. Require the trusted SubagentStart context before stage work. Record each original receipt unchanged exactly once. Do not edit from the parent, assemble replacement prompts, repair receipts, duplicate or relaunch agents, expire dispatches, regate, resume a started run, create a successor, inspect session logs to recover a receipt, or weaken gates. Abort rather than reconstruct unavailable or invalid evidence. Continue bounded next calls through terminal completion and report the run id and result, including whether spawn_args remained byte-for-byte unchanged and authoritative context was hook-injected.
 `;
