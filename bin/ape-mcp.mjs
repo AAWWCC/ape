@@ -259,7 +259,7 @@ const TOOLS = Object.freeze([
   },
   {
     name: 'ape_validate_receipt',
-    description: 'Validate one complete StageReceipt draft against its immutable, role-specific StageTicket contract before record. Call as ape_validate_receipt(ticket_id, draft). For receipt_contract_version:1 tickets this performs at most three validations per physical dispatch (initial plus two corrections), does not consume the receipt capability or a stage attempt, and attests the exact normalized draft hash required by ape_run record. On exhaustion, stop correcting and return control to the parent using recovery_kind/next_action.',
+    description: 'Validate one complete StageReceipt draft against its immutable, role-specific StageTicket contract before record. Call as ape_validate_receipt(ticket_id, draft). For receipt_contract_version:1 tickets this performs at most three validations per physical dispatch (initial plus two corrections), does not consume the receipt capability or a stage attempt, and attests the exact normalized draft hash required by ape_run record. A valid result is terminal and has no continuation action: immediately return the exact validated draft unchanged and do not validate it again. On exhaustion, stop correcting and return control to the parent using recovery_kind/next_action.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -470,7 +470,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.24.1' };
+    return { name: 'ape', version: '2.24.2' };
   }
 }
 

@@ -116,9 +116,11 @@ describe('public prompt contracts', () => {
     expect(common).toMatch(/unmet\s+objective[\s\S]*security[\s\S]*unauthorized scope[\s\S]*missing required evidence/iu);
     expect(common).toMatch(/Style preferences[\s\S]*equally valid[\s\S]*advisory only/iu);
 
-    for (const field of ['ticket_id', 'status', 'tests', 'findings', 'evidence', 'timing']) {
+    for (const field of ['ticket_id', 'status', 'tests', 'findings', 'evidence']) {
       expect(common, `receipt field ${field}`).toContain(`\`${field}\``);
     }
+    expect(common).toMatch(/Return one JSON object with required/iu);
+    expect(common).toMatch(/omit optional runtime-stamped `timing`/iu);
     for (const field of ['command', 'passed', 'exit_code', 'duration_ms', 'output_hash']) {
       expect(common, `test field ${field}`).toContain(`\`${field}\``);
     }
@@ -130,7 +132,8 @@ describe('public prompt contracts', () => {
     expect(common).toMatch(/plan_deviation[\s\S]*only[\s\S]*material deviation[\s\S]*approved_plan[\s\S]*otherwise omit/iu);
     expect(common).toMatch(/Plan review[\s\S]*"passed"[\s\S]*"agree"[\s\S]*"disagree"/u);
     expect(common).toMatch(/Code\/security review[\s\S]*"passed"[\s\S]*"pass"[\s\S]*"fail"/u);
-    expect(common).toMatch(/ape_validate_receipt[\s\S]*exact complete\s+`draft`[\s\S]*corrections_remaining/iu);
+    expect(common).toMatch(/stable final `draft`[\s\S]*omit timing[\s\S]*never generate timestamps during validation[\s\S]*ape_validate_receipt[\s\S]*corrections_remaining/iu);
+    expect(common).toMatch(/`valid: true` is\s+terminal[\s\S]*no continuation action[\s\S]*return unchanged[\s\S]*never validate again/iu);
   });
 
   it('gives each role a distinct evidence-producing responsibility', async () => {

@@ -342,6 +342,7 @@ describe('live receipt contract integration', () => {
       failure_domain: 'orchestration',
       next_action: { kind: 'continue_same_agent', failure_domain: 'orchestration' },
     });
+    expect(payload.validation.next_action).toEqual({ kind: 'continue_same_agent' });
     expect(payload.corrections).toContainEqual(expect.objectContaining({ field: 'status' }));
   });
 
@@ -419,7 +420,9 @@ describe('live receipt contract integration', () => {
       },
     });
     const responses = await runProcess('bin/ape-mcp.mjs', [call(1), call(2)]);
-    expect(JSON.parse(responses[0].result.content[0].text)).toMatchObject({
+    const first = JSON.parse(responses[0].result.content[0].text);
+    const replay = JSON.parse(responses[1].result.content[0].text);
+    expect(first).toMatchObject({
       ok: true,
       valid: true,
       attested: true,
@@ -427,7 +430,7 @@ describe('live receipt contract integration', () => {
       idempotent: false,
       validation: { attempt: 1 },
     });
-    expect(JSON.parse(responses[1].result.content[0].text)).toMatchObject({
+    expect(replay).toMatchObject({
       ok: true,
       valid: true,
       attested: true,
@@ -435,6 +438,10 @@ describe('live receipt contract integration', () => {
       idempotent: true,
       validation: { attempt: 1 },
     });
+    expect(first).not.toHaveProperty('next_action');
+    expect(first.validation).not.toHaveProperty('next_action');
+    expect(replay).not.toHaveProperty('next_action');
+    expect(replay.validation).not.toHaveProperty('next_action');
 
     const binding = {
       contract_version: 1,
@@ -484,6 +491,174 @@ describe('live receipt contract integration', () => {
       value.capability,
       binding,
     )).valid).toBe(false);
+  });
+
+  it('archives a valid draft replacement as non-first-pass without inventing a rejection', async () => {
+    const value = await fixture();
+    const timestampedDraft = {
+      ...draft(value.ticket, value.capability),
+      timing: {
+        started_at: value.ticket.issued_at,
+        completed_at: value.ticket.issued_at,
+        duration_ms: 0,
+      },
+    };
+    const finalDraft = draft(value.ticket, value.capability);
+
+    const first = await validateReceiptForDispatch(
+      value.directory,
+      timestampedDraft,
+      value.ticket.ticket_id,
+    );
+    const second = await validateReceiptForDispatch(
+      value.directory,
+      finalDraft,
+      value.ticket.ticket_id,
+    );
+    expect(first).toMatchObject({
+      valid: true,
+      validation: {
+        attempt: 1,
+        invalid_attempts: 0,
+        first_validation_valid: true,
+      },
+    });
+    expect(second).toMatchObject({
+      valid: true,
+      validation: {
+        attempt: 2,
+        invalid_attempts: 0,
+        first_validation_valid: true,
+      },
+    });
+    expect(first).not.toHaveProperty('next_action');
+    expect(first.validation).not.toHaveProperty('next_action');
+    expect(second).not.toHaveProperty('next_action');
+    expect(second.validation).not.toHaveProperty('next_action');
+    expect(second.input_hash).not.toBe(first.input_hash);
+
+    const recorded = await recordReceipt(value.directory, finalDraft);
+    expect(recorded.receipt.timing).toMatchObject({
+      started_at: value.ticket.issued_at,
+      completed_at: expect.any(String),
+      duration_ms: expect.any(Number),
+    });
+    expect(recorded.receipt.timing.duration_ms).toBeGreaterThanOrEqual(0);
+    expect(recorded.run.orchestration).toMatchObject({
+      receipt_record_attempts: 2,
+      receipt_accepts: 1,
+      receipt_first_pass_accepts: 0,
+      receipt_rejections: 0,
+      receipt_rejections_by_class: { contract: 0 },
+    });
+    expect(await readJson(
+      path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`),
+      null,
+    )).toMatchObject({
+      receipt_validation: {
+        attempts: 2,
+        invalid_attempts: 0,
+        first_validation_valid: true,
+      },
+    });
+  });
+
+  it('counts only actually invalid validations as contract rejections', async () => {
+    const value = await fixture();
+    const invalidDraft = draft(value.ticket, value.capability, 'invalid-status');
+    const finalDraft = draft(value.ticket, value.capability);
+
+    expect(await validateReceiptForDispatch(
+      value.directory,
+      invalidDraft,
+      value.ticket.ticket_id,
+    )).toMatchObject({
+      valid: false,
+      validation: {
+        attempt: 1,
+        invalid_attempts: 1,
+        first_validation_valid: false,
+      },
+    });
+    expect(await validateReceiptForDispatch(
+      value.directory,
+      finalDraft,
+      value.ticket.ticket_id,
+    )).toMatchObject({
+      valid: true,
+      validation: {
+        attempt: 2,
+        invalid_attempts: 1,
+        first_validation_valid: false,
+      },
+    });
+
+    const recorded = await recordReceipt(value.directory, finalDraft);
+    expect(recorded.run.orchestration).toMatchObject({
+      receipt_record_attempts: 2,
+      receipt_accepts: 1,
+      receipt_first_pass_accepts: 0,
+      receipt_rejections: 1,
+      receipt_rejections_by_class: { contract: 1 },
+    });
+  });
+
+  it('does not recount an exhausted physical summary when its earlier valid attestation records', async () => {
+    const value = await fixture();
+    const attestedDraft = draft(value.ticket, value.capability);
+    expect(await validateReceiptForDispatch(
+      value.directory,
+      attestedDraft,
+      value.ticket.ticket_id,
+    )).toMatchObject({
+      valid: true,
+      validation: { attempt: 1, invalid_attempts: 0 },
+    });
+
+    await validateReceiptForDispatch(
+      value.directory,
+      draft(value.ticket, value.capability, 'first-invalid'),
+      value.ticket.ticket_id,
+    );
+    const intentFile = path.join(
+      value.paths.dispatchIntents,
+      `${rawDigest(value.ticket.ticket_id)}.json`,
+    );
+    const legacyIntent = await readJson(intentFile, null);
+    delete legacyIntent.receipt_validation.invalid_attempts;
+    delete legacyIntent.receipt_validation.first_validation_valid;
+    await atomicWriteJson(intentFile, legacyIntent);
+    expect(await validateReceiptForDispatch(
+      value.directory,
+      draft(value.ticket, value.capability, 'second-invalid'),
+      value.ticket.ticket_id,
+    )).toMatchObject({
+      valid: false,
+      validation: {
+        attempt: 3,
+        invalid_attempts: 2,
+        first_validation_valid: false,
+        exhausted: true,
+      },
+    });
+    expect((await readJson(value.paths.active, null)).orchestration).toMatchObject({
+      receipt_record_attempts: 3,
+      receipt_accepts: 0,
+      receipt_rejections: 2,
+      receipt_rejections_by_class: { contract: 2 },
+      protocol_redispatches: 1,
+    });
+
+    const recorded = await recordReceipt(value.directory, attestedDraft);
+    expect(recorded).toMatchObject({ ok: true, receipt: { ticket_id: value.ticket.ticket_id } });
+    expect(recorded.run.orchestration).toMatchObject({
+      receipt_record_attempts: 3,
+      receipt_accepts: 1,
+      receipt_first_pass_accepts: 0,
+      receipt_rejections: 2,
+      receipt_rejections_by_class: { contract: 2 },
+      protocol_redispatches: 1,
+    });
   });
 
   it('accepts a plain exact draft with string braces and escaped quotes at the first SubagentStop', async () => {

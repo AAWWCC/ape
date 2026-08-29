@@ -48,22 +48,22 @@ Style preferences, optional refactors, speculation, and equally valid alternativ
 
 ## Receipt
 
-Return one JSON object with `ticket_id`, `status`, `tests`, `findings`, `evidence`, `timing`, and
-injected `receipt_capability`. Tests have `command`, `passed`, `exit_code`, `duration_ms`, and optional
-`output_hash`. Keep `evidence.summary` concise.
+Return one JSON object with required `ticket_id`, `status`, `tests`, `findings`, `evidence`, and
+`receipt_capability`; omit optional runtime-stamped `timing`. Tests require `command`, `passed`,
+`exit_code`, `duration_ms`; `output_hash` is optional.
 
-Use this exact outcome matrix:
+Outcomes:
 
-- Non-review work completed: `status: "passed"`; unable to complete: `status: "failed"`.
-- Plan review performed, positive or negative: `status: "passed"` with
-  `evidence.verdict: "agree"` or `"disagree"`; unable to review: `status: "failed"`.
-- Code/security review performed, positive or negative: `status: "passed"` with
-  `evidence.verdict: "pass"` or `"fail"`; unable to review: `status: "failed"`.
+- Non-review: completed is `status: "passed"`; unable is `status: "failed"`.
+- Plan review: performed is `status: "passed"` with `evidence.verdict: "agree"` or `"disagree"`;
+  unable is `status: "failed"`.
+- Code/security review: performed is `status: "passed"` with `evidence.verdict: "pass"` or `"fail"`;
+  unable is `status: "failed"`.
 
-Runtime recomputes hashes. Never claim unobserved evidence.
+Never claim unobserved evidence.
 
-Before returning, call `ape_validate_receipt` with immutable `ticket_id` and the exact complete
-`draft`. If valid, return it unchanged. Otherwise correct only reported fields within
-`validation.corrections_remaining`. On
-`exhausted`, stop for runtime recovery; never convert receipt failure into product remediation,
-replan, abort, or a successor.
+Build a stable final `draft`; omit timing and never generate timestamps during validation.
+Call `ape_validate_receipt` with immutable `ticket_id` and that exact draft. `valid: true` is
+terminal with no continuation action: return unchanged; never validate again. Otherwise correct
+reported fields within `validation.corrections_remaining`. On `exhausted`, stop for runtime recovery;
+never turn receipt failure into remediation, replan, abort, or a successor.

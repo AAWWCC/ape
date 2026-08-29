@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 2.24.2 — 2026-08-29
+
+The 2.24.1 certification cycle first exposed and fixed an exact-root guard that mistook the quoted
+`project_dir` key in generated JSON call templates for a filesystem path. Its later fast cohort then
+showed a worker validating two valid drafts that differed only in optional timing: the worker prompt
+incorrectly presented timing as required, a successful validation still carried a nested
+`continue_same_agent` action, and telemetry mislabeled the second valid submission as a contract
+rejection. Successful validation is now terminal and action-free; workers build one stable literal
+draft, omit runtime-stamped timing, and return that exact object without revalidation. Persisted
+validation summaries now distinguish total submissions from actually invalid attempts so receipt
+rejections and first-pass rates remain truthful. Version 2.24.2 starts a fresh exact-source
+certification cycle; no failed 2.24.1 attempt or evidence is reused.
+
 ## 2.24.1 — 2026-08-29
 
 The first 2.24.0 live-certification candidate was rejected because its generated fast-cohort prompt

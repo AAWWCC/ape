@@ -70,6 +70,9 @@ describe('APE v2 MCP public surface', () => {
     const receiptValidator = responses[1].result.tools.find(
       (tool) => tool.name === 'ape_validate_receipt',
     );
+    expect(receiptValidator.description).toMatch(
+      /valid result is terminal[\s\S]*no continuation action[\s\S]*exact validated draft unchanged[\s\S]*do not validate it again/iu,
+    );
     expect(receiptValidator.inputSchema).toMatchObject({
       required: ['ticket_id', 'draft'],
       additionalProperties: false,
