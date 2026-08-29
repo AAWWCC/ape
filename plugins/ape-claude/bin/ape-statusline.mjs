@@ -136,8 +136,18 @@ const readActive = (dir) => {
   activeStateCorrupt = false;
   try {
     const value = JSON.parse(readFileSync(join(dir, '.ape', 'runtime', 'active.json'), 'utf8'));
-    const diagnostic = projectRunDiagnostic(value);
-    if (diagnostic.reason_code === 'corrupt_state') {
+    // v2 keeps dispatch liveness in bounded lock/intent artifacts instead of
+    // requiring a denormalized dispatch_state in active.json. Supply a
+    // validation-only witness when the key is absent so artifact inspection
+    // stays after durable-state validation; diagnosticText derives the
+    // truthful dispatch status later.
+    const hasStoredDispatch = value && typeof value === 'object' && !Array.isArray(value) &&
+      Object.hasOwn(value, 'dispatch_state');
+    const validationDiagnostic = projectRunDiagnostic(
+      value,
+      hasStoredDispatch ? {} : { dispatchState: 'pending' },
+    );
+    if (validationDiagnostic.reason_code === 'corrupt_state') {
       const legacy = value && typeof value === 'object' && !Array.isArray(value) &&
         !['schema_version', 'run_id', 'host', 'dispatch_state'].some((key) => Object.hasOwn(value, key)) &&
         !Object.hasOwn(value, 'objective') &&

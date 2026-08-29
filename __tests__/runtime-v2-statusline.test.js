@@ -646,18 +646,31 @@ describe('ape v2 statusline renderer', () => {
     const runtime = join(dir, '.ape', 'runtime');
     const intents = join(runtime, 'dispatch-intents');
     const state = {
+      version: 2,
+      runtime_version: 2,
       run_id: 'run-later-dispatch',
       mode: 'phase',
       lane: 'fast',
       host: 'claude',
       status: 'running',
       stage: 'build',
+      // The durable runtime keeps dispatch liveness in the lock/intent
+      // artifacts. Override the fixture default with undefined so JSON
+      // serialization reproduces a real v2 active.json with no stored key.
+      dispatch_state: undefined,
       tickets: [{ ticket_id: ticketId, stage_id: 'build', role: 'implementer' }],
       receipts: [],
       expired_tickets: [],
     };
     writeActive(dir, state);
-    expect(stripAnsi(render({ workspace: { current_dir: dir } }))).toContain('dispatch_pending');
+    expect(Object.hasOwn(
+      JSON.parse(readFileSync(join(runtime, 'active.json'), 'utf8')),
+      'dispatch_state',
+    )).toBe(false);
+    const pendingLine = stripAnsi(render({ workspace: { current_dir: dir } }));
+    expect(pendingLine).toContain('dispatch_pending');
+    expect(pendingLine).not.toContain('CORRUPT');
+    expect(pendingLine).not.toContain('corrupt_state');
 
     mkdirSync(intents, { recursive: true });
     writeFileSync(join(runtime, 'active.lock'), JSON.stringify({
