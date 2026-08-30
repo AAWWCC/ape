@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 2.24.7 — 2026-08-30
+
+The public checkout now has a closed commit-attribution policy. Versioned commit-message and
+pre-push wrappers install into stable Git metadata and check new commits plus outgoing branch and
+nested tag objects, failing closed when historical code lacks the checker. Required PR CI blocks
+unapproved candidate ancestry from protected `main`, while release candidates containing the gate
+block assets for an unapproved pushed tag. Unknown and malformed identities fail without being
+echoed into logs. Live certification now pins both repository-local and effective author/committer
+identities rather than accepting any GitHub noreply address or ambient Git override.
+
+Over-budget live run responses now retain the exact native launch capability through the
+reference-only, minimal, and action-only fallback tiers. Claude's nonce-bearing dispatch intent
+and Codex's `spawn_args` remain launchable while recoverable annotations and run detail move behind
+authoritative references. The plaintext Claude nonce remains memory/wire-only, and the 48,000-byte
+host-safety bound is unchanged. Native model selectors are also rejected before immutable ticket
+issuance or intent preparation when they exceed the corresponding launch-hook boundary. Large
+legacy execution-budget continuations now replay one native parallel group at a time, retaining a
+hash-checked durable tail instead of minting more launch capabilities than one response can carry.
+Version 2.24.7 invalidates the prior source certification and starts a fresh release cycle.
+
 ## 2.24.6 — 2026-08-29
 
 APE no longer intercepts or authorizes tools owned by other MCP servers. External MCP discovery,

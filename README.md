@@ -195,6 +195,7 @@ See [configuration](docs/configuration.md), [pipelines](docs/pipeline.md), and t
 
 ```bash
 npm ci
+npm run public:hooks
 npm run typecheck
 npm run test:v2
 npm run bundle
@@ -207,6 +208,17 @@ npm run operational:canary
 npm run release:live-certification -- --head <certification-commit> --tag <version-tag>
 npm run validate
 ```
+
+`npm run public:hooks` copies the repository's versioned commit-message and pre-push wrappers into
+stable Git metadata for this clone. During ordinary commits they reject unapproved author,
+committer, co-author, and sign-off identities before the object is created, then check every
+outgoing branch or tag including nested taggers. A historical checkout that lacks the checker fails
+closed; rerun the installer after moving the checkout or changing its Git metadata location.
+Required PR CI checks the exact source commit against complete history before protected `main` can
+merge. Release candidates containing this gate check their pushed tag and block release assets if
+a local hook was bypassed. Use the versioned hooks in every write-enabled clone because post-push
+CI cannot retract a remote ref that GitHub has already accepted, and a tag aimed at older code runs
+that older revision's workflow.
 
 `npm run release:artifacts` produces the two host tarballs, checksum ledger, release manifest, and
 SPDX SBOM under `release/`. `npm run release:reproducible` builds that set twice and compares every

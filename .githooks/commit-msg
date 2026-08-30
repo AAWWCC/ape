@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+exec node scripts/check-public-commit-identities.mjs --commit-message "$1"

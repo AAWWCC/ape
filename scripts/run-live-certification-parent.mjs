@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyLiveCertificationEnvironment } from './check-live-certification-environment.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const RELEASE_VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -198,6 +199,11 @@ export function buildCodexParentInvocation({
 }) {
   const project = exactDirectory(projectDir, '--project-dir');
   const home = exactDirectory(codexHome, '--codex-home');
+  try {
+    verifyLiveCertificationEnvironment(project);
+  } catch (error) {
+    throw new LiveCertificationParentError(error?.message ?? String(error));
+  }
   if (typeof promptPath !== 'string' || !existsSync(promptPath)) {
     throw new LiveCertificationParentError('--prompt must name an existing file');
   }
@@ -227,7 +233,13 @@ export function buildCodexParentInvocation({
       '-',
     ]),
     cwd: project,
-    env: Object.freeze({ CODEX_HOME: home }),
+    env: Object.freeze({
+      CODEX_HOME: home,
+      GIT_AUTHOR_NAME: 'APE Certification',
+      GIT_AUTHOR_EMAIL: 'ape-certification@users.noreply.github.com',
+      GIT_COMMITTER_NAME: 'APE Certification',
+      GIT_COMMITTER_EMAIL: 'ape-certification@users.noreply.github.com',
+    }),
     input: prompt,
   });
 }

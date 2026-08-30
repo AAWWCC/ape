@@ -1,6 +1,6 @@
 {
   "name": "ape",
-  "version": "2.24.6",
+  "version": "2.24.7",
   "type": "module",
   "private": true,
   "description": "APE — durable, evidence-gated engineering runs for AI coding agents",
@@ -63,7 +63,9 @@
     "package:reproducible": "node scripts/check-plugin-reproducibility.mjs",
     "release:artifacts": "node scripts/build-release-artifacts.mjs",
     "release:reproducible": "node scripts/check-release-reproducibility.mjs",
-    "public:check": "node scripts/check-public-surface.mjs",
+    "public:check": "node scripts/check-public-surface.mjs && node scripts/check-public-commit-identities.mjs",
+    "public:identity": "node scripts/check-public-commit-identities.mjs",
+    "public:hooks": "node scripts/install-public-hooks.mjs",
     "public:export": "node scripts/export-public-tree.mjs",
     "smoke:plugins": "node scripts/smoke-plugin-mcp.mjs",
     "smoke:marketplaces": "node scripts/smoke-marketplace-install.mjs",

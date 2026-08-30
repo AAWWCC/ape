@@ -18,7 +18,7 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = dirname(SCRIPT_DIR);
-const PUBLIC_VERSION = '2.24.6';
+const PUBLIC_VERSION = '2.24.7';
 const PUBLIC_FILES = Object.freeze([
   '.gitattributes',
   'compatibility.json',
@@ -33,6 +33,7 @@ const PUBLIC_FILES = Object.freeze([
   'vitest.config.js',
 ]);
 const PUBLIC_DIRECTORIES = Object.freeze([
+  '.githooks',
   '.agents',
   '.claude-plugin',
   '.github',
@@ -50,6 +51,7 @@ const PUBLIC_DIRECTORIES = Object.freeze([
   'scripts',
   'test-support',
 ]);
+const PUBLIC_EXECUTABLE_FILES = new Set(['.githooks/commit-msg', '.githooks/pre-push']);
 
 class ExportError extends Error {}
 
@@ -150,7 +152,8 @@ async function copyPublicFile(source, destination) {
   await mkdir(dirname(destination), { recursive: true, mode: 0o755 });
   await chmod(dirname(destination), 0o755);
   await writeFile(destination, sanitizePublicText(text), 'utf8');
-  await chmod(destination, 0o644);
+  const normalized = relative(REPO_ROOT, source).split(sep).join('/');
+  await chmod(destination, PUBLIC_EXECUTABLE_FILES.has(normalized) ? 0o755 : 0o644);
 }
 
 async function copyRegularTree(source, destination) {

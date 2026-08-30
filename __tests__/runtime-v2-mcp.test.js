@@ -1,12 +1,23 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { sha256 } from '../lib/runtime/canonical.js';
 import { LANES } from '../lib/runtime/constants.js';
+import { RESPONSE_BUDGET_BYTES } from '../lib/runtime/projection.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+async function filesUnder(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const file = path.join(directory, entry.name);
+    return entry.isDirectory() ? filesUnder(file) : [file];
+  }));
+  return nested.flat();
+}
 
 const verificationProfiles = [{
   id: 'api-contract',
@@ -40,6 +51,28 @@ function session(messages) {
       else resolve(stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line)));
     });
     child.stdin.end(messages.map((message) => JSON.stringify(message)).join('\n') + '\n');
+  });
+}
+
+function invokeClaudeHook(input) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(root, 'bin', 'ape-hook.mjs')], {
+      cwd: root,
+      env: { ...process.env, CLAUDECODE: '1' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) reject(new Error(stderr));
+      else resolve(JSON.parse(stdout));
+    });
+    child.stdin.end(`${JSON.stringify(input)}\n`);
   });
 }
 
@@ -470,7 +503,7 @@ describe('APE v2 MCP public surface', () => {
     }
   }, 30_000);
 
-  it('accepts answer-preflight without optional fields over the MCP wire', async () => {
+  it('keeps an over-budget answer-preflight Claude dispatch launchable over the MCP wire', async () => {
     const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-answer-'));
     try {
       await mkdir(path.join(scratch, '.ape', 'runtime'), { recursive: true });
@@ -507,6 +540,7 @@ describe('APE v2 MCP public surface', () => {
             questions: [
               { id: 'api-name', question: 'Which API name stays stable?', rationale: 'Compatibility' },
             ],
+            analysis: `Accepted preflight evidence ${'P'.repeat(20_000)}`,
           },
         },
         input_required: { preflight_hash: preflightHash, question_ids: ['api-name'] },
@@ -524,17 +558,78 @@ describe('APE v2 MCP public surface', () => {
             preflight_hash: preflightHash,
             reason: 'Operator answering question over MCP wire without optional fields',
             answers: [
-              { id: 'api-name', answer: 'Keep value export unchanged.' },
+              { id: 'api-name', answer: 'A'.repeat(16_000) },
             ],
           },
         },
       }]);
       expect(responses[0].result.isError).not.toBe(true);
-      const result = JSON.parse(responses[0].result.content[0].text);
+      const text = responses[0].result.content[0].text;
+      expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(RESPONSE_BUDGET_BYTES);
+      const result = JSON.parse(text);
+      expect(result.projection).toMatchObject({
+        kind: 'reference-only-v1',
+        authoritative_ref: '.ape/runtime/active.json',
+      });
       expect(result.run.status).toBe('running');
       expect(result.run.lane).toBe('fast');
       expect(result.run.stage).toBe('test');
-      expect(result.run.claimed_paths).toEqual(['value.js']);
+      const action = result.actions.find((entry) => entry.type === 'dispatch_agent');
+      const { nonce, prompt } = action.dispatch.dispatch_intent;
+      expect(nonce).toMatch(/^[A-Za-z0-9_-]{32,256}$/u);
+      expect(prompt).toBe(
+        `Execute the immutable APE StageTicket ${action.ticket.ticket_id}.\n` +
+        `APE_DISPATCH_NONCE=${nonce}`,
+      );
+      expect(prompt.match(/APE_DISPATCH_NONCE=/gu)).toHaveLength(1);
+      const intentName = `${sha256(action.ticket.ticket_id)}.json`;
+      expect(action.dispatch.dispatch_intent_ref)
+        .toBe(`.ape/runtime/dispatch-intents/${intentName}`);
+
+      const active = JSON.parse(await readFile(
+        path.join(scratch, '.ape', 'runtime', 'active.json'),
+        'utf8',
+      ));
+      expect(active.claimed_paths).toEqual(['value.js']);
+      const intentDir = path.join(scratch, '.ape', 'runtime', 'dispatch-intents');
+      const intentFiles = (await readdir(intentDir)).filter((name) => name.endsWith('.json'));
+      expect(intentFiles).toEqual([intentName]);
+      const persisted = await readFile(path.join(intentDir, intentFiles[0]), 'utf8');
+      expect(JSON.parse(persisted).nonce_hash).toMatch(/^[a-f0-9]{64}$/u);
+      expect(persisted).not.toContain(nonce);
+      expect(persisted).not.toContain(prompt);
+      const runtimeFiles = await filesUnder(path.join(scratch, '.ape', 'runtime'));
+      for (const file of runtimeFiles) {
+        const contents = await readFile(file, 'utf8');
+        expect(contents, `plaintext nonce leaked into ${path.relative(scratch, file)}`)
+          .not.toContain(nonce);
+        expect(contents, `launch prompt leaked into ${path.relative(scratch, file)}`)
+          .not.toContain(prompt);
+      }
+
+      const launch = await invokeClaudeHook({
+        hook_event_name: 'PreToolUse',
+        project_dir: scratch,
+        session_id: 'mcp-over-budget-parent',
+        tool_use_id: 'mcp-over-budget-launch',
+        tool_name: 'Agent',
+        tool_input: {
+          subagent_type: action.dispatch.agent_type,
+          prompt,
+          model: action.dispatch.model.model,
+        },
+      });
+      expect(launch.hookSpecificOutput.permissionDecision).toBe('allow');
+      const started = await invokeClaudeHook({
+        hook_event_name: 'SubagentStart',
+        project_dir: scratch,
+        session_id: 'mcp-over-budget-parent',
+        agent_id: 'mcp-over-budget-agent',
+        agent_type: action.dispatch.agent_type,
+      });
+      const context = started.hookSpecificOutput.additionalContext;
+      expect(context).toEqual(expect.any(String));
+      expect(context).not.toContain(nonce);
     } finally {
       await rm(scratch, { recursive: true, force: true });
     }

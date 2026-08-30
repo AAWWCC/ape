@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { bindClaudeSubagent, launchClaudeIntent, pruneClaudeIntents } from '../lib/runtime/claude-dispatch.js';
+import {
+  bindClaudeSubagent,
+  launchClaudeIntent,
+  prepareClaudeIntent,
+  pruneClaudeIntents,
+} from '../lib/runtime/claude-dispatch.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { finalizeTicket } from '../lib/runtime/schemas.js';
 import { abortRun, recordReceipt, startRun } from '../lib/runtime/service.js';
@@ -172,6 +177,36 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     const stored = await readFile(runtimePaths(dir).active, 'utf8');
     expect(stored).not.toContain(nonce);
     expect(Buffer.byteLength(stored)).toBeLessThan(256 * 1024);
+  });
+
+  it('rejects an unlaunchable model before minting a Claude dispatch intent', async () => {
+    const dir = await project();
+    const paths = runtimePaths(dir);
+    const baseTicket = {
+      run_id: 'run-model-boundary',
+      ticket_id: 'ticket-model-boundary',
+      ticket_hash: 'a'.repeat(64),
+      role: 'implementer',
+      deadline_at: new Date(Date.now() + 60_000).toISOString(),
+    };
+    await expect(prepareClaudeIntent(paths, {
+      ...baseTicket,
+      model: { model: 'c'.repeat(257) },
+    }, 'ape:implementer')).rejects.toThrow('Claude dispatch ticket carries an invalid model');
+    const afterRejection = await readdir(paths.dispatchIntents).catch((error) => {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    });
+    expect(afterRejection).toEqual([]);
+
+    const prepared = await prepareClaudeIntent(paths, {
+      ...baseTicket,
+      model: { model: 'c'.repeat(256), annotation: 'retained-on-ticket' },
+    }, 'ape:implementer');
+    expect(prepared.nonce).toMatch(/^[A-Za-z0-9_-]{32,256}$/u);
+    const { intent } = await readOnlyIntent(dir);
+    expect(intent.nonce_hash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(JSON.stringify(intent)).not.toContain(prepared.nonce);
   });
 
   it('recovers a legacy prepared intent after its five-minute nonce lease and still consumes it once', async () => {

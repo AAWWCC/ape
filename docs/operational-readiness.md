@@ -21,8 +21,11 @@ these canaries in a disposable repository on every host marked `required` for li
 packaged and receives pinned structural and marketplace validation, but authenticated Claude live
 operation is marked `unverified` and is not part of the release certificate.
 
-Before the first attempt, set `user.name` and a GitHub noreply `user.email` in each disposable
-repository's local Git config; never inherit release commit identity from global or system config.
+Before the first attempt, set the exact repository-local identity `APE Certification
+<ape-certification@users.noreply.github.com>` in each disposable repository's Git config; never
+inherit release commit identity from global or system config, substitute another noreply account,
+or override the effective author/committer with `GIT_*` environment variables. The parent launcher
+rechecks and pins that identity immediately before starting Codex.
 Run `npm run release:live-preflight -- --project-dir <disposable-repository>` from the exact source
 candidate and require it to pass before launching the host. This prevents GitHub private-email push
 protection from turning a clean APE run into a shipping failure.

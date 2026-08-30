@@ -45,6 +45,36 @@ const roles = [
 ];
 
 describe('APE v2 adapter conformance', () => {
+  it('enforces each native model boundary without stripping open annotations', () => {
+    const annotation = 'operator-note-'.repeat(4_000);
+    const claudeModel = { model: 'c'.repeat(256), annotation };
+    const claude = nativeDispatch('claude', { ...ticket, model: claudeModel });
+    expect(claude.model).toBe(claudeModel);
+    expect(() => nativeDispatch('claude', { ...ticket, model: { model: '' } }))
+      .toThrow('Claude dispatch ticket carries an invalid model');
+    expect(() => nativeDispatch('claude', { ...ticket, model: { model: 1 } }))
+      .toThrow('Claude dispatch ticket carries an invalid model');
+    expect(() => nativeDispatch('claude', {
+      ...ticket,
+      model: { model: 'c'.repeat(257) },
+    })).toThrow('Claude dispatch ticket carries an invalid model');
+
+    const codexModel = {
+      model: 'g'.repeat(512),
+      reasoning_effort: 'r'.repeat(64),
+      annotation,
+    };
+    expect(nativeDispatch('codex', { ...ticket, model: codexModel }).model).toBe(codexModel);
+    expect(() => nativeDispatch('codex', {
+      ...ticket,
+      model: { model: 'g'.repeat(513), reasoning_effort: 'high' },
+    })).toThrow('Codex dispatch ticket carries an invalid model');
+    expect(() => nativeDispatch('codex', {
+      ...ticket,
+      model: { model: 'gpt-5.5', reasoning_effort: 'r'.repeat(65) },
+    })).toThrow('Codex dispatch ticket carries an invalid reasoning effort');
+  });
+
   it('translates the same ticket without owning policy', () => {
     const claude = nativeDispatch('claude', ticket);
     const codex = nativeDispatch('codex', ticket);
