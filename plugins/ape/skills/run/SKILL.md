@@ -23,8 +23,9 @@ call.
   documentation only when the objective may require them.
 - `test_paths`: independently authored test paths for behavioral work; never put them in
   `claimed_paths`.
-- `behavioral`, `requirements`, `completes`, `risk_triggers`, and least-privilege `tool_claims`.
-- `required_capabilities`: only exact additionally required capability IDs; never infer availability.
+- `behavioral`, `requirements`, `completes`, and `risk_triggers`.
+- `required_capabilities`: only exact additionally required command or verification capability IDs;
+  never infer availability. External MCP tools are discovered and permissioned by the host, not APE.
 - `plan_contract_version: 2` for every newly started behavioral fast/full `phase` run. Omit it for
   mechanical, non-phase modes, and every resume; version 1 is legacy-only.
 

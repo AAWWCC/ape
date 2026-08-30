@@ -191,36 +191,28 @@ short attached operands, and relocation flags. The refusal names the operand, no
 The optional leading `cd` is resolved first; the remaining command is checked relative to that
 directory. The session cwd itself must already be inside the governed project.
 
-## External editor MCP policy
+## External MCP pass-through
 
-APE's matcher and authorization rules normalize namespaced MCP tool calls from either host, but
-that does not prove that a provider is installed, connected, or exposes the same names on both
-hosts. The current capability and evidence boundary is explicit:
+APE does not match, classify, authorize, deny, or audit tools owned by other MCP servers. Server
+names, operation names, schemas, discovery, and permissions remain host- and operator-owned. This
+keeps an installed APE plugin from interfering with unrelated integrations or requiring future tool
+names to be predicted before a run starts.
 
-| External surface | Codex | Claude Code |
-| --- | --- | --- |
-| Unity, Blender, Playwright exact adapters | Host-neutral policy fixtures cover classification; live availability depends on the operator's connected server. | Same policy implementation, but no claim of live provider parity. |
-| GitHub `mcp__codex_apps__github_*` connector | Exact reviewed read operations are attested; mutations fail closed. | Not a Claude surface; no parity claim. |
-| Reviewed GitHub MCP server identity | Exact read classification is covered and mutations fail closed; connection is external to APE. | Policy can classify the exact identity, but no live Claude attestation is claimed. |
-| Codex Security | Read-only triage inspection is attested; scan/remediation state changes fail closed. | Not attested or advertised. |
-| Other namespaced plugin MCP | An exact `<server>:tool:<operation>:read` ticket claim may admit a conservative read. | The same policy branch exists, but package/provider discovery is not attested. |
+The shared policy hooks match only APE's own control-plane operations and receipt validator, plus
+the host write, shell, and agent-dispatch surfaces APE actually governs. A defensive runtime branch
+also immediately defers any non-APE `mcp__<server>__<operation>` event without returning a permission
+decision if a host delivers it despite the narrowed matcher, before APE reads run state or resolves
+a ticket binding.
 
-A bound stage needs matching immutable `tool_claims`; write also requires a writable role. Main-
-session inspection remains available, but mutation is denied during a run. An exact claim cannot
-install a provider or upgrade an unavailable/unverified host capability. Wildcards and
-write/execute claims cannot upgrade an unknown tool, and admitted unknown reads retain conservative
-post-call drift reconciliation.
+Claude's supplemental asynchronous LARP hook still sees failed tool events for user-facing error
+cues. It has no permission or receipt authority; the synchronous policy bundle does not receive
+generic MCP events.
 
-Claude agent manifests include `mcp__*` in their role-specific tool allowlists so parent-session MCP
-providers remain visible to bound subagents. A manifest-level `disallowedTools` backstop removes both
-supported namespace forms of `ape_run`, `ape_config`, and `ape_history`; the lifecycle hook separately
-enforces that orchestrator-only boundary. `ape_status` remains available as a compact read, while every
-external MCP operation still needs the exact ticket claim described above.
-
-Raw Playwright, Blender, or Unity code execution uses `server-rce` and requires a writable,
-high-risk ticket plus an exact non-wildcard provider claim. File inputs are separate resources.
-PostToolUse records runtime-observed effects in `external-tool-effects.ndjson`; receipt admission
-ignores agent-supplied effects and still reconciles the filesystem tree.
+Claude agent manifests retain `ToolSearch` and `mcp__*` so parent-session providers remain visible
+to bound workers. Their `disallowedTools` entries cover only APE's own orchestrator-controlled
+operations; `ape_validate_receipt` remains the one worker protocol tool. Repository integrity is
+still checked at agent/receipt boundaries against `claimed_paths` and `test_paths`, independently of
+which external service a worker used.
 
 ## Main-session shell policy
 

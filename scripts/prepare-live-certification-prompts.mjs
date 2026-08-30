@@ -87,7 +87,6 @@ function exactRunCall(action, projectDir, contract) {
     requirements: [],
     completes: [],
     risk_triggers: [],
-    tool_claims: [],
     required_capabilities: [],
     behavioral: contract.behavioral,
     hooks_trusted: true,

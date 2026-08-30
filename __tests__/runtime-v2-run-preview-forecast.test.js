@@ -503,9 +503,8 @@ describe('previewRun blueprint shape', () => {
   });
 
   it('separates requested, pipeline-derived, and available capability facts', async () => {
-    const requested = [{ kind: 'tool_claim', id: 'browser:page:read' }];
+    const requested = [{ kind: 'evidence_command', id: 'npm test' }];
     const result = await previewRun(sharedProjectDir, previewInput({
-      tool_claims: ['browser:page:read'],
       required_capabilities: requested,
     }));
     const readiness = result.blueprint.readiness;
@@ -518,8 +517,8 @@ describe('previewRun blueprint shape', () => {
     expect(readiness.available_capability_catalog).toMatchObject({
       config_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
       catalog_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
-      declared_tool_claims: ['browser:page:read'],
     });
+    expect(readiness.available_capability_catalog).not.toHaveProperty('declared_tool_claims');
     expect(readiness).not.toHaveProperty('execution_budget');
   });
 });

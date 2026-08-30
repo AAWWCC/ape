@@ -156,7 +156,6 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
             verification_profiles: [{ id: 'integration', command: 'npm test' }],
             runners: [{ root: '.', profile: { full: 'npm test' } }],
             test_commands: { targeted: 'npm test -- value.test.js', full: 'npm test' },
-            declared_tool_claims: ['browser.read'],
           },
           capabilities: { unbounded_legacy_snapshot: 'x'.repeat(60_000) },
           doctor: { unbounded_diagnostics: 'x'.repeat(60_000) },

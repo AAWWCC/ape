@@ -120,12 +120,15 @@ generated-path exception across a monorepo.
 ## Trust boundary
 
 The model proposes work and returns receipt drafts. The runtime independently supplies or verifies
-identity, ticket capability, paths, tree hashes, test observations, external-tool effects, receipt
-hashes, stage transitions, and merge gates. Agent text never grants authority.
+identity, ticket capability, paths, tree hashes, test observations, receipt hashes, stage
+transitions, and merge gates. Agent text never grants authority. External MCP permissions remain
+with the host and operator rather than APE.
 
-Lifecycle hooks enforce this boundary at tool time. Main-session control-plane calls remain
-available, while a bound child may act only within its immutable ticket. Unknown or ambiguous
-write/execute paths fail closed during an active run.
+Lifecycle hooks enforce this boundary at tool time for APE-owned shell, filesystem-write, agent-
+dispatch, control-plane, and receipt-validation surfaces. On those surfaces, main-session control-
+plane calls remain available while a bound child may act only within its immutable ticket, and
+unknown or ambiguous write/execute paths fail closed during an active run. External MCP calls defer
+to the host; APE still reconciles resulting repository changes at agent and receipt boundaries.
 
 Shipping truth and local checkout hygiene are separate. `github-shipping.js` proves the exact
 pushed head and remote merge before completion; `receipt-service.js` then reconciles the local

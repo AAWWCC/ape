@@ -101,11 +101,6 @@ const TOOLS = Object.freeze([
           items: { type: 'string' },
           description: 'PRODUCTION files the run may write. Never list test files here — tests go in test_paths. Empty means unbounded scope, which forces the full lane.',
         },
-        tool_claims: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Structured external-tool capabilities in provider:resource:read|write|execute form, for example unity:console:read, blender:scene:execute, or playwright:origin:https://example.com:execute.',
-        },
         test_paths: {
           type: 'array',
           items: { type: 'string' },
@@ -137,7 +132,7 @@ const TOOLS = Object.freeze([
         required_capabilities: {
           type: 'array',
           maxItems: 64,
-          description: 'Optional additive capabilities that must exist before start. Every entry names one exact configured command profile, verification profile, evidence command, or declared tool claim.',
+          description: 'Optional additive capabilities that must exist before start. Every entry names one exact configured command profile, verification profile, or evidence command.',
           items: {
             oneOf: [
               {
@@ -160,19 +155,6 @@ const TOOLS = Object.freeze([
                 properties: {
                   kind: { const: 'evidence_command' },
                   id: { type: 'string', minLength: 1 },
-                },
-              },
-              {
-                type: 'object', additionalProperties: false, required: ['kind', 'id'],
-                properties: {
-                  kind: { const: 'tool_claim' },
-                  id: {
-                    type: 'string',
-                    minLength: 3,
-                    maxLength: 4096,
-                    pattern: '^[a-z0-9][a-z0-9._-]*:(?:\\*|[^\\u0000-\\u001f\\u007f\\s*](?:[^\\u0000-\\u001f\\u007f*]*[^\\u0000-\\u001f\\u007f\\s*])?|[^\\u0000-\\u001f\\u007f\\s*][^\\u0000-\\u001f\\u007f*]*\\*):(read|write|execute)$',
-                    description: 'Exact provider:resource:read|write|execute claim.',
-                  },
                 },
               },
             ],
@@ -575,7 +557,6 @@ async function dispatchApeRun(projectDir, input) {
       lane: input.lane ?? 'auto',
       host: input.host,
       claimed_paths: input.claimed_paths ?? [],
-      tool_claims: input.tool_claims ?? [],
       test_paths: input.test_paths ?? [],
       requirements: input.requirements ?? [],
       ...(input.completes !== undefined ? { completes: input.completes } : {}),
@@ -603,7 +584,6 @@ async function dispatchApeRun(projectDir, input) {
       lane: input.lane ?? 'auto',
       host: input.host,
       claimed_paths: input.claimed_paths ?? [],
-      tool_claims: input.tool_claims ?? [],
       test_paths: input.test_paths ?? [],
       requirements: input.requirements ?? [],
       // Strict start schema: forward the optional advances-vs-completes subset

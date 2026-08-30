@@ -157,7 +157,8 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
       tool_input: toolInput,
     });
 
-    expect(decision(response)).toBe('allow');
+    if (toolName.startsWith('mcp__')) expect(response).toEqual({});
+    else expect(decision(response)).toBe('allow');
   });
 
   it('prepares a bounded one-time nonce without persisting its plaintext', async () => {
@@ -560,7 +561,6 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
 
   it.each([
     ['Bash', { command: "node -e \"require('fs').writeFileSync('src/value.js', 'pwned')\"" }],
-    ['mcp__filesystem__write_file', { path: 'src/value.js', content: 'pwned' }],
     ['custom_mutator', { path: 'src/value.js', content: 'pwned' }],
   ])('fails closed for an unproven active APE mutation channel: %s', async (toolName, toolInput) => {
     const dir = await project();
@@ -596,6 +596,20 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
       tool_input: toolInput,
     });
     expect(decision(response)).toBe('deny');
+  });
+
+  it('returns neutral output for a bound worker external MCP call', async () => {
+    const dir = await project();
+    const response = await invokeClaudeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: 'external-mcp-parent',
+      agent_id: 'external-mcp-worker',
+      agent_type: 'ape:implementer',
+      tool_name: 'mcp__filesystem__write_file',
+      tool_input: { path: 'src/value.js', content: 'host decides' },
+    });
+    expect(response).toEqual({});
   });
 
   it('rejects a forged receipt even when its public ticket id and evidence are valid', async () => {

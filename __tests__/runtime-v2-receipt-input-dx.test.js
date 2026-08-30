@@ -300,9 +300,9 @@ describe('shipped output_schema stays in sync with zod', () => {
     expect(field.type).toBe('object');
     expect(field.additionalProperties).toBe(false);
     expect(Object.keys(field.properties).sort()).toEqual([
-      'claimed_paths', 'required_role', 'test_paths', 'tool_claims',
+      'claimed_paths', 'required_role', 'test_paths',
     ]);
-    for (const key of ['claimed_paths', 'test_paths', 'tool_claims']) {
+    for (const key of ['claimed_paths', 'test_paths']) {
       expect(field.properties[key]).toMatchObject({
         type: 'array',
         maxItems: 64,

@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { SAFE_CLAUDE_SUBAGENT_TOOLS } from '../lib/runtime/hooks.js';
 
 // Layer 2 (defense in depth) of control-plane ownership: the agents/*.md
-// manifests expose inherited MCP tools to the runtime's ticket-claim policy but
-// use disallowedTools so an APE subagent can never reach the ape_* control plane,
+// manifests expose inherited MCP tools directly to the host but use
+// disallowedTools so an APE subagent can never reach the ape_* control plane,
 // even when the policy hook is not installed or trusted. Agent/Task remain absent
 // from the built-in allowlist. The runtime exports the shared built-in contract;
 // this test pins the Claude-specific MCP frontmatter contract.
@@ -27,7 +27,7 @@ const DENIED = [
 ];
 const WRITER_EXTRA = ['Edit', 'Write', 'MultiEdit'];
 const WRITERS = new Set(['implementer', 'test-writer']);
-const CONTROL_PLANE = /(?:^|__)ape_(run|status|config|history)$/;
+const CONTROL_PLANE = /^mcp__(?:ape|plugin_ape_ape)__ape_(run|status|config|history)$/;
 
 function parseToolSurface(file) {
   const source = readFileSync(path.join(agentsDir, file), 'utf8');

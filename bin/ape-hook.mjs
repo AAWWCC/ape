@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import {
   normalizeLifecycleEvent,
   evaluateLifecyclePolicy,
@@ -21,15 +20,15 @@ import {
   looksLikeTest,
   withinTestScope,
   CONTROL_PLANE_TOOLS,
+  isExternalMcpTool,
   evaluateWriteContentPolicy,
   isAgentDispatchTool,
 } from '../lib/runtime/hooks.js';
-import { SCHEMA_VERSION, SEALED_STATUSES } from '../lib/runtime/constants.js';
+import { SEALED_STATUSES } from '../lib/runtime/constants.js';
 import { widenedTestClaims } from '../lib/runtime/path-scope.js';
 import { resolveGovernedRoot, runtimePaths } from '../lib/runtime/paths.js';
-import { appendJsonLine, readJson } from '../lib/runtime/storage.js';
+import { readJson } from '../lib/runtime/storage.js';
 import { currentTreeSha, diffFiles } from '../lib/runtime/git.js';
-import { resolveClaimedPluginRead } from '../lib/runtime/external-tools.js';
 import {
   bindClaudeSubagent,
   bindCodexSubagent,
@@ -179,6 +178,19 @@ try {
       decision: 'allow',
       reason: 'APE control-plane MCP call is exempt from the stage guard',
     }))}\n`);
+    process.exit(0);
+  }
+
+  // Generic MCP integrations are outside APE's authority. Exit before any
+  // run-state read, binding lookup, drift reconciliation, or effect audit so a
+  // broken/stale APE runtime cannot interfere with an unrelated server. The
+  // explicit APE control-plane and receipt-validation names are excluded by
+  // isExternalMcpTool and continue through their dedicated policy paths.
+  if (isExternalMcpTool(event.tool_name)) {
+    // Neutral output is intentional. In particular, Claude's explicit
+    // "allow" response can bypass the host's own permission prompt. APE is
+    // stepping out of the decision entirely, not granting permission itself.
+    process.stdout.write('{}\n');
     process.exit(0);
   }
 
@@ -434,15 +446,6 @@ try {
     }))}\n`);
     process.exit(0);
   }
-  // Generic Codex plugins are not trusted merely because they are installed.
-  // Once the immutable ticket is resolved, an exact per-operation read claim
-  // may narrow an otherwise unknown plugin MCP call to a conservative read.
-  // Store the resolved classification on the event so lifecycle policy, drift
-  // reconciliation, and the persisted effect audit all consume one verdict.
-  event.external_tool = resolveClaimedPluginRead(
-    event.external_tool,
-    ticket?.tool_claims,
-  );
   if (ticket && event.targets.length > 0) {
     for (const target of event.targets) {
       if (target.file) {
@@ -790,38 +793,6 @@ try {
     ticket,
     claudeBindingDenialCause: dispatchBindingDenialCause,
   });
-  if (
-    ticket &&
-    event.external_tool &&
-    (event.event === 'PostToolUse' || event.event === 'PostToolUseFailure')
-  ) {
-    try {
-      const response = input.tool_response ?? input.toolResponse ?? null;
-      const responseHash = response === null
-        ? null
-        : createHash('sha256').update(JSON.stringify(response)).digest('hex');
-      await appendJsonLine(paths.externalToolEffects, {
-        schema_version: SCHEMA_VERSION,
-        run_id: state.run_id,
-        ticket_id: ticket.ticket_id,
-        host: event.host,
-        agent_identity: event.agent_identity,
-        provider: event.external_tool.provider,
-        operation: event.external_tool.operation,
-        effect: event.external_tool.effect,
-        resources: event.external_tool.resources,
-        tool_use_id: input.tool_use_id ?? input.toolUseId ?? null,
-        status: event.event === 'PostToolUse' ? 'completed' : 'failed',
-        response_hash: responseHash,
-        occurred_at: new Date().toISOString(),
-      });
-    } catch (cause) {
-      decision = {
-        decision: 'deny',
-        reason: `APE external tool result denied: effect audit could not be persisted (${cause?.code ?? cause?.message ?? String(cause)})`,
-      };
-    }
-  }
   process.stdout.write(`${JSON.stringify(formatHookResponse(event, decision))}\n`);
 } catch (cause) {
   // The input may be unparseable (oversized or corrupt), so consult the

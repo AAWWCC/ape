@@ -132,7 +132,7 @@ describe('public prompt contracts', () => {
     }
     expect(common).toContain('`evidence.summary`');
     expect(common).toMatch(/`evidence\.required_claims`[\s\S]*object, never an array/iu);
-    for (const field of ['claimed_paths', 'test_paths', 'tool_claims', 'required_role']) {
+    for (const field of ['claimed_paths', 'test_paths', 'required_role']) {
       expect(common, `required claim field ${field}`).toContain(`\`${field}\``);
     }
     expect(common).toMatch(/plan_deviation[\s\S]*only[\s\S]*material deviation[\s\S]*approved_plan[\s\S]*otherwise omit/iu);

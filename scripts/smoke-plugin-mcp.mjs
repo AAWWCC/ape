@@ -47,7 +47,6 @@ function assertToolContract(host, tools) {
     JSON.stringify(kinds) === JSON.stringify([
       'command_profile',
       'evidence_command',
-      'tool_claim',
       'verification_profile',
     ]),
     host,
@@ -80,11 +79,6 @@ function assertToolContract(host, tools) {
     capabilityByKind.get('evidence_command')?.properties?.id?.minLength === 1,
     host,
     'evidence_command capability does not require a nonblank exact command ID',
-  );
-  assertContract(
-    /read\|write\|execute/.test(capabilityByKind.get('tool_claim')?.properties?.id?.pattern ?? ''),
-    host,
-    'tool_claim capability does not publish the canonical access-ID grammar',
   );
 
   const validateSchema = byName.get('ape_validate_receipt')?.inputSchema;
@@ -187,7 +181,6 @@ async function smoke(host, pluginRoot) {
               lane: 'auto',
               host,
               claimed_paths: ['src/example.js'],
-              tool_claims: [],
               test_paths: [],
               requirements: [],
               risk_triggers: [],

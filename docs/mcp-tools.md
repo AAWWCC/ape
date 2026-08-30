@@ -69,7 +69,7 @@ metrics calls do not mutate that cache or send telemetry anywhere.
 - `preview` uses the same readiness resolver and reports derived capability requirements and the
   pipeline's deterministic dispatch bounds before any run state is written.
 - `record` accepts an agent receipt draft. The runtime adds and verifies identity, tree/test
-  evidence, observed external-tool effects, hashes, and the next transition. New-contract tickets
+  evidence, hashes, and the next transition. New-contract tickets
   also require a matching `ape_validate_receipt` attestation for the normalized exact draft.
 - `next` advances one pending transition or polls a `gating`/`shipping` watch.
 - `ape_status` is the canonical read-only status tool. The `ape_run` `status` action remains a
@@ -190,53 +190,19 @@ command. `output_hash` may be omitted from both entries when the host does not e
 output to compute it; agents must never invent a digest. When a baseline hash is supplied, the
 matching receipt hash is required and must be byte-for-byte identical.
 
-### External-tool claims
+### External MCP tools
 
-`tool_claims` use `provider:resource:read|write|execute`. They govern already-connected Unity,
-Blender, Playwright, GitHub, Codex Security, and explicitly claimed plugin MCP reads; a claim does
-not install or connect a provider. Availability and attestation are host-specific:
+New run starts do not advertise, require, persist, or enforce external-tool claims. Non-APE MCP
+servers and operations pass through to the host's discovery, connection, permission, and approval
+mechanisms without APE classification or interception. This includes providers added after the
+installed APE version and operations whose names cannot be known when a run starts. Legacy claim
+fields remain parseable only inside immutable historical tickets and manifests; they grant no
+authority and are not part of the new run input contract.
 
-| External surface | Codex | Claude Code |
-| --- | --- | --- |
-| Unity, Blender, Playwright exact adapters | Host-neutral policy fixtures cover classification; live availability depends on the connected server. | Same policy implementation, with no claim of live provider parity. |
-| GitHub `codex_apps` connector | Exact reviewed read operations are attested; mutations fail closed. | Unavailable as a claimed Claude integration. |
-| Reviewed GitHub MCP server identity | Exact read classification is covered; provider connectivity remains external. | Classification exists, but no live Claude attestation is claimed. |
-| Codex Security | Read-only triage inspection is attested; mutating lifecycle operations fail closed. | Not attested or advertised. |
-| Other namespaced plugin MCP | Exact read-only ticket claims are supported with drift reconciliation. | The policy branch exists, but discovery/connectivity is not attested. |
-
-Examples:
-
-- `unity:console:read`
-- `blender:scene:execute`
-- `playwright:origin:https://example.com:execute`
-- `github:repo:owner/repository:read`
-- `github:pull:owner/repository#42:read`
-- `codex-security:triage:scan-id:read`
-- `my-plugin:tool:get_status:read`
-
-A trailing `*` is a prefix wildcard; otherwise matching is exact. Every resource in a call needs
-coverage, and filesystem effects must still fit `claimed_paths` or `test_paths`.
-
-Raw code execution is a separate high-risk capability. Playwright unsafe code, Blender Python, and
-Unity raw-code/menu execution require a writable ticket, a high-risk run, and an exact non-wildcard
-`<provider>:server-rce:execute` claim. Broad page, scene, editor, or provider claims are insufficient.
-GitHub support is intentionally read-only during a governed run. The reviewed adapter classifies
-the named GitHub server's repository, issue, pull-request, Actions, notification, discussion,
-project, and security inspection tools. It also covers the Codex app connector's
-`mcp__codex_apps__github_*` operations with a separate exact read allowlist.
-GitHub mutations—including file changes, issue updates, PR creation, reviews, pushes, and merge—
-remain unknown and fail closed; APE's gate/ship runtime retains shipping ownership. Codex Security
-admits only its read-only triage-result viewer; scan setup, progress, completion, and remediation
-updates stay blocked.
-
-An unreviewed namespaced plugin MCP can be used only for a read when the sealed ticket has the exact
-`<server>:tool:<operation>:read` claim. Provider, resource, or operation wildcards do not upgrade
-an unknown tool, and neither `write` nor `execute` claims can do so. APE conservatively runs its
-filesystem drift guard after these claimed plugin reads. This policy support is not a claim that a
-particular plugin is installed or available on both hosts. All other unknown operations/providers,
-unclaimed resources, main-session mutation, and writes by read-only roles fail closed. Successful
-and failed calls are observed by hooks and sealed into the receipt's `tool_effects`; agent-supplied
-effects are ignored.
+APE still owns its own `ape_run`, `ape_status`, `ape_config`, `ape_history`, and
+`ape_validate_receipt` boundaries. It also verifies the repository tree at agent and receipt
+boundaries, so an external tool cannot make an out-of-scope project change valid merely because the
+tool call itself passed through.
 
 ## Artifact maintenance
 
@@ -296,8 +262,8 @@ limits returned entries without changing whole-roadmap counts.
   persisted overlay sparse.
 - `init` detects common project test runners and proposes commands. `apply: true` persists an
   operator-approved proposal.
-- `doctor` checks state/lock health, git, configuration, bundles, host preconditions, and known
-  editor declarations. A declared MCP provider is not proof of a live editor connection.
+- `doctor` checks state/lock health, git, configuration, bundles, host preconditions, and recognized
+  project types. It does not forecast or validate external MCP providers.
 - `wire` / `unwire` configure Claude's command-backed APE statusline or Codex's closest native TUI
   footer. Pass `host` explicitly.
 

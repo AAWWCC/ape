@@ -15,9 +15,10 @@ Apply only a complete proposal with operator approval; otherwise stop before any
 Behavioral readiness requires a grounded `test_commands.full` command.
 When acceptance requires browser or visual inspection, require either a configured
 `verification.profiles` command that records the evidence or an actually callable
-browser/Playwright provider covered by least-privilege `tool_claims`. A doctor warning or provider
-name in prose does not establish availability. If neither exists, stop before start and report the
-concrete configuration requirement.
+browser/Playwright provider. A doctor warning or provider name in prose does not establish
+availability. External MCP discovery and permissions remain host-owned; APE does not require or
+forecast tool names. If neither evidence path exists, stop before start and report the concrete
+configuration requirement.
 
 On Google Antigravity / Gemini, pass the exact open project root as `project_dir` on every APE MCP
 call. The plugin process runs from its installed package directory, so its process working directory

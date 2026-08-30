@@ -109,7 +109,6 @@ async function fixture(host = 'codex', options = {}) {
     objective,
     claimed_paths: claimedPaths,
     test_paths: testPaths,
-    tool_claims: [],
     risk_triggers: [],
     model_tier: 'balanced',
     model: { model: 'gpt-5.4', reasoning_effort: 'medium' },
@@ -186,7 +185,6 @@ async function fixture(host = 'codex', options = {}) {
       : {}),
     claimed_paths: claimedPaths,
     test_paths: testPaths,
-    tool_claims: [],
     requirements: [],
     risk_triggers: [],
     ...(options.manifest_growth_contract_version === 1

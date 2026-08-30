@@ -92,8 +92,8 @@ describe('run readiness and capability manifests', () => {
       version: 1,
       config_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
       catalog_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
-      declared_tool_claims: [],
     });
+    expect(readiness.available_capability_catalog).not.toHaveProperty('declared_tool_claims');
     expect(readiness.available_capability_catalog.command_profiles.map((entry) => entry.id))
       .toEqual(['editor.batch', 'audit.read']);
     expect(readiness.capabilities.config_hash).toMatch(/^[0-9a-f]{64}$/);
@@ -177,8 +177,7 @@ describe('run readiness and capability manifests', () => {
     const input = runInput({
       host: 'claude',
       binding_protocol: 'native-v1',
-      tool_claims: Array.from({ length: 65 }, (_, index) => `provider:resource-${index}:read`),
-      required_capabilities: [{ kind: 'tool_claim', id: 'provider:resource-0:read' }],
+      capability_contract_required: true,
     });
 
     const preview = await previewRun(dir, input);
@@ -188,7 +187,6 @@ describe('run readiness and capability manifests', () => {
       'capability-verification-profiles-over-limit',
       'capability-evidence-scripts-over-limit',
       'capability-runners-over-limit',
-      'capability-tool-claims-over-limit',
       'capability-evidence-commands-over-limit',
     ]));
     expect(readdirSync(runtime).sort()).toEqual(['config.json']);
@@ -335,8 +333,8 @@ describe('run readiness and capability manifests', () => {
       verification_profiles: result.run.capability_snapshot.verification_profiles,
       runners: result.run.capability_snapshot.runners,
       test_commands: result.run.capability_snapshot.test_commands,
-      tool_claims: [],
     });
+    expect(contract.capability_catalog).not.toHaveProperty('tool_claims');
     expect(contract.capability_catalog_hash).toBe(sha256(contract.capability_catalog));
     expect(contract.receipt_contract.ticket_contracts).toHaveLength(1);
     expect(contract.receipt_contract.ticket_contracts[0]).toMatchObject({

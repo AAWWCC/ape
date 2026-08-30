@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   SAFE_CLAUDE_SUBAGENT_TOOLS,
   CONTROL_PLANE_TOOLS,
+  SUBAGENT_PROTOCOL_TOOLS,
   evaluateLifecyclePolicy,
   driftGuardApplies,
   isAgentDispatchTool,
@@ -17,17 +18,11 @@ import {
 // policy event Codex does not implement. The shared PreToolUse/PostToolUse
 // matchers cover exactly the enforcement tool set:
 //
-//   Edit|Write|MultiEdit|NotebookEdit|apply_patch|Bash|Agent|Task|mcp__.*|ape_(run|status|config|history)
+//   Edit|Write|MultiEdit|NotebookEdit|apply_patch|Bash|Agent|Task plus APE's
+//   exact control-plane and receipt-validator names.
 //
-// This suite is the executable proof that the narrowing keeps zero enforcement
-// gap. The coverage/tripwire assertions (§1, §2 incl. amendments A1/A2, §4, §5)
-// are matcher-independent and pass both under the current "*" wiring and under
-// the narrowed matcher — they are the permanent drift tripwire, NOT the red
-// signal. The red signal comes solely from the §3 narrowing pins, which fail
-// against the current "*" matchers and go green once the two policy arms are
-// narrowed. The enforcement set is DERIVED from lib/runtime (source extraction +
-// behavioral cross-checks), never a hardcoded copy, so a future enforcement
-// addition that the matcher does not cover fails this suite loudly.
+// External MCP names are deliberately absent: APE neither forecasts nor
+// intercepts another server's dynamic operation surface.
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -163,7 +158,7 @@ describe('policy-arm matcher coverage of the enforcement set (plan §2)', () => 
     expect(alternation, 'CONTROL_PLANE_TOOLS.source shape changed; update this extraction').not.toBeNull();
     const names = alternation[1].split('|');
     expect(names.length).toBeGreaterThan(0);
-    const reconstruction = `(?:^|__)ape_(${names.join('|')})$`;
+    const reconstruction = `^(?:mcp__(?:ape|plugin_ape_ape)__)?ape_(${names.join('|')})$`;
     expect(reconstruction).toBe(controlSource);
 
     for (const name of names) {
@@ -171,7 +166,6 @@ describe('policy-arm matcher coverage of the enforcement set (plan §2)', () => 
         `ape_${name}`,
         `mcp__plugin_ape_ape__ape_${name}`,
         `mcp__ape__ape_${name}`,
-        `mcp__anyserver__ape_${name}`,
       ];
       for (const sample of samples) {
         // Self-consistency: the generated name is a real control-plane tool name.
@@ -179,18 +173,38 @@ describe('policy-arm matcher coverage of the enforcement set (plan §2)', () => 
         expect(coveredBy(prePolicyMatchers, sample), `PreToolUse must match ${sample}`).toBe(true);
         expect(coveredBy(postPolicyMatchers, sample), `PostToolUse must match ${sample}`).toBe(true);
       }
+      const collision = `mcp__anyserver__ape_${name}`;
+      expect(CONTROL_PLANE_TOOLS.test(collision)).toBe(false);
+      expect(coveredBy(prePolicyMatchers, collision)).toBe(false);
+      expect(coveredBy(postPolicyMatchers, collision)).toBe(false);
     }
   });
 
-  it('matches arbitrary namespaced MCP tools on both hosts so editor policy cannot be bypassed', () => {
+  it('does not match arbitrary namespaced MCP tools on either shared policy event', () => {
     for (const sample of ['mcp__unity__save_scene', 'mcp__official_unity__read_console', 'mcp__future_provider__unknown']) {
-      expect(coveredBy(prePolicyMatchers, sample), `Claude PreToolUse must match ${sample}`).toBe(true);
-      expect(coveredBy(postPolicyMatchers, sample), `Claude PostToolUse must match ${sample}`).toBe(true);
+      expect(coveredBy(prePolicyMatchers, sample), `PreToolUse must ignore ${sample}`).toBe(false);
+      expect(coveredBy(postPolicyMatchers, sample), `PostToolUse must ignore ${sample}`).toBe(false);
       for (const event of ['PreToolUse', 'PostToolUse']) {
         const matchers = policyArms(codexHooks[event]).map((entry) => entry.matcher);
-        expect(coveredBy(matchers, sample), `Codex ${event} must match ${sample}`).toBe(true);
+        expect(coveredBy(matchers, sample), `${event} must ignore ${sample}`).toBe(false);
       }
     }
+  });
+
+  it('matches only APE-owned receipt validation aliases', () => {
+    for (const sample of [
+      'ape_validate_receipt',
+      'mcp__ape__ape_validate_receipt',
+      'mcp__plugin_ape_ape__ape_validate_receipt',
+    ]) {
+      expect(SUBAGENT_PROTOCOL_TOOLS.test(sample)).toBe(true);
+      expect(coveredBy(prePolicyMatchers, sample)).toBe(true);
+      expect(coveredBy(postPolicyMatchers, sample)).toBe(true);
+    }
+    const collision = 'mcp__anyserver__ape_validate_receipt';
+    expect(SUBAGENT_PROTOCOL_TOOLS.test(collision)).toBe(false);
+    expect(coveredBy(prePolicyMatchers, collision)).toBe(false);
+    expect(coveredBy(postPolicyMatchers, collision)).toBe(false);
   });
 
   it('inventories tool_name literal predicates across the runtime and matches each (amendment A2)', () => {
@@ -230,10 +244,10 @@ describe('policy-arm matcher coverage of the enforcement set (plan §2)', () => 
   });
 });
 
-describe('narrowing pins — RED until the policy matchers are narrowed (plan §3)', () => {
+describe('narrow policy matcher pins (plan §3)', () => {
   it('forbids a wildcard or empty policy matcher on PreToolUse and PostToolUse', () => {
-    // RED today: both policy arms are matcher "*". Green once narrowed. Scoped to
-    // PreToolUse/PostToolUse only — PostToolUseFailure legitimately keeps "*".
+    // Scoped to PreToolUse/PostToolUse. Claude's separate wildcard
+    // PostToolUseFailure arm is observability-only and never loads policy.
     expect(prePolicyMatchers.length + postPolicyMatchers.length).toBeGreaterThan(0);
     for (const matcher of [...prePolicyMatchers, ...postPolicyMatchers]) {
       expect(matcher, 'policy matcher must not be the always-on wildcard').not.toBe('*');
@@ -257,8 +271,8 @@ describe('narrowing pins — RED until the policy matchers are narrowed (plan §
     //        including Read/Grep/Glob; after narrowing those unmatched calls
     //        bypass the hook. So "skipping the hook is the hook's own allow"
     //        (hooks.js:461) holds for bound subagents and the main session only.
-    // Both are backstopped: the layer-2 agents/*.md tools: allowlists (no
-    // Agent/Task, no mcp__ tools; pinned green by
+    // Both are backstopped: the layer-2 agents/*.md tool surfaces (no
+    // Agent/Task and exact APE control-plane denials; pinned by
     // runtime-v2-agent-tool-surface.test.js), the still-matched write/Bash/Agent/
     // ape_* channels that keep reaching the 374-380 and 344-355 denies, the
     // launch-nonce gate (bin/ape-hook.mjs:100-113) that blocks minting new
@@ -308,13 +322,15 @@ describe('Claude supplemental wiring and shared binding policy (plan §4)', () =
     expect(group.hooks[0].async).toBe(true);
   });
 
-  it('PostToolUseFailure keeps one wildcard group carrying both bundles', () => {
-    expect(claudeHooks.PostToolUseFailure).toHaveLength(1);
-    const group = claudeHooks.PostToolUseFailure[0];
-    expect(group.matcher).toBe('*');
-    expect(group.hooks).toHaveLength(2);
-    expect(refersToBundle(group, POLICY_BUNDLE)).toBe(true);
-    expect(refersToBundle(group, LARP_BUNDLE)).toBe(true);
+  it('PostToolUseFailure splits narrow policy from wildcard observability', () => {
+    expect(claudeHooks.PostToolUseFailure).toHaveLength(2);
+    const [policy] = policyArms(claudeHooks.PostToolUseFailure);
+    const [larp] = larpArms(claudeHooks.PostToolUseFailure);
+    expect(policy.matcher).not.toBe('*');
+    expect(coveredBy([policy.matcher], 'mcp__future_provider__unknown')).toBe(false);
+    expect(larp.matcher).toBe('*');
+    expect(larp.hooks).toHaveLength(1);
+    expect(larp.hooks[0].async).toBe(true);
   });
 
   it('PreToolUse retains the AskUserQuestion larp arm', () => {
@@ -324,21 +340,22 @@ describe('Claude supplemental wiring and shared binding policy (plan §4)', () =
     expect(arms[0].hooks[0].async).toBe(true);
   });
 
-  it('PostToolUse retains the ape_run outcome-cue larp arm unchanged', () => {
+  it('PostToolUse retains only exact APE ape_run outcome cues', () => {
     const arms = larpArms(claudeHooks.PostToolUse);
     expect(arms).toHaveLength(1);
-    expect(arms[0].matcher).toBe('mcp__plugin_ape_ape__ape_run|mcp__ape__ape_run');
+    expect(arms[0].matcher).toBe('^(?:ape_run|mcp__(?:ape|plugin_ape_ape)__ape_run)$');
     expect(arms[0].hooks[0].async).toBe(true);
   });
 });
 
 describe('Codex hooks parity guard (plan §5)', () => {
-  it('covers the shared write, dispatch, and MCP surfaces on both events', () => {
+  it('covers shared write and dispatch surfaces while excluding external MCP', () => {
     for (const event of ['PreToolUse', 'PostToolUse']) {
       const matchers = (codexHooks[event] ?? []).map((entry) => entry.matcher);
-      for (const tool of ['Bash', 'Edit', 'Write', 'apply_patch', 'Agent', 'spawn_agent', 'collaborationspawn_agent', 'mcp__unity__save_scene']) {
+      for (const tool of ['Bash', 'Edit', 'Write', 'apply_patch', 'Agent', 'spawn_agent', 'collaborationspawn_agent']) {
         expect(coveredBy(matchers, tool), `Codex ${event} must match ${tool}`).toBe(true);
       }
+      expect(coveredBy(matchers, 'mcp__unity__save_scene')).toBe(false);
     }
   });
 
@@ -353,7 +370,7 @@ describe('Codex hooks parity guard (plan §5)', () => {
 
     const outcomes = larpArms(codexHooks.PostToolUse);
     expect(outcomes).toHaveLength(1);
-    expect(outcomes[0].matcher).toBe('(?:^|__)ape_run$');
+    expect(outcomes[0].matcher).toBe('^(?:ape_run|mcp__(?:ape|plugin_ape_ape)__ape_run)$');
 
     for (const event of ['SessionStart', 'Stop', 'SubagentStop', 'PreToolUse', 'PostToolUse']) {
       for (const arm of larpArms(codexHooks[event])) {

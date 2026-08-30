@@ -31,7 +31,7 @@ The preflight analyst runs only for behavioral fast/full phase work using plan c
 baseline commands must be receipt-backed. Output hashes are included when the host exposes enough
 raw output to compute them and omitted—not fabricated—otherwise.
 
-Agents never schedule other agents or write runtime state. A connected Unity, Blender, Playwright,
-GitHub, or Codex Security MCP operation is available only when the ticket has matching
-`tool_claims`; ordinary filesystem changes must still fit `claimed_paths` or `test_paths`.
-Unreviewed plugin MCPs support exact per-operation read claims only.
+Agents never schedule other agents or write runtime state. External MCP tools exposed by the host
+remain available without APE-specific names, claims, adapters, or provider allowlists. The host and
+operator own discovery and permission decisions. APE still verifies repository changes at stage
+and receipt boundaries, so ordinary filesystem changes must fit `claimed_paths` or `test_paths`.

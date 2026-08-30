@@ -107,7 +107,6 @@ export function runtimePaths(projectDir) {
     roadmapMutation: path.join(runtime, 'roadmap-mutation.json'),
     roadmapAttestations: path.join(runtime, 'roadmap-attestations.json'),
     overrideLog: path.join(runtime, 'overrides.ndjson'),
-    externalToolEffects: path.join(runtime, 'external-tool-effects.ndjson'),
     migration: path.join(runtime, 'migration.json'),
     // Advisory, bounded latest-result projection for automatic/manual
     // artifact retention. It is overwritten atomically rather than appended.

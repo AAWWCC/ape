@@ -10,8 +10,8 @@ Common actions:
 - `init`: inspect project manifests and propose grounded test commands/evidence scripts. It may
   separately propose a managed APE orientation block for the effective project instruction file;
   config and instruction changes require explicit, separate approval.
-- `doctor`: check git, state, locks, configuration, bundles, host preconditions, and known external
-  editor declarations.
+- `doctor`: check git, state, locks, configuration, bundles, host preconditions, and recognized
+  project types. MCP discovery and permissions remain host-owned.
 - `wire` / `unwire`: opt a host statusline in or out.
 
 <!-- BEGIN GENERATED CONFIG REFERENCE -->

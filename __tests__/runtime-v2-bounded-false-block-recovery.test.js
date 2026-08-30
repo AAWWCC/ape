@@ -553,7 +553,7 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
     });
   });
 
-  it('actionable-scope-denial preserves exact additive claims and successor requirements', () => {
+  it('actionable-scope-denial preserves exact additive paths, role, and successor requirements', () => {
     const ticket = {
       ticket_id: 'ticket-capability-build',
       stage_id: 'build',
@@ -561,7 +561,6 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
       parallel_group: null,
       claimed_paths: ['src/value.js'],
       test_paths: ['tests/value.test.js'],
-      tool_claims: ['github:pull-request:read'],
     };
     const state = pureRun({
       run_id: 'run-capability-blocked',
@@ -581,7 +580,6 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
           required_claims: {
             claimed_paths: ['src/generated/value.js'],
             test_paths: ['tests/generated/value.test.js'],
-            tool_claims: ['github:pull-request:write'],
             required_role: 'test_writer',
           },
         },
@@ -608,7 +606,6 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
         additive_claims: {
           claimed_paths: ['src/generated/value.js'],
           test_paths: ['tests/generated/value.test.js'],
-          tool_claims: ['github:pull-request:write'],
           required_role: 'test_writer',
         },
         claims_reported: true,
@@ -641,7 +638,7 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
       findings: [],
       evidence: {
         failure_kind: 'capability',
-        required_claims: { tool_claims: ['github:pull-request:read'] },
+        required_claims: { claimed_paths: ['docs/review.md'] },
       },
     };
     const agreeingReceipt = {
@@ -673,7 +670,7 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
         terminal_reason_code: 'capability_blocked',
         blocked_recovery: {
           source_ticket_id: reviewTicket.ticket_id,
-          additive_claims: { tool_claims: ['github:pull-request:read'] },
+          additive_claims: { claimed_paths: ['docs/review.md'] },
           successor_required: true,
           supersession_required: true,
         },
@@ -714,7 +711,7 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
           findings: [],
           evidence: {
             failure_kind: 'capability',
-            required_claims: { tool_claims: ['github:pull-request:read'] },
+            required_claims: { test_paths: ['tests/generated.test.js'] },
           },
         },
         stage: { id: stageId, role, parallel_group: null },
@@ -727,7 +724,7 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
           stage: stageId,
           terminal_reason_code: 'capability_blocked',
           blocked_recovery: {
-            additive_claims: { tool_claims: ['github:pull-request:read'] },
+            additive_claims: { test_paths: ['tests/generated.test.js'] },
             successor_required: true,
           },
         },
@@ -813,7 +810,6 @@ describe('APE v2 bounded recovery receipt admission', () => {
       lane: 'full',
       host: 'codex',
       claimed_paths: ['src'],
-      tool_claims: ['github:*:read'],
       test_paths: ['tests/value.test.js'],
       requirements: [],
       risk_triggers: [],
@@ -829,10 +825,8 @@ describe('APE v2 bounded recovery receipt admission', () => {
     const invalid = [
       ['missing claims', undefined, /requires evidence\.required_claims/i],
       ['empty claims', {}, /at least one genuinely additive/i],
-      ['invalid tool claim', { tool_claims: ['github:pull-request:admin'] }, /canonical provider:resource/i],
       ['noncanonical path', { claimed_paths: ['src/../escape.js'] }, /canonical contained project-relative/i],
       ['path already covered by a directory claim', { claimed_paths: ['src/value.js'] }, /already on the immutable ticket/i],
-      ['tool already covered by a wildcard claim', { tool_claims: ['github:pull-request:read'] }, /already on the immutable ticket/i],
       ['undispatchable role', { required_role: 'root' }, /dispatchable APE role/i],
       ['prototype role', { required_role: 'toString' }, /dispatchable APE role/i],
       ['existing role', { required_role: 'planner' }, /already the immutable ticket role/i],
@@ -856,9 +850,9 @@ describe('APE v2 bounded recovery receipt admission', () => {
       status: 'failed',
       evidence: {
         failure_kind: 'capability',
-        summary: 'The planner needs a reviewed external read.',
+        summary: 'The planner needs an additional reviewed project path.',
         required_claims: {
-          tool_claims: ['github:pull-request:write'],
+          claimed_paths: ['docs/review.md'],
           required_role: 'plan_checker',
         },
       },
@@ -869,7 +863,7 @@ describe('APE v2 bounded recovery receipt admission', () => {
       terminal_reason_code: 'capability_blocked',
       blocked_recovery: {
         additive_claims: {
-          tool_claims: ['github:pull-request:write'],
+          claimed_paths: ['docs/review.md'],
           required_role: 'plan_checker',
         },
         successor_required: true,

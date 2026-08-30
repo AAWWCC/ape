@@ -55,13 +55,14 @@ to an APE-operated service.
 platforms and blocking host versions. The detailed [host compatibility contract](docs/compatibility.md)
 explains how pull-request, release, and informational edge checks consume it.
 
-| Host | Package | MCP transport | Agent integration | Live release status | External-tool attestation |
-| --- | --- | --- | --- | --- | --- |
-| Codex CLI | `plugins/ape` | Local stdio | Native Codex subagents and lifecycle hooks | Required; certification is supplied by the tagged-release ledger. | Codex-specific GitHub connector and Codex Security reads are covered; other providers depend on the installed server. |
-| Claude Code | `plugins/ape-claude` | Local stdio | Claude Agent tool and supplemental hooks | Packaged and structurally validated; authenticated live operation is unverified. | Core policy is shared, but Codex-only connectors and live provider parity are not claimed. |
+| Host | Package | MCP transport | Agent integration | Live release status |
+| --- | --- | --- | --- | --- |
+| Codex CLI | `plugins/ape` | Local stdio | Native Codex subagents and lifecycle hooks | Required; certification is supplied by the tagged-release ledger. |
+| Claude Code | `plugins/ape-claude` | Local stdio | Claude Agent tool and supplemental hooks | Packaged and structurally validated; authenticated live operation is unverified. |
 
-Node.js 22.12.0 and the pinned Node.js 24 release runtime are exercised on Windows, Linux, and macOS. Provider availability, host plugin
-discovery, and external editor connections remain host/version/environment dependent.
+Node.js 22.12.0 and the pinned Node.js 24 release runtime are exercised on Windows, Linux, and
+macOS. External MCP discovery, availability, and permissions remain entirely host/operator owned;
+APE does not intercept or attest them.
 
 For development from this checkout, rebuild the packages before using a host reinstall helper:
 

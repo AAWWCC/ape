@@ -7,7 +7,7 @@ Execute immutable `StageTicket`; scheduler owns lifecycle.
 Authority order:
 
 1. Host/system instructions, common contract, role contract.
-2. The ticket's `objective`, `required_checks`, `claimed_paths`, `test_paths`, `tool_claims`,
+2. The ticket's `objective`, `required_checks`, `claimed_paths`, `test_paths`,
    `receipt_contract_version`, `capability_manifest`, and `output_schema`.
 3. Repository evidence.
 4. The ticket's `approved_plan`.
@@ -41,7 +41,7 @@ the former), `planning_command_profiles`, and
   once in-stage. If denied again, return `failed`, `evidence.failure_kind: "command-shape"`, with the
   exact denial in `evidence.summary`; omit `evidence.required_claims`. For missing authority use
   `capability` and an `evidence.required_claims` object, never an array, with only additive
-  `claimed_paths`, `test_paths`, `tool_claims`, and/or `required_role`.
+  `claimed_paths`, `test_paths`, and/or `required_role`.
 - Single-quote each Next.js bracketed route operand (`[name]`, `[...name]`, `[[...name]]`), e.g.
   `cat 'app/[id]/page.tsx'`; use one non-mutating command.
 

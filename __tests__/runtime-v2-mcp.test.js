@@ -123,11 +123,7 @@ describe('APE v2 MCP public surface', () => {
     // request the mechanical lane that RunStartInputSchema accepts.
     expect(run.inputSchema.properties.lane.enum).toEqual([...LANES]);
     expect(run.inputSchema.properties.lane.enum).toContain('mechanical');
-    expect(run.inputSchema.properties.tool_claims).toMatchObject({
-      type: 'array',
-      items: { type: 'string' },
-    });
-    expect(run.inputSchema.properties.tool_claims.description).toMatch(/provider:resource:read\|write\|execute/);
+    expect(run.inputSchema.properties).not.toHaveProperty('tool_claims');
     expect(run.inputSchema.properties.action.enum).toEqual(expect.arrayContaining([
       'probe',
       'probe-status',
@@ -151,16 +147,7 @@ describe('APE v2 MCP public surface', () => {
       'command_profile',
       'verification_profile',
       'evidence_command',
-      'tool_claim',
     ]);
-    const toolClaim = capabilityVariants.find(
-      (variant) => variant.properties.kind.const === 'tool_claim',
-    );
-    expect(toolClaim.properties.id).toMatchObject({
-      minLength: 3,
-      maxLength: 4096,
-      pattern: expect.stringContaining('read|write|execute'),
-    });
     expect(run.inputSchema.properties.probe_id).toMatchObject({ type: 'string' });
     expect(run.inputSchema.properties.probe_capability).toMatchObject({ type: 'string' });
     expect(run.description).toMatch(/Preview and start require the same complete prospective run facts[\s\S]*objective and host/iu);
