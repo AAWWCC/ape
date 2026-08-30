@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.24.6 — 2026-08-29
+
 APE no longer intercepts or authorizes tools owned by other MCP servers. External MCP discovery,
 names, schemas, permissions, and approvals now pass through to the host and operator without
 provider allowlists or forecasted `tool_claims`, regardless of operation name, run state, role, or
@@ -9,7 +11,7 @@ legacy claim; only APE's own control plane and receipt validator
 remain in its MCP hook boundary. Legacy claim fields and already-persisted receipt effects stay
 readable but grant no authority; new calls are not recorded as receipt effects.
 Repository path, stage, receipt, and shipping protections remain enforced at the boundaries APE
-owns.
+owns. Version 2.24.6 invalidates the prior source certification and starts a fresh release cycle.
 
 ## 2.24.5 — 2026-08-29
 
