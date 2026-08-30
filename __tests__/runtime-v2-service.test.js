@@ -23,9 +23,12 @@ import {
   statusRun,
 } from '../lib/runtime/service.js';
 import { autoMergeGithub, pollRemoteChecksAndMerge } from '../lib/runtime/gates.js';
+import { sha256 } from '../lib/runtime/canonical.js';
 import { queryHistory } from '../lib/runtime/history.js';
 import { acquireRunLock } from '../lib/runtime/lock.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
+import { projectRunResponse, RESPONSE_BUDGET_BYTES } from '../lib/runtime/projection.js';
+import { finalizeTicket } from '../lib/runtime/schemas.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 
 function exists(file) {
@@ -424,6 +427,130 @@ describe('APE v2 service integration', () => {
     expect(persisted.status).toBe('running');
     expect(persisted).not.toHaveProperty('execution_budget');
     expect(persisted).not.toHaveProperty('input_required');
+  });
+
+  it('replays a large legacy dispatch continuation in bounded native groups', async () => {
+    const dir = await project();
+    const started = await startRun(dir, {
+      objective: 'Resume every durable legacy dispatch without losing its launch capability',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'claude',
+      claimed_paths: ['src/value.js'],
+      test_paths: ['tests/value.test.js'],
+      requirements: [],
+      risk_triggers: [],
+      behavioral: true,
+      hooks_trusted: true,
+      subagents_available: true,
+      explicit_invocation: true,
+    });
+    expect(started.ok).toBe(true);
+    const paths = runtimePaths(dir);
+    const state = await readJson(paths.active);
+    const original = state.tickets[0];
+    const { ticket_hash: _oldHash, ...ticketSeed } = original;
+    const tickets = Array.from({ length: 64 }, (_, index) => finalizeTicket({
+      ...structuredClone(ticketSeed),
+      ticket_id: `${original.ticket_id}-legacy-${index}`,
+    }));
+    await Promise.all(tickets.map((ticket) => atomicWriteJson(
+      path.join(paths.tickets, `${ticket.ticket_id.replaceAll(':', '_')}.json`),
+      ticket,
+    )));
+    state.tickets = tickets;
+    state.receipts = [];
+    state.expired_tickets = [];
+    state.status = 'running';
+    state.stage = tickets[0].stage_id;
+    const actions = tickets.map((ticket) => ({
+      type: 'dispatch_agent',
+      ticket_id: ticket.ticket_id,
+    }));
+    const configSnapshot = await readJson(paths.config);
+    state.budget_continuation = {
+      version: 1,
+      source: 'legacy-execution-budget',
+      run_id: state.run_id,
+      actions,
+      actions_hash: sha256(actions),
+      config_snapshot: configSnapshot,
+      config_hash: sha256(configSnapshot),
+    };
+    await atomicWriteJson(paths.active, state);
+    const beforeIntentNames = new Set(await readdir(paths.dispatchIntents));
+
+    const resumed = await nextRun(dir);
+    expect(resumed.ok).toBe(true);
+    expect(resumed.actions).toHaveLength(2);
+    expect(resumed.actions.every((action) => action.type === 'dispatch_agent')).toBe(true);
+    expect(resumed.actions.map((action) => action.ticket.ticket_id)).toEqual(
+      tickets.slice(0, 2).map((ticket) => ticket.ticket_id),
+    );
+    for (const action of resumed.actions) {
+      expect(action.dispatch.dispatch_intent.nonce).toMatch(/^[A-Za-z0-9_-]{32,256}$/u);
+      expect(action.dispatch.dispatch_intent.prompt)
+        .toContain(`APE_DISPATCH_NONCE=${action.dispatch.dispatch_intent.nonce}`);
+    }
+
+    const persisted = await readJson(paths.active);
+    expect(persisted.budget_continuation.actions).toEqual(actions.slice(2));
+    expect(persisted.budget_continuation.actions_hash).toBe(sha256(actions.slice(2)));
+    const afterIntentNames = await readdir(paths.dispatchIntents);
+    expect(afterIntentNames.filter((name) => !beforeIntentNames.has(name))).toHaveLength(2);
+
+    const projected = projectRunResponse(resumed);
+    expect(projected.actions).toHaveLength(2);
+    expect(Buffer.byteLength(JSON.stringify(projected), 'utf8'))
+      .toBeLessThanOrEqual(RESPONSE_BUDGET_BYTES);
+
+    // The shortened tail is itself a valid durable continuation on the next
+    // call; replay does not depend on an in-memory cursor from the first call.
+    const resumedAgain = await nextRun(dir);
+    expect(resumedAgain.actions.map((action) => action.ticket.ticket_id)).toEqual(
+      tickets.slice(2, 4).map((ticket) => ticket.ticket_id),
+    );
+    let persistedAgain = await readJson(paths.active);
+    expect(persistedAgain.budget_continuation.actions).toEqual(actions.slice(4));
+    expect(persistedAgain.budget_continuation.actions_hash).toBe(sha256(actions.slice(4)));
+
+    const emittedTicketIds = resumed.actions.concat(resumedAgain.actions)
+      .map((action) => action.ticket.ticket_id);
+    let batches = 2;
+    while (persistedAgain.budget_continuation) {
+      const nextBatch = await nextRun(dir);
+      batches += 1;
+      expect(nextBatch.actions.length).toBeGreaterThan(0);
+      expect(nextBatch.actions.length).toBeLessThanOrEqual(2);
+      emittedTicketIds.push(...nextBatch.actions.map((action) => action.ticket.ticket_id));
+      const projectedBatch = projectRunResponse(nextBatch);
+      expect(projectedBatch.actions).toHaveLength(nextBatch.actions.length);
+      expect(Buffer.byteLength(JSON.stringify(projectedBatch), 'utf8'))
+        .toBeLessThanOrEqual(RESPONSE_BUDGET_BYTES);
+      persistedAgain = await readJson(paths.active);
+      expect(batches).toBeLessThanOrEqual(32);
+    }
+    expect(batches).toBe(32);
+    expect(emittedTicketIds).toEqual(tickets.map((ticket) => ticket.ticket_id));
+
+    // Even if a caller ignores all 32 returned launch groups and asks NEXT
+    // again, the ordinary pending-ticket replay is re-batched before any new
+    // intents are minted; it can never recreate one 64-action wire response.
+    const replay = await nextRun(dir);
+    expect(replay.actions).toHaveLength(2);
+    expect(replay.actions.map((action) => action.ticket.ticket_id)).toEqual(
+      tickets.slice(0, 2).map((ticket) => ticket.ticket_id),
+    );
+    const replayState = await readJson(paths.active);
+    expect(replayState.budget_continuation).toMatchObject({
+      source: 'response-wire-dispatch-batch',
+      actions: actions.slice(2),
+      actions_hash: sha256(actions.slice(2)),
+    });
+    const projectedReplay = projectRunResponse(replay);
+    expect(projectedReplay.actions).toHaveLength(2);
+    expect(Buffer.byteLength(JSON.stringify(projectedReplay), 'utf8'))
+      .toBeLessThanOrEqual(RESPONSE_BUDGET_BYTES);
   });
 });
 

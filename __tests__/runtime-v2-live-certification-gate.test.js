@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -33,7 +33,7 @@ import {
   writeLiveCertificationPrompts,
 } from '../scripts/prepare-live-certification-prompts.mjs';
 
-const VERSION = '2.24.6';
+const VERSION = '2.24.7';
 const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
@@ -55,6 +55,13 @@ function certificationParentFixture({
   const codexHome = path.join(root, 'codex-home');
   const promptPath = path.join(root, 'prompt.txt');
   mkdirSync(projectDir, { recursive: true });
+  execFileSync('git', ['init', '--initial-branch=main'], { cwd: projectDir, stdio: 'ignore' });
+  execFileSync('git', ['config', '--local', 'user.name', 'APE Certification'], { cwd: projectDir });
+  execFileSync(
+    'git',
+    ['config', '--local', 'user.email', 'ape-certification@users.noreply.github.com'],
+    { cwd: projectDir },
+  );
   mkdirSync(path.join(projectDir, '.ape', 'runtime'), { recursive: true });
   writeFileSync(
     path.join(projectDir, '.ape', 'runtime', 'config.json'),
@@ -285,7 +292,13 @@ describe('live certification Codex parent launcher', () => {
       fixture.projectDir,
       '-',
     ]);
-    expect(invocation.env).toEqual({ CODEX_HOME: fixture.codexHome });
+    expect(invocation.env).toEqual({
+      CODEX_HOME: fixture.codexHome,
+      GIT_AUTHOR_NAME: 'APE Certification',
+      GIT_AUTHOR_EMAIL: 'ape-certification@users.noreply.github.com',
+      GIT_COMMITTER_NAME: 'APE Certification',
+      GIT_COMMITTER_EMAIL: 'ape-certification@users.noreply.github.com',
+    });
     expect(invocation.input).toBe(
       `$ape:run\nPass project_dir "${fixture.projectDir}" on every APE MCP call.\n`,
     );
@@ -334,6 +347,16 @@ describe('live certification Codex parent launcher', () => {
     expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
     expect(() => buildCodexParentInvocation(fixture)).toThrow(
       /shipping\.auto_merge = true.*first-pass-perfect/iu,
+    );
+  });
+
+  it('fails closed before launch when the effective Git identity is overridden', () => {
+    const fixture = certificationParentFixture();
+    execFileSync('git', ['config', '--local', 'user.email', 'developer@example.invalid'], {
+      cwd: fixture.projectDir,
+    });
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(
+      /exact APE Certification repository-local GitHub noreply user\.email/iu,
     );
   });
 
@@ -598,19 +621,40 @@ describe('live certification prompt preparation', () => {
 });
 
 describe('live release certification evidence', () => {
-  it('requires a repository-local GitHub noreply identity before live attempts', () => {
+  it('requires the exact repository-local service identity before live attempts', () => {
     const { repo } = sourceRepository();
     expect(() => verifyLiveCertificationEnvironment(repo))
-      .toThrow(/repository-local user\.name/u);
+      .toThrow(/exact APE Certification repository-local user\.name/u);
     git(repo, 'config', '--local', 'user.name', 'APE Certification');
     git(repo, 'config', '--local', 'user.email', 'developer@example.invalid');
     expect(() => verifyLiveCertificationEnvironment(repo))
-      .toThrow(/repository-local GitHub noreply user\.email/u);
+      .toThrow(/exact APE Certification repository-local GitHub noreply user\.email/u);
+    git(repo, 'config', '--local', 'user.email', 'unapproved@users.noreply.github.com');
+    expect(() => verifyLiveCertificationEnvironment(repo))
+      .toThrow(/exact APE Certification repository-local GitHub noreply user\.email/u);
     git(repo, 'config', '--local', 'user.email', 'ape-certification@users.noreply.github.com');
     expect(verifyLiveCertificationEnvironment(repo)).toEqual({
       identity_scope: 'repository-local',
+      identity: 'APE Certification',
       email_domain: 'users.noreply.github.com',
     });
+
+    const checker = path.join(
+      fileURLToPath(new URL('..', import.meta.url)),
+      'scripts',
+      'check-live-certification-environment.mjs',
+    );
+    const overridden = spawnSync(process.execPath, [checker, '--project-dir', repo], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Unapproved Service',
+        GIT_AUTHOR_EMAIL: 'unapproved@users.noreply.github.com',
+      },
+    });
+    expect(overridden.status).not.toBe(0);
+    expect(overridden.stderr).toMatch(/effective author identity/iu);
+    expect(overridden.stderr).not.toContain('unapproved@users.noreply.github.com');
 
     const aliasRoot = mkdtempSync(path.join(tmpdir(), 'ape-live-certification-alias-'));
     temporaryRepositories.push(aliasRoot);

@@ -53,6 +53,38 @@ describe('model tier policy', () => {
       .toEqual({ model: 'gpt-5.5', reasoning_effort: 'high' });
   });
 
+  it('rejects unlaunchable raw model mappings before issuing an immutable ticket', () => {
+    const annotation = 'a'.repeat(60_000);
+    const claudeBoundary = { model: 'c'.repeat(256), annotation };
+    const claudeConfig = {
+      ...DEFAULT_CONFIG,
+      models: {
+        ...DEFAULT_CONFIG.models,
+        claude: { ...DEFAULT_CONFIG.models.claude, deep: claudeBoundary },
+      },
+    };
+    expect(resolveModel(claudeConfig, 'claude', 'deep')).toBe(claudeBoundary);
+    claudeConfig.models.claude.deep = { model: 'c'.repeat(257) };
+    expect(() => resolveModel(claudeConfig, 'claude', 'deep'))
+      .toThrow('invalid claude model mapping configured for tier deep');
+
+    const codexBoundary = { model: 'g'.repeat(512), reasoning_effort: 'r'.repeat(64) };
+    const codexConfig = {
+      ...DEFAULT_CONFIG,
+      models: {
+        ...DEFAULT_CONFIG.models,
+        codex: { ...DEFAULT_CONFIG.models.codex, deep: codexBoundary },
+      },
+    };
+    expect(resolveModel(codexConfig, 'codex', 'deep')).toBe(codexBoundary);
+    codexConfig.models.codex.deep = { model: 'g'.repeat(513), reasoning_effort: 'high' };
+    expect(() => resolveModel(codexConfig, 'codex', 'deep'))
+      .toThrow('invalid codex model mapping configured for tier deep');
+    codexConfig.models.codex.deep = { model: 'gpt-5.5', reasoning_effort: 'r'.repeat(65) };
+    expect(() => resolveModel(codexConfig, 'codex', 'deep'))
+      .toThrow('invalid codex reasoning effort configured for tier deep');
+  });
+
   it('gives the fast and full lanes deadline headroom for long deep-tier turns', () => {
     expect(DEFAULT_DEADLINES_MS).toEqual({
       mechanical: 15 * 60_000,

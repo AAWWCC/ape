@@ -17,8 +17,9 @@
 //     non-empty run.objective becomes the same reference.
 //   * Below the budget the response is byte-identical to today: the full ticket
 //     still crosses on the dispatch action. The change is additive.
-//   * action.dispatch is never touched, so a Claude dispatch_intent prompt and
-//     its single-use APE_DISPATCH_NONCE line cross verbatim.
+//   * The lossless pass never touches action.dispatch. If the hard reference
+//     fallback is required, its smaller native launch envelope still retains
+//     Claude's exact nonce/prompt capability and Codex's exact spawn_args.
 //   * Nothing is destroyed: the on-disk ticket file keeps the complete
 //     objective and the complete output_schema, and the sanctioned agent path
 //     is reading that file (prompts/common.md).
@@ -36,6 +37,7 @@ import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { nativeDispatch } from '../lib/runtime/adapters.js';
 import { OUTPUT_SCHEMA_REFERENCE, projectRunResponse } from '../lib/runtime/projection.js';
 import { RECEIPT_INPUT_SCHEMA } from '../lib/runtime/receipt-input.js';
 import { classifyApeRunOutcome } from '../lib/runtime/larp.js';
@@ -188,7 +190,11 @@ function countOccurrences(haystack, needle) {
   return count;
 }
 
-const wireSize = (response) => JSON.stringify(response).length;
+function launchBearingClaudeIntent(intent) {
+  return { nonce: intent.nonce, prompt: intent.prompt };
+}
+
+const wireSize = (response) => Buffer.byteLength(JSON.stringify(response), 'utf8');
 
 function largeCandidatePlan() {
   const plan = {
@@ -328,7 +334,7 @@ describe('APE v2 ape_run response size cap: unit projection behavior', () => {
     // response far under the cap, so nothing new may happen: the dispatch action
     // ticket deep-equals its input, the status action state keeps its objective,
     // and only today's run.tickets[] dedupe applies.
-    const state = runState(SMALL_OBJECTIVE);
+    const state = runState(SMALL_OBJECTIVE, { host: 'claude' });
     const pending = state.tickets[2];
     const response = {
       ok: true,
@@ -464,7 +470,7 @@ describe('APE v2 ape_run response size cap: unit projection behavior', () => {
     expect(emptyProjected.actions[0].state.objective).toBe('');
   });
 
-  it('A5 nonce integrity: action.dispatch crosses the cap untouched, nonce line verbatim', () => {
+  it('A5 lossless nonce integrity: objective dedupe crosses action.dispatch untouched', () => {
     // The single-use launch capability exists ONLY in the response that
     // overflowed, so the compaction must never reach into action.dispatch. Its
     // projected form is exactly today's: everything passes through and only the
@@ -608,23 +614,218 @@ describe('APE v2 ape_run response size cap: unit projection behavior', () => {
     expect(response).toEqual(snapshot);
   });
 
-  it('A10 cliff pin: a ~63 KB objective is replaced by a hard reference projection', () => {
-    // The recorded residual, made discoverable as a test instead of prose: ONE
-    // full run.objective copy always remains on the wire (it is the operator's
-    // own text and the sole complete copy), and input-guard.js admits 64 KB of
-    // input. So an objective near that ceiling is past the cap no matter how
-    // well the duplicates are deduped.
-    const huge = 'H'.repeat(63_000);
-    const state = runState(huge);
+  it('A10 hard fallback: accepted preflight evidence retains the exact Claude launch intent', () => {
+    // answer-preflight forwards the accepted artifact and operator answers onto
+    // the next ticket. Both the run ticket and dispatch action carry that
+    // immutable evidence, so a realistic accepted preflight can remain over the
+    // cap after lossless objective/schema dedupe and require reference-only-v1.
+    const state = runState(SMALL_OBJECTIVE, { host: 'claude' });
+    const pending = state.tickets[2];
+    pending.preflight = {
+      artifact_hash: 'a'.repeat(64),
+      artifact: {
+        questions: [{
+          id: 'api-name',
+          question: 'Which API name stays stable?',
+          rationale: `Compatibility evidence ${'P'.repeat(18_000)}`,
+        }],
+      },
+      trust: 'untrusted-evidence',
+      operator_evidence: {
+        trust: 'untrusted-evidence',
+        answers: [{ id: 'api-name', answer: `Keep the API stable. ${'A'.repeat(16_000)}` }],
+      },
+    };
+    const action = dispatchAction(pending);
     const projected = projectRunResponse({
       ok: true,
       run: state,
-      actions: [dispatchAction(state.tickets[2])],
+      actions: [action],
     });
     expect(projected.run).not.toHaveProperty('objective');
     expect(projected.run.run_ref).toBe('.ape/runtime/active.json');
     expect(projected.projection.kind).toBe('reference-only-v1');
+    expect(projected.projection.original_utf8_bytes).toBeGreaterThan(BUDGET_CHARS);
+    expect(projected.actions[0].dispatch.dispatch_intent).toEqual(action.dispatch.dispatch_intent);
+    const prompt = projected.actions[0].dispatch.dispatch_intent.prompt;
+    expect(countOccurrences(prompt, 'APE_DISPATCH_NONCE=')).toBe(1);
+    expect(prompt).toContain(`APE_DISPATCH_NONCE=${NONCE}`);
+    expect(projected.actions[0].dispatch.dispatch_intent_ref)
+      .toBe(`.ape/runtime/dispatch-intents/${sha256(pending.ticket_id)}.json`);
     expect(wireSize(projected)).toBeLessThanOrEqual(BUDGET_CHARS);
+    expect(projectRunResponse(projected)).toEqual(projected);
+  });
+
+  it('A11 minimal fallback: oversized hints cannot erase the Claude launch capability', () => {
+    const state = runState(SMALL_OBJECTIVE, { host: 'claude' });
+    const pending = state.tickets[2];
+    const claude = dispatchAction(pending);
+    claude.dispatch.prompt_paths = Array.from(
+      { length: 64 },
+      (_, index) => `prompts/${index}-${'p'.repeat(1_000)}.md`,
+    );
+    const projected = projectRunResponse({ ok: true, run: state, actions: [claude] });
+    expect(projected.projection.kind).toBe('reference-only-v1');
+    expect(projected.run.run_ref).toBe('.ape/runtime/active.json');
+    expect(projected.actions[0].dispatch).not.toHaveProperty('prompt_paths');
+    expect(projected.actions[0].dispatch.dispatch_intent)
+      .toEqual(launchBearingClaudeIntent(claude.dispatch.dispatch_intent));
+    expect(projected.actions[0].dispatch.model).toBe(pending.model);
+    expect(wireSize(projected)).toBeLessThanOrEqual(BUDGET_CHARS);
+  });
+
+  it('A12 launch-only fallback: schema-valid metadata cannot erase either native launch envelope', () => {
+    const claudeSelector = 'c'.repeat(256);
+    const annotatedClaudeModel = {
+      model: claudeSelector,
+      // Claude's Agent launch does not consume this Codex-only field. Config
+      // annotations are open-ended, so the deepest projection must not spend
+      // its launch budget forwarding it.
+      reasoning_effort: 'r'.repeat(55_000),
+      annotation: 'operator note',
+    };
+    const claudeState = runState(SMALL_OBJECTIVE, { host: 'claude' });
+    claudeState.tickets[2].model = annotatedClaudeModel;
+    claudeState.tickets[2].stage_id = `build-${'s'.repeat(55_000)}`;
+    const legacyDeadline = `2099-01-01${' '.repeat(55_000)}`;
+    expect(Number.isFinite(Date.parse(legacyDeadline))).toBe(true);
+    claudeState.tickets[2].deadline_at = legacyDeadline;
+    const claudeIntent = dispatchAction(claudeState.tickets[2]).dispatch.dispatch_intent;
+    const claude = {
+      type: 'dispatch_agent',
+      ticket: claudeState.tickets[2],
+      dispatch: nativeDispatch('claude', claudeState.tickets[2], claudeIntent),
+    };
+    // Cross-host metadata is structurally valid but irrelevant to Agent.
+    claude.dispatch.spawn_args = { message: 'x'.repeat(55_000) };
+    claude.recovery_kind = `unknown-${'k'.repeat(55_000)}`;
+    const projectedClaude = projectRunResponse({
+      ok: true,
+      run: claudeState,
+      actions: [claude],
+    });
+    expect(projectedClaude).not.toHaveProperty('run');
+    expect(projectedClaude.actions[0].dispatch.dispatch_intent)
+      .toEqual(launchBearingClaudeIntent(claude.dispatch.dispatch_intent));
+    expect(projectedClaude.actions[0].dispatch.dispatch_intent).not.toHaveProperty('expires_at');
+    expect(projectedClaude.actions[0].dispatch.model).toEqual({
+      model: claudeSelector,
+    });
+    expect(projectedClaude.actions[0].dispatch).not.toHaveProperty('spawn_args');
+    expect(projectedClaude.actions[0].ticket).not.toHaveProperty('model');
+    expect(projectedClaude.actions[0].ticket).not.toHaveProperty('stage_id');
+    expect(projectedClaude.actions[0]).not.toHaveProperty('recovery_kind');
+    expect(wireSize(projectedClaude)).toBeLessThanOrEqual(BUDGET_CHARS);
+    expect(projectRunResponse(projectedClaude)).toEqual(projectedClaude);
+
+    const annotatedCodexModel = {
+      model: 'gpt-5.6-sol',
+      reasoning_effort: 'high',
+      annotation: 'm'.repeat(55_000),
+    };
+    const codexState = runState(SMALL_OBJECTIVE, { host: 'codex' });
+    const codexTicket = codexState.tickets[2];
+    codexTicket.model = annotatedCodexModel;
+    const spawnArgs = {
+      task_name: 'ape_implementer_fixture',
+      fork_turns: 'none',
+      message: 'Execute the immutable APE ticket injected by the trusted hook.',
+      model: 'gpt-5.6-sol',
+      reasoning_effort: 'high',
+    };
+    const codex = {
+      type: 'dispatch_agent',
+      ticket: codexTicket,
+      dispatch: {
+        host: 'codex',
+        native_tool: 'spawn_agent',
+        agent_name: 'ape:implementer',
+        agent_type: 'implementer',
+        model: annotatedCodexModel,
+        protocol_version: 'ape-native-dispatch-v2',
+        envelope_version: 2,
+        ticket_projection: 'hook-injected',
+        spawn_args: { ...spawnArgs, annotation: 'z'.repeat(55_000) },
+        dispatch_intent: { annotation: 'i'.repeat(55_000) },
+      },
+    };
+    const projectedCodex = projectRunResponse({ ok: true, run: codexState, actions: [codex] });
+    expect(projectedCodex).not.toHaveProperty('run');
+    expect(projectedCodex.actions[0].dispatch.spawn_args).toEqual(spawnArgs);
+    expect(projectedCodex.actions[0].dispatch).not.toHaveProperty('dispatch_intent');
+    expect(projectedCodex.actions[0].dispatch.model).toEqual({
+      model: 'gpt-5.6-sol',
+      reasoning_effort: 'high',
+    });
+    expect(projectedCodex.actions[0].ticket).not.toHaveProperty('model');
+    expect(wireSize(projectedCodex)).toBeLessThanOrEqual(BUDGET_CHARS);
+    expect(projectRunResponse(projectedCodex)).toEqual(projectedCodex);
+  });
+
+  it('A13 action-priority fallback preserves every concurrent launch and drops cross-host bulk', () => {
+    const secondTicket = makeTicket(
+      'build',
+      'reviewer',
+      'tik-pending-review',
+      SMALL_OBJECTIVE,
+      { model: { model: 'claude-sonnet-4-6' } },
+    );
+    const state = runState(SMALL_OBJECTIVE, { host: 'claude' });
+    state.tickets[2].model = { model: 'claude-sonnet-4-6' };
+    state.tickets.push(secondTicket);
+    const actions = [
+      dispatchAction(state.tickets[2], NONCE),
+      dispatchAction(secondTicket, 'z'.repeat(43)),
+    ];
+    for (const action of actions) {
+      action.dispatch.spawn_args = { message: 'unused-'.repeat(4_000) };
+    }
+
+    const projected = projectRunResponse({ ok: true, run: state, actions });
+    expect(projected.actions).toHaveLength(2);
+    expect(projected.actions.map((action) => action.ticket.ticket_id)).toEqual([
+      state.tickets[2].ticket_id,
+      secondTicket.ticket_id,
+    ]);
+    expect(projected.actions.map((action) => action.dispatch.dispatch_intent.nonce)).toEqual([
+      NONCE,
+      'z'.repeat(43),
+    ]);
+    expect(projected.actions.every((action) => !('spawn_args' in action.dispatch))).toBe(true);
+    expect(wireSize(projected)).toBeLessThanOrEqual(BUDGET_CHARS);
+    expect(projectRunResponse(projected)).toEqual(projected);
+  });
+
+  it('A14 launch-only fallback: an oversized run reference cannot erase a live dispatch', () => {
+    const tickets = Array.from({ length: 80 }, (_, index) => makeTicket(
+      'build',
+      'implementer',
+      `tik-${index}-${'t'.repeat(800)}`,
+      SMALL_OBJECTIVE,
+    ));
+    const state = runState(SMALL_OBJECTIVE, {
+      host: 'claude',
+      tickets,
+      receipts: [],
+      expired_tickets: [],
+    });
+    const action = dispatchAction(tickets[0]);
+    action.recovery_kind = 'stage_retry';
+    const projected = projectRunResponse({ ok: true, run: state, actions: [action] });
+
+    // The action-only emergency tier proves it ran by omitting the enormous
+    // runReference while retaining its authoritative marker.
+    expect(projected).not.toHaveProperty('run');
+    expect(projected.projection).toMatchObject({
+      kind: 'reference-only-v1',
+      authoritative_ref: '.ape/runtime/active.json',
+    });
+    expect(projected.actions[0].dispatch.dispatch_intent)
+      .toEqual(launchBearingClaudeIntent(action.dispatch.dispatch_intent));
+    expect(projected.actions[0].recovery_kind).toBe('stage_retry');
+    expect(projected.actions[0].ticket.ticket_id).toBe(tickets[0].ticket_id);
+    expect(wireSize(projected)).toBeLessThanOrEqual(BUDGET_CHARS);
+    expect(projectRunResponse(projected)).toEqual(projected);
   });
 });
 

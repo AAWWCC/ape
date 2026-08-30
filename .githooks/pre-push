@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+remote_url=${2:-}
+case "${remote_url}" in
+  https://github.com/AAWWCC/ape.git|git@github.com:AAWWCC/ape.git|ssh://git@github.com/AAWWCC/ape.git)
+    ;;
+  *)
+    echo "Refusing push: this public APE checkout only permits its canonical origin" >&2
+    exit 1
+    ;;
+esac
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+exec node scripts/check-public-commit-identities.mjs --pre-push

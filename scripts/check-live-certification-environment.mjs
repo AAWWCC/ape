@@ -5,8 +5,8 @@ import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const GITHUB_NOREPLY = /^[A-Za-z0-9][A-Za-z0-9.+_-]*@users\.noreply\.github\.com$/iu;
-const SAFE_NAME = /^[^\u0000-\u001f\u007f]+$/u;
+const LIVE_CERTIFICATION_NAME = 'APE Certification';
+const LIVE_CERTIFICATION_EMAIL = 'ape-certification@users.noreply.github.com';
 
 export class LiveCertificationEnvironmentError extends Error {
   constructor(message) {
@@ -27,22 +27,52 @@ function localGitValue(projectDir, key) {
   }
 }
 
+function effectiveGitIdentity(projectDir, variable) {
+  let value;
+  try {
+    value = execFileSync('git', ['var', variable], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+  const match = value.match(/^(.+) <([^<>]+)> \d+ [+-]\d{4}$/u);
+  return match ? { name: match[1], email: match[2] } : null;
+}
+
 export function verifyLiveCertificationEnvironment(projectDir = process.cwd()) {
   const root = resolve(projectDir);
   const name = localGitValue(root, 'user.name');
   const email = localGitValue(root, 'user.email');
-  if (!name || !SAFE_NAME.test(name)) {
+  if (name !== LIVE_CERTIFICATION_NAME) {
     throw new LiveCertificationEnvironmentError(
-      'disposable repository must set a safe repository-local user.name before live certification',
+      'disposable repository must set the exact APE Certification repository-local user.name before live certification',
     );
   }
-  if (!GITHUB_NOREPLY.test(email)) {
+  if (email.toLowerCase() !== LIVE_CERTIFICATION_EMAIL) {
     throw new LiveCertificationEnvironmentError(
-      'disposable repository must set a repository-local GitHub noreply user.email before live certification',
+      'disposable repository must set the exact APE Certification repository-local GitHub noreply user.email before live certification',
     );
+  }
+  for (const [variable, kind] of [
+    ['GIT_AUTHOR_IDENT', 'author'],
+    ['GIT_COMMITTER_IDENT', 'committer'],
+  ]) {
+    const identity = effectiveGitIdentity(root, variable);
+    if (
+      identity?.name !== LIVE_CERTIFICATION_NAME ||
+      identity.email.toLowerCase() !== LIVE_CERTIFICATION_EMAIL
+    ) {
+      throw new LiveCertificationEnvironmentError(
+        `live certification effective ${kind} identity must be the exact repository-local APE Certification service identity without a Git environment override`,
+      );
+    }
   }
   return Object.freeze({
     identity_scope: 'repository-local',
+    identity: LIVE_CERTIFICATION_NAME,
     email_domain: 'users.noreply.github.com',
   });
 }
@@ -68,7 +98,7 @@ if (invokedDirectly(process.argv[1])) {
   try {
     verifyLiveCertificationEnvironment(parseArgs(process.argv.slice(2)));
     process.stdout.write(
-      'live-certification environment passed: repository-local GitHub noreply identity is set\n',
+      'live-certification environment passed: exact repository-local and effective service identity is set\n',
     );
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
