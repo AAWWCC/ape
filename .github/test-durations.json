@@ -76,6 +76,7 @@
   "__tests__/runtime-v2-gating-watch.test.js": 16590,
   "__tests__/runtime-v2-git-plumbing.test.js": 3317,
   "__tests__/runtime-v2-git-status.test.js": 141,
+  "__tests__/runtime-v2-green-maintenance.test.js": 3118,
   "__tests__/runtime-v2-history-explain.test.js": 98,
   "__tests__/runtime-v2-history.test.js": 1122,
   "__tests__/runtime-v2-hook-agent-attribution.test.js": 1590,
@@ -189,6 +190,7 @@
   "__tests__/runtime-v2-round3-terminal-tree.test.js": 2319,
   "__tests__/runtime-v2-run-observability.test.js": 790,
   "__tests__/runtime-v2-run-preview-forecast.test.js": 981,
+  "__tests__/runtime-v2-run-scoped-command-profiles.test.js": 371,
   "__tests__/runtime-v2-runner-routing-resolver.test.js": 25,
   "__tests__/runtime-v2-runner.test.js": 963,
   "__tests__/runtime-v2-scheduler.test.js": 7,
@@ -224,5 +226,6 @@
   "__tests__/runtime-v2-validated-receipt-handoff.test.js": 8,
   "__tests__/runtime-v2-verification-profiles.test.js": 154,
   "__tests__/runtime-v2-versioned-terminal-diagnostics.test.js": 337,
-  "__tests__/runtime-v2-windows-path-containment.test.js": 3
+  "__tests__/runtime-v2-windows-path-containment.test.js": 3,
+  "__tests__/runtime-v2-worker-validator-reachability.test.js": 19
 }

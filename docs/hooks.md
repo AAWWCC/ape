@@ -125,6 +125,16 @@ are explicit shell builtins; Windows resolution honors PATHEXT and case-insensit
 `read`, `write`, or `execute` effect. There is no prefix/glob matching. Write profiles require a
 writable ticket, and write/execute effects trigger tree reconciliation.
 
+For one investigation, `ape_run preview`/`start` may instead carry `run_command_profiles`. This
+surface is restricted to `debugger` or `spike_researcher`, the profile must name only the mode's
+role, and its effect must be `execute`. Each entry also requires a nonblank audit `reason` and
+`operator_authorized: true`, which may be set only after the operator approves that exact literal
+command. The exact command becomes a required capability in that run's immutable snapshot; it never
+changes repository-wide configuration and cannot be added after start. This is the supported path
+for measurements such as an exact interpreter invocation that is intentionally outside the generic
+non-mutating command grammar. Because execute profiles can run arbitrary code, their normal
+post-command tree reconciliation is defense in depth, not a substitute for that explicit approval.
+
 ### Token and character rules
 
 Admission is tokenize-then-allowlist. The command is parsed into tokens, checked against one

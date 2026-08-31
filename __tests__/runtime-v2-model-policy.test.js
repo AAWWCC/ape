@@ -90,6 +90,8 @@ describe('model tier policy', () => {
       mechanical: 15 * 60_000,
       fast: 30 * 60_000,
       full: 60 * 60_000,
+      debug: 15 * 60_000,
+      spike: 15 * 60_000,
     });
   });
 });

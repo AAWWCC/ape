@@ -17,7 +17,8 @@ enforces.
 2. **No main-session production writes.** Production code flows through a stage ticket; the main
    session authors only orchestration state and prose.
 3. **Behavioral test independence.** Tests assert behavior, not the implementation that produced it;
-   non-behavioral work does not manufacture red-test evidence.
+   red-first work observes fail/fail, explicit green maintenance observes pass/pass, and
+   non-behavioral work manufactures neither.
 4. **Deterministic, tree-bound evidence.** Every receipt is validated against a recomputed tree SHA
    and changed-file set — claims are never trusted as written.
 5. **One retry per failed stage and bounded, convergent remediation.** A new blocker set may receive
@@ -39,7 +40,7 @@ enforces.
 | --- | --- |
 | Runtime-owned transitions | `lib/runtime/scheduler.js` — a pure `RunState + Event → Action[]` reducer |
 | No main-session production writes | `lib/runtime/hooks.js` ticket / path-claim policy; `prompts/common.md` agent contract |
-| Behavioral test independence | `test_writer` role boundary + `required_checks` (`red-test`); receipt test entries |
+| Behavioral test independence | `test_writer` role boundary + runtime-owned `required_checks` (`red-test` or `green-test`); receipt observations |
 | Deterministic, tree-bound evidence | `lib/runtime/receipt-validator.js` recomputes the tree SHA and changed files |
 | One retry + convergent remediation | `lib/runtime/constants.js` bounds plus reducer finding fingerprints |
 | Project / host agnosticism | `lib/runtime/adapters.js` (Claude / Codex); no literal tooling in the core |

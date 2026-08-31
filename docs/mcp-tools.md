@@ -5,7 +5,7 @@ machine contract behind them.
 
 | Tool | Actions |
 | --- | --- |
-| `ape_run` | `probe`, `probe-status`, `probe-ack`, `preview`, `start`, `next`, `record`, `answer-preflight`, `status`, `resume`, `regate`, `ship`, `expire-dispatch`, `abort`, `override` |
+| `ape_run` | `probe`, `probe-status`, `probe-ack`, `preview`, `start`, `next`, `record`, `recover-receipt`, `answer-preflight`, `status`, `resume`, `regate`, `ship`, `expire-dispatch`, `abort`, `override` |
 | `ape_status` | Dedicated read-only current-run, pending-ticket, lane, and gate snapshot. |
 | `ape_history` | `query`, `explain`, `metrics`, `import`, `maintenance-status`, `compact-artifacts`, `roadmap-status`, `roadmap-register`, `roadmap-supersede`, `roadmap-attest` |
 | `ape_config` | `get`, `set`, `doctor`, `wire`, `unwire`, `init` |
@@ -62,15 +62,30 @@ metrics calls do not mutate that cache or send telemetry anywhere.
 
 - `start` validates objective, host, mode, lane, path claims, test paths, requirements, risk, host
   capabilities, and explicit invocation before creating a branch or run. Behavioral fast/full runs
-  require `test_paths`; non-behavioral phase runs omit the test-writer/red-test stage. Explicit plan
-  contract v2 is limited to behavioral fast/full phase runs. `land` additionally requires a
+  require `test_paths` and default to `test_intent: "red-first"`. Explicit phase-only
+  `"green-maintenance"` instead requires runtime-observed pass/pass and skips the ordinary
+  implementer when `claimed_paths` is empty. Non-behavioral phase runs omit the test-writer stage;
+  keep `behavioral:false` for pure data/baseline work. Explicit plan contract v2 is limited to
+  behavioral fast/full phase runs. `land` additionally requires a
   non-empty default-tip-to-working-tree diff entirely inside `claimed_paths` and `test_paths`, with
   HEAD equal to or descended from the resolved default tip.
 - `preview` uses the same readiness resolver and reports derived capability requirements and the
-  pipeline's deterministic dispatch bounds before any run state is written.
+  pipeline's deterministic dispatch bounds plus the resolved ticket deadline before any run state
+  is written. `debug`/`spike` may supply exact `run_command_profiles`; each is restricted to the
+  matching read-only role with `effect: execute`, requires an operator-approved audit reason, and is
+  frozen as a required capability. Do not set `operator_authorized: true` until the operator has
+  approved the exact literal command; repository tree reconciliation does not make arbitrary code
+  execution intrinsically safe.
 - `record` accepts an agent receipt draft. The runtime adds and verifies identity, tree/test
   evidence, hashes, and the next transition. New-contract tickets
   also require a matching `ape_validate_receipt` attestation for the normalized exact draft.
+- `recover-receipt` is an emergency operator-only admission for a native-bound receipt-contract
+  ticket whose exact physical worker is host-observed as stopped without an attestation. Supply the
+  unchanged `receipt`, the exact `receipt_input_hash` returned by the refused ordinary `record`, and
+  a nonblank audit `reason`. The runtime still validates the one-time ticket/session/dispatch binding
+  and every ordinary receipt contract; only the worker attestation is waived. It seals the exact
+  draft and dispatch hashes plus the reason into the immutable receipt, completed dispatch intent,
+  and `overrides.ndjson`. An already attested draft must use ordinary `record`.
 - `next` advances one pending transition or polls a `gating`/`shipping` watch.
 - `ape_status` is the canonical read-only status tool. The `ape_run` `status` action remains a
   deprecated compatibility alias. `resume` returns the action needed to continue an interrupted
@@ -92,6 +107,14 @@ not a content-quality judgment. A valid call binds the normalized
 draft hash to that physical dispatch; changing the draft invalidates the attestation.
 Candidate-plan usage is returned at
 `budgets.candidate_plan_utf8_bytes.{used_bytes,max_bytes,remaining_bytes}`.
+
+Every canonical and packaged Claude role names both supported exact host-qualified validators,
+`mcp__ape__ape_validate_receipt` and
+`mcp__plugin_ape_ape__ape_validate_receipt`, in addition to the external-MCP wildcard. The manual
+release prerequisite in `docs/operational-readiness.md` launches each packaged role through the real
+Claude host without overriding its tool allowlist, requires a linked validator tool call with an
+exact role sentinel, and accepts only the APE service's expected no-active-run response. A prose
+mention or a similarly named tool cannot pass.
 
 Each physical worker receives an initial validation and two corrections. One fresh worker may then
 be authorized on the same immutable ticket without consuming a stage attempt. A second exhaustion
@@ -235,9 +258,12 @@ and stale, pending, ready, in-progress, or unknown dependencies fail closed with
 - `roadmap-supersede` marks known live entries stale with a reason and optional `replaced_by`; it
   does not delete them. Targets and replacements must be unique, known, live, and disjoint, and the
   remaining live dependency graph must still be valid.
-- `roadmap-attest` closes live requirements against an archived completed run without modifying the
-  run's immutable record. Pass `requirement_ids`, `run_id`, and a non-empty audit `reason`. The
-  run must exist and be completed; each requirement must be known and live (not superseded).
+- `roadmap-attest` closes live requirements against an archived completed run, or against the exact
+  verified produce-and-hold shape (`blocked` at `merge`, `gates.passed: true`, and the canonical
+  auto-merge-disabled reason), without modifying the run's immutable record. Pass `requirement_ids`,
+  `run_id`, and a non-empty audit `reason`. No other blocked shape is eligible, and a shipping hold's
+  `completes` declaration does not satisfy a requirement without this explicit attestation. Each
+  requirement must be known and live (not superseded).
   Attestations are idempotent and stored in a separate overlay (`roadmap-attestations.json`) that
   the derivation reads alongside `completes`. The requirement-index is updated so `query` can find
   the relationship.

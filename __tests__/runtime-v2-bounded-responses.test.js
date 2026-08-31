@@ -131,6 +131,7 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
           by_role: { planner: 2, implementer: 2 },
           by_model_tier: { deep: 2, balanced: 2 },
         },
+        ticket_deadline: { deadline_ms: 900_000, source: 'mode:spike' },
         readiness: {
           healthy: false,
           ready: false,
@@ -173,6 +174,7 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
       blueprint: {
         lane: 'full',
         dispatch_bounds: response.blueprint.dispatch_bounds,
+        ticket_deadline: response.blueprint.ticket_deadline,
         readiness: {
           healthy: false,
           ready: false,

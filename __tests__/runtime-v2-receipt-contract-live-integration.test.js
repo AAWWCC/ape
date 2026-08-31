@@ -11,8 +11,10 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { receiptOutputSchemaForTicket } from '../lib/runtime/receipt-validator.js';
 import { receiptInputHash } from '../lib/runtime/receipt-input.js';
 import {
+  executeApeRunTaskOperation,
   nextRun,
   recordReceipt,
+  recoverReceipt,
   resumeRun,
   validateReceiptForDispatch,
 } from '../lib/runtime/service.js';
@@ -256,6 +258,9 @@ async function fixture(host = 'codex', options = {}) {
       capability_hash: rawDigest(capability),
       prepared_at: createdAt,
       bound_at: createdAt,
+      ...(options.agent_stopped_at
+        ? { agent_stopped_at: options.agent_stopped_at }
+        : {}),
       expires_at: ticket.deadline_at,
       launch_attempts: 1,
       physical_worker_dispatches: 1,
@@ -480,6 +485,241 @@ describe('live receipt contract integration', () => {
       value.capability,
       binding,
     )).valid).toBe(false);
+  });
+
+  it('audits an exact stopped-dispatch operator recovery without weakening receipt validation', async () => {
+    const stoppedAt = new Date().toISOString();
+    const value = await fixture('codex', { agent_stopped_at: stoppedAt });
+    const exactDraft = draft(value.ticket, value.capability);
+
+    // The normal worker-owned path remains closed and gives the operator the
+    // exact normalized hash it must explicitly confirm on the emergency path.
+    const ordinary = await recordReceipt(value.directory, exactDraft);
+    expect(ordinary).toMatchObject({
+      ok: false,
+      rejected: true,
+      input_hash: receiptInputHash(exactDraft),
+      errors: [expect.stringMatching(/not pre-validated and attested byte-for-byte/i)],
+    });
+
+    const reason = 'validator schema was absent from this bound worker tool surface';
+    const recovered = await recoverReceipt(value.directory, exactDraft, {
+      receipt_input_hash: ordinary.input_hash,
+      reason,
+    });
+    expect(recovered).toMatchObject({
+      ok: true,
+      recovered: 'operator-receipt',
+      operator_recovery: {
+        ticket_id: value.ticket.ticket_id,
+        receipt_input_hash: ordinary.input_hash,
+        dispatch_identity_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+        worker_attestation: 'operator-waived',
+        validation: 'runtime-revalidated',
+      },
+      receipt: {
+        ticket_id: value.ticket.ticket_id,
+        agent: { identity: 'agent-1' },
+        evidence: {
+          operator_receipt_recovery: {
+            version: 1,
+            reason,
+            receipt_input_hash: ordinary.input_hash,
+            dispatch_identity_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+            dispatch: {
+              host: 'codex',
+              run_id: value.state.run_id,
+              ticket_id: value.ticket.ticket_id,
+              ticket_hash: value.ticket.ticket_hash,
+              session_id: 'session-1',
+              agent_id: 'agent-1',
+              worker_stopped_at: stoppedAt,
+              physical_worker_dispatches: 1,
+            },
+            validation: {
+              draft_contract: 'runtime-revalidated',
+              authoritative_admission: 'runtime-validated',
+              worker_attestation: 'operator-waived',
+            },
+          },
+        },
+      },
+    });
+    // A waiver is not counted as worker validation success.
+    expect(recovered.run.orchestration).toMatchObject({
+      receipt_accepts: 0,
+      receipt_first_pass_accepts: 0,
+    });
+
+    const intent = await readJson(
+      path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`),
+      null,
+    );
+    expect(intent).toMatchObject({
+      status: 'completed',
+      bound_session_id: 'session-1',
+      bound_agent_id: 'agent-1',
+      receipt_input_hash: ordinary.input_hash,
+      receipt_recording: {
+        mode: 'operator-recovery',
+        reason,
+        receipt_input_hash: ordinary.input_hash,
+        worker_attestation: 'operator-waived',
+        validation: 'runtime-revalidated',
+      },
+    });
+
+    const audit = (await readFile(value.paths.overrideLog, 'utf8'))
+      .trim().split('\n').map((line) => JSON.parse(line))
+      .filter((entry) => entry.operation === 'recover-receipt');
+    expect(audit).toEqual([expect.objectContaining({
+      run_id: value.state.run_id,
+      ticket_id: value.ticket.ticket_id,
+      ticket_hash: value.ticket.ticket_hash,
+      receipt_id: recovered.receipt.receipt_id,
+      receipt_hash: recovered.receipt.receipt_hash,
+      receipt_input_hash: ordinary.input_hash,
+      dispatch_identity_hash:
+        recovered.receipt.evidence.operator_receipt_recovery.dispatch_identity_hash,
+      host: 'codex',
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      physical_worker_dispatches: 1,
+      worker_attestation: 'operator-waived',
+      validation: 'runtime-revalidated',
+      reason,
+    })]);
+
+    // An identical replay stays content-addressed and does not duplicate the
+    // override-class audit record.
+    const replay = await recoverReceipt(value.directory, exactDraft, {
+      receipt_input_hash: ordinary.input_hash,
+      reason,
+    });
+    expect(replay).toMatchObject({ ok: true, idempotent: true });
+    expect((await readFile(value.paths.overrideLog, 'utf8')).trim().split('\n')).toHaveLength(1);
+  });
+
+  it('executes recover-receipt through the durable task-operation schema and action branch', async () => {
+    const value = await fixture('codex', { agent_stopped_at: new Date().toISOString() });
+    const exactDraft = draft(value.ticket, value.capability);
+    const inputHash = receiptInputHash(exactDraft);
+    const result = await executeApeRunTaskOperation(value.directory, {
+      operationId: `op-${'R'.repeat(43)}`,
+      action: 'recover-receipt',
+      expectedRunId: value.state.run_id,
+      request: {
+        action: 'recover-receipt',
+        receipt: exactDraft,
+        receipt_input_hash: inputHash,
+        reason: 'task-wrapped validator provisioning recovery',
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      recovered: 'operator-receipt',
+      operator_recovery: { receipt_input_hash: inputHash },
+    });
+    const taskTransactions = await readdir(
+      path.join(value.paths.runtime, 'task-operation-transactions'),
+    );
+    expect(taskTransactions.filter((name) => name.endsWith('.json'))).toHaveLength(1);
+  });
+
+  it('fails operator recovery closed on a wrong hash, live worker, invalid draft, or missing reason', async () => {
+    const value = await fixture();
+    const exactDraft = draft(value.ticket, value.capability);
+    const exactHash = receiptInputHash(exactDraft);
+
+    await expect(recoverReceipt(value.directory, exactDraft, {
+      receipt_input_hash: exactHash,
+      reason: '   ',
+    })).rejects.toThrow(/nonblank audit reason/i);
+
+    expect(await recoverReceipt(value.directory, exactDraft, {
+      receipt_input_hash: '0'.repeat(64),
+      reason: 'confirm a deliberately mismatched draft',
+    })).toMatchObject({
+      ok: false,
+      rejected: true,
+      actual_receipt_input_hash: exactHash,
+      failure_domain: 'operator',
+    });
+
+    expect(await recoverReceipt(value.directory, exactDraft, {
+      receipt_input_hash: exactHash,
+      reason: 'worker has not stopped',
+    })).toMatchObject({
+      ok: false,
+      rejected: true,
+      errors: [expect.stringMatching(/host-observed stop/i)],
+    });
+
+    const intentFile = path.join(
+      value.paths.dispatchIntents,
+      `${rawDigest(value.ticket.ticket_id)}.json`,
+    );
+    await atomicWriteJson(intentFile, {
+      ...await readJson(intentFile, null),
+      agent_stopped_at: new Date().toISOString(),
+    });
+    const invalid = draft(value.ticket, value.capability, 'invalid-status');
+    expect(await recoverReceipt(value.directory, invalid, {
+      receipt_input_hash: receiptInputHash(invalid),
+      reason: 'invalid drafts must remain invalid',
+    })).toMatchObject({
+      ok: false,
+      rejected: true,
+      corrections: expect.arrayContaining([
+        expect.objectContaining({ field: 'status' }),
+      ]),
+    });
+
+    expect(await readdir(value.paths.receipts).catch((error) =>
+      error?.code === 'ENOENT' ? [] : Promise.reject(error))).toEqual([]);
+    expect(await readdir(value.paths.receiptTransactions).catch((error) =>
+      error?.code === 'ENOENT' ? [] : Promise.reject(error))).toEqual([]);
+    await expect(readFile(value.paths.overrideLog, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses operator recovery for an already worker-attested draft and reserves its audit field', async () => {
+    const value = await fixture('codex', { agent_stopped_at: new Date().toISOString() });
+    const spoofed = {
+      ...draft(value.ticket, value.capability),
+      evidence: {
+        summary: 'complete',
+        operator_receipt_recovery: { reason: 'worker-authored spoof' },
+      },
+    };
+    const spoofedValidation = await validateReceiptForDispatch(
+      value.directory,
+      spoofed,
+      value.ticket.ticket_id,
+    );
+    expect(spoofedValidation).toMatchObject({
+      valid: false,
+      corrections: [expect.objectContaining({
+        field: 'evidence.operator_receipt_recovery',
+      })],
+    });
+
+    const exactDraft = draft(value.ticket, value.capability);
+    expect(await validateReceiptForDispatch(
+      value.directory,
+      exactDraft,
+      value.ticket.ticket_id,
+    )).toMatchObject({ valid: true, attested: true });
+    expect(await recoverReceipt(value.directory, exactDraft, {
+      receipt_input_hash: receiptInputHash(exactDraft),
+      reason: 'an attested draft does not need operator recovery',
+    })).toMatchObject({
+      ok: false,
+      rejected: true,
+      errors: [expect.stringMatching(/already has an exact worker attestation/i)],
+      next_action: { required_control_action: 'record_exact_attested_receipt' },
+    });
+    await expect(readFile(value.paths.overrideLog, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('archives a valid draft replacement as non-first-pass without inventing a rejection', async () => {

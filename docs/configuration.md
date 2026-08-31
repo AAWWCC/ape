@@ -36,6 +36,8 @@ checked byte-for-byte by `npm run docs:check`.
 | `deadlines_ms.mechanical` | number | `900000` | Mechanical stage/suite deadline (15 minutes). |
 | `deadlines_ms.fast` | number | `1800000` | Fast stage/suite deadline (30 minutes). |
 | `deadlines_ms.full` | number | `3600000` | Full stage/suite deadline (60 minutes). |
+| `deadlines_ms.debug` | number | `900000` | Read-only debug ticket deadline (15 minutes), independent of its change-lane classification. |
+| `deadlines_ms.spike` | number | `900000` | Read-only spike ticket deadline (15 minutes), independent of its change-lane classification. |
 | `models.claude.fast.model` | string | `"haiku"` | Claude fast-tier model. |
 | `models.claude.balanced.model` | string | `"sonnet"` | Claude balanced-tier model. |
 | `models.claude.deep.model` | string | `"opus"` | Claude deep-tier model. |
@@ -121,7 +123,9 @@ orphan and fails closed.
 `shipping.auto_merge: false` is produce-and-hold. Green work blocks at merge with
 `auto-merge is disabled by configuration`; the audited `ship` action re-proves every gate against
 the current tree and merges only on green. A failed proof moves back to the ordinary gate-block /
-`regate` path.
+`regate` path. A roadmap requirement may instead be closed against that exact verified hold with a
+reason-audited `roadmap-attest`; no other blocked shape is eligible, and the hold is not satisfying
+without the attestation.
 
 With auto-merge enabled, a protected base that rejects an immediate squash merge can require
 GitHub's `--auto` path. APE enables it and keeps the run in `shipping` until `next` observes the

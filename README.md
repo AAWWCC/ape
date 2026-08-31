@@ -121,7 +121,8 @@ read-only `status` skill may be selected implicitly when relevant.
 The building lanes are:
 
 - `mechanical`: documentation, generated output, non-behavioral configuration, or tracked data.
-- `fast`: behavioral work with at most six production files and no high-risk trigger.
+- `fast`: behavioral work with at most six production files and no high-risk trigger. A test-only
+  `green-maintenance` run uses its bounded `test_paths` when it has no production claims.
 - `full`: larger or sensitive work, including security, auth, migrations, dependencies, public APIs,
   schemas, concurrency, and destructive operations.
 
@@ -130,13 +131,15 @@ Generated host bundles under `plugins/<host>/dist/` and release staging under
 `release/generated/` are recognized as mechanical output without treating arbitrary nested
 `dist` or `build` directories as generated code.
 
-Behavioral `phase` work in the fast and full lanes follows a test-first protocol: a test writer is
-assigned failing tests in `test_paths`, then a separate implementer owns production
-`claimed_paths`, and read-only reviewers judge the result. APE verifies the artifacts and receipts
-available to it; it cannot guarantee that a test is meaningful or a review is correct. This
-protocol does not describe mechanical work, read-only `debug`/`spike`, or `land`, which reviews and
-ships an existing diff without editing it. High-risk runs add a security review. Each failed stage
-can be retried once; distinct blocking findings receive a bounded remediation budget, while repeated
+Behavioral `phase` work defaults to `test_intent: "red-first"`: a test writer is assigned failing
+tests in `test_paths`, then a separate implementer owns production `claimed_paths`. For a regression
+net that is green on arrival or a test-only deflake, select `test_intent: "green-maintenance"`;
+the runtime executes the exact changed test paths twice and requires pass/pass. When that run has no
+production claims it proceeds from the test writer directly to read-only review, with no empty
+implementer stage. APE verifies the artifacts and receipts available to it; it cannot guarantee that
+a test is meaningful or a review is correct. This protocol does not describe mechanical work,
+read-only `debug`/`spike`, or `land`. High-risk runs add a security review. Each failed stage can be
+retried once; distinct blocking findings receive a bounded remediation budget, while repeated
 findings stop immediately as no-progress failures.
 
 Non-behavioral fast/full phase work keeps its planning, implementation, review, and merge gates but

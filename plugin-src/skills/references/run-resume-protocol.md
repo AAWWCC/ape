@@ -74,7 +74,15 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    `test_paths` when test-owned. Do not translate these into legacy `evidence.test_remediation`.
    If `record` rejects because exact validation or attestation is absent, do not repair in the
    parent: continue the same physical agent with the exact errors. It has at most two correction
-   submissions after its initial validation and must return a complete replacement.
+   submissions after its initial validation and must return a complete replacement. If that exact
+   worker is already host-observed as stopped and its finished draft could not be attested because
+   the validator schema was unavailable, report the unchanged draft hash and stop for explicit
+   operator direction. Only when the operator approves the emergency waiver with a nonblank reason,
+   call `ape_run` action `recover-receipt` with the unchanged `receipt`, the refused `record`
+   response's exact `receipt_input_hash`, and that reason. The runtime revalidates every ordinary
+   receipt and binding contract and seals the worker/session/dispatch identity; only the worker's
+   exact-draft attestation is waived. Never infer this authorization, use recovery while the worker
+   is live, change the draft, or recover a draft that already has a valid attestation.
    If `next_action.kind` is `redispatch_same_ticket`, wait for the observed SubagentStop, call
    `ape_run next` (or `resume` during recovery), and launch only the returned same-ticket dispatch;
    this does not consume a logical stage attempt. If that worker exhausts its

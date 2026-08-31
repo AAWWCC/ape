@@ -21,6 +21,28 @@ these canaries in a disposable repository on every host marked `required` for li
 packaged and receives pinned structural and marketplace validation, but authenticated Claude live
 operation is marked `unverified` and is not part of the release certificate.
 
+Claude packaging nevertheless has an explicit authenticated manual release prerequisite. From the
+exact candidate source, retain a proof outside the repository and verify that it still binds the
+candidate's manifests, plugin MCP declaration, plugin identity, and canary implementation:
+
+```sh
+npm run --silent release:worker-validator-reachability > /secure/path/worker-validator-proof.json
+npm run release:worker-validator-proof -- /secure/path/worker-validator-proof.json
+```
+
+The canary enumerates every canonical and packaged role, launches each packaged role through Claude
+without injecting a tool allowlist, and exits nonzero unless a real call to either supported exact
+validator schema reaches the APE service and returns the expected no-active-run sentinel. Its
+bounded JSON proof includes the exact candidate validator-surface hash, each role/tool observation,
+and a hash of each host transcript; a missing role, stale candidate, or altered observation fails the
+proof verifier. Do not proceed with a release candidate when either command fails.
+
+This is a manual prerequisite, not a field consumed by `release:live-certification`; retain its
+operator-attested proof beside the other external release evidence. It proves per-role schema
+resolution and MCP transport only. It does not certify ticket binding, a complete Claude run, model
+effectiveness, or Claude as a required compatibility host, and it is intentionally excluded from
+credential-free CI because it uses the operator's authenticated Claude host.
+
 Before the first attempt, set the exact repository-local identity `APE Certification
 <ape-certification@users.noreply.github.com>` in each disposable repository's Git config; never
 inherit release commit identity from global or system config, substitute another noreply account,

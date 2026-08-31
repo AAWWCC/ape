@@ -1,10 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { archiveRun } from '../lib/runtime/history.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
+import { AUTO_MERGE_HOLD_REASON } from '../lib/runtime/constants.js';
 
 // Behavioral tests for RM2 derived status. Status is computed at read time from
 // the roadmap store, the requirement index + history, and any active run — never
@@ -330,14 +331,98 @@ describe('APE v2 roadmap attestation (RM8)', () => {
     expect(statusOf(roadmap, 'ATT-2')).toBe('satisfied');
   });
 
-  it('rejects attestation against a non-completed run', async () => {
+  it('satisfies only after a reason-audited attestation against a verified shipping hold', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-hold')]);
+    await archiveRun(paths, archivedRun('run-att-hold', {
+      requirements: ['ATT-hold'],
+      completes: ['ATT-hold'],
+      status: 'blocked',
+      stage: 'merge',
+      gates: { passed: true },
+      block_reason: AUTO_MERGE_HOLD_REASON,
+    }));
+
+    const before = await derive(paths);
+    expect(statusOf(before, 'ATT-hold')).toBe('ready');
+
+    const reason = 'accept the fully gated produce-and-hold result';
+    await attest(paths, { requirement_ids: ['ATT-hold'], run_id: 'run-att-hold', reason });
+
+    const after = await derive(paths);
+    expect(statusOf(after, 'ATT-hold')).toBe('satisfied');
+    const attestations = await readJson(paths.roadmapAttestations, { attestations: [] });
+    expect(attestations.attestations).toContainEqual(expect.objectContaining({
+      requirement_id: 'ATT-hold',
+      run_id: 'run-att-hold',
+      reason,
+    }));
+    const audit = (await readFile(paths.overrideLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(audit).toContainEqual(expect.objectContaining({
+      operation: 'roadmap-attest',
+      requirement_ids: ['ATT-hold'],
+      run_id: 'run-att-hold',
+      reason,
+    }));
+  });
+
+  it('rejects attestation against an ordinary blocked run', async () => {
     const paths = await tempPaths();
     await seedRoadmap(paths, [storedEntry('ATT-3')]);
     await archiveRun(paths, archivedRun('run-att3', { requirements: ['ATT-3'], status: 'blocked' }));
 
     await expect(
       attest(paths, { requirement_ids: ['ATT-3'], run_id: 'run-att3', reason: 'try' }),
-    ).rejects.toThrow(/requires a completed run/);
+    ).rejects.toThrow(/requires a completed run or verified shipping hold/);
+  });
+
+  it.each([
+    ['the wrong stage', { stage: 'gates', gates: { passed: true }, block_reason: AUTO_MERGE_HOLD_REASON }],
+    ['unpassed gates', { stage: 'merge', gates: { passed: false }, block_reason: AUTO_MERGE_HOLD_REASON }],
+    ['the wrong reason', { stage: 'merge', gates: { passed: true }, block_reason: 'manual hold' }],
+  ])('rejects a blocked run with %s', async (_label, shape) => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-near-hold')]);
+    await archiveRun(paths, archivedRun('run-near-hold', {
+      requirements: ['ATT-near-hold'],
+      status: 'blocked',
+      ...shape,
+    }));
+
+    await expect(
+      attest(paths, {
+        requirement_ids: ['ATT-near-hold'],
+        run_id: 'run-near-hold',
+        reason: 'must remain rejected',
+      }),
+    ).rejects.toThrow(/requires a completed run or verified shipping hold/);
+  });
+
+  it('does not derive satisfaction for an arbitrary blocked run even with a stored attestation', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-blocked-overlay')]);
+    await archiveRun(paths, archivedRun('run-blocked-overlay', {
+      requirements: ['ATT-blocked-overlay'],
+      status: 'blocked',
+      stage: 'gates',
+      gates: { passed: false },
+    }));
+    await atomicWriteJson(paths.roadmapAttestations, {
+      schema_version: '2.0.0',
+      attestations: [{
+        requirement_id: 'ATT-blocked-overlay',
+        run_id: 'run-blocked-overlay',
+        reason: 'legacy or manually seeded overlay',
+        attested_at: '2026-07-01T00:02:00.000Z',
+        mutation_id: 'seeded-attestation',
+      }],
+    });
+
+    const roadmap = await derive(paths);
+    expect(statusOf(roadmap, 'ATT-blocked-overlay')).toBe('ready');
   });
 
   it('rejects attestation against an unknown run', async () => {

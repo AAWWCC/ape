@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { LANES } from '../lib/runtime/constants.js';
 import { RESPONSE_BUDGET_BYTES } from '../lib/runtime/projection.js';
+import { receiptInputHash } from '../lib/runtime/receipt-input.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -147,6 +148,60 @@ describe('APE v2 MCP public surface', () => {
     }
   });
 
+  it('hard-bounds an ape_run status response backed by a >100KB active state', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-large-active-'));
+    try {
+      const runtime = path.join(scratch, '.ape', 'runtime');
+      await mkdir(runtime, { recursive: true });
+      const active = {
+        schema_version: '2.0.0',
+        run_id: 'run-large-active-projection',
+        status: 'running',
+        stage: 'test',
+        mode: 'phase',
+        lane: 'fast',
+        behavioral: true,
+        test_intent: 'green-maintenance',
+        objective: `Large immutable objective ${'O'.repeat(110 * 1024)}`,
+        claimed_paths: [],
+        test_paths: ['tests/value.test.js'],
+        tickets: [],
+        receipts: [],
+        expired_tickets: [],
+      };
+      const activeText = JSON.stringify(active);
+      expect(Buffer.byteLength(activeText, 'utf8')).toBeGreaterThan(100 * 1024);
+      await writeFile(path.join(runtime, 'active.json'), activeText);
+
+      const responses = await session([{
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'ape_run',
+          arguments: { action: 'status', project_dir: scratch },
+        },
+      }]);
+      expect(responses[0].result.isError).not.toBe(true);
+      const text = responses[0].result.content[0].text;
+      expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(RESPONSE_BUDGET_BYTES);
+      const projected = JSON.parse(text);
+      expect(projected.projection).toMatchObject({
+        kind: 'reference-only-v1',
+        authoritative_ref: '.ape/runtime/active.json',
+      });
+      expect(projected.run).toMatchObject({
+        run_id: active.run_id,
+        run_ref: '.ape/runtime/active.json',
+      });
+      expect(projected.run).not.toHaveProperty('objective');
+      // Projection is wire-only: the complete state remains authoritative.
+      expect(await readFile(path.join(runtime, 'active.json'), 'utf8')).toBe(activeText);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it('advertises every runtime lane — including mechanical — on the ape_run start schema (F43)', async () => {
     const responses = await session([
       { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
@@ -163,6 +218,7 @@ describe('APE v2 MCP public surface', () => {
       'probe-ack',
       'preview',
       'start',
+      'recover-receipt',
     ]));
     expect(run.inputSchema.allOf).toContainEqual({
       if: {
@@ -170,6 +226,24 @@ describe('APE v2 MCP public surface', () => {
         required: ['action'],
       },
       then: { required: ['objective', 'host'] },
+    });
+    expect(run.inputSchema.allOf).toContainEqual({
+      if: {
+        properties: { action: { const: 'recover-receipt' } },
+        required: ['action'],
+      },
+      then: { required: ['receipt', 'receipt_input_hash', 'reason'] },
+    });
+    expect(run.inputSchema.allOf).toContainEqual({
+      if: {
+        properties: { action: { enum: ['preview', 'start'] } },
+        required: ['action'],
+      },
+      else: { not: { required: ['run_command_profiles'] } },
+    });
+    expect(run.inputSchema.properties.receipt_input_hash).toMatchObject({
+      type: 'string',
+      pattern: '^[0-9a-fA-F]{64}$',
     });
     expect(run.inputSchema.properties).not.toHaveProperty('execution_budget');
     expect(run.inputSchema.properties).not.toHaveProperty('max_worker_dispatches');
@@ -181,6 +255,31 @@ describe('APE v2 MCP public surface', () => {
       'verification_profile',
       'evidence_command',
     ]);
+    expect(run.inputSchema.properties.run_command_profiles).toMatchObject({
+      type: 'array',
+      maxItems: 64,
+      items: {
+        additionalProperties: false,
+        required: ['id', 'command', 'roles', 'effect', 'operator_authorized', 'reason'],
+        properties: {
+          roles: {
+            minItems: 1,
+            maxItems: 1,
+            items: { enum: ['debugger', 'spike_researcher'] },
+          },
+          effect: { const: 'execute' },
+          operator_authorized: { const: true },
+          reason: { type: 'string', minLength: 1, maxLength: 2000, pattern: '\\S' },
+        },
+      },
+    });
+    expect(run.inputSchema.properties.run_command_profiles.items.properties.command.pattern)
+      .toBe('^[^\\r\\n\\u0000]+$');
+    expect(run.inputSchema.properties.test_intent).toMatchObject({
+      type: 'string',
+      enum: ['red-first', 'green-maintenance'],
+      default: 'red-first',
+    });
     expect(run.inputSchema.properties.probe_id).toMatchObject({ type: 'string' });
     expect(run.inputSchema.properties.probe_capability).toMatchObject({ type: 'string' });
     expect(run.description).toMatch(/Preview and start require the same complete prospective run facts[\s\S]*objective and host/iu);
@@ -191,6 +290,33 @@ describe('APE v2 MCP public surface', () => {
     expect(run.inputSchema.properties.action.description).toMatch(/action status[\s\S]*only action and project_dir[\s\S]*never send run_id/i);
     for (const field of ['explicit_invocation', 'hooks_trusted', 'subagents_available']) {
       expect(run.inputSchema.properties[field].description).toMatch(/initial Codex probe call/i);
+    }
+  });
+
+  it('routes recover-receipt on the direct compatibility plane as well as MCP tasks', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-recover-route-'));
+    try {
+      const receipt = { ticket_id: 'missing-ticket' };
+      const responses = await session([{
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'ape_run',
+          arguments: {
+            action: 'recover-receipt',
+            project_dir: scratch,
+            receipt,
+            receipt_input_hash: receiptInputHash(receipt),
+            reason: 'exercise the non-task compatibility route',
+          },
+        },
+      }]);
+      expect(responses[0].result.isError).toBe(true);
+      expect(responses[0].result.content[0].text).toMatch(/no active run/iu);
+      expect(responses[0].result.content[0].text).not.toMatch(/unknown tool or action/iu);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
     }
   });
 
@@ -233,6 +359,27 @@ describe('APE v2 MCP public surface', () => {
     expect(history.inputSchema.properties.reason.description).toMatch(/compact-artifacts/);
   });
 
+  it('advertises reason-audited roadmap attestation with complete required inputs', async () => {
+    const responses = await session([
+      { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
+    ]);
+    const history = responses[0].result.tools.find((tool) => tool.name === 'ape_history');
+    expect(history.inputSchema.properties.action.enum).toContain('roadmap-attest');
+    expect(history.inputSchema.properties.requirement_ids).toMatchObject({
+      type: 'array',
+      minItems: 1,
+      maxItems: 64,
+      items: { type: 'string', minLength: 1, maxLength: 128 },
+    });
+    expect(history.inputSchema.allOf).toContainEqual({
+      if: {
+        properties: { action: { const: 'roadmap-attest' } },
+        required: ['action'],
+      },
+      then: { required: ['requirement_ids', 'run_id', 'reason'] },
+    });
+  });
+
   it('rejects abort carrying an operation instead of silently dropping it', async () => {
     // The guard throws before abortRun runs. project_dir additionally aims
     // the mutating call at an empty scratch dir so a guard regression fails
@@ -259,6 +406,30 @@ describe('APE v2 MCP public surface', () => {
     expect(text).toMatch(/operation 'reset' belongs to action 'override'/);
     expect(text).toMatch(/"action":"override"/);
     expect(text).toMatch(/"operation":"reset"/);
+  });
+
+  it('rejects run-local command grants on actions that cannot freeze them', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-profile-guard-'));
+    try {
+      const responses = await session([{
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'ape_run',
+          arguments: {
+            action: 'next',
+            project_dir: scratch,
+            run_command_profiles: [],
+          },
+        },
+      }]);
+      expect(responses[0].result.isError).toBe(true);
+      expect(responses[0].result.content[0].text)
+        .toMatch(/action 'next' does not take run_command_profiles[\s\S]*'preview'\/'start'/u);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
   });
 
   it('keeps malformed input from killing the server loop', async () => {

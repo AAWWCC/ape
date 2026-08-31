@@ -31,7 +31,19 @@ The preflight analyst runs only for behavioral fast/full phase work using plan c
 baseline commands must be receipt-backed. Output hashes are included when the host exposes enough
 raw output to compute them and omitted—not fabricated—otherwise.
 
+The test writer follows the immutable ticket intent. `red-first` is the default and receives
+runtime-owned fail/fail admission. Explicit phase-only `green-maintenance` receives runtime-owned
+pass/pass admission for green-on-arrival coverage or deflaking; when no production path is claimed,
+review follows directly and no implementer is dispatched.
+
 Agents never schedule other agents or write runtime state. External MCP tools exposed by the host
 remain available without APE-specific names, claims, adapters, or provider allowlists. The host and
 operator own discovery and permission decisions. APE still verifies repository changes at stage
 and receipt boundaries, so ordinary filesystem changes must fit `claimed_paths` or `test_paths`.
+
+Every canonical and packaged Claude role explicitly grants the receipt validator under both known
+host-qualified names: `mcp__ape__ape_validate_receipt` and
+`mcp__plugin_ape_ape__ape_validate_receipt`. The broad external-MCP wildcard is not treated as proof
+that a deferred per-role schema was provisioned. The manual authenticated prerequisite in
+`docs/operational-readiness.md` launches every role through Claude, verifies that an actual linked
+validator call reaches the APE service, and emits a candidate-bound proof for external retention.

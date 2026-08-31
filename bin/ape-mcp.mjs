@@ -19,6 +19,7 @@ import {
   overrideRun,
   prepareNativeBindingProbe,
   recordReceipt,
+  recoverReceipt,
   regateRun,
   resumeRun,
   shipRun,
@@ -77,18 +78,35 @@ const TOOLS = Object.freeze([
           },
           then: { required: ['objective', 'host'] },
         },
+        {
+          if: {
+            properties: { action: { const: 'recover-receipt' } },
+            required: ['action'],
+          },
+          then: { required: ['receipt', 'receipt_input_hash', 'reason'] },
+        },
+        {
+          if: {
+            properties: { action: { enum: ['preview', 'start'] } },
+            required: ['action'],
+          },
+          else: { not: { required: ['run_command_profiles'] } },
+        },
       ],
       properties: {
         action: {
           type: 'string',
-          enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'],
-          description: 'Preview and start require identical complete prospective facts, including objective and host; only action differs. For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
+          enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'recover-receipt', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'],
+          description: 'Preview and start require identical complete prospective facts, including objective and host; only action differs. recover-receipt is the reason-audited emergency path for the exact draft of a host-observed stopped worker when normal worker attestation is unavailable. For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
         },
         project_dir: {
           type: 'string',
           description: 'Exact governed project root.',
         },
-        objective: { type: 'string' },
+        objective: {
+          type: 'string',
+          description: 'Observable outcome and acceptance criteria. Do not embed execution budgets or guessed lane durations; preview reports the runtime-owned ticket deadline separately.',
+        },
         mode: { type: 'string', enum: [...START_MODES] },
         lane: {
           type: 'string',
@@ -105,6 +123,12 @@ const TOOLS = Object.freeze([
           type: 'array',
           items: { type: 'string' },
           description: 'Test files the independent test writer will author (its write allowlist). Required for behavioral lanes (fast/full); leave empty only for mechanical/debug/spike scopes with behavioral:false.',
+        },
+        test_intent: {
+          type: 'string',
+          enum: ['red-first', 'green-maintenance'],
+          default: 'red-first',
+          description: 'Immutable phase-test contract. Use green-maintenance only for behavioral regression/deflake work whose authored tests must pass on the incoming implementation; omit it for ordinary red-first work and use behavioral:false for data or baseline re-recording.',
         },
         requirements: {
           type: 'array',
@@ -160,6 +184,43 @@ const TOOLS = Object.freeze([
             ],
           },
         },
+        run_command_profiles: {
+          type: 'array',
+          maxItems: 64,
+          description: 'Preview/start only, and only for debug or spike: exact operator-attested measurement commands frozen into this run. Each profile must authorize only the matching read-only role, use effect execute, carry a nonblank audit reason, and set operator_authorized true only after explicit approval of that literal command.',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['id', 'command', 'roles', 'effect', 'operator_authorized', 'reason'],
+            properties: {
+              id: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' },
+              command: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 8192,
+                pattern: '^[^\\r\\n\\u0000]+$',
+              },
+              roles: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 1,
+                items: { type: 'string', enum: ['debugger', 'spike_researcher'] },
+              },
+              effect: { const: 'execute' },
+              operator_authorized: {
+                const: true,
+                description: 'Set true only after the operator explicitly approves this exact literal command for this run.',
+              },
+              reason: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 2000,
+                pattern: '\\S',
+                description: 'Nonblank audit reason for granting this exact run-local execution capability.',
+              },
+            },
+          },
+        },
         preflight_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
         answers: {
           type: 'array',
@@ -178,6 +239,11 @@ const TOOLS = Object.freeze([
         explicit_invocation: { type: 'boolean', description: 'Required true on the initial Codex probe call and start call only after an explicit operator invocation.' },
         wait_ms: { type: 'number', description: 'Optional on next: best-effort max ms to server-side wait for a run resting in gating/shipping to resolve in one call; clamped to GATE_NEXT_MAX_WAIT_MS (300000); the receipt lock is released between internal polls; a non-number/<=0/omitted value = one poll (unchanged). A gating run that resolves into required-remote-checks shipping stops at shipping_started; call next again (with wait_ms) to drive shipping to merged.' },
         receipt: { type: 'object' },
+        receipt_input_hash: {
+          type: 'string',
+          pattern: '^[0-9a-fA-F]{64}$',
+          description: 'recover-receipt only: exact normalized draft hash returned by the refused ordinary record attempt; binds the audited recovery to byte-for-byte receipt content.',
+        },
         probe_id: {
           type: 'string',
           description: 'probe-ack only: the probe id returned by the bound canary agent.',
@@ -242,20 +308,27 @@ const TOOLS = Object.freeze([
   {
     name: 'ape_history',
     description:
-      'Query, privacy-safely explain with the shared stable diagnostics, aggregate project metrics, or import APE machine history; inspect latest retention maintenance status; explicitly compact redundant old run artifacts with a required audit reason; and drive the runtime-owned roadmap: roadmap-status (derived cold-boot picture), roadmap-register (validated, receipt-provenanced, journaled batch), roadmap-supersede (validated journaled staleness mutation). Explain returns a bounded safe projection rather than the full immutable record. Inputs are bounded at 64 KB.',
+      'Query, privacy-safely explain with the shared stable diagnostics, aggregate project metrics, or import APE machine history; inspect latest retention maintenance status; explicitly compact redundant old run artifacts with a required audit reason; and drive the runtime-owned roadmap: roadmap-status (derived cold-boot picture), roadmap-register (validated, receipt-provenanced, journaled batch), roadmap-supersede (validated journaled staleness mutation), and roadmap-attest (reason-audited closure against a completed run or exact verified shipping hold). Explain returns a bounded safe projection rather than the full immutable record. Inputs are bounded at 64 KB.',
     inputSchema: {
       type: 'object',
       required: ['action'],
+      allOf: [{
+        if: {
+          properties: { action: { const: 'roadmap-attest' } },
+          required: ['action'],
+        },
+        then: { required: ['requirement_ids', 'run_id', 'reason'] },
+      }],
       properties: {
         action: {
           type: 'string',
-          enum: ['query', 'explain', 'metrics', 'import', 'maintenance-status', 'compact-artifacts', 'roadmap-status', 'roadmap-register', 'roadmap-supersede'],
+          enum: ['query', 'explain', 'metrics', 'import', 'maintenance-status', 'compact-artifacts', 'roadmap-status', 'roadmap-register', 'roadmap-supersede', 'roadmap-attest'],
         },
         project_dir: {
           type: 'string',
           description: 'Exact governed project root.',
         },
-        run_id: { type: 'string' },
+        run_id: { type: 'string', description: 'Run selector for query/explain, or exact archived run bound by roadmap-attest.' },
         requirement: { type: 'string' },
         since: { type: 'string', format: 'date-time', description: 'metrics only: inclusive ISO timestamp start of date range filter.' },
         until: { type: 'string', format: 'date-time', description: 'metrics only: inclusive ISO timestamp end of date range filter; must not precede since.' },
@@ -308,10 +381,18 @@ const TOOLS = Object.freeze([
         // replacement ids. reason is required for register, supersede, and
         // the explicit compact-artifacts maintenance action.
         ids: { type: 'array', maxItems: 64, items: { type: 'string', minLength: 1, maxLength: 128 } },
+        requirement_ids: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 64,
+          items: { type: 'string', minLength: 1, maxLength: 128 },
+          description: 'roadmap-attest only: live requirement ids to bind to the archived run.',
+        },
         replaced_by: { type: 'array', maxItems: 32, items: { type: 'string', minLength: 1, maxLength: 128 } },
         reason: {
           type: 'string',
-          description: 'Required non-empty audit reason for compact-artifacts, roadmap-register, and roadmap-supersede.',
+          minLength: 1,
+          description: 'Required non-empty audit reason for compact-artifacts, roadmap-register, roadmap-supersede, and roadmap-attest.',
         },
         status_filter: {
           type: 'array',
@@ -413,7 +494,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.24.7' };
+    return { name: 'ape', version: '2.24.8' };
   }
 }
 
@@ -509,8 +590,16 @@ function taskWireProjection(task) {
   return projected;
 }
 
+function assertRunCommandProfilesAction(input) {
+  const action = input.action;
+  if (input.run_command_profiles !== undefined && action !== 'preview' && action !== 'start') {
+    throw new Error(`action '${action}' does not take run_command_profiles; run-local command grants may only be frozen by actions 'preview'/'start'`);
+  }
+}
+
 async function dispatchApeRun(projectDir, input) {
   const action = input.action;
+  assertRunCommandProfilesAction(input);
   if (action === 'answer-preflight') {
     return projectRunResponse(await answerPreflight(projectDir, {
       ...(input.run_id !== undefined ? { run_id: input.run_id } : {}),
@@ -558,6 +647,7 @@ async function dispatchApeRun(projectDir, input) {
       host: input.host,
       claimed_paths: input.claimed_paths ?? [],
       test_paths: input.test_paths ?? [],
+      test_intent: input.test_intent ?? 'red-first',
       requirements: input.requirements ?? [],
       ...(input.completes !== undefined ? { completes: input.completes } : {}),
       ...(input.supersedes_run !== undefined ? { supersedes_run: input.supersedes_run } : {}),
@@ -573,8 +663,10 @@ async function dispatchApeRun(projectDir, input) {
       hooks_trusted: input.hooks_trusted ?? false,
       subagents_available: input.subagents_available ?? false,
       explicit_invocation: input.explicit_invocation ?? false,
+      binding_protocol: 'native-v1',
       capability_contract_required: true,
       required_capabilities: input.required_capabilities ?? [],
+      run_command_profiles: input.run_command_profiles ?? [],
     });
   }
   if (action === 'start') {
@@ -585,6 +677,7 @@ async function dispatchApeRun(projectDir, input) {
       host: input.host,
       claimed_paths: input.claimed_paths ?? [],
       test_paths: input.test_paths ?? [],
+      test_intent: input.test_intent ?? 'red-first',
       requirements: input.requirements ?? [],
       // Strict start schema: forward the optional advances-vs-completes subset
       // and the cross-run supersession marker only when the caller sent them.
@@ -605,6 +698,7 @@ async function dispatchApeRun(projectDir, input) {
       binding_protocol: 'native-v1',
       capability_contract_required: true,
       required_capabilities: input.required_capabilities ?? [],
+      run_command_profiles: input.run_command_profiles ?? [],
       // Codex must prove the live host actually delivers APE's launch and
       // child-binding lifecycle before a real run may mutate Git or state.
       // Claude uses its separately attested native binding path.
@@ -613,6 +707,12 @@ async function dispatchApeRun(projectDir, input) {
   }
   if (action === 'next') return nextRun(projectDir, { wait_ms: input.wait_ms });
   if (action === 'record') return recordReceipt(projectDir, input.receipt ?? {});
+  if (action === 'recover-receipt') {
+    return recoverReceipt(projectDir, input.receipt ?? {}, {
+      receipt_input_hash: input.receipt_input_hash,
+      reason: input.reason,
+    });
+  }
   if (action === 'status') return statusRun(projectDir);
   if (action === 'resume') return resumeRun(projectDir);
   if (action === 'regate') return regateRun(projectDir);
@@ -971,6 +1071,20 @@ export async function shutdownOwnedTasks(reason = 'MCP server shutdown requested
 export async function executeToolCall(message) {
   const name = message.params?.name;
   const args = message.params?.arguments ?? {};
+  if (name === 'ape_run') {
+    // Reject a misplaced immutable grant before task wrapping. Otherwise a
+    // task-capable `next`/`record` could bypass dispatchApeRun and silently
+    // discard a caller-supplied run profile inside executeApeRunTaskOperation.
+    try {
+      assertRunCommandProfilesAction(args);
+    } catch (cause) {
+      return result(message.id, {
+        resultType: 'complete',
+        isError: true,
+        content: [{ type: 'text', text: cause?.message ?? String(cause) }],
+      });
+    }
+  }
   if (name === 'ape_run' && declaresModernProtocol(message)) {
     const projectDir = resolveMcpRoot(args.project_dir);
     if (await shouldTaskWrapApeRun(projectDir, args)) {
@@ -1118,7 +1232,7 @@ export function createToolCallQueue({
       const taskCapableApeRun = declaresModernProtocol(message) && declaresTasksCapability(message) &&
         message.params?.name === 'ape_run';
       const definitelyCreatesTask = taskCapableApeRun && (
-        ['record', 'regate', 'ship'].includes(args.action) ||
+        ['record', 'recover-receipt', 'regate', 'ship'].includes(args.action) ||
         (args.action === 'next' && Number.isFinite(args.wait_ms) && args.wait_ms > 0)
       );
       const gateDependentNext = taskCapableApeRun && args.action === 'next' && !definitelyCreatesTask;

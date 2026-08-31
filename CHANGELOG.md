@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## 2.24.8 — 2026-08-30
+
+Roadmap attestation now accepts the exact fully gated produce-and-hold terminal shape emitted when
+auto-merge is disabled. The exception remains reason-audited and fail-closed: arbitrary blocked
+runs are still rejected, and a shipping hold never satisfies a requirement from `completes` alone.
+
+Claude worker manifests now name both supported receipt-validator server identities explicitly,
+with a live release canary that exercises every packaged role through the host. A stopped bound
+worker whose exact finished draft could not be attested can be recovered through a separate
+operator-only action: the runtime revalidates the full receipt, requires its exact hash and an audit
+reason, and seals the waived attestation plus ticket/session/dispatch identity in durable evidence.
+
+Read-only debug and spike runs can now freeze exact run-local measurement commands without changing
+repository-wide policy. Each command is limited to the matching investigation role and requires an
+explicit operator authorization plus audit reason; the normal command-effect tree reconciliation
+still applies. Debug and spike tickets now use their own 15-minute defaults even though their empty
+production scope classifies `full`, preview exposes the resolved deadline, and workers treat
+`deadline_at`—not time-budget prose embedded in the immutable objective—as authoritative.
+
+Behavioral phase runs now support an explicit immutable `green-maintenance` test intent for
+green-on-arrival regression coverage and test deflakes. The test writer retains exclusive ownership,
+the runtime executes exact authored paths twice and requires pass/pass (including per-runner and
+tree-stability checks), and a test-only run skips the empty production implementer stage. Red-first
+remains the default; pure data and baseline rerecords remain non-behavioral. An end-to-end MCP
+regression also proves a complete active state larger than 100 KB degrades to the existing
+authoritative reference while staying under the 48,000-byte wire bound.
+
+`npm run package:check` now rebuilds MCP and hook bundles out of tree and compares them byte for
+byte with committed `dist/`, so a source-only tool-schema repair cannot ship behind a stale bundle.
+Version 2.24.8 invalidates the prior source certification and starts a fresh release cycle.
+
 ## 2.24.7 — 2026-08-30
 
 The public checkout now has a closed commit-attribution policy. Versioned commit-message and
