@@ -16,11 +16,12 @@ without changing the lane.
 
 ### Fast
 
-`test writer → implementer → reviewer → gates → ship`
+`test writer → [implementer when production is claimed] → reviewer → gates → ship`
 
 For behavioral work with a bounded production scope (six files by default) and no high-risk
-trigger. The test writer authors the test and a concise plan; the implementer cannot edit those
-tests; the reviewer is read-only.
+trigger. Test-only `green-maintenance` uses its bounded authored-test scope when production scope is
+empty. The test writer authors the test and a concise plan; the implementer cannot edit those tests;
+the reviewer is read-only.
 
 ### Full
 
@@ -39,12 +40,17 @@ cycle, but it does cost one additional deep-tier agent dispatch beyond the two p
 The judge receives the disagreeing reviewers' bounded `review_findings` and either advances or
 blocks the run. It is not a writing or remediation stage.
 
-Behavioral fast/full phase runs use the test-writer/red-test stage; plan contract v2 adds the
-preflight analyst before it. Non-behavioral fast/full phase runs keep their ordinary planning (full
-only), build, review, and merge gates but omit preflight v2 and the test-writer stage; targeted
-stage checks run only when `test_paths` are present. An explicit `plan_contract_version: 2` on
-non-behavioral, non-phase, or non-fast/full work is refused before APE creates a branch because that
-contract requires a schedulable preflight.
+Behavioral fast/full phase runs default to `test_intent: "red-first"`, whose runtime-owned
+`red-test` admission executes exact authored paths twice and requires fail/fail. Explicit
+`test_intent: "green-maintenance"` is phase-only, requires `behavioral:true` and non-empty
+`test_paths`, and instead requires runtime-owned pass/pass; it is for green-on-arrival regression
+nets and test deflakes, not data/baseline rerecords. A test-only green-maintenance run omits the
+ordinary implementer stage. Plan contract v2 adds the preflight analyst before either test intent.
+Non-behavioral fast/full phase runs keep their ordinary planning (full only), build, review, and
+merge gates but omit preflight v2 and the test-writer stage; targeted stage checks run only when
+`test_paths` are present. An explicit `plan_contract_version: 2` on non-behavioral, non-phase, or
+non-fast/full work is refused before APE creates a branch because that contract requires a
+schedulable preflight.
 
 ## Retries and remediation
 

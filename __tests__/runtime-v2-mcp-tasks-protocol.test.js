@@ -177,6 +177,19 @@ describe('APE v2 experimental MCP task protocol', () => {
     expect(waitedLegacyCall.result.taskId).toBeUndefined();
   });
 
+  it('rejects misplaced run command grants before task wrapping can discard them', async () => {
+    const projectDir = await scratchDir('ape-task-profile-guard-');
+    const response = await executeToolCall(toolCall(1, projectDir, 'next', {
+      tasks: true,
+      arguments: { wait_ms: 10, run_command_profiles: [] },
+    }));
+
+    expect(response.result).toMatchObject({ resultType: 'complete', isError: true });
+    expect(response.result).not.toHaveProperty('taskId');
+    expect(response.result.content[0].text)
+      .toMatch(/action 'next' does not take run_command_profiles[\s\S]*'preview'\/'start'/u);
+  });
+
   it('makes generation zero durable and resolvable before returning CreateTaskResult', async () => {
     const projectDir = await scratchDir('ape-task-before-response-');
     const response = await executeToolCall(toolCall(1, projectDir, 'regate', { tasks: true }));

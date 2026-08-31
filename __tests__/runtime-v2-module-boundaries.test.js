@@ -25,7 +25,8 @@ const OWNER_MANIFEST = [
     owner: 'lib/runtime/receipt-service.js',
     facade: 'lib/runtime/service.js',
     symbols: [
-      'recordReceipt', 'validateReceiptForDispatch', 'settleReceiptValidationSubagentStop',
+      'recordReceipt', 'recoverReceipt', 'validateReceiptForDispatch',
+      'settleReceiptValidationSubagentStop',
       'executeTaskOperationTransaction', 'withReceiptLock',
     ],
   },
@@ -215,7 +216,7 @@ const REQUIRED_OWNER_FILES = [
 ];
 
 const FACADE_EXPORT_COUNTS = Object.freeze({
-  'lib/runtime/service.js': 34,
+  'lib/runtime/service.js': 35,
   'lib/runtime/hooks.js': 36,
   'lib/runtime/gates.js': 12,
   'lib/runtime/scheduler.js': 3,
