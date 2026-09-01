@@ -136,6 +136,14 @@ async function check(root) {
   requireContains(smoke, 'compatibility.json', 'scripts/smoke-marketplace-install.mjs');
   requireContains(smoke, 'host.version', 'scripts/smoke-marketplace-install.mjs');
   requireContains(smoke, "mode === 'edge'", 'scripts/smoke-marketplace-install.mjs');
+  requireContains(smoke, 'npm_execpath', 'scripts/smoke-marketplace-install.mjs');
+  requireContains(smoke, 'resolveMarketplaceHostInvocation', 'scripts/smoke-marketplace-install.mjs');
+  requireCondition(!/shell:\s*true/u.test(smoke), 'marketplace smoke must not launch through a command shell');
+
+  const hostInvocation = await text(root, 'scripts/marketplace-host-invocation.mjs');
+  requireContains(hostInvocation, 'realpath', 'scripts/marketplace-host-invocation.mjs');
+  requireContains(hostInvocation, 'shell: false', 'scripts/marketplace-host-invocation.mjs');
+  requireCondition(!/shell:\s*true/u.test(hostInvocation), 'marketplace host invocation must remain shell-free');
 
   const exporter = await text(root, 'scripts/export-public-tree.mjs');
   requireContains(exporter, "'compatibility.json'", 'scripts/export-public-tree.mjs');

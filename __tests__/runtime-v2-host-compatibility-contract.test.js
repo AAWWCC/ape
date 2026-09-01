@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
+import { resolveMarketplaceHostInvocation } from '../scripts/marketplace-host-invocation.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -20,6 +21,7 @@ const CONTRACT_FILES = [
   '.github/workflows/ci.yml',
   '.github/workflows/release.yml',
   '.github/workflows/host-edge.yml',
+  'scripts/marketplace-host-invocation.mjs',
   'scripts/smoke-marketplace-install.mjs',
   'scripts/export-public-tree.mjs',
 ];
@@ -112,6 +114,7 @@ describe('host compatibility contract', () => {
     ['pull-request CI', '.github/workflows/ci.yml', (text) => text.replace('0.147.0', '0.148.0')],
     ['tagged release', '.github/workflows/release.yml', (text) => text.replace('2.1.228', '2.1.229')],
     ['edge authority', '.github/workflows/host-edge.yml', (text) => text.replace('contents: read', 'contents: write')],
+    ['marketplace host shell isolation', 'scripts/marketplace-host-invocation.mjs', (text) => text.replace('shell: false', 'shell: true')],
     ['marketplace smoke', 'scripts/smoke-marketplace-install.mjs', (text) => text.replace('compatibility.json', 'compatibility-broken.json')],
     ['public export', 'scripts/export-public-tree.mjs', (text) => text.replace("'compatibility.json'", "'compatibility-broken.json'")],
   ];
@@ -159,6 +162,11 @@ describe('host compatibility contract', () => {
     expect(edge).not.toMatch(/contents: write|id-token: write|attestations: write|secrets\.|GH_TOKEN|NPM_TOKEN/u);
     expect(edge).not.toMatch(/gh release|npm publish|release:artifacts|attest-build-provenance|workflow_call:/u);
     expect(edge).not.toMatch(/^\s*uses:\s*\.\//mu);
+
+    const smoke = await read('scripts/smoke-marketplace-install.mjs');
+    expect(smoke).toContain('resolveMarketplaceHostInvocation');
+    expect(smoke).toContain('npm_execpath');
+    expect(smoke).not.toMatch(/shell:\s*true/u);
   });
 
   it('pins every third-party action in every compatibility workflow to a full SHA', async () => {
@@ -168,5 +176,82 @@ describe('host compatibility contract', () => {
       expect(uses.length, workflow).toBeGreaterThan(0);
       for (const line of uses) expect(line, workflow).toMatch(/@[0-9a-f]{40}(?:\s+#.*)?$/u);
     }
+  });
+});
+
+describe('marketplace host executable resolution', () => {
+  async function installedPackage(packageName, identity, declaredBin) {
+    const modulesRoot = await mkdtemp(path.join(tmpdir(), 'ape-host-modules-'));
+    scratchRoots.push(modulesRoot);
+    const packageRoot = path.join(modulesRoot, ...packageName.split('/'));
+    await mkdir(path.dirname(path.join(packageRoot, declaredBin)), { recursive: true });
+    await writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({
+      name: packageName,
+      bin: { [identity]: declaredBin },
+    }));
+    const executable = path.join(packageRoot, declaredBin);
+    await writeFile(executable, 'fixture\n');
+    return { modulesRoot, packageRoot, executable: await realpath(executable) };
+  }
+
+  it('launches JavaScript bins through Node while preserving every argument boundary', async () => {
+    const fixture = await installedPackage('@openai/codex', 'codex', 'bin/codex.js');
+    const specialPath = 'C:\\repo with spaces\\percent%\\bang!\\amp&';
+    const invocation = await resolveMarketplaceHostInvocation({
+      identity: 'codex',
+      packageName: '@openai/codex',
+      modulesRoot: fixture.modulesRoot,
+      args: ['plugin', 'marketplace', 'add', specialPath],
+      platform: 'win32',
+    });
+    expect(invocation).toEqual({
+      command: process.execPath,
+      args: [fixture.executable, 'plugin', 'marketplace', 'add', specialPath],
+      shell: false,
+    });
+  });
+
+  it('launches a native Windows host binary directly without a shell', async () => {
+    const fixture = await installedPackage('@anthropic-ai/claude-code', 'claude', 'bin/claude.exe');
+    const invocation = await resolveMarketplaceHostInvocation({
+      identity: 'claude',
+      packageName: '@anthropic-ai/claude-code',
+      modulesRoot: fixture.modulesRoot,
+      args: ['--version'],
+      platform: 'win32',
+    });
+    expect(invocation).toEqual({
+      command: fixture.executable,
+      args: ['--version'],
+      shell: false,
+    });
+  });
+
+  it('rejects batch shims and package-bin traversal on Windows', async () => {
+    const shim = await installedPackage('@openai/codex', 'codex', 'bin/codex.cmd');
+    await expect(resolveMarketplaceHostInvocation({
+      identity: 'codex',
+      packageName: '@openai/codex',
+      modulesRoot: shim.modulesRoot,
+      args: [],
+      platform: 'win32',
+    })).rejects.toThrow(/not a native Windows binary/u);
+
+    const modulesRoot = await mkdtemp(path.join(tmpdir(), 'ape-host-modules-'));
+    scratchRoots.push(modulesRoot);
+    const packageRoot = path.join(modulesRoot, '@openai', 'codex');
+    await mkdir(packageRoot, { recursive: true });
+    await writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({
+      name: '@openai/codex',
+      bin: { codex: '../../outside.js' },
+    }));
+    await writeFile(path.join(modulesRoot, 'outside.js'), 'fixture\n');
+    await expect(resolveMarketplaceHostInvocation({
+      identity: 'codex',
+      packageName: '@openai/codex',
+      modulesRoot,
+      args: [],
+      platform: 'win32',
+    })).rejects.toThrow(/escapes its package root/u);
   });
 });
