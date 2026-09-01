@@ -188,16 +188,16 @@ describe('projectedPipeline stage graph (full+high_risk)', () => {
 describe('projectedPipeline forecast bounds', () => {
   it('full+high_risk total includes every default remediation cycle and global retry', () => {
     const result = projectedPipeline(runSpec());
-    expect(result.dispatch_bounds.total).toBe(41);
+    expect(result.dispatch_bounds.total).toBe(44);
   });
 
-  it('models single-attempt reconciliation, two plan rounds, and repeated remediation', () => {
+  it('models single-attempt reconciliation, three plan rounds, and repeated remediation', () => {
     const result = projectedPipeline(runSpec());
     for (const [stageId, count] of Object.entries(result.dispatch_bounds.by_stage)) {
       const expected = ['test-reconcile', 'test-recheck'].includes(stageId)
         ? 1
         : ['plan-check', 'plan-critic', 'plan-judge'].includes(stageId)
-          ? MAX_STAGE_ATTEMPTS + 1
+          ? MAX_STAGE_ATTEMPTS + 2
           : stageId.startsWith('remediation-')
             ? MAX_REMEDIATION_CYCLES + (MAX_STAGE_ATTEMPTS - 1)
           : MAX_STAGE_ATTEMPTS;
@@ -210,7 +210,7 @@ describe('projectedPipeline forecast bounds', () => {
       high_risk_security_review: true,
       max_remediation_cycles: 10,
     } }));
-    expect(result.dispatch_bounds.total).toBe(69);
+    expect(result.dispatch_bounds.total).toBe(72);
     for (const stageId of [
       'remediation-test',
       'remediation-build',
@@ -226,7 +226,7 @@ describe('projectedPipeline forecast bounds', () => {
     const stageIds = result.stages.map((s) => s.id);
     expect(stageIds).toContain('security-review');
     expect(stageIds).toContain('remediation-security-review');
-    expect(result.dispatch_bounds.total).toBe(41);
+    expect(result.dispatch_bounds.total).toBe(44);
     expect(result.conditional_branches).toContainEqual({
       id: 'security-review',
       label: 'Security review (late risk trigger)',
@@ -241,7 +241,7 @@ describe('projectedPipeline forecast bounds', () => {
     const stageIds = result.stages.map((s) => s.id);
     expect(stageIds).not.toContain('security-review');
     expect(stageIds).not.toContain('remediation-security-review');
-    expect(result.dispatch_bounds.total).toBe(35);
+    expect(result.dispatch_bounds.total).toBe(38);
   });
 
   it('mechanical lane includes late-armed security review and its remediation envelope', () => {
@@ -324,7 +324,7 @@ describe('projectedPipeline forecast bounds', () => {
   it('fast v2 preflight forecasts the full graph that additive answers can arm', () => {
     const result = projectedPipeline(runSpec({ lane: 'fast', high_risk: false }));
     expect(result.stages.map((stage) => stage.id)).toContain('plan');
-    expect(result.dispatch_bounds.total).toBe(41);
+    expect(result.dispatch_bounds.total).toBe(44);
     expect(result.conditional_branches).toContainEqual({
       id: 'lane-escalation',
       label: 'Full-lane planning (preflight escalation)',
@@ -337,7 +337,7 @@ describe('projectedPipeline forecast bounds', () => {
       high_risk: false,
       policy: { high_risk_security_review: true, max_remediation_cycles: 10 },
     }));
-    expect(result.dispatch_bounds.total).toBe(69);
+    expect(result.dispatch_bounds.total).toBe(72);
   });
 
   it('land mode forecasts only read-only review and terminally blocks disagreement', () => {

@@ -8,6 +8,8 @@ import { archiveRun, calculateProjectMetrics } from '../lib/runtime/history.js';
 import { projectHistoryResponse, RESPONSE_BUDGET_CHARS } from '../lib/runtime/projection.js';
 import { historyAction } from '../lib/runtime/service.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
+import { createSuccessorAttestation } from '../lib/runtime/successor-attestation.js';
+import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identity.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const cleanups = [];
@@ -41,6 +43,37 @@ function makeRunRecord(id, overrides = {}) {
     ],
     ...overrides,
   };
+}
+
+const SUCCESSOR_REQUEST_HASH = 'd'.repeat(64);
+const SUCCESSOR_CONFIG_HASH = 'c'.repeat(64);
+
+function successorBinding(predecessor, successorRunId, retainedTree = predecessor.final_tree_sha) {
+  return {
+    start_config_hash: SUCCESSOR_CONFIG_HASH,
+    successor_request_hash: SUCCESSOR_REQUEST_HASH,
+    successor_attestation: createSuccessorAttestation({
+      version: 2,
+      predecessor_run_id: predecessor.run_id,
+      retained_tree_sha: retainedTree,
+      config_hash: SUCCESSOR_CONFIG_HASH,
+      approval_id: 'successor-approval-00000000-0000-4000-8000-000000000001',
+    }, predecessor.record_hash, successorRunId, SUCCESSOR_REQUEST_HASH),
+  };
+}
+
+function successorRecord(predecessor, successorRunId, overrides = {}) {
+  const state = makeRunRecord(successorRunId, {
+    status: 'completed',
+    supersedes_run: predecessor.run_id,
+    ...successorBinding(predecessor, successorRunId),
+    ...overrides,
+  });
+  state.admitted_start_identity_version = 1;
+  state.start_request_hash = overrides.start_request_hash ?? SUCCESSOR_REQUEST_HASH;
+  state.admitted_run_contract = null;
+  state.admitted_start_identity_hash = admittedStartIdentityHash(state);
+  return state;
 }
 
 describe('APE v2 Project Metrics Aggregation & Telemetry', () => {
@@ -96,6 +129,50 @@ describe('APE v2 Project Metrics Aggregation & Telemetry', () => {
       expect(fastLane.outcomes.completed).toBe(1);
       expect(fastLane.outcomes.blocked).toBe(1);
       expect(fastLane.outcomes.aborted).toBe(1);
+    });
+
+    it('excludes unrelated lineage diagnostics and lifecycle counts from filtered cohorts', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-filtered-lineage-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+
+      await archiveRun(paths, makeRunRecord('run-filtered-codex', {
+        host: 'codex',
+        status: 'completed',
+      }));
+      await archiveRun(paths, makeRunRecord('run-filtered-claude-blocked', {
+        host: 'claude',
+        status: 'blocked',
+      }));
+      await mkdir(paths.history, { recursive: true });
+      await atomicWriteJson(
+        path.join(paths.history, 'run-filtered-claude-corrupt.json'),
+        {
+          ...makeRunRecord('run-filtered-claude-corrupt', { host: 'claude' }),
+          record_hash: '0'.repeat(64),
+        },
+      );
+
+      const metrics = await calculateProjectMetrics(paths, { host: 'codex' });
+      expect(metrics.primary_outcome).toEqual({
+        basis: 'logical-lineage-v1',
+        total: 1,
+        outcomes: {
+          recovered: 1,
+          unresolved_blocked: 0,
+          aborted: 0,
+          unknown: 0,
+        },
+        success_rate: 1,
+        blocked_rate: 0,
+        run_lifecycle: {
+          unresolved_blocked: 0,
+          superseded: 0,
+          recovering: 0,
+          recovered: 1,
+        },
+        incomplete: false,
+      });
     });
 
     it('accepts the protected-branch land mode advertised by the MCP contract', async () => {
@@ -225,6 +302,298 @@ describe('APE v2 Project Metrics Aggregation & Telemetry', () => {
           malformed_components: 1,
         },
       });
+    });
+
+    it('makes the validated logical lineage the primary aggregate while retaining raw audit counts', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-primary-lineage-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+
+      const predecessor = await archiveRun(
+        paths,
+        makeRunRecord('run-primary-root', { status: 'blocked' }),
+      );
+      await archiveRun(paths, successorRecord(predecessor, 'run-primary-successor'));
+      await archiveRun(paths, makeRunRecord('run-primary-open', { status: 'blocked' }));
+
+      const metrics = await calculateProjectMetrics(paths, {});
+      expect(metrics.outcomes).toEqual({ completed: 1, blocked: 2, aborted: 0 });
+      expect(metrics.primary_outcome).toEqual({
+        basis: 'logical-lineage-v1',
+        total: 2,
+        outcomes: {
+          recovered: 1,
+          unresolved_blocked: 1,
+          aborted: 0,
+          unknown: 0,
+        },
+        success_rate: 0.5,
+        blocked_rate: 0.5,
+        run_lifecycle: {
+          unresolved_blocked: 1,
+          superseded: 1,
+          recovering: 0,
+          recovered: 1,
+        },
+        incomplete: false,
+      });
+      expect(metrics.audit_outcomes).toEqual({
+        total_runs: 3,
+        outcomes: { completed: 1, blocked: 2, aborted: 0 },
+      });
+    });
+
+    it('rejects a self-consistent attestation whose retained tree does not match the predecessor', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-mismatched-attestation-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      const predecessor = await archiveRun(
+        paths,
+        makeRunRecord('run-mismatch-root', { status: 'blocked' }),
+      );
+      await archiveRun(paths, successorRecord(
+        predecessor,
+        'run-mismatch-completed',
+        successorBinding(
+          predecessor,
+          'run-mismatch-completed',
+          'c'.repeat(40),
+        ),
+      ));
+
+      const metrics = await calculateProjectMetrics(paths, {});
+      expect(metrics.primary_outcome).toMatchObject({
+        total: 1,
+        outcomes: { recovered: 0, unresolved_blocked: 1 },
+        incomplete: true,
+        uncounted_runs: 1,
+        incomplete_reasons: ['mismatched-successor-attestation'],
+      });
+    });
+
+    it('keeps an unattested legacy supersession audit-only and never promotes it as recovered', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-unattested-lineage-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+
+      await archiveRun(paths, makeRunRecord('run-unattested-root', { status: 'blocked' }));
+      await archiveRun(paths, makeRunRecord('run-unattested-completed', {
+        status: 'completed',
+        supersedes_run: 'run-unattested-root',
+      }));
+
+      const metrics = await calculateProjectMetrics(paths, {});
+      expect(metrics.audit_outcomes).toEqual({
+        total_runs: 2,
+        outcomes: { completed: 1, blocked: 1, aborted: 0 },
+      });
+      expect(metrics.primary_outcome).toMatchObject({
+        total: 1,
+        outcomes: {
+          recovered: 0,
+          unresolved_blocked: 1,
+          aborted: 0,
+          unknown: 0,
+        },
+        incomplete: true,
+        uncounted_runs: 1,
+        incomplete_reasons: ['unattested-supersession'],
+      });
+    });
+
+    it('keeps a configuration-unbound version-1 attestation audit-only', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-v1-lineage-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      const predecessor = await archiveRun(
+        paths,
+        makeRunRecord('run-v1-root', { status: 'blocked' }),
+      );
+      await archiveRun(paths, makeRunRecord('run-v1-successor', {
+        status: 'completed',
+        supersedes_run: predecessor.run_id,
+        start_config_hash: SUCCESSOR_CONFIG_HASH,
+        successor_request_hash: SUCCESSOR_REQUEST_HASH,
+        successor_attestation: createSuccessorAttestation({
+          version: 1,
+          predecessor_run_id: predecessor.run_id,
+          retained_tree_sha: predecessor.final_tree_sha,
+          authorization: 'explicit-operator-start',
+        }, predecessor.record_hash, 'run-v1-successor', SUCCESSOR_REQUEST_HASH),
+      }));
+
+      expect((await calculateProjectMetrics(paths, {})).primary_outcome).toMatchObject({
+        total: 1,
+        outcomes: { recovered: 0, unresolved_blocked: 1 },
+        incomplete: true,
+        uncounted_runs: 1,
+        incomplete_reasons: ['legacy-successor-attestation'],
+      });
+    });
+
+    it('keeps a self-consistent attestation audit-only when it is not bound to the admitted start request', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-request-hash-mismatch-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      const predecessor = await archiveRun(
+        paths,
+        makeRunRecord('run-request-hash-root', { status: 'blocked' }),
+      );
+      const forgedRequestHash = 'e'.repeat(64);
+      const binding = {
+        start_config_hash: SUCCESSOR_CONFIG_HASH,
+        successor_request_hash: forgedRequestHash,
+        successor_attestation: createSuccessorAttestation({
+          version: 2,
+          predecessor_run_id: predecessor.run_id,
+          retained_tree_sha: predecessor.final_tree_sha,
+          config_hash: SUCCESSOR_CONFIG_HASH,
+          approval_id: 'successor-approval-00000000-0000-4000-8000-000000000003',
+        }, predecessor.record_hash, 'run-request-hash-successor', forgedRequestHash),
+      };
+      await archiveRun(paths, successorRecord(
+        predecessor,
+        'run-request-hash-successor',
+        binding,
+      ));
+
+      expect((await calculateProjectMetrics(paths, {})).primary_outcome).toMatchObject({
+        total: 1,
+        outcomes: { recovered: 0, unresolved_blocked: 1 },
+        incomplete: true,
+        uncounted_runs: 1,
+        incomplete_reasons: ['mismatched-successor-start-request'],
+      });
+    });
+
+    it('keeps a version-2 attestation audit-only when admitted-start identity is absent', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-unbound-start-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      const predecessor = await archiveRun(
+        paths,
+        makeRunRecord('run-unbound-start-root', { status: 'blocked' }),
+      );
+      await archiveRun(paths, makeRunRecord('run-unbound-start-successor', {
+        status: 'completed',
+        supersedes_run: predecessor.run_id,
+        ...successorBinding(predecessor, 'run-unbound-start-successor'),
+      }));
+
+      expect((await calculateProjectMetrics(paths, {})).primary_outcome).toMatchObject({
+        total: 1,
+        outcomes: { recovered: 0, unresolved_blocked: 1 },
+        incomplete: true,
+        uncounted_runs: 1,
+        incomplete_reasons: ['unbound-successor-start-request'],
+      });
+    });
+
+    it('marks a logical result incomplete when a missing predecessor or cycle prevents validation', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-incomplete-lineage-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+
+      await archiveRun(paths, makeRunRecord('run-incomplete-leaf', {
+        status: 'completed',
+        supersedes_run: 'run-incomplete-missing',
+      }));
+      await archiveRun(paths, makeRunRecord('run-incomplete-cycle-a', {
+        status: 'blocked',
+        supersedes_run: 'run-incomplete-cycle-b',
+      }));
+      await archiveRun(paths, makeRunRecord('run-incomplete-cycle-b', {
+        status: 'aborted',
+        supersedes_run: 'run-incomplete-cycle-a',
+      }));
+
+      const metrics = await calculateProjectMetrics(paths, {});
+      expect(metrics.primary_outcome).toMatchObject({
+        basis: 'logical-lineage-v1',
+        incomplete: true,
+        uncounted_runs: 3,
+        incomplete_reasons: ['missing-predecessor', 'unattested-supersession'],
+      });
+      expect(metrics.primary_outcome.outcomes.recovered).toBe(0);
+    });
+
+    it('fails closed when one predecessor has multiple competing logical leaves', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-ambiguous-lineage-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+
+      const predecessor = await archiveRun(
+        paths,
+        makeRunRecord('run-ambiguous-root', { status: 'blocked' }),
+      );
+      await archiveRun(paths, successorRecord(predecessor, 'run-ambiguous-completed'));
+      await archiveRun(paths, successorRecord(predecessor, 'run-ambiguous-aborted', {
+        status: 'aborted',
+      }));
+
+      const metrics = await calculateProjectMetrics(paths, {});
+      expect(metrics.primary_outcome).toMatchObject({
+        basis: 'logical-lineage-v1',
+        total: 0,
+        incomplete: true,
+        uncounted_runs: 3,
+        incomplete_reasons: ['ambiguous-leaf'],
+        outcomes: {
+          recovered: 0,
+          unresolved_blocked: 0,
+          aborted: 0,
+          unknown: 0,
+        },
+      });
+      expect(metrics.audit_outcomes).toEqual({
+        total_runs: 3,
+        outcomes: { completed: 1, blocked: 1, aborted: 1 },
+      });
+    });
+
+    it('never promotes a corrupt archived record into a successful logical outcome', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-corrupt-lineage-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      await mkdir(paths.history, { recursive: true });
+      await atomicWriteJson(
+        path.join(paths.history, 'run-corrupt-completed.json'),
+        {
+          ...makeRunRecord('run-corrupt-completed', { status: 'completed' }),
+          record_hash: '0'.repeat(64),
+        },
+      );
+
+      const metrics = await calculateProjectMetrics(paths, {});
+      expect(metrics.primary_outcome).toMatchObject({
+        total: 0,
+        incomplete: true,
+        uncounted_runs: 1,
+        incomplete_reasons: ['corrupt-record'],
+      });
+      expect(metrics.primary_outcome.outcomes.recovered).toBe(0);
+    });
+
+    it('treats a missing archive hash as unverified instead of a successful logical outcome', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-missing-hash-lineage-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      await mkdir(paths.history, { recursive: true });
+      const unverified = makeRunRecord('run-unverified-completed', { status: 'completed' });
+      delete unverified.record_hash;
+      await atomicWriteJson(
+        path.join(paths.history, 'run-unverified-completed.json'),
+        unverified,
+      );
+
+      const metrics = await calculateProjectMetrics(paths, {});
+      expect(metrics.primary_outcome).toMatchObject({
+        total: 0,
+        incomplete: true,
+        uncounted_runs: 1,
+        incomplete_reasons: ['corrupt-record'],
+      });
+      expect(metrics.primary_outcome.outcomes.recovered).toBe(0);
     });
 
     it('handles empty datasets without division by zero errors', async () => {

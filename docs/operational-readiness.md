@@ -115,6 +115,75 @@ version. A release with no live candidate runs is *untested operationally*, even
 credential-free gate passes; the release workflow will fail closed rather than convert that absence
 into a certification claim.
 
+## Block-prevention and lineage contract
+
+APE keeps every terminal run as immutable audit evidence while reporting the validated logical
+lineage as the primary project outcome. A lineage edge requires both a hash-verified archive and a
+hash-bound structured successor attestation. The attestation binds the normalized explicit-start
+request hash and successor run id to the predecessor's immutable archive hash, exact retained tree,
+and reviewed runtime-configuration digest. The same complete normalized request hash is persisted
+independently in the successor archive;
+lineage promotion independently verifies that admitted-start hash against the attested request hash,
+and any mismatch or missing admitted-start identity fails closed. A legacy `supersedes_run` marker or configuration-less version-1
+attestation remains audit-visible and is disclosed as incomplete rather than promoted; only a
+version-2 attestation with the successor's exact admitted configuration hash and bounded approval
+id can promote the edge. Existing attestations remain readable, but the current runtime does not
+mint or accept new structured successor starts because lifecycle-hook stdin does not authenticate
+human provenance.
+A blocked predecessor with a running attested successor is
+`recovering`; a completed successor makes the lineage `recovered`; an unsuperseded blocked leaf is
+`unresolved_blocked`. Missing predecessors, self-links, cycles, and malformed links are excluded
+from success rates and disclosed as incomplete. Status and wire projections contain bounded
+identifiers and lifecycle labels only; history records are never rewritten to manufacture a better
+outcome. In the `archive_history`-before-`persist_state` crash window, a hash-verified terminal
+archive may replace the stale preterminal active copy only when both share the canonical
+admitted-start commitment. That commitment binds the complete normalized request, frozen policy and
+capability snapshot, initial run-contract root, shipping authorization, and repository identity.
+Any disagreement or partial commitment is `active-archive-conflict`; a mutable terminal state with
+no immutable archive is `missing-terminal-archive`. Metrics filters select logical
+leaves before lifecycle counters or incomplete diagnostics are accumulated, so excluded components
+never leak into the requested cohort.
+
+Eligible blocked leaves may expose versioned recovery guidance containing the predecessor run id,
+exact retained tree, terminal reason, exact currently reviewed configuration hash, and a
+configuration-drift flag. Guidance explicitly reports that structured successors are unavailable
+and names `override-reset` as the recovery action. The runtime derives this bounded object from the
+durable blocked state for every eligible terminal writer and recomputes it on both full and compact
+status reads, so a later session does not depend on retaining the response that first created the
+block. Lifecycle hook JSON is observable input, not an
+authentication boundary: a model can invoke the same shipped command with synthetic stdin, so no
+prompt literal or hook event can authorize a successor. After explicit operator direction, use the
+reason-audited override reset and start an ordinary fresh run. Guidance is advisory. It cannot
+dispatch work, consume a product attempt, waive a gate, ship, or mutate the predecessor. A legacy
+marker or structured request cannot supersede the active blocked run.
+
+Preview/start admission compiles every reachable role and the worst-case monotone transition
+surface. It bounds command and verification profiles, evidence commands, claims, schemas, fields,
+and bytes before dispatch. Complexity admission uses the deterministic score `production claims +
+test paths + 2*requirements + 4*risks + 2*required verification profiles`; a score above 48 or a
+canonical planning input above 8192 UTF-8 bytes requires an acyclic, scope-covering,
+non-overlapping decomposition whose slices independently pass admission.
+
+Treat `policy.evidence_scripts` as read-only reviewer commands. Do not advertise baseline
+generators, formatters, or other tracked-file writers there: a command that mutates the reviewed
+tree cannot be attributed to a read-only ticket and must fail closed. Run such maintenance
+deliberately before ticket issuance, then review the resulting stable tree.
+
+Receipt contract v1 canonicalizes only object-key order and JSON negative zero for hashing. It does
+not trim strings, insert defaults, wrap values, remove nulls, reorder arrays, or reinterpret tests,
+findings, paths, commands, verdicts, or evidence. Invalid drafts receive bounded exact correction
+deltas. Validation, hook correction, record, recovery, and task-operation responses omit or redact
+the `receipt_capability` bearer from every public field name, nested value, issue, correction, and
+thrown unsafe-input error before it can reach MCP output, host transcripts, or persisted task
+results. Redaction authority comes only from the canonical draft field matching the dispatch
+intent's one-way capability hash. A missing, non-string, or substituted canonical field cannot
+select a redaction target: hooks and service/task/MCP edges emit fixed non-reflective refusals
+instead, so copying the live bearer elsewhere cannot expose it. Directed planning retries and remediation cycles continue only when their normalized
+structured assurance/finding identity set is a strict proper subset with no additions. Per-ticket
+evidence anchors are provenance rather than semantic assurance identity; equality, expansion,
+incomparability, malformed evidence, or the independent two-replan/three-remediation ceilings end in
+the existing audited blocked outcome.
+
 ## Recovery development rule
 
 When dispatch, binding, or ticket orchestration is under repair, make the fix through ordinary

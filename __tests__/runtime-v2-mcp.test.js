@@ -426,7 +426,7 @@ describe('APE v2 MCP public surface', () => {
       }]);
       expect(responses[0].result.isError).toBe(true);
       expect(responses[0].result.content[0].text)
-        .toMatch(/action 'next' does not take run_command_profiles[\s\S]*'preview'\/'start'/u);
+          .toMatch(/action 'next' does not take run_command_profiles[\s\S]*'preview'\/'start'/u);
     } finally {
       await rm(scratch, { recursive: true, force: true });
     }

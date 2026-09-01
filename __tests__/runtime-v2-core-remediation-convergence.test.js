@@ -104,12 +104,15 @@ describe('APE v2 remediation convergence (F1)', () => {
     expect(state.status).toBe('running');
   });
 
-  it('continues when a remediation review reports a distinct blocker, then stops a repeated blocker', () => {
+  it('continues only when blocking findings are a strict proper subset, then stops repetition', () => {
     const state = baseRun();
     const reviewTicket = walkToReview(state);
     record(state, reviewTicket, {
       evidence: { verdict: 'disagree' },
-      findings: [blocker('src/value.js', 'Initial defect')],
+      findings: [
+        blocker('src/value.js', 'Value defect'),
+        blocker('src/lock.js', 'Crash recovery defect'),
+      ],
     });
     const remediationBuild = state.tickets.at(-1);
     record(state, remediationBuild);
@@ -117,7 +120,7 @@ describe('APE v2 remediation convergence (F1)', () => {
 
     const continued = record(state, remediationReview, {
       evidence: { verdict: 'disagree' },
-      findings: [blocker('src/lock.js', 'Newly exposed crash recovery defect')],
+      findings: [blocker('src/lock.js', 'Crash recovery defect')],
     });
     expect(continued.some((action) => action.type === 'issue_ticket'
       && action.stage.id === 'remediation-build')).toBe(true);
@@ -129,12 +132,88 @@ describe('APE v2 remediation convergence (F1)', () => {
     const secondReview = state.tickets.at(-1);
     const blocked = record(state, secondReview, {
       evidence: { verdict: 'disagree' },
-      findings: [blocker('src/lock.js', 'Newly exposed crash recovery defect')],
+      findings: [blocker('src/lock.js', 'Crash recovery defect')],
     });
     expect(blocked.some((action) => action.type === 'issue_ticket')).toBe(false);
     expect(state.status).toBe('blocked');
     expect(state.block_reason).toMatch(/repeated.*remediation/i);
     expect(blocked.some((action) => action.type === 'release_lock')).toBe(true);
+  });
+
+  it('terminates when remediation swaps one blocker for a new blocker', () => {
+    const state = baseRun();
+    const reviewTicket = walkToReview(state);
+    record(state, reviewTicket, {
+      evidence: { verdict: 'disagree' },
+      findings: [
+        blocker('src/value.js', 'Value defect'),
+        blocker('src/lock.js', 'Crash recovery defect'),
+      ],
+    });
+    record(state, state.tickets.at(-1));
+
+    const actions = record(state, state.tickets.at(-1), {
+      evidence: { verdict: 'disagree' },
+      findings: [
+        blocker('src/lock.js', 'Crash recovery defect'),
+        blocker('src/new.js', 'New defect'),
+      ],
+    });
+
+    expect(actions.some((action) => action.type === 'issue_ticket')).toBe(false);
+    expect(state).toMatchObject({
+      status: 'blocked',
+      stage: 'remediation',
+    });
+    expect(state.block_reason).toMatch(/strict|progress|expanded|incomparable/i);
+  });
+
+  it('deduplicates blocking-finding identities before measuring strict progress', () => {
+    const state = baseRun();
+    const reviewTicket = walkToReview(state);
+    const remaining = blocker('src/lock.js', 'Crash recovery defect');
+    record(state, reviewTicket, {
+      evidence: { verdict: 'disagree' },
+      findings: [
+        blocker('src/value.js', 'Value defect'),
+        remaining,
+        blocker('src/cache.js', 'Cache defect'),
+      ],
+    });
+    record(state, state.tickets.at(-1));
+
+    const actions = record(state, state.tickets.at(-1), {
+      evidence: { verdict: 'disagree' },
+      findings: [remaining, { ...remaining }],
+    });
+    expect(actions.some((action) => action.type === 'issue_ticket'
+      && action.stage.id === 'remediation-build')).toBe(true);
+    expect(state).toMatchObject({ status: 'running', remediation_cycles: 2 });
+  });
+
+  it.each([
+    ['reordered equality', (prior) => [...prior].reverse()],
+    ['empty findings', () => []],
+    ['malformed findings', () => [{ blocking: true }]],
+  ])('terminates on %s rather than fabricating remediation progress', (_label, nextFor) => {
+    const state = baseRun();
+    const reviewTicket = walkToReview(state);
+    const prior = [
+      blocker('src/value.js', 'Value defect'),
+      blocker('src/lock.js', 'Crash recovery defect'),
+    ];
+    record(state, reviewTicket, {
+      evidence: { verdict: 'disagree' },
+      findings: prior,
+    });
+    record(state, state.tickets.at(-1));
+
+    const actions = record(state, state.tickets.at(-1), {
+      evidence: { verdict: 'disagree' },
+      findings: nextFor(prior),
+    });
+    expect(actions.some((action) => action.type === 'issue_ticket')).toBe(false);
+    expect(state).toMatchObject({ status: 'blocked', stage: 'remediation' });
   });
 
   it('honors a configured remediation-cycle budget even when the next blocker is distinct', () => {

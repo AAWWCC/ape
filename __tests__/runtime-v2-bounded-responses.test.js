@@ -446,6 +446,52 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
     expect(projected.recovered).toBe(true);
   });
 
+  it('bounds successor guidance to authorization facts and lineage identity', () => {
+    const state = unitState();
+    state.status = 'blocked';
+    state.stage = 'build';
+    const projected = projectRunResponse({
+      ok: true,
+      run: state,
+      successor_guidance: {
+        version: 2,
+        eligible: true,
+        predecessor_run_id: 'run-unit',
+        retained_tree_sha: 'c'.repeat(40),
+        config_hash: 'd'.repeat(64),
+        eligibility_reason: 'capability_blocked',
+        structured_successor_supported: false,
+        unavailable_reason: 'authenticated-host-approval-unavailable',
+        recovery_action: 'override-reset',
+        required_authorization: 'explicit-operator-override',
+        automatic_start: false,
+        automatic_ship: false,
+        configuration_drift: { changed: true, details: 'PRIVATE_DRIFT_DETAIL'.repeat(10_000) },
+        additive_claims: { claimed_paths: ['PRIVATE_PATH/'.repeat(10_000)] },
+        corrections: ['PRIVATE_CORRECTION'.repeat(10_000)],
+      },
+    });
+
+    expect(projected.successor_guidance).toEqual({
+      version: 2,
+      eligible: true,
+      predecessor_run_id: 'run-unit',
+      retained_tree_sha: 'c'.repeat(40),
+      config_hash: 'd'.repeat(64),
+      eligibility_reason: 'capability_blocked',
+      structured_successor_supported: false,
+      unavailable_reason: 'authenticated-host-approval-unavailable',
+      recovery_action: 'override-reset',
+      required_authorization: 'explicit-operator-override',
+      automatic_start: false,
+      automatic_ship: false,
+      configuration_drift: { changed: true },
+    });
+    expect(JSON.stringify(projected)).not.toContain('PRIVATE_');
+    expect(Buffer.byteLength(JSON.stringify(projected), 'utf8'))
+      .toBeLessThanOrEqual(RESPONSE_BUDGET_BYTES);
+  });
+
   it('passes ok:false shapes and unknown top-level keys through unchanged', () => {
     const blocked = {
       ok: false,

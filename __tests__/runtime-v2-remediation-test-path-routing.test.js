@@ -224,7 +224,9 @@ describe('remediation-test routing shape (pure reducer)', () => {
     });
     expect(blocked.some((action) => action.type === 'issue_ticket')).toBe(false);
     expect(state.status).toBe('blocked');
-    expect(state.block_reason).toBe('review disagreement persists after the single remediation cycle');
+    expect(state.block_reason).toBe(
+      'review disagreement persists after a remediation cycle without a comparable structured finding set',
+    );
     expect(state.remediation_cycles).toBe(1);
     expect(state.tickets.filter((ticket) => ticket.stage_id === 'remediation-test')).toHaveLength(1);
   });

@@ -37,8 +37,11 @@ tail is unseen rather than proof that the design omitted it; an omission marker 
 inconclusive and route disagreement to the judge. That route consumes no retry or remediation
 cycle, but it does cost one additional deep-tier agent dispatch beyond the two plan-review calls.
 
-The judge receives the disagreeing reviewers' bounded `review_findings` and either advances or
-blocks the run. It is not a writing or remediation stage.
+The judge receives the disagreeing reviewers' bounded `review_findings` and either advances,
+issues a directed replan, or blocks the run. At most two directed replans can be issued; after the
+first, the normalized assurance identities must be a strict proper subset. Replan attempt 2 is part
+of the immutable ticket schema and preview forecasts the initial plan plus both reachable replans.
+The judge is not a writing or remediation stage.
 
 Behavioral fast/full phase runs default to `test_intent: "red-first"`, whose runtime-owned
 `red-test` admission executes exact authored paths twice and requires fail/fail. Explicit
@@ -56,7 +59,9 @@ schedulable preflight.
 
 - A stage that could not complete may be retried once.
 - A blocking code-review verdict skips a verbatim retry and enters bounded remediation. A distinct
-  blocker set may continue up to `policy.max_remediation_cycles`; a repeated blocker stops early.
+  blocker set may continue up to `policy.max_remediation_cycles`; after the first cycle, the next
+  normalized finding identities must be a strict proper subset. A repeated, expanded, incomparable,
+  or malformed blocker set stops early. Structured remediation routes use this same budget.
 - A reviewer may request exact additional production paths through `evidence.scope_expansion`.
   The runtime audits the expansion, reclassifies lane/risk, and gives the remediation ticket the
   expanded scope.
@@ -78,7 +83,10 @@ schedulable preflight.
   compact copy of the exact denied command in `prior_attempts`; the replacement can correct syntax
   without gaining new authority.
 - `failure_kind: capability` means the immutable ticket truly lacks required authority and blocks
-  immediately with exact additive claims and structured successor guidance.
+  immediately with exact additive claims and bounded recovery guidance. Current hosts provide no
+  authenticated human provenance for structured successor starts, so recovery requires an explicit,
+  reason-audited override reset followed by an ordinary fresh run. Eligible guidance is derived from
+  the durable terminal state and remains available on full and compact status reads.
 - `failure_kind: test-contradiction` also blocks immediately. The marker is an implementer claim,
   not a runtime finding. Recovery is the normal audited path: ABORT the run or OVERRIDE reset with
   a reason, then correct the work outside that blocked run. For a worked blocked-run instance, see

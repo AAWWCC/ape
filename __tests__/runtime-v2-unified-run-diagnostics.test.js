@@ -5,13 +5,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { hashRecord } from '../lib/runtime/canonical.js';
-import { archiveRun, explainRun } from '../lib/runtime/history.js';
+import { archiveRun, explainRun, logicalLineageForRun } from '../lib/runtime/history.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { RESPONSE_BUDGET_CHARS } from '../lib/runtime/projection.js';
 import { compactStatus, historyAction, startRun } from '../lib/runtime/service.js';
 import { renderStatusDoc } from '../lib/runtime/status-doc.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
 import { bindCodexDispatchContext, invokeCodexHook } from './codex-native-test-helper.js';
+import { createSuccessorAttestation } from '../lib/runtime/successor-attestation.js';
+import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identity.js';
 
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const statuslineProgram = path.join(repoRoot, 'bin', 'ape-statusline.mjs');
@@ -140,6 +142,121 @@ describe('unified public run diagnostics', () => {
       .toContain('Reason code: legacy_record');
     expect(explainRun({ run_id: 'run-incomplete-example', status: 'completed' }))
       .toContain('Reason code: incomplete_record');
+  });
+
+  it('adds a bounded logical-lineage diagnostic without replacing the current run diagnosis', async () => {
+    const dir = await sandbox('ape-diagnostic-recovering-lineage-');
+    const predecessorId = 'run-diagnostic-blocked-root';
+    const predecessor = await archiveRun(runtimePaths(dir), runState({
+      run_id: predecessorId,
+      status: 'blocked',
+      stage: 'implement',
+      completed_at: '2026-08-22T05:00:05.000Z',
+      terminal_at: '2026-08-22T05:00:05.000Z',
+      requirements: [],
+      base_commit_sha: 'a'.repeat(40),
+      tree_sha: 'b'.repeat(40),
+      tickets: [{
+        ticket_id: `${predecessorId}:implement:ticket`,
+        stage_id: 'implement',
+        role: 'implementer',
+      }],
+      receipts: [{
+        ticket_id: `${predecessorId}:implement:ticket`,
+        status: 'failed',
+      }],
+      block_reason: 'stage implement capability-blocked',
+      terminal_reason_code: 'capability_blocked',
+      failure_domain: 'configuration',
+    }));
+    const successor = runState({
+      run_id: 'run-diagnostic-recovering-leaf',
+      supersedes_run: predecessorId,
+      start_config_hash: 'c'.repeat(64),
+      successor_request_hash: 'd'.repeat(64),
+      successor_attestation: createSuccessorAttestation({
+        version: 2,
+        predecessor_run_id: predecessorId,
+        retained_tree_sha: predecessor.final_tree_sha,
+        config_hash: 'c'.repeat(64),
+        approval_id: 'successor-approval-00000000-0000-4000-8000-000000000001',
+      }, predecessor.record_hash, 'run-diagnostic-recovering-leaf', 'd'.repeat(64)),
+      status: 'running',
+      stage: 'implement',
+    });
+    successor.admitted_start_identity_version = 1;
+    successor.start_request_hash = successor.successor_request_hash;
+    successor.admitted_run_contract = null;
+    successor.admitted_start_identity_hash = admittedStartIdentityHash(successor);
+    await atomicWriteJson(runtimePaths(dir).active, successor);
+
+    const status = await compactStatus(dir);
+    expectDiagnostic(status.diagnostic, 'stage_active', 'ape_run next');
+    expect(status.logical_lineage).toEqual({
+      version: 1,
+      state: 'recovering',
+      root_run_id: predecessorId,
+      leaf_run_id: successor.run_id,
+      complete: true,
+    });
+    expect(JSON.stringify(status.logical_lineage)).not.toContain('capability-blocked');
+    expect(JSON.stringify(status.logical_lineage).length).toBeLessThan(512);
+  });
+
+  it('fails closed when active state conflicts with or masks a same-run archive', async () => {
+    const dir = await sandbox('ape-diagnostic-active-archive-conflict-');
+    const paths = runtimePaths(dir);
+    const active = runState({
+      run_id: 'run-diagnostic-active-archive-conflict',
+      status: 'completed',
+      stage: 'completed',
+      completed_at: '2026-08-22T05:00:05.000Z',
+      terminal_at: '2026-08-22T05:00:05.000Z',
+      requirements: [],
+      base_commit_sha: 'a'.repeat(40),
+      tree_sha: 'b'.repeat(40),
+    });
+    const archived = await archiveRun(paths, active);
+
+    const conflict = await logicalLineageForRun(paths, active.run_id, {
+      ...active,
+      status: 'aborted',
+      stage: 'aborted',
+    });
+    expect(conflict).toMatchObject({
+      state: 'unknown',
+      complete: false,
+      incomplete_reasons: ['active-archive-conflict'],
+    });
+
+    await atomicWriteJson(path.join(paths.history, `${active.run_id}.json`), {
+      ...archived,
+      objective: 'tampered archive',
+    });
+    const corrupt = await logicalLineageForRun(paths, active.run_id, active);
+    expect(corrupt).toMatchObject({
+      state: 'unknown',
+      complete: false,
+      incomplete_reasons: ['corrupt-record'],
+    });
+  });
+
+  it('reports a terminal active state without an archive as incomplete', async () => {
+    const dir = await sandbox('ape-diagnostic-missing-terminal-archive-');
+    const paths = runtimePaths(dir);
+    const active = runState({
+      run_id: 'run-diagnostic-missing-terminal-archive',
+      status: 'completed',
+      stage: 'completed',
+      completed_at: '2026-08-22T05:00:05.000Z',
+      terminal_at: '2026-08-22T05:00:05.000Z',
+    });
+
+    expect(await logicalLineageForRun(paths, active.run_id, active)).toMatchObject({
+      state: 'unknown',
+      complete: false,
+      incomplete_reasons: ['missing-terminal-archive'],
+    });
   });
 
   it.each([
