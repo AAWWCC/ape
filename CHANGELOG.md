@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.24.9 — 2026-09-01
+
 Logical lineage is now the primary project result without rewriting immutable run history: metrics,
 compact status, and explanations distinguish unresolved, superseded, recovering, recovered, and
 incomplete ancestry. Existing configuration-bound version-2 successor attestations remain readable,
@@ -37,7 +39,11 @@ redaction is now authorized by the dispatch-owned hash rather than the untrusted
 non-string, or substituted canonical fields get non-reflective refusals even when the live bearer
 was copied elsewhere. Structured version-1 remediation routes use the full strict-subset cycle
 budget, second directed replans are schema-valid at ticket issuance, and preview budgets the initial
-plan plus both reachable replans.
+plan plus both reachable replans. Authenticated SubagentStop diagnostics are recursively redacted
+before the lock-held attestation writer persists `receipt_validation.last_result`, so copied bearer
+material cannot survive in durable runtime-state keys or values on ordinary invalid or exhausted
+validation paths. Version 2.24.9 invalidates the prior source certification and starts a fresh
+release cycle.
 
 ## 2.24.8 — 2026-08-30
 
