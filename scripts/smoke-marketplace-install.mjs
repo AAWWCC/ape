@@ -5,6 +5,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveMarketplaceHostInvocation } from './marketplace-host-invocation.mjs';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -21,9 +22,9 @@ async function exists(path) {
   }
 }
 
-function command(program, args, options) {
+function command(program, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(program, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(program, args, { ...options, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
@@ -44,6 +45,17 @@ function command(program, args, options) {
   });
 }
 
+function npmCommand(args, options = {}) {
+  const npmExecPath = options.env?.npm_execpath ?? process.env.npm_execpath;
+  if (typeof npmExecPath === 'string' && npmExecPath.trim()) {
+    return command(process.execPath, [npmExecPath, ...args], options);
+  }
+  if (process.platform === 'win32') {
+    return Promise.reject(new Error('npm_execpath is required for shell-free npm execution on Windows'));
+  }
+  return command('npm', args, options);
+}
+
 function pinnedNpmEnv(env) {
   return {
     ...env,
@@ -53,12 +65,15 @@ function pinnedNpmEnv(env) {
   };
 }
 
-function hostCommand(identity, args, options, mode, toolsRoot) {
-  if (mode === 'edge') return command(identity, args, options);
-  return command('npm', ['exec', '--prefix', toolsRoot, '--', identity, ...args], {
-    ...options,
-    env: pinnedNpmEnv(options.env),
+async function hostCommand(identity, args, options, modulesRoot) {
+  const host = compatibility.hosts[identity];
+  const invocation = await resolveMarketplaceHostInvocation({
+    identity,
+    packageName: host.package,
+    modulesRoot,
+    args,
   });
+  return command(invocation.command, invocation.args, options);
 }
 
 async function findPackage(root, manifestDirectory) {
@@ -169,9 +184,9 @@ function requestedOptions(argv) {
   return { hosts, mode };
 }
 
-async function assertHostVersion(identity, mode, toolsRoot) {
+async function assertHostVersion(identity, mode, modulesRoot) {
   const host = compatibility.hosts[identity];
-  const result = await hostCommand(identity, ['--version'], { cwd: REPO_ROOT, env: process.env }, mode, toolsRoot);
+  const result = await hostCommand(identity, ['--version'], { cwd: REPO_ROOT, env: process.env }, modulesRoot);
   const output = `${result.stdout}\n${result.stderr}`.trim();
   const observed = output.match(/\d+\.\d+\.\d+/u)?.[0];
   if (!observed) throw new Error(`${identity} --version did not report a semantic version: ${output}`);
@@ -191,21 +206,27 @@ async function main(argv = process.argv.slice(2)) {
   await mkdir(codexHome, { recursive: true, mode: 0o700 });
   await mkdir(claudeConfig, { recursive: true, mode: 0o700 });
   try {
+    let modulesRoot;
     if (mode !== 'edge') {
       const packages = [...hosts].map((identity) => {
         const host = compatibility.hosts[identity];
         return `${host.package}@${host.version}`;
       });
-      await command('npm', ['install', '--no-save', '--prefix', toolsRoot, ...packages], {
+      await npmCommand(['install', '--no-save', '--prefix', toolsRoot, ...packages], {
         cwd: scratch,
         env: pinnedNpmEnv(process.env),
       });
+      modulesRoot = join(toolsRoot, 'node_modules');
+    } else {
+      const rootResult = await npmCommand(['root', '--global'], { cwd: scratch, env: process.env });
+      modulesRoot = rootResult.stdout.trim();
+      if (!isAbsolute(modulesRoot)) throw new Error('npm root --global did not return an absolute path');
     }
     if (hosts.has('codex')) {
-      await assertHostVersion('codex', mode, toolsRoot);
+      await assertHostVersion('codex', mode, modulesRoot);
       const codexEnv = { ...process.env, CODEX_HOME: codexHome };
-      await hostCommand('codex', ['plugin', 'marketplace', 'add', REPO_ROOT, '--json'], { cwd: scratch, env: codexEnv }, mode, toolsRoot);
-      await hostCommand('codex', ['plugin', 'add', 'ape@ape', '--json'], { cwd: scratch, env: codexEnv }, mode, toolsRoot);
+      await hostCommand('codex', ['plugin', 'marketplace', 'add', REPO_ROOT, '--json'], { cwd: scratch, env: codexEnv }, modulesRoot);
+      await hostCommand('codex', ['plugin', 'add', 'ape@ape', '--json'], { cwd: scratch, env: codexEnv }, modulesRoot);
       const codexPackage = await findPackage(codexHome, '.codex-plugin');
       await assertNoAssets(codexPackage);
       await initializeInstalled('codex', codexPackage);
@@ -213,10 +234,10 @@ async function main(argv = process.argv.slice(2)) {
     }
 
     if (hosts.has('claude')) {
-      await assertHostVersion('claude', mode, toolsRoot);
+      await assertHostVersion('claude', mode, modulesRoot);
       const claudeEnv = { ...process.env, CLAUDE_CONFIG_DIR: claudeConfig };
-      await hostCommand('claude', ['plugin', 'marketplace', 'add', REPO_ROOT, '--scope', 'user'], { cwd: scratch, env: claudeEnv }, mode, toolsRoot);
-      await hostCommand('claude', ['plugin', 'install', 'ape@ape', '--scope', 'user'], { cwd: scratch, env: claudeEnv }, mode, toolsRoot);
+      await hostCommand('claude', ['plugin', 'marketplace', 'add', REPO_ROOT, '--scope', 'user'], { cwd: scratch, env: claudeEnv }, modulesRoot);
+      await hostCommand('claude', ['plugin', 'install', 'ape@ape', '--scope', 'user'], { cwd: scratch, env: claudeEnv }, modulesRoot);
       const claudePackage = await findPackage(claudeConfig, '.claude-plugin');
       await assertNoAssets(claudePackage);
       await initializeInstalled('claude', claudePackage);

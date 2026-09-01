@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Windows host-edge marketplace smoke now resolves each installed Codex and Claude package entrypoint
+and launches it directly without npm command shims or a command shell, preserving argv boundaries
+under current Node process-launch behavior.
+
 ## 2.24.9 — 2026-09-01
 
 Logical lineage is now the primary project result without rewriting immutable run history: metrics,
