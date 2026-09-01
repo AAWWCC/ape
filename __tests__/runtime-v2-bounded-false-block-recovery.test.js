@@ -5,9 +5,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { SCHEMA_VERSION } from '../lib/runtime/constants.js';
+import { handle as handleMcp } from '../bin/ape-mcp.mjs';
 import { reduceRun } from '../lib/runtime/scheduler.js';
 import { attemptSummaryList, reviewFindings } from '../lib/runtime/review-evidence.js';
-import { recordReceipt, startRun, statusRun } from '../lib/runtime/service.js';
+import { compactStatus, previewRun, recordReceipt, startRun, statusRun } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { finalizeTicket, validateTicket } from '../lib/runtime/schemas.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
@@ -180,7 +181,7 @@ function recordPure(state, ticket, rawReceipt) {
 }
 
 describe('APE v2 bounded false-block recovery operational replay corpus', () => {
-  it('plan-directed-replan admits one structured replacement plan, then terminally rejects a second disagreement', async () => {
+  it('plan-directed-replan issues a schema-valid second ticket only for strict-subset progress', async () => {
     const dir = await integrationProject();
     const objective = 'Change the value without breaking callers';
     const started = await startRun(dir, {
@@ -243,11 +244,18 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
     const judged = await recordReceipt(dir, receipt(firstJudge, {
       evidence: {
         verdict: 'disagree',
-        missing_assurances: [{
-          summary: 'Bind R1 to the unit profile and its expected observation.',
-          requirement_id: 'R1',
-          evidence_anchor: 'candidate_plan.workstreams.build.acceptance.0',
-        }],
+        missing_assurances: [
+          {
+            summary: 'Bind R1 to the unit profile and its expected observation.',
+            requirement_id: 'R1',
+            evidence_anchor: 'candidate_plan.workstreams.build.acceptance.0',
+          },
+          {
+            summary: 'Add an independent rollback assurance.',
+            requirement_id: 'R1',
+            evidence_anchor: 'candidate_plan.risks.0.mitigation',
+          },
+        ],
       },
     }));
     expect(judged.ok, JSON.stringify(judged.errors)).toBe(true);
@@ -263,13 +271,19 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
         source_ticket_id: firstJudge.ticket_id,
       },
     });
-    expect(replan.plan_recovery.missing_assurances).toEqual([
+    expect(replan.plan_recovery.missing_assurances).toEqual(expect.arrayContaining([
       expect.objectContaining({
         summary: 'Bind R1 to the unit profile and its expected observation.',
         requirement_id: 'R1',
         evidence_anchor: 'candidate_plan.workstreams.build.acceptance.0',
       }),
-    ]);
+      expect.objectContaining({
+        summary: 'Add an independent rollback assurance.',
+        requirement_id: 'R1',
+        evidence_anchor: 'candidate_plan.risks.0.mitigation',
+      }),
+    ]));
+    expect(replan.plan_recovery.missing_assurances).toHaveLength(2);
     expect(validateTicket(await diskTicket(dir, replan))).toMatchObject({ valid: true });
 
     // Receipt admission must accept candidate_plan on plan-replan, not only on
@@ -299,23 +313,35 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
     expect(replacementCriticResult.ok).toBe(true);
     const secondJudge = replacementCriticResult.run.tickets.at(-1);
     expect(secondJudge.stage_id).toBe('plan-judge');
-    const rejected = await recordReceipt(dir, receipt(secondJudge, {
+    const secondJudged = await recordReceipt(dir, receipt(secondJudge, {
       evidence: {
         verdict: 'disagree',
-        missing_assurances: ['The replacement still lacks independent assurance.'],
+        missing_assurances: [{
+          summary: 'Add an independent rollback assurance.',
+          requirement_id: 'R1',
+          evidence_anchor: 'candidate_plan.risks.0.mitigation',
+        }],
       },
     }));
-    expect(rejected.ok).toBe(true);
-    expect(rejected.run).toMatchObject({
-      status: 'blocked',
-      stage: 'plan-judge',
-      terminal_reason_code: 'planning_rejected',
-      blocked_recovery: {
-        reason_code: 'plan_rejected_after_directed_replan',
-        directed_replan_attempts: 1,
+    expect(secondJudged.ok, JSON.stringify(secondJudged.errors)).toBe(true);
+    expect(secondJudged.run).toMatchObject({
+      status: 'running',
+      plan_replan_cycles: 2,
+    });
+    const secondReplan = secondJudged.run.tickets.at(-1);
+    expect(secondReplan).toMatchObject({
+      stage_id: 'plan-replan',
+      role: 'planner',
+      plan_recovery: {
+        version: 1,
+        attempt: 2,
+        source_ticket_id: secondJudge.ticket_id,
       },
     });
-    expect(rejected.run.tickets.filter((ticket) => ticket.stage_id === 'plan-replan')).toHaveLength(1);
+    expect(secondReplan.plan_recovery.missing_assurances).toHaveLength(1);
+    expect(validateTicket(await diskTicket(dir, secondReplan))).toMatchObject({ valid: true });
+    expect(secondJudged.run.tickets.filter((ticket) => ticket.stage_id === 'plan-replan'))
+      .toHaveLength(2);
   }, 30_000);
 
   it('test-contradiction-verification reconciles once, rechecks exact test scope, and resumes the original writer', () => {
@@ -870,6 +896,216 @@ describe('APE v2 bounded recovery receipt admission', () => {
         supersession_required: true,
       },
     });
+    expect(admitted.successor_guidance).toEqual({
+      version: 2,
+      eligible: true,
+      predecessor_run_id: admitted.run.run_id,
+      retained_tree_sha: admitted.run.tree_sha,
+      config_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      eligibility_reason: 'capability_blocked',
+      structured_successor_supported: false,
+      unavailable_reason: 'authenticated-host-approval-unavailable',
+      recovery_action: 'override-reset',
+      required_authorization: 'explicit-operator-override',
+      automatic_start: false,
+      automatic_ship: false,
+      configuration_drift: { changed: false },
+    });
+    expect(admitted.successor_guidance).not.toHaveProperty('dispatch');
+    expect(admitted.successor_guidance).not.toHaveProperty('actions');
+    expect((await statusRun(dir)).successor_guidance).toEqual(admitted.successor_guidance);
+    expect((await compactStatus(dir)).successor_guidance).toEqual(admitted.successor_guidance);
+  }, 30_000);
+
+  it('fails closed when any caller tries to bypass an active blocked run', async () => {
+    const dir = await integrationProject();
+    const startInput = {
+      objective: 'Refuse unauthenticated structured carry-forward',
+      mode: 'phase',
+      lane: 'full',
+      host: 'codex',
+      claimed_paths: ['src'],
+      test_paths: ['tests/value.test.js'],
+      requirements: [],
+      risk_triggers: [],
+      behavioral: true,
+      hooks_trusted: true,
+      subagents_available: true,
+      explicit_invocation: true,
+    };
+    const started = await startRun(dir, startInput);
+    const blocked = await recordReceipt(dir, receipt(started.run.tickets.at(-1), {
+      status: 'failed',
+      evidence: {
+        failure_kind: 'capability',
+        summary: 'The next run needs one additional path.',
+        required_claims: { claimed_paths: ['docs/review.md'] },
+      },
+    }));
+    const guidance = blocked.successor_guidance;
+    const before = await readJson(runtimePaths(dir).active);
+    const branchBefore = git(dir, 'branch', '--show-current');
+
+    const legacyResponse = await handleMcp({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'ape_run',
+        arguments: {
+          action: 'start',
+          project_dir: dir,
+          ...startInput,
+          supersedes_run: guidance.predecessor_run_id,
+        },
+      },
+    });
+    expect(legacyResponse.result.isError).toBe(true);
+    expect(JSON.parse(legacyResponse.result.content[0].text).errors.join(' '))
+      .toMatch(/audited override reset|ordinary fresh run/i);
+
+    for (const successor of [
+      {
+        version: guidance.version,
+        predecessor_run_id: guidance.predecessor_run_id,
+        retained_tree_sha: guidance.retained_tree_sha,
+        config_hash: guidance.config_hash,
+        authorization: 'explicit-operator-start',
+      },
+      {
+        version: guidance.version,
+        predecessor_run_id: guidance.predecessor_run_id,
+        retained_tree_sha: guidance.retained_tree_sha,
+        config_hash: guidance.config_hash,
+        approval_id: 'successor-approval-00000000-0000-4000-8000-000000000001',
+      },
+    ]) {
+      const previewRefused = await previewRun(dir, { ...startInput, successor });
+      expect(previewRefused).toMatchObject({ ok: false, blocked: true, attempts_consumed: 0 });
+      expect(previewRefused.errors.join(' ')).toMatch(/authenticated user provenance|override reset/i);
+      const refused = await startRun(dir, { ...startInput, successor });
+      expect(refused).toMatchObject({ ok: false, blocked: true, attempts_consumed: 0 });
+      expect(refused.errors.join(' ')).toMatch(/authenticated user provenance|override reset/i);
+    }
+
+    expect(await readJson(runtimePaths(dir).active)).toEqual(before);
+    expect(git(dir, 'branch', '--show-current')).toBe(branchBefore);
+  }, 30_000);
+
+  it('keeps unauthenticated structured successors off the public MCP surface', async () => {
+    const listed = await handleMcp({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: {},
+    });
+    const publicRun = listed.result.tools.find((tool) => tool.name === 'ape_run');
+    expect(publicRun.inputSchema.properties).not.toHaveProperty('successor');
+    expect(publicRun.inputSchema.properties.action.enum).not.toContain('prepare-successor');
+    expect(publicRun.inputSchema.properties.action.description)
+      .toMatch(/authenticated human provenance|audited override reset/i);
+    expect(JSON.stringify(publicRun.inputSchema)).not.toMatch(/successor-approval|UserPromptSubmit/i);
+
+    const response = await handleMcp({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'ape_run',
+        arguments: { action: 'prepare-successor', project_dir: process.cwd() },
+      },
+    });
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toMatch(/unknown tool or action/i);
+
+    for (const action of ['preview', 'start']) {
+      const structured = await handleMcp({
+        jsonrpc: '2.0',
+        id: action,
+        method: 'tools/call',
+        params: {
+          name: 'ape_run',
+          arguments: {
+            action,
+            project_dir: process.cwd(),
+            objective: 'Attempt a structured successor through MCP',
+            host: 'codex',
+            successor: { version: 2 },
+          },
+        },
+      });
+      expect(structured.result.isError, action).toBe(true);
+      expect(structured.result.content[0].text, action)
+        .toMatch(/authenticated user provenance|audited override reset/i);
+    }
+  });
+
+  it('omits actionable guidance when a legacy blocked run has no configuration baseline', async () => {
+    const dir = await integrationProject();
+    const started = await startRun(dir, {
+      objective: 'Fail closed without a configuration baseline',
+      mode: 'phase',
+      lane: 'full',
+      host: 'codex',
+      claimed_paths: ['src'],
+      test_paths: ['tests/value.test.js'],
+      requirements: [],
+      risk_triggers: [],
+      behavioral: true,
+      hooks_trusted: true,
+      subagents_available: true,
+      explicit_invocation: true,
+    });
+    const paths = runtimePaths(dir);
+    const legacyState = await readJson(paths.active);
+    delete legacyState.start_config_hash;
+    delete legacyState.capability_snapshot;
+    await atomicWriteJson(paths.active, legacyState);
+
+    const blocked = await recordReceipt(dir, receipt(started.run.tickets.at(-1), {
+      status: 'failed',
+      evidence: {
+        failure_kind: 'capability',
+        summary: 'An additional path is required.',
+        required_claims: { claimed_paths: ['docs/review.md'] },
+      },
+    }));
+    expect(blocked.ok).toBe(true);
+    expect(blocked.run.status).toBe('blocked');
+    expect(blocked).not.toHaveProperty('successor_guidance');
+  }, 30_000);
+
+  it('reports configuration drift as a boolean fact without disclosing changed configuration', async () => {
+    const dir = await integrationProject();
+    const started = await startRun(dir, {
+      objective: 'Report bounded successor drift',
+      mode: 'phase',
+      lane: 'full',
+      host: 'codex',
+      claimed_paths: ['src'],
+      test_paths: ['tests/value.test.js'],
+      requirements: [],
+      risk_triggers: [],
+      behavioral: true,
+      hooks_trusted: true,
+      subagents_available: true,
+      explicit_invocation: true,
+    });
+    const paths = runtimePaths(dir);
+    const changedConfig = await readJson(paths.config);
+    changedConfig.verification.profiles[0].description = 'PRIVATE_CONFIGURATION_DETAIL';
+    await atomicWriteJson(paths.config, changedConfig);
+
+    const blocked = await recordReceipt(dir, receipt(started.run.tickets.at(-1), {
+      status: 'failed',
+      evidence: {
+        failure_kind: 'capability',
+        summary: 'An additional path is required.',
+        required_claims: { claimed_paths: ['docs/review.md'] },
+      },
+    }));
+    expect(blocked.successor_guidance.configuration_drift).toEqual({ changed: true });
+    expect(JSON.stringify(blocked.successor_guidance)).not.toContain('PRIVATE_');
   }, 30_000);
 
   it('rejects ungrounded reconciliation and narrows recheck authority to independently confirmed paths', async () => {

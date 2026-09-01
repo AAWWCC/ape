@@ -5,7 +5,14 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { bindClaudeSubagent, launchClaudeIntent } from '../lib/runtime/claude-dispatch.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
-import { expireDispatch, recordReceipt, resumeRun, startRun } from '../lib/runtime/service.js';
+import {
+  compactStatus,
+  expireDispatch,
+  recordReceipt,
+  resumeRun,
+  startRun,
+  statusRun,
+} from '../lib/runtime/service.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 
 // frictions #27/#30: once a Claude dispatch intent is launched/bound, the runtime
@@ -199,6 +206,20 @@ describe('APE v2 audited dispatch expiry (frictions #27/#30)', () => {
     expect(blocked.run.block_reason).toMatch(/dispatch expired by operator after retry/);
     expect(blocked.run.expired_tickets).toEqual([first.ticket_id, retry.ticket_id]);
     expect(blocked.actions.some((action) => action.type === 'history_archived')).toBe(true);
+    expect(blocked.successor_guidance).toMatchObject({
+      version: 2,
+      eligible: true,
+      predecessor_run_id: blocked.run.run_id,
+      retained_tree_sha: blocked.run.tree_sha,
+      eligibility_reason: 'dispatch_expired',
+      structured_successor_supported: false,
+      recovery_action: 'override-reset',
+      required_authorization: 'explicit-operator-override',
+      automatic_start: false,
+      automatic_ship: false,
+    });
+    expect((await statusRun(dir)).successor_guidance).toEqual(blocked.successor_guidance);
+    expect((await compactStatus(dir)).successor_guidance).toEqual(blocked.successor_guidance);
 
     // Terminal for scheduling: the lever itself is no longer valid.
     const rejected = await expireDispatch(dir, retry.ticket_id, 'run is already blocked');

@@ -4,6 +4,28 @@ APE turns AI coding from session-driven improvisation into durable, evidence-gat
 runs. It keeps Plan → Build → Ship state outside the chat, resumes across sessions, and accepts
 progress only when the working tree, tests, reviews, and configured gates support it.
 
+Project status treats a hash-verified, structured-successor-attested lineage as the primary outcome
+while retaining every run as immutable audit evidence. Each promoted historical edge binds the
+successor run id and complete normalized start-request hash to the predecessor's immutable archive
+hash, exact retained tree, and reviewed runtime-configuration digest. Legacy `supersedes_run`
+markers and version-1 attestations remain audit metadata and cannot replace an active block or
+manufacture recovery. Version-2 attestations remain readable for existing history, but the current
+runtime does not mint or accept structured successor starts: lifecycle-hook stdin contains no
+authenticated proof that a human submitted it, so treating a prompt literal as authority would be
+forgeable. Eligible blocked trees expose bounded recovery guidance instead. After explicit operator
+direction, use the reason-audited `ape_run override reset` action and start an ordinary fresh run;
+recovery never starts or ships automatically. The same bounded guidance is recomputed from durable
+blocked state on later full and compact status reads. A verified terminal archive wins over a stale
+same-run active copy only when the complete admitted-start identity still matches; archive-less
+terminal state and authorization, capability, or configuration conflicts fail closed. Preview compiles the complete
+reachable capability surface and rejects over-complex work before dispatch; receipt repair and
+planning/remediation convergence are deterministic and evidence-preserving, and validator responses
+never echo receipt bearer capabilities from any response field, nested value, correction prose, or
+thrown raw-input error. The same redaction applies to hook continuations, record/recovery results,
+and task-wrapped errors. Only the canonical capability field may authenticate against the
+dispatch-owned hash; missing, non-string, or substituted fields receive fixed non-reflective
+refusals even if the true bearer was copied elsewhere in the draft.
+
 Under the hood, APE is a deterministic runtime for Claude Code and Codex that coordinates
 each host's native agents. The scheduler—not the model—owns stage order,
 retries, lane selection, receipts, recovery, and merge decisions. Agents and tooling can still be
@@ -140,7 +162,8 @@ implementer stage. APE verifies the artifacts and receipts available to it; it c
 a test is meaningful or a review is correct. This protocol does not describe mechanical work,
 read-only `debug`/`spike`, or `land`. High-risk runs add a security review. Each failed stage can be
 retried once; distinct blocking findings receive a bounded remediation budget, while repeated
-findings stop immediately as no-progress failures.
+findings stop immediately as no-progress failures. Planning may issue at most two directed replans,
+and only when each later assurance set is a strict proper subset of the preceding set.
 
 Non-behavioral fast/full phase work keeps its planning, implementation, review, and merge gates but
 does not schedule a test writer or demand fabricated red-test evidence. It runs targeted stage

@@ -10,9 +10,10 @@ import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { acquireRunLock, releaseRunLock } from '../lib/runtime/lock.js';
 import { currentTreeSha } from '../lib/runtime/git.js';
+import { archiveRun } from '../lib/runtime/history.js';
 import { bindCodexDispatch } from './codex-native-test-helper.js';
 import { reconcileTerminalCheckout } from '../lib/runtime/receipt-service.js';
-
+import { FAILURE_DOMAIN_TAXONOMY_VERSION } from '../lib/runtime/orchestration-telemetry.js';
 const cleanups = [];
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -140,7 +141,7 @@ describe('APE v2 start-time working-tree hygiene', () => {
     expect(git(dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(second.run.branch);
   });
 
-  it('carries an exact blocked tree and unresolved findings into an explicit successor run', async () => {
+  it('refuses a structured successor without mutating an exact dirty blocked tree', async () => {
     const dir = await project();
     const first = await startRun(dir, startInput());
     const paths = runtimePaths(dir);
@@ -150,44 +151,36 @@ describe('APE v2 start-time working-tree hygiene', () => {
     blocked.status = 'blocked';
     blocked.stage = 'remediation';
     blocked.block_reason = 'review disagreement reached the configured remediation budget';
+    blocked.terminal_reason_code = 'review_remediation_exhausted';
+    blocked.failure_domain = 'product';
+    blocked.failure_domain_taxonomy_version = FAILURE_DOMAIN_TAXONOMY_VERSION;
     blocked.tree_sha = await currentTreeSha(dir);
-    blocked.tickets.push({
-      ticket_id: `${blocked.run_id}:remediation-review:test`,
-      stage_id: 'remediation-review',
-      role: 'reviewer',
-      parallel_group: 'code-review',
-    });
-    blocked.receipts.push({
-      ticket_id: `${blocked.run_id}:remediation-review:test`,
-      status: 'passed',
-      findings: [{
-        file: 'src/value.js', line: 1, title: 'Unresolved migration defect',
-        detail: 'The successor must preserve and remediate this finding.', blocking: true,
-      }],
-      evidence: { verdict: 'fail' },
-    });
     await atomicWriteJson(paths.active, blocked);
+    await archiveRun(paths, blocked);
     await releaseRunLock(paths.lock, blocked.run_id);
+    const branchBefore = git(dir, 'branch', '--show-current');
 
-    const second = await startRun(dir, startInput({ supersedes_run: blocked.run_id }));
-    expect(second.ok).toBe(true);
-    expect(second.run.supersedes_run).toBe(blocked.run_id);
-    expect(second.run.branch).not.toBe(first.run.branch);
-    expect(await currentTreeSha(dir)).toBe(blocked.tree_sha);
-    expect(await readFileSync(path.join(dir, 'src', 'value.js'), 'utf8')).toContain('value = 2');
-    expect(second.run.receipts[0]).toMatchObject({
-      ticket_id: `${second.run.run_id}:carry-forward-admission`,
-      changed_files: ['src/value.js'],
-      evidence: { carry_forward_admission: { supersedes_run: blocked.run_id } },
+    const refused = await startRun(dir, {
+      ...startInput(),
+      successor: {
+        version: 2,
+        predecessor_run_id: blocked.run_id,
+        retained_tree_sha: blocked.tree_sha,
+        config_hash: blocked.start_config_hash,
+        approval_id: 'successor-approval-00000000-0000-4000-8000-000000000001',
+      },
     });
-    expect(second.run.tickets[0].review_findings).toEqual([
-      expect.stringMatching(/Unresolved migration defect/),
-    ]);
+    expect(refused).toMatchObject({ ok: false, blocked: true, attempts_consumed: 0 });
+    expect(refused.errors.join(' ')).toMatch(/authenticated user provenance|override reset/i);
+    expect(await readJson(paths.active)).toEqual(blocked);
+    expect(git(dir, 'branch', '--show-current')).toBe(branchBefore);
+    expect(await currentTreeSha(dir)).toBe(blocked.tree_sha);
+    expect(first.run.run_id).toBe(blocked.run_id);
   });
 
-  it('carries an exact clean committed blocked tree into an explicit successor run', async () => {
+  it('refuses a structured successor without rebasing a clean committed blocked tree', async () => {
     const dir = await project();
-    const first = await startRun(dir, startInput());
+    await startRun(dir, startInput());
     const paths = runtimePaths(dir);
     await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 2;\n');
 
@@ -195,29 +188,35 @@ describe('APE v2 start-time working-tree hygiene', () => {
     blocked.status = 'blocked';
     blocked.stage = 'gates';
     blocked.block_reason = 'remote checks failed after shipping committed the run tree';
+    blocked.terminal_reason_code = 'stage_failed';
+    blocked.failure_domain = 'product';
+    blocked.failure_domain_taxonomy_version = FAILURE_DOMAIN_TAXONOMY_VERSION;
     blocked.tree_sha = await currentTreeSha(dir);
     await atomicWriteJson(paths.active, blocked);
+    await archiveRun(paths, blocked);
     await releaseRunLock(paths.lock, blocked.run_id);
 
     git(dir, 'add', 'src/value.js');
     git(dir, 'commit', '-qm', 'runtime-owned shipping commit');
-    const predecessorCommit = git(dir, 'rev-parse', 'HEAD');
-    expect(git(dir, 'status', '--porcelain').split('\n').filter((line) => line && !line.endsWith(' .ape/'))).toEqual([]);
-    expect(git(dir, 'rev-parse', 'HEAD^{tree}')).toBe(blocked.tree_sha);
+    const commitBefore = git(dir, 'rev-parse', 'HEAD');
+    const branchBefore = git(dir, 'branch', '--show-current');
 
-    const second = await startRun(dir, startInput({ supersedes_run: blocked.run_id }));
-    expect(second.ok).toBe(true);
-    expect(second.run.supersedes_run).toBe(blocked.run_id);
-    expect(second.run.branch).not.toBe(first.run.branch);
-    expect(second.run.base_commit_sha).toBe(blocked.base_commit_sha);
-    expect(git(dir, 'merge-base', '--is-ancestor', predecessorCommit, 'HEAD')).toBe('');
-    expect(await currentTreeSha(dir)).toBe(blocked.tree_sha);
-    expect(await readFileSync(path.join(dir, 'src', 'value.js'), 'utf8')).toContain('value = 2');
-    expect(second.run.receipts[0]).toMatchObject({
-      ticket_id: `${second.run.run_id}:carry-forward-admission`,
-      changed_files: ['src/value.js'],
-      evidence: { carry_forward_admission: { supersedes_run: blocked.run_id } },
+    const refused = await startRun(dir, {
+      ...startInput(),
+      successor: {
+        version: 2,
+        predecessor_run_id: blocked.run_id,
+        retained_tree_sha: blocked.tree_sha,
+        config_hash: blocked.start_config_hash,
+        approval_id: 'successor-approval-00000000-0000-4000-8000-000000000001',
+      },
     });
+    expect(refused).toMatchObject({ ok: false, blocked: true, attempts_consumed: 0 });
+    expect(refused.errors.join(' ')).toMatch(/authenticated user provenance|override reset/i);
+    expect(await readJson(paths.active)).toEqual(blocked);
+    expect(git(dir, 'branch', '--show-current')).toBe(branchBefore);
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(commitBefore);
+    expect(await currentTreeSha(dir)).toBe(blocked.tree_sha);
   });
 
   it('requires explicit per-run authorization when automatic merging is enabled', async () => {

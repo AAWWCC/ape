@@ -8,9 +8,14 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { archiveRun, explainRun } from '../lib/runtime/history.js';
 import { historyAction } from '../lib/runtime/service.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
+import { hashRecord } from '../lib/runtime/canonical.js';
+import { createSuccessorAttestation } from '../lib/runtime/successor-attestation.js';
+import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identity.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const cleanups = [];
+const SUCCESSOR_REQUEST_HASH = 'd'.repeat(64);
+const SUCCESSOR_CONFIG_HASH = 'c'.repeat(64);
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -79,6 +84,29 @@ function createHistoryRecord(overrides = {}) {
     },
     ...overrides,
   };
+}
+
+function createSuccessorHistoryRecord(predecessor, successorId, overrides = {}) {
+  const state = createHistoryRecord({
+    run_id: successorId,
+    status: 'completed',
+    supersedes_run: predecessor.run_id,
+    start_config_hash: SUCCESSOR_CONFIG_HASH,
+    successor_request_hash: SUCCESSOR_REQUEST_HASH,
+    successor_attestation: createSuccessorAttestation({
+      version: 2,
+      predecessor_run_id: predecessor.run_id,
+      retained_tree_sha: predecessor.final_tree_sha,
+      config_hash: SUCCESSOR_CONFIG_HASH,
+      approval_id: 'successor-approval-00000000-0000-4000-8000-000000000001',
+    }, predecessor.record_hash, successorId, SUCCESSOR_REQUEST_HASH),
+    ...overrides,
+  });
+  state.admitted_start_identity_version = 1;
+  state.start_request_hash = SUCCESSOR_REQUEST_HASH;
+  state.admitted_run_contract = null;
+  state.admitted_start_identity_hash = admittedStartIdentityHash(state);
+  return state;
 }
 
 describe('APE v2 History Explain & Lifecycle Telemetry Output', () => {
@@ -354,6 +382,117 @@ describe('APE v2 History Explain & Lifecycle Telemetry Output', () => {
       expect(res.text).not.toContain('tests/calc.test.js');
       expect(res.text).toContain('Recovery: regate; regate attempts: 1');
       expect(res.text).toContain('Input-hold: answered 2 questions');
+    });
+
+    it('explains recovered logical lineage without rewriting either immutable run record', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-history-lineage-explain-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      const predecessorId = 'run-explain-lineage-blocked';
+      const successorId = 'run-explain-lineage-recovered';
+      const predecessor = await archiveRun(paths, createHistoryRecord({
+        run_id: predecessorId,
+        status: 'blocked',
+        stage: 'build',
+        block_reason: 'stage build failed',
+        merge: null,
+      }));
+      await archiveRun(paths, createSuccessorHistoryRecord(predecessor, successorId));
+      const predecessorFile = path.join(paths.history, `${predecessorId}.json`);
+      const successorFile = path.join(paths.history, `${successorId}.json`);
+      const before = [await readFile(predecessorFile, 'utf8'), await readFile(successorFile, 'utf8')];
+
+      const explained = await historyAction(dir, 'explain', { run_id: predecessorId });
+      expect(explained).toMatchObject({
+        logical_lineage: {
+          version: 1,
+          state: 'recovered',
+          root_run_id: predecessorId,
+          leaf_run_id: successorId,
+          complete: true,
+          immutable_run_count: 2,
+        },
+        diagnostic: {
+          logical_outcome: 'recovered',
+          next_safe_action: 'ape_run start',
+        },
+      });
+      expect(explained.text).toContain(`Logical lineage: recovered by ${successorId}.`);
+      expect(explained.text).toContain('Immutable run outcomes: 1 blocked, 1 completed.');
+      expect(await readFile(predecessorFile, 'utf8')).toBe(before[0]);
+      expect(await readFile(successorFile, 'utf8')).toBe(before[1]);
+    });
+
+    it('explains a hash-verified successor with a forged request digest as incomplete', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-history-forged-attestation-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      const predecessorId = 'run-explain-forged-root';
+      const successorId = 'run-explain-forged-successor';
+      const predecessor = await archiveRun(paths, createHistoryRecord({
+        run_id: predecessorId,
+        status: 'blocked',
+        stage: 'build',
+        block_reason: 'stage build failed',
+        merge: null,
+      }));
+      const successor = await archiveRun(paths, createSuccessorHistoryRecord(
+        predecessor,
+        successorId,
+        {
+        merge: null,
+        },
+      ));
+      successor.successor_attestation.request_hash = 'e'.repeat(64);
+      successor.record_hash = hashRecord(successor, ['record_hash', 'completed_at', 'timing']);
+      await atomicWriteJson(path.join(paths.history, `${successorId}.json`), successor);
+
+      const explained = await historyAction(dir, 'explain', { run_id: successorId });
+      expect(explained.logical_lineage).toMatchObject({
+        state: 'unknown',
+        complete: false,
+        incomplete_reasons: ['invalid-successor-attestation'],
+      });
+      expect(explained.diagnostic).toMatchObject({
+        logical_outcome: 'unknown',
+        next_safe_action: 'inspect immutable history',
+      });
+    });
+
+    it('explains malformed ancestry as unknown and incomplete without echoing or rewriting it', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-history-lineage-unknown-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      const runId = 'run-explain-lineage-self-link';
+      await archiveRun(paths, createHistoryRecord({
+        run_id: runId,
+        status: 'blocked',
+        stage: 'build',
+        supersedes_run: runId,
+        block_reason: 'PRIVATE_SELF_LINK_REASON',
+        merge: null,
+      }));
+      const historyFile = path.join(paths.history, `${runId}.json`);
+      const before = await readFile(historyFile, 'utf8');
+
+      const explained = await historyAction(dir, 'explain', { run_id: runId });
+      expect(explained.logical_lineage).toEqual({
+        version: 1,
+        state: 'unknown',
+        root_run_id: runId,
+        leaf_run_id: runId,
+        complete: false,
+        immutable_run_count: 1,
+        audit_outcomes: { completed: 0, blocked: 1, aborted: 0 },
+        incomplete_reasons: ['self-link'],
+      });
+      expect(explained.diagnostic).toMatchObject({
+        logical_outcome: 'unknown',
+        next_safe_action: 'inspect immutable history',
+      });
+      expect(explained.text).toContain('Logical lineage: unknown/incomplete (self-link).');
+      expect(explained.text).not.toContain('PRIVATE_SELF_LINK_REASON');
+      expect(await readFile(historyFile, 'utf8')).toBe(before);
     });
 
     it('explains an archived blocked post-gate merge hold as shipping_hold with ape_run ship', async () => {

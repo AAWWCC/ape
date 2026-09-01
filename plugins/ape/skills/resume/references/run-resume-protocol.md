@@ -103,12 +103,15 @@ MCP call at the wrapper's yield boundary can expose a host transport retry. If a
 are scheduler-owned and serialized: production, test, and mixed/both findings select build; test
 then review; or test then build then review respectively.
 
-When a blocked run retains a dirty APE branch and the user explicitly asks APE to keep going, start
-one successor with `supersedes_run` set to the exact blocked run id and the same or additive claims.
-The runtime admits this only when the checked-out tree exactly matches the blocked tree, the default
-tip has not moved, and every dirty path is claimed; it then carries that tree and the latest
-unresolved review findings into the successor ticket. Never recreate the diff manually, omit the
-supersession link, or use this path for unrelated dirty work.
+When a run is blocked, never start a structured successor: current host lifecycle hooks do not
+provide authenticated human provenance, and raw hook stdin or a copied prompt is not authority. If
+the user explicitly directs recovery, call `ape_run override` with `operation: "reset"`, the exact
+active `run_id` as confirmation when available, and a non-empty reason that records the user's
+direction. The reset is audited. Then re-inspect the repository, preserve or reconcile retained work
+without destructive cleanup, and use preview/start for an ordinary fresh run with complete facts.
+Do not infer reset authority from the original invocation, guidance, prior approval, or config.
+Never reset automatically, recreate a retained diff from memory, or ship merely because recovery was
+authorized.
 
 If the runtime reports an active bound dispatch, wait. If it reports
 `dispatch_retirement_pending`, wait for the original agent unless the flight is genuinely orphaned

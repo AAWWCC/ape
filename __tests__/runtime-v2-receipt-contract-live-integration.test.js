@@ -9,7 +9,7 @@ import { emptyOrchestrationTelemetry } from '../lib/runtime/orchestration-teleme
 import { readDispatchReceiptAttestation } from '../lib/runtime/claude-dispatch.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { receiptOutputSchemaForTicket } from '../lib/runtime/receipt-validator.js';
-import { receiptInputHash } from '../lib/runtime/receipt-input.js';
+import { normalizeReceiptInput, receiptInputHash } from '../lib/runtime/receipt-input.js';
 import {
   executeApeRunTaskOperation,
   nextRun,
@@ -313,6 +313,537 @@ function maximalPlannerPlan(preflightHash, targetBytes = 16_384) {
 }
 
 describe('live receipt contract integration', () => {
+  it('limits contract-v1 normalization to value-preserving JSON canonicalization', () => {
+    const semanticRewriteCandidates = {
+      ticket_id: 'ticket-normalization-v1',
+      status: 'success',
+      tests: { command: 'npm test', passed: true, exit_code: 0, duration_ms: 1 },
+      findings: 'one finding',
+      evidence: [{ summary: 'one evidence object' }],
+    };
+    const normalized = normalizeReceiptInput(semanticRewriteCandidates, {
+      receipt_contract_version: 1,
+    });
+    expect(normalized).toEqual({
+      input: semanticRewriteCandidates,
+      normalized_fields: [],
+      correction_deltas: [],
+    });
+
+    const canonicalA = {
+      ticket_id: 'ticket-canonical-v1',
+      status: 'passed',
+      tests: [{ command: 'npm test', passed: true, exit_code: 0, duration_ms: -0 }],
+      findings: [],
+      evidence: { z: 1, a: 2 },
+    };
+    const canonicalB = {
+      evidence: { a: 2, z: 1 },
+      findings: [],
+      tests: [{ duration_ms: 0, exit_code: 0, passed: true, command: 'npm test' }],
+      status: 'passed',
+      ticket_id: 'ticket-canonical-v1',
+    };
+    expect(receiptInputHash(canonicalA)).toBe(receiptInputHash(canonicalB));
+  });
+
+  it('preserves every contract-v1 semantic edge instead of trimming, wrapping, dropping, or reordering it', () => {
+    const candidates = [
+      {
+        ticket_id: 'ticket-whitespace-v1',
+        status: 'passed',
+        tests: [],
+        findings: [],
+        evidence: { verdict: ' agree ', summary: '  exact evidence bytes  ' },
+      },
+      {
+        ticket_id: 'ticket-null-v1',
+        status: 'passed',
+        tests: [{ command: 'npm test', passed: true, exit_code: 0, duration_ms: 1, output_hash: null }],
+        findings: [],
+        evidence: {},
+      },
+      {
+        ticket_id: 'ticket-singletons-v1',
+        status: 'passed',
+        tests: { command: 'npm test', passed: true, exit_code: 0, duration_ms: 1 },
+        findings: { id: 'finding-one' },
+        evidence: ['not-an-object'],
+      },
+      {
+        ticket_id: 'ticket-order-v1',
+        status: 'passed',
+        tests: [
+          { command: 'npm run first', passed: true, exit_code: 0, duration_ms: 1 },
+          { command: 'npm run second', passed: false, exit_code: 1, duration_ms: 2 },
+        ],
+        findings: [{ id: 'first' }, { id: 'second' }],
+        evidence: { paths: ['b.js', 'a.js'] },
+      },
+    ];
+
+    for (const candidate of candidates) {
+      const normalized = normalizeReceiptInput(candidate, { receipt_contract_version: 1 });
+      expect(normalized).toEqual({
+        input: candidate,
+        normalized_fields: [],
+        correction_deltas: [],
+      });
+      expect(normalized.input).toBe(candidate);
+    }
+  });
+
+  it('hashes only JSON-representation equivalents together and keeps semantic differences distinct', () => {
+    const base = {
+      ticket_id: 'ticket-hash-semantics-v1',
+      status: 'passed',
+      tests: [
+        { command: 'npm run first', passed: true, exit_code: 0, duration_ms: 1 },
+        { command: 'npm run second', passed: true, exit_code: 0, duration_ms: 2 },
+      ],
+      findings: [{ id: 'first' }, { id: 'second' }],
+      evidence: { verdict: 'agree', summary: 'exact' },
+    };
+    const semanticVariants = [
+      { ...base, status: 'success' },
+      { ...base, evidence: { ...base.evidence, summary: ' exact ' } },
+      { ...base, tests: [...base.tests].reverse() },
+      { ...base, findings: [...base.findings].reverse() },
+      { ...base, evidence: { ...base.evidence, verdict: 'AGREE' } },
+    ];
+    for (const variant of semanticVariants) {
+      expect(receiptInputHash(variant)).not.toBe(receiptInputHash(base));
+    }
+
+    expect(receiptInputHash({ ...base, evidence: { summary: 'exact', verdict: 'agree' } }))
+      .toBe(receiptInputHash(base));
+  });
+
+  it('returns exact bounded correction deltas without changing agent evidence', async () => {
+    const value = await fixture();
+    const invalid = {
+      ...draft(value.ticket, value.capability),
+      status: 'success',
+      tests: 'not-an-array',
+      extra_worker_note: 'remove only this unknown field',
+      evidence: { summary: '  preserve these exact bytes  ' },
+    };
+    const result = await validateReceiptForDispatch(
+      value.directory,
+      invalid,
+      value.ticket.ticket_id,
+    );
+
+    expect(result).toMatchObject({
+      valid: false,
+      correction_deltas: [
+        {
+          field: 'status',
+          current_value: 'success',
+          required_value: 'passed',
+          operation: 'replace',
+        },
+        {
+          field: 'extra_worker_note',
+          current_value: 'remove only this unknown field',
+          operation: 'remove',
+        },
+      ],
+    });
+    expect(result).not.toHaveProperty('normalized_draft');
+    expect(invalid.evidence.summary).toBe('  preserve these exact bytes  ');
+    expect(result.corrections).toContainEqual(expect.objectContaining({ field: 'tests' }));
+    expect(result.correction_deltas).not.toContainEqual(
+      expect.objectContaining({ field: 'tests' }),
+    );
+    expect(result.correction_deltas).not.toContainEqual(expect.objectContaining({
+      required_value: expect.stringMatching(/^(?:set|use|provide|revise|include|return)\b/i),
+    }));
+    expect(result.correction_deltas.length).toBeLessThanOrEqual(20);
+    expect(Buffer.byteLength(JSON.stringify(result.correction_deltas), 'utf8'))
+      .toBeLessThanOrEqual(12_000);
+  });
+
+  it('does not reflect a bearer copied anywhere in an invalid public draft', async () => {
+    const cases = [
+      (value) => ({
+        ...draft(value.ticket, value.capability),
+        [`unknown_${value.capability}`]: 'remove this field',
+      }),
+      (value) => ({
+        ...draft(value.ticket, value.capability),
+        status: `invalid:${value.capability}`,
+      }),
+      (value) => ({
+        ...draft(value.ticket, value.capability),
+        ticket_id: `invalid:${value.capability}`,
+      }),
+      (value) => ({
+        ...draft(value.ticket, value.capability),
+        extra_worker_note: {
+          nested_value: `copied:${value.capability}`,
+        },
+      }),
+      (value) => ({
+        ...draft(value.ticket, value.capability),
+        extra_worker_note: {
+          [`nested_${value.capability}`]: 'copied key',
+        },
+      }),
+    ];
+
+    for (const invalidDraft of cases) {
+      const value = await fixture();
+      const invalid = invalidDraft(value);
+      const result = await validateReceiptForDispatch(
+        value.directory,
+        invalid,
+        value.ticket.ticket_id,
+      );
+
+      expect(result.valid).not.toBe(true);
+      expect(JSON.stringify(result)).not.toContain(value.capability);
+      expect(result.correction_deltas ?? []).not.toContainEqual(
+        expect.objectContaining({ field: expect.stringContaining(value.capability) }),
+      );
+    }
+  });
+
+  it('redacts the bearer from unsafe-input errors before MCP serialization', async () => {
+    const value = await fixture();
+    const invalid = {
+      ...draft(value.ticket, value.capability),
+      [`${value.capability}.constructor`]: 'forbidden dotted key',
+    };
+    const responses = await runProcess('bin/ape-mcp.mjs', {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'ape_validate_receipt',
+        arguments: {
+          project_dir: value.directory,
+          ticket_id: value.ticket.ticket_id,
+          draft: invalid,
+        },
+      },
+    });
+
+    expect(responses[0].result.isError).toBe(true);
+    expect(responses[0].result.content[0].text).toContain('unsafe prototype key');
+    expect(JSON.stringify(responses[0])).not.toContain(value.capability);
+  });
+
+  it('redacts copied bearers from stop, pre-submit, record, and task correction/error channels', async () => {
+    const stoppedValue = await fixture();
+    const stoppedDraft = {
+      ...draft(stoppedValue.ticket, stoppedValue.capability),
+      [`unknown_${stoppedValue.capability}`]: {
+        nested: `copied:${stoppedValue.capability}`,
+      },
+      [`${stoppedValue.capability}.constructor`]: 'unsafe dotted key',
+    };
+    const [stopped] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'SubagentStop',
+      project_dir: stoppedValue.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(stoppedDraft),
+    }, { APE_HOST: 'codex', CODEX_CWD: stoppedValue.directory });
+    expect(stopped).toMatchObject({ decision: 'block' });
+    expect(JSON.stringify(stopped)).not.toContain(stoppedValue.capability);
+    expect(JSON.stringify(stopped)).toContain('[receipt-capability-redacted]');
+
+    const preSubmitValue = await fixture('claude');
+    const preSubmitDraft = {
+      ...draft(preSubmitValue.ticket, preSubmitValue.capability),
+      extra_worker_note: { nested: `copied:${preSubmitValue.capability}` },
+    };
+    const [preSubmit] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'PreToolUse',
+      project_dir: preSubmitValue.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'implementer',
+      tool_name: 'mcp__ape__ape_validate_receipt',
+      tool_input: {
+        ticket_id: preSubmitValue.ticket.ticket_id,
+        draft: preSubmitDraft,
+      },
+    }, { APE_HOST: 'claude', CLAUDECODE: '1' });
+    expect(preSubmit.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(JSON.stringify(preSubmit)).not.toContain(preSubmitValue.capability);
+
+    const recordValue = await fixture();
+    const recordDraft = {
+      ...draft(recordValue.ticket, recordValue.capability),
+      extra_worker_note: {
+        nested_value: `copied:${recordValue.capability}`,
+        [`nested_${recordValue.capability}`]: 'copied key',
+      },
+    };
+    const recorded = await recordReceipt(recordValue.directory, recordDraft);
+    expect(recorded).toMatchObject({ ok: false, rejected: true });
+    expect(JSON.stringify(recorded)).not.toContain(recordValue.capability);
+
+    const taskValue = await fixture();
+    const taskDraft = {
+      ...draft(taskValue.ticket, taskValue.capability),
+      extra_worker_note: { nested: `copied:${taskValue.capability}` },
+    };
+    const taskResult = await executeApeRunTaskOperation(taskValue.directory, {
+      operationId: `op-${'B'.repeat(43)}`,
+      action: 'record',
+      expectedRunId: taskValue.state.run_id,
+      request: { action: 'record', receipt: taskDraft },
+    });
+    expect(JSON.stringify(taskResult)).not.toContain(taskValue.capability);
+
+    const unsafeValue = await fixture();
+    const unsafeDraft = {
+      ...draft(unsafeValue.ticket, unsafeValue.capability),
+      [`${unsafeValue.capability}.constructor`]: 'unsafe dotted key',
+    };
+    const responses = await runProcess('bin/ape-mcp.mjs', {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'ape_run',
+        arguments: {
+          action: 'record',
+          project_dir: unsafeValue.directory,
+          receipt: unsafeDraft,
+        },
+      },
+    });
+    expect(responses[0].result.isError).toBe(true);
+    expect(responses[0].result.content[0].text).toContain('unsafe prototype key');
+    expect(JSON.stringify(responses[0])).not.toContain(unsafeValue.capability);
+  });
+
+  it('redacts authenticated stop-validation results before ordinary and exhausted intent persistence', async () => {
+    const value = await fixture();
+    const invalid = {
+      ...draft(value.ticket, value.capability),
+      [`unknown_${value.capability}`]: {
+        nested_value: `copied:${value.capability}`,
+        [`nested_${value.capability}`]: 'copied key',
+      },
+    };
+    const stop = {
+      hook_event_name: 'SubagentStop',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(invalid),
+    };
+    const intentFile = path.join(
+      value.paths.dispatchIntents,
+      `${rawDigest(value.ticket.ticket_id)}.json`,
+    );
+
+    const [first] = await runProcess(
+      'bin/ape-hook.mjs',
+      stop,
+      { APE_HOST: 'codex', CODEX_CWD: value.directory },
+    );
+    expect(first).toMatchObject({ decision: 'block' });
+    expect(JSON.stringify(first)).not.toContain(value.capability);
+    expect(JSON.stringify(first)).toContain('[receipt-capability-redacted]');
+
+    const firstIntent = await readJson(intentFile, null);
+    expect(firstIntent).toMatchObject({
+      status: 'bound',
+      validation_attempts: 1,
+      valid_draft_observed: false,
+      receipt_validation: {
+        attempts: 1,
+        invalid_attempts: 1,
+        exhausted: false,
+        last_result: {
+          valid: false,
+          corrections: expect.arrayContaining([
+            expect.objectContaining({
+              field: expect.stringContaining('[receipt-capability-redacted]'),
+            }),
+          ]),
+        },
+      },
+    });
+    expect(JSON.stringify(firstIntent)).not.toContain(value.capability);
+    expect(firstIntent).not.toHaveProperty('agent_stopped_at');
+
+    const firstAttestation = await readDispatchReceiptAttestation(
+      value.paths,
+      value.ticket.ticket_id,
+      receiptInputHash(invalid),
+      value.capability,
+      {
+        contract_version: 1,
+        ticket_hash: value.ticket.ticket_hash,
+        output_schema_hash: value.ticket.capability_manifest.receipt_schema.hash,
+      },
+    );
+    expect(firstAttestation).toMatchObject({
+      valid: false,
+      validation: {
+        attempt: 1,
+        corrections_remaining: 2,
+        exhausted: false,
+        next_action: { kind: 'continue_same_agent' },
+      },
+    });
+
+    const [second] = await runProcess(
+      'bin/ape-hook.mjs',
+      stop,
+      { APE_HOST: 'codex', CODEX_CWD: value.directory },
+    );
+    expect(second).toMatchObject({ decision: 'block' });
+    expect(JSON.stringify(second)).not.toContain(value.capability);
+
+    const [third] = await runProcess(
+      'bin/ape-hook.mjs',
+      stop,
+      { APE_HOST: 'codex', CODEX_CWD: value.directory },
+    );
+    expect(third).toEqual({});
+
+    const exhaustedIntent = await readJson(intentFile, null);
+    expect(exhaustedIntent).toMatchObject({
+      status: 'bound',
+      validation_attempts: 3,
+      valid_draft_observed: false,
+      receipt_validation_exhaustions: 1,
+      agent_stopped_at: expect.any(String),
+      receipt_validation: {
+        attempts: 3,
+        invalid_attempts: 3,
+        exhausted: true,
+        exhaustion_count: 1,
+        last_result: {
+          valid: false,
+          corrections: expect.arrayContaining([
+            expect.objectContaining({
+              field: expect.stringContaining('[receipt-capability-redacted]'),
+            }),
+          ]),
+        },
+      },
+    });
+    expect(JSON.stringify(exhaustedIntent)).not.toContain(value.capability);
+  });
+
+  it('uses dispatch authority rather than a missing, non-string, or substituted draft field', async () => {
+    const withoutCanonical = (value) => {
+      const invalid = {
+        ...draft(value.ticket, value.capability),
+        extra_worker_note: { nested: `copied:${value.capability}` },
+      };
+      delete invalid.receipt_capability;
+      return invalid;
+    };
+    const withNonStringCanonical = (value) => ({
+      ...draft(value.ticket, value.capability),
+      receipt_capability: 7,
+      extra_worker_note: { nested: `copied:${value.capability}` },
+    });
+    const withSubstitutedCanonical = (value) => ({
+      ...draft(value.ticket, value.capability),
+      receipt_capability: 'substituted-capability-value-1234567890',
+      extra_worker_note: { nested: `copied:${value.capability}` },
+    });
+
+    const stoppedValue = await fixture();
+    const [stopped] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'SubagentStop',
+      project_dir: stoppedValue.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(withoutCanonical(stoppedValue)),
+    }, { APE_HOST: 'codex', CODEX_CWD: stoppedValue.directory });
+    expect(stopped).toMatchObject({ decision: 'block' });
+    expect(JSON.stringify(stopped)).not.toContain(stoppedValue.capability);
+    const stoppedIntent = await readJson(path.join(
+      stoppedValue.paths.dispatchIntents,
+      `${rawDigest(stoppedValue.ticket.ticket_id)}.json`,
+    ));
+    expect(JSON.stringify(stoppedIntent)).not.toContain(stoppedValue.capability);
+
+    const preSubmitValue = await fixture('claude');
+    const [preSubmit] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'PreToolUse',
+      project_dir: preSubmitValue.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'implementer',
+      tool_name: 'mcp__ape__ape_validate_receipt',
+      tool_input: {
+        ticket_id: preSubmitValue.ticket.ticket_id,
+        draft: withSubstitutedCanonical(preSubmitValue),
+      },
+    }, { APE_HOST: 'claude', CLAUDECODE: '1' });
+    expect(preSubmit.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(JSON.stringify(preSubmit)).not.toContain(preSubmitValue.capability);
+
+    const validationValue = await fixture();
+    const validation = await validateReceiptForDispatch(
+      validationValue.directory,
+      withNonStringCanonical(validationValue),
+      validationValue.ticket.ticket_id,
+    );
+    expect(validation).toMatchObject({ ok: false, rejected: true, valid: false });
+    expect(JSON.stringify(validation)).not.toContain(validationValue.capability);
+
+    const recordValue = await fixture();
+    const recorded = await recordReceipt(recordValue.directory, withoutCanonical(recordValue));
+    expect(recorded).toMatchObject({ ok: false, rejected: true });
+    expect(JSON.stringify(recorded)).not.toContain(recordValue.capability);
+
+    const recoveryValue = await fixture();
+    const recovered = await recoverReceipt(
+      recoveryValue.directory,
+      withSubstitutedCanonical(recoveryValue),
+      { receipt_input_hash: 'a'.repeat(64), reason: 'recover the exact stopped draft' },
+    );
+    expect(recovered).toMatchObject({ ok: false, rejected: true });
+    expect(JSON.stringify(recovered)).not.toContain(recoveryValue.capability);
+
+    const taskValue = await fixture();
+    const taskResult = await executeApeRunTaskOperation(taskValue.directory, {
+      operationId: `op-${'C'.repeat(43)}`,
+      action: 'record',
+      expectedRunId: taskValue.state.run_id,
+      request: { action: 'record', receipt: withoutCanonical(taskValue) },
+    });
+    expect(JSON.stringify(taskResult)).not.toContain(taskValue.capability);
+
+    const mcpValue = await fixture();
+    const mcpDraft = withNonStringCanonical(mcpValue);
+    mcpDraft[`${mcpValue.capability}.constructor`] = 'unsafe copied bearer key';
+    const responses = await runProcess('bin/ape-mcp.mjs', {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'ape_run',
+        arguments: {
+          action: 'record',
+          project_dir: mcpValue.directory,
+          receipt: mcpDraft,
+        },
+      },
+    });
+    expect(JSON.stringify(responses[0])).not.toContain(mcpValue.capability);
+  });
+
   it('returns canonical corrections from the real MCP validation tool', async () => {
     const value = await fixture();
     const responses = await runProcess('bin/ape-mcp.mjs', {
@@ -329,6 +860,8 @@ describe('live receipt contract integration', () => {
       },
     });
     const payload = JSON.parse(responses[0].result.content[0].text);
+    expect(responses[0].result.content[0].text).not.toContain(value.capability);
+    expect(payload).not.toHaveProperty('normalized_draft');
     expect(payload).toMatchObject({
       ok: true,
       valid: false,
@@ -416,6 +949,8 @@ describe('live receipt contract integration', () => {
     const responses = await runProcess('bin/ape-mcp.mjs', [call(1), call(2)]);
     const first = JSON.parse(responses[0].result.content[0].text);
     const replay = JSON.parse(responses[1].result.content[0].text);
+    expect(responses[0].result.content[0].text).not.toContain(value.capability);
+    expect(responses[1].result.content[0].text).not.toContain(value.capability);
     expect(first).toMatchObject({
       ok: true,
       valid: true,
@@ -433,8 +968,10 @@ describe('live receipt contract integration', () => {
       validation: { attempt: 1 },
     });
     expect(first).not.toHaveProperty('next_action');
+    expect(first).not.toHaveProperty('normalized_draft');
     expect(first.validation).not.toHaveProperty('next_action');
     expect(replay).not.toHaveProperty('next_action');
+    expect(replay).not.toHaveProperty('normalized_draft');
     expect(replay.validation).not.toHaveProperty('next_action');
 
     const binding = {
@@ -924,6 +1461,42 @@ describe('live receipt contract integration', () => {
         last_result: { valid: true },
       },
     });
+  });
+
+  it('does not legacy-coerce a contract-v1 draft at the SubagentStop attestation boundary', async () => {
+    const value = await fixture();
+    const nonExactDraft = {
+      ...draft(value.ticket, value.capability),
+      status: 'success',
+    };
+
+    const [stopped] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'SubagentStop',
+      project_dir: value.directory,
+      session_id: 'session-1',
+      agent_id: 'agent-1',
+      agent_type: 'default',
+      is_subagent: true,
+      last_assistant_message: JSON.stringify(nonExactDraft),
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+
+    expect(stopped).toMatchObject({ decision: 'block' });
+    expect(stopped.reason).toMatch(/status.*success.*passed|status.*invalid/i);
+    const intent = await readJson(
+      path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`),
+      null,
+    );
+    expect(intent).toMatchObject({
+      validation_attempts: 1,
+      valid_draft_observed: false,
+      receipt_validation: {
+        attempts: 1,
+        exhausted: false,
+        last_result: { valid: false },
+      },
+    });
+    expect(intent.receipt_validation).not.toHaveProperty('attested_input_hash');
+    expect(intent).not.toHaveProperty('agent_stopped_at');
   });
 
   it('validates and records a maximal compliant planner receipt on its first submission', async () => {

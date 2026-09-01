@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+Logical lineage is now the primary project result without rewriting immutable run history: metrics,
+compact status, and explanations distinguish unresolved, superseded, recovering, recovered, and
+incomplete ancestry. Existing configuration-bound version-2 successor attestations remain readable,
+but current lifecycle-hook stdin does not authenticate human provenance. APE therefore removed the
+public successor preparation/approval surface and refuses every structured successor start instead
+of treating a model-forgeable prompt event as operator authority. Eligible blocked trees expose
+bounded recovery guidance for the explicit, reason-audited override-reset path; recovery can never
+start or ship automatically. Eligible terminal writers now return that guidance consistently, and
+full or compact status recomputes it from durable blocked state for later sessions.
+Primary lineage promotion now additionally requires an immutable structured-successor attestation
+that binds the complete normalized start-request hash and successor run id to the predecessor
+archive hash, exact retained tree, reviewed configuration digest, and bounded approval id; legacy `supersedes_run`
+values and configuration-less version-1 attestations remain audit-only and cannot
+bypass an active blocked run or promote a lineage edge. Same-run crash reconciliation prefers a verified terminal archive
+over stale preterminal state only when a canonical admitted-start commitment still matches; that
+commitment covers the normalized request, frozen policy/capabilities, initial run-contract root,
+shipping authority, and repository identity. Conflicts and archive-less mutable terminal states
+fail closed as incomplete. Metrics filters
+now select logical leaves before lifecycle or incomplete-coverage accounting, so excluded history
+cannot contaminate a requested cohort.
+
+Preview admission now compiles every reachable capability surface and applies deterministic score
+and UTF-8 planning-input limits before dispatch. Receipt contract v1 no longer performs semantic
+coercions—including at SubagentStop attestation—and returns exact bounded correction deltas. Run
+branches are created from the already-resolved default commit SHA rather than a mutable ref. Directed replanning and remediation continue
+only on strict structured proper-subset progress within independent ceilings. Lineage promotion now
+independently requires the attested request hash to match the validated
+admitted-start request hash; absent or mismatched commitments remain audit-only. Receipt validation,
+hook correction, record, recovery, and task-operation responses redact the receipt bearer across
+every public field, nested value, correction, and thrown raw-input error. Replan comparisons use normalized semantic assurance identities and exclude
+per-ticket evidence anchors, while malformed declared entries still fail closed. Capability
+redaction is now authorized by the dispatch-owned hash rather than the untrusted draft: missing,
+non-string, or substituted canonical fields get non-reflective refusals even when the live bearer
+was copied elsewhere. Structured version-1 remediation routes use the full strict-subset cycle
+budget, second directed replans are schema-valid at ticket issuance, and preview budgets the initial
+plan plus both reachable replans.
+
 ## 2.24.8 — 2026-08-30
 
 Roadmap attestation now accepts the exact fully gated produce-and-hold terminal shape emitted when

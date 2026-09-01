@@ -135,14 +135,149 @@ describe('APE v2 plan-judge verdict handling (friction #22)', () => {
     expect(state.status).toBe('running');
   });
 
-  it('treats the verdict case-insensitively: a second DISAGREE blocks', () => {
-    const { state, judgeTicket } = stateAtPlanJudge({ plan_replan_cycles: 1 });
-    const actions = record(state, judgeTicket, { evidence: { verdict: 'DISAGREE' } });
+  it('permits a second directed replan only for strict proper-subset progress', () => {
+    const prior = [
+      { summary: 'Bind R1', requirement_id: 'R1', evidence_anchor: 'requirements.R1' },
+      { summary: 'Add rollback proof', requirement_id: 'R2', evidence_anchor: 'risks.rollback' },
+    ];
+    const { state, judgeTicket } = stateAtPlanJudge({
+      plan_replan_cycles: 1,
+      plan_recovery: { missing_assurances: prior },
+    });
+    const actions = record(state, judgeTicket, {
+      evidence: { verdict: 'disagree', missing_assurances: [prior[1]] },
+    });
 
-    expect(actions[0].type).toBe('transition');
-    expect(actions[0].patch.status).toBe('blocked');
-    expect(actions[0].patch.block_reason).toMatch(/plan judged unsound/);
+    expect(actions.map((action) => action.type)).toEqual([
+      'transition',
+      'issue_ticket',
+      'persist_state',
+    ]);
+    expect(actions[0].patch.plan_replan_cycles).toBe(2);
+    expect(actions[1]).toMatchObject({
+      type: 'issue_ticket',
+      stage: { id: 'plan-replan', role: 'planner' },
+    });
+    expect(state.status).toBe('running');
+  });
+
+  it.each([
+    ['string shorthand', 'Add rollback proof', false],
+    ['object without an anchor', { summary: 'Add rollback proof', requirement_id: 'R2' }, true],
+  ])('compares normalized assurances for a strict subset expressed as %s', (_label, assurance, withRequirement) => {
+    const prior = [
+      {
+        summary: 'Bind R1',
+        requirement_id: 'R1',
+        evidence_anchor: 'receipt:prior#missing_assurances.0',
+      },
+      {
+        summary: 'Add rollback proof',
+        ...(withRequirement ? { requirement_id: 'R2' } : {}),
+        evidence_anchor: 'receipt:prior#missing_assurances.1',
+      },
+    ];
+    const { state, judgeTicket } = stateAtPlanJudge({
+      plan_replan_cycles: 1,
+      plan_recovery: { missing_assurances: prior },
+    });
+    const actions = record(state, judgeTicket, {
+      evidence: { verdict: 'disagree', missing_assurances: [assurance] },
+    });
+
+    expect(actions.some((action) => action.type === 'issue_ticket'
+      && action.stage.id === 'plan-replan')).toBe(true);
+    expect(state.plan_replan_cycles).toBe(2);
+  });
+
+  it('canonicalizes duplicate assurance identities before deciding strict subset progress', () => {
+    const prior = [
+      { summary: 'Bind R1', requirement_id: 'R1', evidence_anchor: 'requirements.R1' },
+      { summary: 'Bind R2', requirement_id: 'R2', evidence_anchor: 'requirements.R2' },
+      { summary: 'Bind R3', requirement_id: 'R3', evidence_anchor: 'requirements.R3' },
+    ];
+    const { state, judgeTicket } = stateAtPlanJudge({
+      plan_replan_cycles: 1,
+      plan_recovery: { missing_assurances: prior },
+    });
+    const actions = record(state, judgeTicket, {
+      evidence: {
+        verdict: 'disagree',
+        missing_assurances: [prior[1], { ...prior[1] }],
+      },
+    });
+
+    expect(actions.some((action) => action.type === 'issue_ticket'
+      && action.stage.id === 'plan-replan')).toBe(true);
+    expect(state.plan_replan_cycles).toBe(2);
+  });
+
+  it.each([
+    ['same identities in a different order', (prior) => [...prior].reverse()],
+    ['an empty set', () => []],
+    ['a malformed assurance', () => [{}]],
+    ['mixed valid and malformed assurances', (prior) => [prior[0], null]],
+  ])('blocks %s without inventing planning progress', (_label, nextFor) => {
+    const prior = [
+      { summary: 'Bind R1', requirement_id: 'R1', evidence_anchor: 'requirements.R1' },
+      { summary: 'Bind R2', requirement_id: 'R2', evidence_anchor: 'requirements.R2' },
+    ];
+    const { state, judgeTicket } = stateAtPlanJudge({
+      plan_replan_cycles: 1,
+      plan_recovery: { missing_assurances: prior },
+    });
+    const actions = record(state, judgeTicket, {
+      evidence: { verdict: 'disagree', missing_assurances: nextFor(prior) },
+    });
+
+    expect(actions.some((action) => action.type === 'issue_ticket')).toBe(false);
+    expect(state).toMatchObject({ status: 'blocked', stage: 'plan-judge' });
+    expect(state.blocked_recovery).toMatchObject({
+      reason_code: 'plan_progress_not_strict_subset',
+      directed_replan_attempts: 1,
+    });
+  });
+
+  it.each([
+    ['repetition', [
+      { summary: 'Bind R1', requirement_id: 'R1', evidence_anchor: 'requirements.R1' },
+    ]],
+    ['mixed remove/add', [
+      { summary: 'New assurance', requirement_id: 'R3', evidence_anchor: 'requirements.R3' },
+    ]],
+  ])('blocks a %s assurance set instead of consuming another replan', (_label, next) => {
+    const prior = [
+      { summary: 'Bind R1', requirement_id: 'R1', evidence_anchor: 'requirements.R1' },
+    ];
+    const { state, judgeTicket } = stateAtPlanJudge({
+      plan_replan_cycles: 1,
+      plan_recovery: { missing_assurances: prior },
+    });
+    const actions = record(state, judgeTicket, {
+      evidence: { verdict: 'disagree', missing_assurances: next },
+    });
+
+    expect(actions.some((action) => action.type === 'issue_ticket')).toBe(false);
     expect(state.status).toBe('blocked');
+    expect(state.block_reason).toMatch(/strict|progress|repeated|expanded|incomparable/i);
+  });
+
+  it('blocks after two directed replans even if the third assurance set shrinks', () => {
+    const prior = [
+      { summary: 'Bind R1', requirement_id: 'R1', evidence_anchor: 'requirements.R1' },
+      { summary: 'Bind R2', requirement_id: 'R2', evidence_anchor: 'requirements.R2' },
+    ];
+    const { state, judgeTicket } = stateAtPlanJudge({
+      plan_replan_cycles: 2,
+      plan_recovery: { missing_assurances: prior },
+    });
+    const actions = record(state, judgeTicket, {
+      evidence: { verdict: 'DISAGREE', missing_assurances: [prior[0]] },
+    });
+
+    expect(actions.some((action) => action.type === 'issue_ticket')).toBe(false);
+    expect(state.status).toBe('blocked');
+    expect(state.block_reason).toMatch(/two|2|ceiling|exhausted/i);
   });
 });
 

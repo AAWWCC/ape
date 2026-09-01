@@ -45,6 +45,7 @@ import { projectHistoryResponse, projectRunResponse } from '../lib/runtime/proje
 import { LANES } from '../lib/runtime/constants.js';
 import { START_MODES } from '../lib/runtime/schemas.js';
 import { TERMINAL_REASON_CODES } from '../lib/runtime/terminal-telemetry.js';
+import { STRUCTURED_SUCCESSOR_UNAVAILABLE_ERROR } from '../lib/runtime/successor-guidance.js';
 
 // Plugin manifests pin the launching host on argv. Environment markers are
 // inherited process state and can be stale when one host starts inside the
@@ -97,7 +98,7 @@ const TOOLS = Object.freeze([
         action: {
           type: 'string',
           enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'recover-receipt', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'],
-          description: 'Preview and start require identical complete prospective facts, including objective and host; only action differs. recover-receipt is the reason-audited emergency path for the exact draft of a host-observed stopped worker when normal worker attestation is unavailable. For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
+          description: 'Preview and start require identical complete prospective facts, including objective and host; only action differs. Structured successor starts are unavailable because current host hooks do not authenticate human provenance; after explicit operator direction recover a blocked run with audited override reset, then start an ordinary fresh run. recover-receipt is the reason-audited emergency path for the exact draft of a host-observed stopped worker when normal worker attestation is unavailable. For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
         },
         project_dir: {
           type: 'string',
@@ -592,13 +593,19 @@ function taskWireProjection(task) {
 
 function assertRunCommandProfilesAction(input) {
   const action = input.action;
-  if (input.run_command_profiles !== undefined && action !== 'preview' && action !== 'start') {
+  if (
+    input.run_command_profiles !== undefined &&
+    action !== 'preview' && action !== 'start'
+  ) {
     throw new Error(`action '${action}' does not take run_command_profiles; run-local command grants may only be frozen by actions 'preview'/'start'`);
   }
 }
 
 async function dispatchApeRun(projectDir, input) {
   const action = input.action;
+  if (Object.hasOwn(input, 'successor')) {
+    throw new Error(STRUCTURED_SUCCESSOR_UNAVAILABLE_ERROR);
+  }
   assertRunCommandProfilesAction(input);
   if (action === 'answer-preflight') {
     return projectRunResponse(await answerPreflight(projectDir, {

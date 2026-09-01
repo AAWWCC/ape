@@ -40,6 +40,7 @@ import {
   resolveClaudeBindingOutcome,
   resolveSealedCodexBinding,
   resolveSealedClaudeBinding,
+  readDispatchReceiptCapabilityHash,
   observeClaudeSubagentStop,
   observeCodexSubagentStop,
   validateAndAttestDispatchReceiptDraftAtStop,
@@ -56,9 +57,11 @@ import {
   validateReceiptDraft,
 } from '../lib/runtime/receipt-validator.js';
 import {
+  authenticatedReceiptBearer,
   extractReceiptDraftFromText,
   formatDraftCorrections,
   normalizeReceiptInput,
+  redactReceiptBearer,
   receiptInputHash,
 } from '../lib/runtime/receipt-input.js';
 import {
@@ -197,6 +200,7 @@ try {
   const paths = runtimePaths(event.project_dir);
   const state = await readJson(paths.active, null);
 
+
   let ticket = null;
   // Third container matches extractPath's own priority order (lib/runtime/
   // hooks.js normalizeLifecycleEvent): a payload shaped {tool_name, input:
@@ -319,9 +323,29 @@ try {
       const extractedDraft = assistantMessage && typeof assistantMessage === 'object'
         ? assistantMessage
         : extractReceiptDraftFromText(assistantMessage);
-      const { input: normalizedDraft } = normalizeReceiptInput(extractedDraft);
-      let stopDraftResult = validateReceiptDraft(inspectedTicket, normalizedDraft);
-      if (stopDraftResult.valid === true && capabilityManifestGrowthEnabled(state)) {
+      const { input: normalizedDraft } = normalizeReceiptInput(extractedDraft, {
+        receipt_contract_version: inspectedTicket.receipt_contract_version,
+      });
+      const stopValidationBearer = authenticatedReceiptBearer(
+        normalizedDraft,
+        inspection.record?.capability_hash,
+      );
+      let stopDraftResult = stopValidationBearer === null
+        ? {
+            valid: false,
+            corrections: [{
+              field: 'receipt_capability',
+              issue: 'the canonical capability does not match the exact bound physical dispatch',
+              correction: 'restore the exact APE_RECEIPT_CAPABILITY injected for this worker',
+            }],
+            budgets: null,
+          }
+        : validateReceiptDraft(inspectedTicket, normalizedDraft);
+      if (
+        stopValidationBearer !== null &&
+        stopDraftResult.valid === true &&
+        capabilityManifestGrowthEnabled(state)
+      ) {
         const growth = await prospectiveReceiptCapabilityGrowthFromTree(
           paths.root,
           state,
@@ -330,6 +354,10 @@ try {
         );
         stopDraftResult = mergeReceiptCapabilityGrowthResult(stopDraftResult, growth);
       }
+      const persistedStopDraftResult = redactReceiptBearer(
+        stopDraftResult,
+        stopValidationBearer,
+      );
       stopReceiptValidation = await validateAndAttestDispatchReceiptDraftAtStop(
         paths,
         state,
@@ -337,7 +365,7 @@ try {
         event.host,
         {
           input_hash: receiptInputHash(normalizedDraft ?? null),
-          validate: () => stopDraftResult,
+          validate: () => persistedStopDraftResult,
         },
       );
       if (!stopReceiptValidation.observed) {
@@ -356,6 +384,7 @@ try {
           reason: formatDraftCorrections(
             stopReceiptValidation.result?.corrections ?? [],
             inspectedTicket,
+            stopValidationBearer,
           ),
         }))}\n`);
         process.exit(0);
@@ -410,6 +439,7 @@ try {
   // service can attest another worker's ticket.
   if (RECEIPT_VALIDATION_TOOL.test(event.tool_name)) {
     let receiptValidation = null;
+    let receiptValidationBearer = null;
     const receiptInput = toolInput?.draft ?? toolInput?.receipt;
     const requestedTicketId = toolInput?.ticket_id ?? receiptInput?.ticket_id;
     const bound = Boolean(
@@ -424,9 +454,28 @@ try {
       receiptInput.ticket_id === ticket.ticket_id
     );
     if (bound && event.event === 'PreToolUse') {
-      const { input: normalizedReceipt } = normalizeReceiptInput(receiptInput);
-      receiptValidation = validateReceiptDraft(ticket, normalizedReceipt);
-      if (receiptValidation.valid === true && capabilityManifestGrowthEnabled(state)) {
+      const { input: normalizedReceipt } = normalizeReceiptInput(receiptInput, {
+        receipt_contract_version: ticket.receipt_contract_version,
+      });
+      receiptValidationBearer = authenticatedReceiptBearer(
+        normalizedReceipt,
+        await readDispatchReceiptCapabilityHash(paths, ticket.ticket_id),
+      );
+      receiptValidation = receiptValidationBearer === null
+        ? {
+            valid: false,
+            corrections: [{
+              field: 'receipt_capability',
+              issue: 'the canonical capability does not match the exact bound physical dispatch',
+              correction: 'restore the exact APE_RECEIPT_CAPABILITY injected for this worker',
+            }],
+          }
+        : validateReceiptDraft(ticket, normalizedReceipt);
+      if (
+        receiptValidationBearer !== null &&
+        receiptValidation.valid === true &&
+        capabilityManifestGrowthEnabled(state)
+      ) {
         const growth = await prospectiveReceiptCapabilityGrowthFromTree(
           paths.root,
           state,
@@ -441,7 +490,7 @@ try {
       reason: bound
         ? receiptValidation?.valid === true
           ? 'APE bound receipt validation call admitted (draft valid)'
-          : `APE bound receipt validation call admitted; ${formatDraftCorrections(receiptValidation?.corrections ?? [], ticket)}`
+          : `APE bound receipt validation call admitted; ${formatDraftCorrections(receiptValidation?.corrections ?? [], ticket, receiptValidationBearer)}`
         : 'APE receipt validation denied: no exact active bound receipt-contract ticket matches receipt.ticket_id',
     }))}\n`);
     process.exit(0);

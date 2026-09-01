@@ -5,10 +5,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AUTO_MERGE_HOLD_REASON, SCHEMA_VERSION } from '../lib/runtime/constants.js';
+import { archiveRun, logicalLineageForRun } from '../lib/runtime/history.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { compactStatus, resumeRun, startRun, statusRun } from '../lib/runtime/service.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { bindCodexDispatch } from './codex-native-test-helper.js';
+import { createSuccessorAttestation } from '../lib/runtime/successor-attestation.js';
+import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identity.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const cleanups = [];
@@ -342,6 +345,167 @@ describe('APE v2 compact status and resume liveness contract', () => {
       },
     });
     expect((await compactStatus(dir)).gate).not.toHaveProperty('blocker');
+  }, 30_000);
+
+  it('projects recovering lineage separately from the immutable blocked predecessor', async () => {
+    const dir = await project();
+    const started = await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    const successor = await readJson(paths.active, null);
+    const predecessorId = 'run-status-blocked-predecessor';
+    const predecessor = await archiveRun(paths, {
+      ...successor,
+      run_id: predecessorId,
+      status: 'blocked',
+      stage: 'build',
+      block_reason: 'stage build capability-blocked',
+      terminal_reason_code: 'capability_blocked',
+      failure_domain: 'configuration',
+      terminal_at: successor.updated_at,
+      completed_at: successor.updated_at,
+      tickets: [],
+      receipts: [],
+    });
+    successor.supersedes_run = predecessorId;
+    successor.successor_request_hash = successor.start_request_hash;
+    successor.successor_attestation = createSuccessorAttestation({
+      version: 2,
+      predecessor_run_id: predecessorId,
+      retained_tree_sha: predecessor.final_tree_sha,
+      config_hash: successor.start_config_hash,
+      approval_id: 'successor-approval-00000000-0000-4000-8000-000000000001',
+    }, predecessor.record_hash, successor.run_id, successor.successor_request_hash);
+    successor.status = 'running';
+    successor.stage = 'test';
+    successor.admitted_start_identity_hash = admittedStartIdentityHash(successor);
+    await atomicWriteJson(paths.active, successor);
+
+    const compact = await compactStatus(dir);
+    expect(compact).toMatchObject({
+      active: true,
+      run: { run_id: started.run.run_id },
+      logical_lineage: {
+        version: 1,
+        state: 'recovering',
+        root_run_id: predecessorId,
+        leaf_run_id: started.run.run_id,
+        complete: true,
+      },
+    });
+    expect(compact.logical_lineage).not.toHaveProperty('block_reason');
+    expect(compact.logical_lineage).not.toHaveProperty('objective');
+  }, 30_000);
+
+  it('binds crash recovery to the complete admitted start authority', async () => {
+    const dir = await project();
+    await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    const running = await readJson(paths.active, null);
+    expect(running.admitted_start_identity_hash).toMatch(/^[0-9a-f]{64}$/);
+    await archiveRun(paths, {
+      ...running,
+      status: 'completed',
+      stage: 'complete',
+      terminal_at: running.updated_at,
+      completed_at: running.updated_at,
+    });
+
+    expect(await logicalLineageForRun(paths, running.run_id, running)).toMatchObject({
+      state: 'completed',
+      complete: true,
+    });
+
+    const authorizationConflict = {
+      ...running,
+      auto_merge_authorized: true,
+    };
+    expect(
+      await logicalLineageForRun(paths, running.run_id, authorizationConflict),
+    ).toMatchObject({
+      state: 'unknown',
+      complete: false,
+      incomplete_reasons: ['active-archive-conflict'],
+    });
+  }, 30_000);
+
+  it('keeps commitment-less legacy archives audit-only during crash reconciliation', async () => {
+    const dir = await project();
+    await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    const running = await readJson(paths.active, null);
+    const legacyRunning = { ...running };
+    delete legacyRunning.admitted_start_identity_version;
+    delete legacyRunning.start_request_hash;
+    delete legacyRunning.admitted_run_contract;
+    delete legacyRunning.admitted_start_identity_hash;
+    await archiveRun(paths, {
+      ...legacyRunning,
+      status: 'completed',
+      stage: 'complete',
+      terminal_at: running.updated_at,
+      completed_at: running.updated_at,
+    });
+
+    expect(
+      await logicalLineageForRun(paths, running.run_id, legacyRunning),
+    ).toMatchObject({
+      state: 'unknown',
+      complete: false,
+      incomplete_reasons: ['active-archive-conflict'],
+    });
+  }, 30_000);
+
+  it.each([
+    ['blocked', 'unresolved_blocked'],
+    ['aborted', 'aborted'],
+  ])('projects a standalone %s run as the validated %s logical leaf', async (status, lineageState) => {
+    const dir = await project();
+    const started = await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    const state = await readJson(paths.active, null);
+    state.status = status;
+    state.stage = status === 'aborted' ? 'aborted' : 'build';
+    state.terminal_at = state.updated_at;
+    state.completed_at = state.updated_at;
+    if (status === 'blocked') {
+      state.block_reason = 'stage build failed';
+      state.terminal_reason_code = 'stage_failed';
+      state.failure_domain = 'product';
+    }
+    await archiveRun(paths, state);
+    await atomicWriteJson(paths.active, state);
+
+    expect(await compactStatus(dir)).toMatchObject({
+      run: { run_id: started.run.run_id },
+      logical_lineage: {
+        version: 1,
+        state: lineageState,
+        root_run_id: started.run.run_id,
+        leaf_run_id: started.run.run_id,
+        complete: true,
+      },
+    });
+  }, 30_000);
+
+  it('does not promote an archive-less mutable terminal state', async () => {
+    const dir = await project();
+    const started = await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    const state = await readJson(paths.active, null);
+    state.status = 'completed';
+    state.stage = 'complete';
+    state.terminal_at = state.updated_at;
+    state.completed_at = state.updated_at;
+    await atomicWriteJson(paths.active, state);
+
+    expect(await compactStatus(dir)).toMatchObject({
+      run: { run_id: started.run.run_id },
+      logical_lineage: {
+        version: 1,
+        state: 'unknown',
+        complete: false,
+      },
+    });
   }, 30_000);
 });
 

@@ -192,7 +192,7 @@ describe('structured owners select one deterministic serialized route', () => {
     ]);
   });
 
-  it('keeps the route through retry and never grants a second cycle', () => {
+  it('keeps the route through retry and grants a strict-subset second cycle', () => {
     const run = state();
     const [review] = openReviews(run);
     recordPure(run, review, failedReview([finding('test'), finding('production')]));
@@ -208,9 +208,16 @@ describe('structured owners select one deterministic serialized route', () => {
     recordPure(run, run.tickets.at(-1));
     const finalReview = run.tickets.at(-1);
     expect(finalReview.stage_id).toBe('remediation-review');
-    expect(issued(recordPure(run, finalReview, failedReview([finding('production')])))).toEqual([]);
-    expect(run.status).toBe('blocked');
-    expect(run.remediation_cycles).toBe(1);
+    expect(issued(recordPure(run, finalReview, failedReview([finding('production')]))))
+      .toEqual(['remediation-build']);
+    expect(run.status).toBe('running');
+    expect(run.remediation_cycles).toBe(2);
+    expect(run.remediation_route).toEqual({
+      route: 'production',
+      cycle: 2,
+      ownership_counts: { production: 1, test: 0, both: 0 },
+      test_paths: [],
+    });
   });
 });
 
