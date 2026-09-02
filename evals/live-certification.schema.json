@@ -37,7 +37,7 @@
       "description": "Packaged hosts that have structural and marketplace validation but no authenticated live release certification."
     },
     "terminal_reason_taxonomy_version": {
-      "const": 1
+      "const": 2
     },
     "attempts": {
       "type": "array",
@@ -91,6 +91,7 @@
         "dispatch_expired",
         "test_failed",
         "implementation_failed",
+        "land_review_disagreement",
         "review_remediation_exhausted",
         "gate_failed",
         "shipping_hold",

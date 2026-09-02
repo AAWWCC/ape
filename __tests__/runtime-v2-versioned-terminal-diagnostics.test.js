@@ -10,9 +10,11 @@ import {
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { historyAction, startRun } from '../lib/runtime/service.js';
 import { summarizeHistoryRecord } from '../lib/runtime/projection.js';
-import { readJson } from '../lib/runtime/storage.js';
+import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
+import { hashRecord } from '../lib/runtime/canonical.js';
 import {
   TERMINAL_REASON_TAXONOMY_VERSION,
+  terminalFailureDomain,
   terminalReasonCode,
   validatedTerminalRecoveryFields,
 } from '../lib/runtime/terminal-telemetry.js';
@@ -141,6 +143,7 @@ describe('versioned-terminal-diagnostics', () => {
   });
 
   it('classifies structured recovery outcomes without depending on future prose wording', () => {
+    expect(TERMINAL_REASON_TAXONOMY_VERSION).toBe(2);
     expect(terminalReasonCode(terminalState('run-directed-replan', {
       terminal_reason_code: 'planning_rejected',
       stage: 'plan-judge',
@@ -155,6 +158,20 @@ describe('versioned-terminal-diagnostics', () => {
       terminal_reason_code: 'capability_blocked',
       block_reason: 'wording may change',
     }))).toBe('capability_blocked');
+    const landDisagreement = terminalState('run-land-review-disagreement', {
+      mode: 'land',
+      stage: 'review',
+      remediation_cycles: 0,
+      block_reason: 'land mode has no writing stage; revise the diff outside APE, then start a new land run',
+    });
+    expect(terminalReasonCode(landDisagreement)).toBe('land_review_disagreement');
+    expect(terminalFailureDomain(landDisagreement)).toBe('product');
+    expect(terminalReasonCode(terminalState('run-review-remediation-exhausted', {
+      mode: 'phase',
+      stage: 'remediation',
+      remediation_cycles: 2,
+      block_reason: 'review disagreement reached the configured remediation budget (2 cycles)',
+    }))).toBe('review_remediation_exhausted');
 
     const directedReplan = {
       reason_code: 'plan_rejected_after_directed_replan',
@@ -262,6 +279,76 @@ describe('versioned-terminal-diagnostics', () => {
       stage: 'build',
       block_reason: 'stage build test-contradiction-blocked',
     }));
+    const versionOne = await archiveRun(paths, terminalState('run-cohort-version-one-review', {
+      ...runVersionProvenance('codex'),
+      mode: 'land',
+      stage: 'review',
+      remediation_cycles: 0,
+      block_reason: 'land mode has no writing stage; revise the diff outside APE, then start a new land run',
+    }));
+    versionOne.terminal_reason_taxonomy_version = 1;
+    versionOne.terminal_reason_code = 'review_remediation_exhausted';
+    versionOne.record_hash = hashRecord(versionOne, ['record_hash', 'completed_at', 'timing']);
+    const versionOneFile = path.join(paths.history, 'run-cohort-version-one-review.json');
+    await atomicWriteJson(versionOneFile, versionOne);
+    expect(versionOne).toMatchObject({
+      terminal_reason_taxonomy_version: 1,
+      terminal_reason_code: 'review_remediation_exhausted',
+    });
+    const versionOneBefore = await readFile(versionOneFile, 'utf8');
+    const replayedVersionOne = await archiveRun(paths, terminalState(
+      'run-cohort-version-one-review',
+      {
+        ...runVersionProvenance('codex'),
+        mode: 'land',
+        stage: 'review',
+        remediation_cycles: 0,
+        block_reason: 'land mode has no writing stage; revise the diff outside APE, then start a new land run',
+      },
+    ), { ifAbsent: true });
+    expect(replayedVersionOne).toMatchObject({
+      terminal_reason_taxonomy_version: 1,
+      terminal_reason_code: 'review_remediation_exhausted',
+    });
+    expect(await readFile(versionOneFile, 'utf8')).toBe(versionOneBefore);
+    const versionTwo = await archiveRun(paths, terminalState('run-cohort-version-two-review', {
+      ...runVersionProvenance('codex'),
+      mode: 'land',
+      stage: 'review',
+      remediation_cycles: 0,
+      block_reason: 'land mode has no writing stage; revise the diff outside APE, then start a new land run',
+    }));
+    versionTwo.terminal_reason_code = 'review_remediation_exhausted';
+    versionTwo.record_hash = hashRecord(versionTwo, ['record_hash', 'completed_at', 'timing']);
+    const versionTwoFile = path.join(paths.history, 'run-cohort-version-two-review.json');
+    await atomicWriteJson(versionTwoFile, versionTwo);
+    expect(versionTwo).toMatchObject({
+      terminal_reason_taxonomy_version: 2,
+      terminal_reason_code: 'review_remediation_exhausted',
+    });
+    const versionTwoBefore = await readFile(versionTwoFile, 'utf8');
+    const replayedVersionTwo = await archiveRun(paths, terminalState(
+      'run-cohort-version-two-review',
+      {
+        ...runVersionProvenance('codex'),
+        mode: 'land',
+        stage: 'review',
+        remediation_cycles: 0,
+        block_reason: 'land mode has no writing stage; revise the diff outside APE, then start a new land run',
+      },
+    ), { ifAbsent: true });
+    expect(replayedVersionTwo).toMatchObject({
+      terminal_reason_taxonomy_version: 2,
+      terminal_reason_code: 'review_remediation_exhausted',
+    });
+    expect(terminalReasonCode(replayedVersionTwo)).toBe('review_remediation_exhausted');
+    const explainedVersionTwo = await historyAction(dir, 'explain', {
+      run_id: replayedVersionTwo.run_id,
+    });
+    expect(explainedVersionTwo.diagnostic.terminal_reason_code)
+      .toBe('review_remediation_exhausted');
+    expect(explainedVersionTwo.run.terminal_reason_code).toBe('review_remediation_exhausted');
+    expect(await readFile(versionTwoFile, 'utf8')).toBe(versionTwoBefore);
     const legacy = await archiveRun(paths, terminalState('run-cohort-legacy', {
       block_reason: 'shipping failed: private provider output is retained only in immutable history',
     }));
@@ -274,21 +361,23 @@ describe('versioned-terminal-diagnostics', () => {
     expect(metrics.terminal_reason_counts).toMatchObject({
       planning_rejected: 1,
       test_contradiction: 1,
+      review_remediation_exhausted: 2,
       shipping_failed: 1,
     });
     expect(metrics.terminal_reason_coverage).toEqual({
       taxonomy_version: TERMINAL_REASON_TAXONOMY_VERSION,
-      persisted_runs: 2,
+      persisted_runs: 4,
       derived_legacy_runs: 1,
     });
     expect(metrics.version_cohorts).toMatchObject({
-      ape_version: { [APE_VERSION]: 2, unknown: 1 },
-      runtime_version: { 2: 2, unknown: 1 },
-      host_plugin_version: { [APE_VERSION]: 2, unknown: 1 },
-      protocol_version: { [CODEX_DISPATCH_PROTOCOL_VERSION]: 2, unknown: 1 },
-      envelope_version: { [CODEX_DISPATCH_ENVELOPE_VERSION]: 2, unknown: 1 },
+      ape_version: { [APE_VERSION]: 4, unknown: 1 },
+      runtime_version: { 2: 4, unknown: 1 },
+      host_plugin_version: { [APE_VERSION]: 4, unknown: 1 },
+      protocol_version: { [CODEX_DISPATCH_PROTOCOL_VERSION]: 4, unknown: 1 },
+      envelope_version: { [CODEX_DISPATCH_ENVELOPE_VERSION]: 4, unknown: 1 },
       terminal_reason_taxonomy_version: {
-        [TERMINAL_REASON_TAXONOMY_VERSION]: 2,
+        1: 1,
+        2: 3,
         unknown: 1,
       },
     });
@@ -299,8 +388,10 @@ describe('versioned-terminal-diagnostics', () => {
       protocol_version: 1,
       envelope_version: 1,
       terminal_reason_code: 1,
-      terminal_reason_taxonomy_version: 1,
+      terminal_reason_taxonomy_version: 2,
     });
+    expect(await readFile(versionOneFile, 'utf8')).toBe(versionOneBefore);
+    expect(await readFile(versionTwoFile, 'utf8')).toBe(versionTwoBefore);
     expect(await readFile(legacyFile, 'utf8')).toBe(legacyBefore);
   });
 

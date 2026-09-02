@@ -151,6 +151,7 @@ describe('APE v2 start-time working-tree hygiene', () => {
     blocked.status = 'blocked';
     blocked.stage = 'remediation';
     blocked.block_reason = 'review disagreement reached the configured remediation budget';
+    blocked.remediation_cycles = 2;
     blocked.terminal_reason_code = 'review_remediation_exhausted';
     blocked.failure_domain = 'product';
     blocked.failure_domain_taxonomy_version = FAILURE_DOMAIN_TAXONOMY_VERSION;
@@ -176,6 +177,60 @@ describe('APE v2 start-time working-tree hygiene', () => {
     expect(git(dir, 'branch', '--show-current')).toBe(branchBefore);
     expect(await currentTreeSha(dir)).toBe(blocked.tree_sha);
     expect(first.run.run_id).toBe(blocked.run_id);
+  });
+
+  it('offers only explicit override-reset guidance for a persisted land review disagreement', async () => {
+    const dir = await project();
+    await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 2;\n');
+
+    const blocked = await readJson(paths.active);
+    blocked.mode = 'land';
+    blocked.status = 'blocked';
+    blocked.stage = 'review';
+    blocked.block_reason = 'land mode has no writing stage; revise the diff outside APE, then start a new land run';
+    blocked.remediation_cycles = 0;
+    blocked.terminal_reason_taxonomy_version = 2;
+    blocked.terminal_reason_code = 'land_review_disagreement';
+    blocked.failure_domain = 'product';
+    blocked.failure_domain_taxonomy_version = FAILURE_DOMAIN_TAXONOMY_VERSION;
+    blocked.tree_sha = await currentTreeSha(dir);
+    await atomicWriteJson(paths.active, blocked);
+    await archiveRun(paths, blocked);
+    await releaseRunLock(paths.lock, blocked.run_id);
+
+    const status = await statusRun(dir);
+    expect(status.successor_guidance).toMatchObject({
+      version: 2,
+      eligible: true,
+      predecessor_run_id: blocked.run_id,
+      retained_tree_sha: blocked.tree_sha,
+      eligibility_reason: 'land_review_disagreement',
+      structured_successor_supported: false,
+      unavailable_reason: 'authenticated-host-approval-unavailable',
+      recovery_action: 'override-reset',
+      required_authorization: 'explicit-operator-override',
+      automatic_start: false,
+      automatic_ship: false,
+    });
+
+    const branchBefore = git(dir, 'branch', '--show-current');
+    const refused = await startRun(dir, {
+      ...startInput(),
+      successor: {
+        version: 2,
+        predecessor_run_id: blocked.run_id,
+        retained_tree_sha: blocked.tree_sha,
+        config_hash: status.successor_guidance.config_hash,
+        approval_id: 'successor-approval-00000000-0000-4000-8000-000000000001',
+      },
+    });
+    expect(refused).toMatchObject({ ok: false, blocked: true, attempts_consumed: 0 });
+    expect(refused.errors.join(' ')).toMatch(/authenticated user provenance|override reset/i);
+    expect(await readJson(paths.active)).toEqual(blocked);
+    expect(git(dir, 'branch', '--show-current')).toBe(branchBefore);
+    expect(await currentTreeSha(dir)).toBe(blocked.tree_sha);
   });
 
   it('refuses a structured successor without rebasing a clean committed blocked tree', async () => {

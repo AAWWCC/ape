@@ -50,7 +50,9 @@ is cycle-tainted rather than trustworthy; cycle-core, tainted, and total omitted
 explicit. `superseded_runs` counts distinct predecessor records, while `valid_supersession_links`
 counts edges (so branching does not distort the run count). `terminal_reason_counts` classifies aborts by runtime-owned
 terminal stage (dispatch, preflight, planning, test, implementation, review, gating, shipping, or investigation)
-without inspecting operator prose.
+without inspecting operator prose. Terminal-reason taxonomy version 2 distinguishes a zero-cycle
+`land_review_disagreement` from genuine `review_remediation_exhausted`; persisted version-1 codes
+remain authoritative and version cohorts expose both generations without rewriting history.
 
 The statusline already uses recent immutable receipt timings to calibrate its stage-duration bar.
 It reads at most the newest 20 history files and caches validated samples under `.ape/runtime/`;
