@@ -902,6 +902,8 @@ describe('tagged certification-only commit gate', () => {
 
   it('ships a strict privacy-safe schema but no fabricated live ledger', () => {
     const schema = JSON.parse(readFileSync(new URL('../evals/live-certification.schema.json', import.meta.url), 'utf8'));
+    expect(TERMINAL_REASON_TAXONOMY_VERSION).toBe(2);
+    expect(TERMINAL_REASON_CODES).toContain('land_review_disagreement');
     expect(schema.additionalProperties).toBe(false);
     expect(schema.$defs.attempt.additionalProperties).toBe(false);
     expect(schema.properties.terminal_reason_taxonomy_version.const)

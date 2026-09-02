@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { recordReceipt, startRun, statusRun } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
-import { atomicWriteJson } from '../lib/runtime/storage.js';
+import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { classifyLane } from '../lib/runtime/lane-policy.js';
 import { START_MODES } from '../lib/runtime/schemas.js';
 import { RUN_MODES } from '../lib/runtime/constants.js';
@@ -186,7 +186,7 @@ describe('land review outcomes', () => {
         file: 'src/value.js',
         line: 1,
         title: 'landed diff still needs correction',
-        detail: 'the finished diff remains behaviorally incorrect',
+        detail: 'PRIVATE_LAND_REVIEW_DETAIL must stay out of terminal telemetry',
         blocking: true,
         remediation: { owner: 'production' },
       }],
@@ -204,6 +204,27 @@ describe('land review outcomes', () => {
     expect(result.run.remediation_cycles).toBe(0);
     expect(result.run.tickets).toHaveLength(1);
     expect(result.actions.some((action) => action.type === 'dispatch_agent')).toBe(false);
+    expect(await readJson(path.join(
+      runtimePaths(dir).history,
+      `${result.run.run_id}.json`,
+    ))).toMatchObject({
+      terminal_reason_taxonomy_version: 2,
+      terminal_reason_code: 'land_review_disagreement',
+    });
+    expect(result.successor_guidance).toMatchObject({
+      version: 2,
+      eligible: true,
+      predecessor_run_id: result.run.run_id,
+      retained_tree_sha: result.run.tree_sha,
+      eligibility_reason: 'land_review_disagreement',
+      structured_successor_supported: false,
+      unavailable_reason: 'authenticated-host-approval-unavailable',
+      recovery_action: 'override-reset',
+      required_authorization: 'explicit-operator-override',
+      automatic_start: false,
+      automatic_ship: false,
+    });
+    expect(JSON.stringify(result.successor_guidance)).not.toContain('PRIVATE_LAND_REVIEW_DETAIL');
   });
 
   it('a failed review receipt is a disagree vote and blocks the same way', async () => {
@@ -216,7 +237,22 @@ describe('land review outcomes', () => {
     expect(result.ok).toBe(true);
     expect(result.run.status).toBe('blocked');
     expect(result.run.block_reason).toMatch(/no writing stage/);
+    expect(result.run.remediation_cycles).toBe(0);
     expect(result.run.tickets).toHaveLength(1);
+    expect(await readJson(path.join(
+      runtimePaths(dir).history,
+      `${result.run.run_id}.json`,
+    ))).toMatchObject({
+      terminal_reason_taxonomy_version: 2,
+      terminal_reason_code: 'land_review_disagreement',
+    });
+    expect(result.successor_guidance).toMatchObject({
+      eligibility_reason: 'land_review_disagreement',
+      recovery_action: 'override-reset',
+      required_authorization: 'explicit-operator-override',
+      automatic_start: false,
+      automatic_ship: false,
+    });
   });
 });
 

@@ -195,6 +195,56 @@ describe('APE v2 Project Metrics Aggregation & Telemetry', () => {
       expect(land.metrics.outcomes.completed).toBe(1);
       expect(land.metrics.lineage_outcomes.outcomes.completed).toBe(1);
     });
+
+    it('counts and exactly filters land disagreement separately from exhausted remediation', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-metrics-land-review-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      await archiveRun(paths, makeRunRecord('run-land-review-disagreement', {
+        mode: 'land',
+        status: 'blocked',
+        stage: 'review',
+        remediation_cycles: 0,
+        block_reason: 'land mode has no writing stage; revise the diff outside APE, then start a new land run',
+        terminal_reason_taxonomy_version: 2,
+        terminal_reason_code: 'land_review_disagreement',
+      }));
+      await archiveRun(paths, makeRunRecord('run-review-remediation-exhausted', {
+        status: 'blocked',
+        stage: 'remediation',
+        remediation_cycles: 2,
+        block_reason: 'review disagreement reached the configured remediation budget (2 cycles)',
+        terminal_reason_taxonomy_version: 2,
+        terminal_reason_code: 'review_remediation_exhausted',
+      }));
+
+      const all = await calculateProjectMetrics(paths);
+      expect(all.terminal_reason_counts).toMatchObject({
+        land_review_disagreement: 1,
+        review_remediation_exhausted: 1,
+      });
+      expect(all.version_cohorts.terminal_reason_taxonomy_version).toMatchObject({
+        2: 2,
+      });
+
+      const land = await historyAction(dir, 'metrics', {
+        terminal_reason_code: 'land_review_disagreement',
+      });
+      expect(land.metrics.total_runs).toBe(1);
+      expect(land.metrics.terminal_reason_counts).toMatchObject({
+        land_review_disagreement: 1,
+        review_remediation_exhausted: 0,
+      });
+
+      const exhausted = await historyAction(dir, 'metrics', {
+        terminal_reason_code: 'review_remediation_exhausted',
+      });
+      expect(exhausted.metrics.total_runs).toBe(1);
+      expect(exhausted.metrics.terminal_reason_counts).toMatchObject({
+        land_review_disagreement: 0,
+        review_remediation_exhausted: 1,
+      });
+    });
   });
 
   describe('calculateProjectMetrics outcome distributions and success rates', () => {
