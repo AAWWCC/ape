@@ -66,31 +66,6 @@ function startInput(overrides = {}) {
   };
 }
 
-function boundedInitialTestPath(index, bytes) {
-  const prefix = `tests/${index}/`;
-  const suffix = '.test.js';
-  const bodyBytes = bytes - Buffer.byteLength(prefix + suffix, 'utf8');
-  return `${prefix}${bodyBytes % 2 === 0 ? '' : 'x'}${'é'.repeat(Math.floor(bodyBytes / 2))}${suffix}`;
-}
-
-function initialTestPathsAt4096Bytes(extraBytes = 0) {
-  const paths = [
-    ...Array.from({ length: 7 }, (_, index) => boundedInitialTestPath(index, 511)),
-    boundedInitialTestPath(7, 494 + extraBytes),
-  ];
-  expect(Buffer.byteLength(JSON.stringify(paths), 'utf8')).toBe(4_096 + extraBytes);
-  return paths;
-}
-
-async function refusedStart(dir, input) {
-  const outcome = await startRun(dir, input).then(
-    (value) => ({ value, error: null }),
-    (error) => ({ value: null, error }),
-  );
-  const message = outcome.error?.message ?? outcome.value?.errors?.join(' ') ?? '';
-  return { ...outcome, message };
-}
-
 function stageReceipt(ticket, receipt_capability, overrides = {}) {
   return {
     ticket_id: ticket.ticket_id,
@@ -613,83 +588,5 @@ describe('APE v2 start-time git/lock hygiene (baseline integrity)', () => {
       .rejects.toThrow(/requires the finished diff to descend from the resolved default branch tip/);
     expect(apeBranches(dir)).toEqual([]);
     expect(git(dir, 'branch', '--show-current')).toBe('feature/unrelated');
-  });
-});
-
-describe('APE v2 canonical initial test-path admission', () => {
-  it('admits the exact 64-item and 4096-byte boundaries without rewriting order or bytes', async () => {
-    const itemDir = await project('ape-start-path-items-');
-    const itemBoundary = Array.from(
-      { length: 64 },
-      (_, index) => `tests/generated-${String(index).padStart(2, '0')}.test.js`,
-    );
-    const itemStarted = await startRun(itemDir, startInput({ test_paths: itemBoundary }));
-    expect(itemStarted.ok).toBe(true);
-    expect(itemStarted.run.test_paths).toEqual(itemBoundary);
-
-    const byteDir = await project('ape-start-path-bytes-');
-    const byteBoundary = initialTestPathsAt4096Bytes();
-    const byteStarted = await startRun(byteDir, startInput({ test_paths: byteBoundary }));
-    expect(byteStarted.ok).toBe(true);
-    expect(byteStarted.run.test_paths).toEqual(byteBoundary);
-  });
-
-  it.each([
-    [
-      '65 canonical items',
-      Array.from(
-        { length: 65 },
-        (_, index) => `tests/generated-${String(index).padStart(2, '0')}.test.js`,
-      ),
-      /64.*test_paths|test_paths.*64/i,
-    ],
-    [
-      '4097 serialized UTF-8 bytes',
-      initialTestPathsAt4096Bytes(1),
-      /4096.*test_paths|test_paths.*4096/i,
-    ],
-    [
-      'a canonical alias duplicate',
-      ['tests/value.test.js', 'tests/./value.test.js'],
-      /canonical|duplicate|unique/i,
-    ],
-    [
-      'an absolute path outside the governed project',
-      ['/tmp/ape-outside.test.js'],
-      /canonical|contained|project.relative|outside/i,
-    ],
-    [
-      'a parent-relative path outside the governed project',
-      ['../outside.test.js'],
-      /canonical|contained|project.relative|outside/i,
-    ],
-    [
-      'a reserved runtime path',
-      ['.ape/runtime/forged.test.js'],
-      /canonical|reserved|\.ape|runtime/i,
-    ],
-    [
-      'an option-like test-runner argument',
-      ['--runInBand'],
-      /canonical|option|project.relative|test.path/i,
-    ],
-  ])('rejects %s before creating state, a lock, or a branch', async (_label, testPaths, error) => {
-    const dir = await project('ape-start-path-reject-');
-    const branchBefore = git(dir, 'branch', '--show-current');
-    const headBefore = git(dir, 'rev-parse', 'HEAD');
-    const attempted = await refusedStart(dir, startInput({ test_paths: testPaths }));
-    const paths = runtimePaths(dir);
-
-    expect(attempted.value?.ok).not.toBe(true);
-    expect(attempted.message).toMatch(error);
-    expect(existsSync(paths.active)).toBe(false);
-    expect(existsSync(paths.lock)).toBe(false);
-    expect(existsSync(paths.receiptLock)).toBe(false);
-    expect(existsSync(paths.tickets)).toBe(false);
-    expect(existsSync(paths.contracts)).toBe(false);
-    expect((await statusRun(dir)).active).toBe(false);
-    expect(git(dir, 'branch', '--show-current')).toBe(branchBefore);
-    expect(git(dir, 'rev-parse', 'HEAD')).toBe(headBefore);
-    expect(git(dir, 'branch', '--list', 'ape/*')).toBe('');
   });
 });

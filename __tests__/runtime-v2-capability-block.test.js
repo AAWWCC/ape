@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { reduceRun } from '../lib/runtime/scheduler.js';
-import { projectRunResponse } from '../lib/runtime/projection.js';
 
 // A capability failure means the immutable ticket lacks required authority, so
 // it blocks honestly. A correctable policy syntax mistake uses command-shape
@@ -27,41 +26,6 @@ function run(overrides = {}) {
 const DENIAL = 'APE write denied: target resolves outside the ticket claims';
 
 describe('APE v2 capability-blocked failure (reducer)', () => {
-  it('keeps the authorized capability successor dispatch explicit on the response wire', () => {
-    const successor = {
-      ticket_id: 'run-1:build:00000000-0000-4000-8000-000000000001',
-      stage_id: 'build',
-      role: 'implementer',
-      attempt: 1,
-    };
-    const projected = projectRunResponse({
-      ok: true,
-      run: run({ tickets: [successor] }),
-      actions: [{
-        type: 'dispatch_agent',
-        recovery_kind: 'capability_scope_expansion',
-        source_ticket_id: 'run-1:build:source',
-        failure_domain: 'orchestration',
-        ticket: successor,
-        dispatch: { ticket_id: successor.ticket_id },
-      }],
-    });
-
-    expect(projected.actions).toHaveLength(1);
-    expect(projected.actions[0]).toMatchObject({
-      type: 'dispatch_agent',
-      recovery_kind: 'capability_scope_expansion',
-      ticket: { ticket_id: successor.ticket_id },
-    });
-    expect(projected.next_action).toEqual({
-      kind: 'capability_recovery',
-      recovery_kind: 'capability_scope_expansion',
-      ticket_ids: [successor.ticket_id],
-      consumes_product_attempt: false,
-      failure_domain: 'orchestration',
-    });
-  });
-
   it('blocks immediately on a capability-marked failure with attempts remaining', () => {
     const state = run({
       attempts: { build: 1 },

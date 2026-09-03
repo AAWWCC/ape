@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { sha256 } from '../lib/runtime/canonical.js';
@@ -10,9 +10,8 @@ import { reduceRun } from '../lib/runtime/scheduler.js';
 import { attemptSummaryList, reviewFindings } from '../lib/runtime/review-evidence.js';
 import { compactStatus, previewRun, recordReceipt, startRun, statusRun } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
-import { finalizeReceipt, finalizeTicket, validateTicket } from '../lib/runtime/schemas.js';
+import { finalizeTicket, validateTicket } from '../lib/runtime/schemas.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
-import { receiptInputHash } from '../lib/runtime/receipt-input.js';
 
 const cleanups = [];
 
@@ -1253,95 +1252,5 @@ describe('APE v2 recovery-stage active-state compatibility', () => {
       run: { stage, tickets: [{ stage_id: stage, role }] },
     });
     expect(status.diagnostic?.reason_code).not.toBe('corrupt_state');
-  });
-});
-
-describe('APE v2 malformed prepared-recovery rejection', () => {
-  it('rejects an otherwise self-consistent prepared receipt with extra successor authority before adoption', async () => {
-    const dir = await integrationProject();
-    const started = await startRun(dir, {
-      objective: 'Reject malformed prepared recovery without partial adoption',
-      mode: 'phase',
-      lane: 'full',
-      host: 'codex',
-      claimed_paths: ['src'],
-      test_paths: ['tests/value.test.js'],
-      requirements: [],
-      risk_triggers: [],
-      behavioral: true,
-      hooks_trusted: true,
-      subagents_available: true,
-      explicit_invocation: true,
-    });
-    expect(started.ok).toBe(true);
-    const ticket = started.run.tickets.at(-1);
-    const raw = receipt(ticket, {
-      status: 'failed',
-      evidence: {
-        failure_kind: 'command-shape',
-        summary: 'The first read used a correctable command shape.',
-      },
-    });
-    const completedAt = new Date(Date.parse(ticket.issued_at) + 10).toISOString();
-    const preparedReceipt = finalizeReceipt({
-      schema_version: SCHEMA_VERSION,
-      receipt_id: 'receipt-malformed-prepared-recovery',
-      run_id: started.run.run_id,
-      ticket_id: ticket.ticket_id,
-      ticket_hash: ticket.ticket_hash,
-      agent: {
-        host: 'codex',
-        role: ticket.role,
-        identity: `agent-${ticket.role}`,
-        model: null,
-      },
-      status: raw.status,
-      base_tree_sha: ticket.base_tree_sha,
-      head_tree_sha: git(dir, 'rev-parse', 'HEAD^{tree}'),
-      changed_files: [],
-      tests: [],
-      findings: [],
-      evidence: raw.evidence,
-      timing: {
-        started_at: ticket.issued_at,
-        completed_at: completedAt,
-        duration_ms: 10,
-      },
-      previous_receipt_hash: null,
-    });
-    const paths = runtimePaths(dir);
-    const transactionFile = path.join(
-      paths.receiptTransactions,
-      `${sha256(ticket.ticket_id)}.json`,
-    );
-    await atomicWriteJson(transactionFile, {
-      version: 1,
-      run_id: started.run.run_id,
-      ticket_id: ticket.ticket_id,
-      input_hash: receiptInputHash(raw),
-      status: 'prepared',
-      prepared_at: ticket.issued_at,
-      receipt: preparedReceipt,
-      forged_successor_contract: {
-        ticket_id: `${started.run.run_id}:${ticket.stage_id}:caller-selected-id`,
-        claimed_paths: ['private/escape.js'],
-      },
-    });
-    const beforeState = await readJson(paths.active);
-    const beforeTransaction = await readFile(transactionFile, 'utf8');
-    const beforeTickets = (await readdir(paths.tickets)).sort();
-    const beforeReceipts = (await readdir(paths.receipts)).sort();
-
-    const attempted = await recordReceipt(dir, raw).then(
-      (value) => ({ value, error: null }),
-      (error) => ({ value: null, error }),
-    );
-    expect(attempted.error).toBe(null);
-    expect(attempted.value).toMatchObject({ ok: false, rejected: true });
-    expect(attempted.value.errors.join(' ')).toMatch(/prepared.*schema|prepared.*binding|recovery.*contract/i);
-    expect(await readJson(paths.active)).toEqual(beforeState);
-    expect(await readFile(transactionFile, 'utf8')).toBe(beforeTransaction);
-    expect((await readdir(paths.tickets)).sort()).toEqual(beforeTickets);
-    expect((await readdir(paths.receipts)).sort()).toEqual(beforeReceipts);
   });
 });

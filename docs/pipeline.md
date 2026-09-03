@@ -82,16 +82,11 @@ schedulable preflight.
   `failure_kind: command-shape`, the runtime still applies its ordinary single stage retry and puts a
   compact copy of the exact denied command in `prior_attempts`; the replacement can correct syntax
   without gaining new authority.
-- `failure_kind: capability` means the immutable ticket truly lacks required authority. For a
-  receipt-contract-v1 ticket, one runtime-derived capability successor may continue the same logical
-  stage without consuming a product retry. The successor keeps validation/worker usage monotonic
-  under the 3-per-worker/2-workers-per-ticket ceilings and accepts only canonical additive scope.
-  Test-path unions are unique project-relative names capped at 64 items and 4096 serialized UTF-8
-  JSON bytes. The exact successor binding is checked before every sink, then receipt, ticket,
-  run-contract/schema, transaction, and next state are published as one immutable hash-manifested
-  generation under the receipt lock. Replay reuses that generation and returns an explicit
-  `capability_recovery` dispatch. Legacy or malformed recovery that cannot prove the complete
-  runtime provenance remains blocked and requires the audited reset/fresh-run path.
+- `failure_kind: capability` means the immutable ticket truly lacks required authority and blocks
+  immediately with exact additive claims and bounded recovery guidance. Current hosts provide no
+  authenticated human provenance for structured successor starts, so recovery requires an explicit,
+  reason-audited override reset followed by an ordinary fresh run. Eligible guidance is derived from
+  the durable terminal state and remains available on full and compact status reads.
 - `failure_kind: test-contradiction` also blocks immediately. The marker is an implementer claim,
   not a runtime finding. Recovery is the normal audited path: ABORT the run or OVERRIDE reset with
   a reason, then correct the work outside that blocked run. For a worked blocked-run instance, see
@@ -147,7 +142,4 @@ retained in terminal checkout metadata for `ape_run resume` and does not falsify
 With `shipping.required_remote_checks: false`, a project explicitly declares that it has no CI and
 can merge in-call. With `shipping.auto_merge: false`, green work is held at merge. The audited
 `ship` action re-runs every gate against the current tree and merges only on green; one `ship`
-authorization covers one evaluation. Immediately before any Git or GitHub operation, the shipping
-sink rechecks run-specific consent: either `auto_merge_authorized: true` from explicit start or the
-audited one-shot `ship_requested` marker must be present. Configuration alone never authorizes a
-legacy, recovered, or reconfigured run to merge.
+authorization covers one evaluation.
