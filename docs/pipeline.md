@@ -58,13 +58,52 @@ schedulable preflight.
 ## Retries and remediation
 
 - A stage that could not complete may be retried once.
-- A blocking code-review verdict skips a verbatim retry and enters bounded remediation. A distinct
-  blocker set may continue up to `policy.max_remediation_cycles`; after the first cycle, the next
-  normalized finding identities must be a strict proper subset. A repeated, expanded, incomparable,
-  or malformed blocker set stops early. Structured remediation routes use this same budget.
+- A blocking code-review verdict skips a verbatim retry and enters bounded remediation. For each
+  post-remediation disagreement, `P` is the immediately prior deduplicated blocker-identity set,
+  `N` is the new set, and `H` is the union of all recorded cycles. Another writer cycle is issued
+  only when `P - N` is non-empty, every identity in `N - P` is absent from `H`, and the configured
+  `policy.max_remediation_cycles` ceiling has room. Equality, retain-all growth, reintroduction,
+  oscillation, ambiguous or malformed identity evidence, inconsistent history, and ceiling
+  exhaustion all take the existing audited terminal block. This does not change the separate
+  plan-judge strict-proper-subset rule.
+- Blocker identity uses a canonical contained project-relative file and bounded normalized defect
+  descriptors. The versioned semantic fingerprint preserves file and title/detail boundaries plus
+  bounded mechanism tags but ignores symbols and repeated-token counts. Dot segments and platform separators may alias to the same file; absolute, drive,
+  escaping, empty-segment, trailing-separator, unsafe, overlong, and Unicode compatibility-changing
+  paths are rejected before structural canonicalization. Stable
+  discriminator rules keep distinct same-file defects apart, while a unique semantic mapping may
+  reuse a prior identity for harmless wording drift. Login-next, logout-return, host, port, encoded
+  separator/backslash, path-normalization, and JWT-claim dimensions are bounded separation proof;
+  lexical overlap, symbols, repetition, anchors, owners, and receipt order are not. Multiple defensible mappings and coarse
+  same-flow overlap between otherwise distinct current findings fail closed.
+  Reviewer-local ids, roles, receipt order, line movement, and owners are not semantic identity;
+  raw structured findings in original order remain the sole routing authority.
+- Runs that enter remediation persist optional version-1 `remediation_finding_history`: sorted unique
+  cycle sets, flattened self-rooted descriptor-to-canonical aliases, and one exact sorted descriptor
+  and receipt-provenance record per cycle. History items and canonical bytes are capped in aggregate;
+  descriptor count, normalized tokens, canonical serialized bytes, and worst-case allocation/clique
+  work are aggregate-bounded across the current and historical receipt domain before nested matching.
+  New provenance retains both the semantic descriptor and its legacy compatibility hash. The field
+  has no default, so legacy and unrelated state stay byte-stable and readable; a legacy run already
+  mid-remediation without trustworthy history, aliases, or provenance cannot claim progress. A
+  complete unmarked checkpoint history is first reconstructed byte-for-byte with the legacy
+  algorithm, then atomically upgraded: its roots and receipt provenance remain immutable, normalized
+  aliases/provenance are collision-checked, and a hashed epoch boundary binds the legacy prefix.
+  Compatibility hashes alone never authorize `P`/`N`/`H` progress, and normalized collisions across
+  established roots block the upgrade.
+  Receipt replay reuses a durable prepared/committed successor, so the same review receipt neither
+  appends history nor charges a cycle twice when active state was stale.
 - A reviewer may request exact additional production paths through `evidence.scope_expansion`.
   The runtime audits the expansion, reclassifies lane/risk, and gives the remediation ticket the
   expanded scope.
+- A failed implementer or test writer may request exact additive repository-local capability paths
+  in its matching production/test claim channel. One request per stage is validated and audited
+  atomically, preserves the logical attempt, and issues a fresh same-stage immutable ticket. Unsafe,
+  private, external, ambiguous, duplicate, non-additive, role-conflicting, or over-limit requests
+  reject without persistence; a second valid request blocks without more growth. Crash replay
+  verifies and reuses the exact durable successor.
+- Explicit auto-merge consent is run-local state and survives scheduler-owned recovery in that run.
+  Configuration, receipts, predecessor consent, and newly started runs cannot supply it.
 - Every new code/security review ticket carries `review_contract_version: 1` and a bounded finding
   schema. Advisory findings set `blocking: false` and omit remediation. Blocking findings name an
   owner (`production`, `test`, or `both`); `test`/`both` also name exact authorized `test_paths`.

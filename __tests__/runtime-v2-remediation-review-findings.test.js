@@ -9,6 +9,7 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { validateTicket } from '../lib/runtime/schemas.js';
 import { projectRunResponse, RESPONSE_BUDGET_CHARS } from '../lib/runtime/projection.js';
+import { reviewFindings } from '../lib/runtime/review-evidence.js';
 
 // Roadmap entry review-findings-truncated-on-remediation-ticket.
 //
@@ -619,6 +620,236 @@ describe('APE v2 remediation review_findings: bounds, wire budget and forwarding
     expectBounded(entries);
     // The load-bearing pin, measured the way the host measures it.
     expect(wireSize(reviewed, remediation)).toBeLessThanOrEqual(RESPONSE_BUDGET_CHARS);
+  }, 30_000);
+});
+
+describe('APE v2 remediation identity stays separate from raw routing authority', () => {
+  it('coalesces equivalent identities without changing raw ownership, writer order, or exact test paths', async () => {
+    const dir = await project();
+    const { reviewTicket } = await walkToReview(dir);
+    const rawFindings = [
+      {
+        id: 'product.redirect-original',
+        file: 'src/value.js',
+        line: 11,
+        title: 'Unchecked redirect accepts external target',
+        detail: 'The redirect accepts an external URL without allow-list validation.',
+        blocking: true,
+        remediation: { owner: 'production' },
+      },
+      {
+        id: 'security.redirect-renumbered',
+        file: 'src/value.js',
+        line: 37,
+        title: '$ UNCHECKED REDIRECT accepts an external external target.',
+        detail: 'The redirect redirect accepts external URL without allowlist validation! $',
+        blocking: true,
+        remediation: { owner: 'test', test_paths: ['tests/value.test.js'] },
+      },
+      {
+        id: 'combined.redirect-third-id',
+        file: 'src/value.js',
+        line: 52,
+        title: 'Unchecked redirect $ accepts external target!',
+        detail: 'The redirect accepts an external URL without allowlist allowlist validation.',
+        blocking: true,
+        remediation: { owner: 'both', test_paths: ['tests/value.test.js'] },
+      },
+    ];
+
+    const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
+      tests: greenTest,
+      findings: rawFindings,
+      evidence: { verdict: 'fail' },
+    }));
+    expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
+    expect(reviewed.run.remediation_finding_history).toMatchObject({ version: 1 });
+    expect(reviewed.run.remediation_finding_history.cycles).toHaveLength(1);
+    expect(reviewed.run.remediation_finding_history.cycles[0]).toHaveLength(1);
+    expect(reviewed.run.receipts.find((entry) => entry.ticket_id === reviewTicket.ticket_id).findings)
+      .toEqual(rawFindings);
+    expect(reviewed.run.remediation_route).toEqual({
+      route: 'test-production',
+      cycle: 1,
+      ownership_counts: { production: 1, test: 1, both: 1 },
+      test_paths: ['tests/value.test.js'],
+    });
+
+    const testWriter = reviewed.run.tickets.at(-1);
+    expect(testWriter).toMatchObject({
+      stage_id: 'remediation-test',
+      role: 'test_writer',
+      test_scope: 'exact',
+      claimed_paths: ['tests/value.test.js'],
+      test_paths: ['tests/value.test.js'],
+    });
+    const testWritten = await recordReceipt(dir, receipt(testWriter, { tests: redTest }));
+    expect(testWritten.ok, JSON.stringify(testWritten.errors ?? [])).toBe(true);
+    const implementationWriter = testWritten.run.tickets.at(-1);
+    expect(implementationWriter).toMatchObject({
+      stage_id: 'remediation-build',
+      role: 'implementer',
+    });
+    expect(testWritten.run.tickets.filter((ticket) =>
+      ['remediation-test', 'remediation-build'].includes(ticket.stage_id))
+      .map((ticket) => ticket.stage_id)).toEqual(['remediation-test', 'remediation-build']);
+
+    const implemented = await recordReceipt(dir, receipt(implementationWriter, { tests: greenTest }));
+    expect(implemented.ok, JSON.stringify(implemented.errors ?? [])).toBe(true);
+    expect(implemented.run.tickets.at(-1).stage_id).toBe('remediation-review');
+  }, 30_000);
+
+  it('coalesces equivalent product and security reports independently of role and receipt order', () => {
+    const product = {
+      ticket_id: 'ticket-product-review',
+      status: 'passed',
+      findings: [{
+        id: 'product.open-redirect',
+        file: 'src/redirect.js',
+        line: 12,
+        title: 'Unchecked redirect accepts external target',
+        detail: 'The redirect accepts an external URL without allow-list validation.',
+        blocking: true,
+        remediation: { owner: 'production' },
+      }],
+      evidence: { verdict: 'fail' },
+    };
+    const security = {
+      ticket_id: 'ticket-security-review',
+      status: 'passed',
+      findings: [{
+        id: 'security.ssrf-renamed',
+        file: 'src/redirect.js',
+        line: 41,
+        title: 'UNCHECKED REDIRECT accepts an external target.',
+        detail: 'The redirect accepts external URL without allowlist validation!',
+        blocking: true,
+        remediation: { owner: 'both', test_paths: ['tests/value.test.js'] },
+      }],
+      evidence: { verdict: 'fail' },
+    };
+
+    const forward = reviewFindings.fingerprints([product, security]);
+    const reversed = reviewFindings.fingerprints([security, product]);
+    expect(forward).toEqual(reversed);
+    expect(forward).toHaveLength(1);
+    const evidence = reviewFindings.evidence({
+      tickets: [
+        {
+          ticket_id: product.ticket_id,
+          stage_id: 'review',
+          role: 'reviewer',
+          parallel_group: 'code-review',
+        },
+        {
+          ticket_id: security.ticket_id,
+          stage_id: 'security-review',
+          role: 'security_reviewer',
+          parallel_group: 'code-review',
+        },
+      ],
+    }, [product, security]);
+    expect(new Set(evidence.map((entry) => entry.id)).size).toBe(1);
+    expect(evidence.map((entry) => entry.evidence_anchor)).toEqual([
+      'src/redirect.js:L12',
+      'src/redirect.js:L41',
+    ]);
+  });
+});
+
+describe('APE v2 remediation open-redirect paraphrases preserve raw routing', () => {
+  it('reuses one identity across a harmless low-overlap paraphrase', () => {
+    const prior = {
+      ticket_id: 'ticket-open-redirect-prior',
+      status: 'passed',
+      findings: [{
+        id: 'redirect.external-destination',
+        file: 'src/redirect.js',
+        line: 14,
+        title: 'Open redirect accepts an attacker-controlled destination',
+        detail: 'A crafted next parameter sends users to an arbitrary external host.',
+        blocking: true,
+        remediation: { owner: 'production' },
+      }],
+      evidence: { verdict: 'fail' },
+    };
+    const paraphrased = {
+      ticket_id: 'ticket-open-redirect-paraphrase',
+      status: 'passed',
+      findings: [{
+        id: 'redirect.untrusted-return-target',
+        file: 'src/redirect.js',
+        line: 63,
+        title: 'Untrusted return target is followed after login',
+        detail: 'Navigation leaves the application because the callback location has no same-origin allowlist.',
+        blocking: true,
+        remediation: { owner: 'production' },
+      }],
+      evidence: { verdict: 'fail' },
+    };
+
+    const known = reviewFindings.fingerprints([prior]);
+    expect(known).toHaveLength(1);
+    expect(reviewFindings.analyzeIdentities([paraphrased], [prior], known)).toMatchObject({
+      valid: true,
+      fingerprints: known,
+    });
+  });
+
+  it('coalesces semantic aliases without changing raw owners, order, or exact test paths', async () => {
+    const dir = await project();
+    const { reviewTicket } = await walkToReview(dir);
+    const rawFindings = [
+      {
+        id: 'redirect.external-destination',
+        file: 'src/value.js',
+        line: 11,
+        title: 'Open redirect accepts an attacker-controlled destination',
+        detail: 'A crafted next parameter sends users to an arbitrary external host.',
+        blocking: true,
+        remediation: { owner: 'production' },
+      },
+      {
+        id: 'redirect.untrusted-return-target',
+        file: 'src/./value.js',
+        line: 52,
+        title: 'Untrusted return target is followed after login',
+        detail: 'Navigation leaves the application because the callback location has no same-origin allowlist.',
+        blocking: true,
+        remediation: { owner: 'test', test_paths: ['tests/value.test.js'] },
+      },
+    ];
+
+    const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
+      tests: greenTest,
+      findings: rawFindings,
+      evidence: { verdict: 'fail' },
+    }));
+    expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
+    expect(reviewed.run.remediation_finding_history.cycles.at(-1)).toHaveLength(1);
+    expect(reviewed.run.receipts.find((entry) => entry.ticket_id === reviewTicket.ticket_id).findings)
+      .toEqual(rawFindings);
+    expect(reviewed.run.remediation_route).toEqual({
+      route: 'test-production',
+      cycle: 1,
+      ownership_counts: { production: 1, test: 1, both: 0 },
+      test_paths: ['tests/value.test.js'],
+    });
+
+    const testWriter = reviewed.run.tickets.at(-1);
+    expect(testWriter).toMatchObject({
+      stage_id: 'remediation-test',
+      role: 'test_writer',
+      test_scope: 'exact',
+      claimed_paths: ['tests/value.test.js'],
+      test_paths: ['tests/value.test.js'],
+    });
+    const testWritten = await recordReceipt(dir, receipt(testWriter, { tests: redTest }));
+    expect(testWritten.ok, JSON.stringify(testWritten.errors ?? [])).toBe(true);
+    expect(testWritten.run.tickets.at(-1)).toMatchObject({
+      stage_id: 'remediation-build',
+      role: 'implementer',
+    });
   }, 30_000);
 });
 

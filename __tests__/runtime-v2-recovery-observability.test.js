@@ -298,6 +298,7 @@ describe('typed and hard-bounded response projection', () => {
       'continue_same_agent',
       'redispatch_same_ticket',
       'stage_retry',
+      'capability_recovery',
       'directed_replan',
       'remediate_product_finding',
       'wait',
@@ -321,6 +322,38 @@ describe('typed and hard-bounded response projection', () => {
       ticket_ids: ['ticket-retry'],
       consumes_product_attempt: false,
       failure_domain: 'orchestration',
+    });
+
+    const capabilitySuccessor = stageTicket(
+      'ticket-capability-successor',
+      'build',
+      'implementer',
+    );
+    const capabilityRecovery = projectRunResponse({
+      ok: true,
+      recovered: 'capability-scope-expansion',
+      run: {
+        run_id: 'run-capability-recovered',
+        status: 'running',
+        stage: 'build',
+        tickets: [capabilitySuccessor],
+        receipts: [],
+      },
+      actions: [{
+        type: 'dispatch_agent',
+        recovery_kind: 'capability_scope_expansion',
+        source_ticket_id: 'ticket-capability-source',
+        failure_domain: 'configuration',
+        ticket: capabilitySuccessor,
+        dispatch: { host: 'codex', ticket: capabilitySuccessor },
+      }],
+    });
+    expect(capabilityRecovery.next_action).toEqual({
+      kind: 'capability_recovery',
+      recovery_kind: 'capability_scope_expansion',
+      ticket_ids: [capabilitySuccessor.ticket_id],
+      consumes_product_attempt: false,
+      failure_domain: 'configuration',
     });
 
     const capability = projectRunResponse({

@@ -141,6 +141,15 @@ async function scopeExpansionAuditLines(dir) {
     .filter((line) => line.operation === 'scope-expansion');
 }
 
+async function capabilityRecoveryAuditLines(dir) {
+  const raw = await readFile(runtimePaths(dir).overrideLog, 'utf8').catch(() => '');
+  return raw
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((line) => /capability/.test(line.operation ?? ''));
+}
+
 function blockingExpansion(paths, reason = 'the fix requires these modules') {
   return {
     verdict: 'fail',
@@ -312,6 +321,189 @@ describe('malformed or out-of-contract proposals reject loudly (D3)', () => {
     const clean = await recordReceipt(dir, receipt(buildTicket, { tests: greenTest }));
     expect(clean.ok).toBe(true);
     expect((await statusRun(dir)).run.claimed_paths).toEqual(['src/value.js']);
+  }, 30_000);
+});
+
+describe('automatic additive capability recovery', () => {
+  it('audits a separated test-path addition and issues one fresh ticket without spending the logical attempt', async () => {
+    const dir = await project();
+    const started = await startRun(dir, startInput());
+    expect(started.ok).toBe(true);
+    const source = started.run.tickets[0];
+    expect(source).toMatchObject({ stage_id: 'test', role: 'test_writer', attempt: 1 });
+    const attemptsBefore = structuredClone(started.run.attempts);
+    const payload = receipt(source, {
+      status: 'failed',
+      evidence: {
+        failure_kind: 'capability',
+        summary: 'the red suite also needs one repository-local test file',
+        required_claims: { test_paths: ['tests/recovered.test.js'] },
+        risk_triggers: ['security'],
+      },
+    });
+
+    const recovered = await recordReceipt(dir, payload);
+    expect(recovered.ok, JSON.stringify(recovered.errors ?? [])).toBe(true);
+    expect(recovered.run).toMatchObject({
+      run_id: started.run.run_id,
+      status: 'running',
+      stage: 'test',
+      lane: 'full',
+      high_risk: true,
+      risk_triggers: ['security'],
+      attempts: attemptsBefore,
+      remediation_cycles: 0,
+    });
+    expect(recovered.run.claimed_paths).toEqual(['src/value.js']);
+    expect(recovered.run.test_paths).toEqual([
+      'tests/value.test.js',
+      'tests/recovered.test.js',
+    ]);
+    expect(recovered.run.receipts.filter((entry) => entry.ticket_id === source.ticket_id))
+      .toEqual([expect.objectContaining({ evidence: payload.evidence })]);
+
+    const successor = recovered.run.tickets.at(-1);
+    expect(successor.ticket_id).not.toBe(source.ticket_id);
+    expect(successor).toMatchObject({
+      run_id: source.run_id,
+      stage_id: source.stage_id,
+      role: source.role,
+      attempt: source.attempt,
+      claimed_paths: ['src/value.js'],
+      test_paths: ['tests/value.test.js', 'tests/recovered.test.js'],
+      prior_attempts: [expect.stringMatching(/red suite.*repository-local test file/i)],
+      ticket_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(successor.ticket_hash).not.toBe(source.ticket_hash);
+    expect(successor.retry_of).toBeUndefined();
+    expect(successor.capability_manifest.field_bounds)
+      .toEqual(source.capability_manifest.field_bounds);
+    expect(recovered.actions.find((entry) =>
+      entry.type === 'dispatch_agent' && entry.ticket?.ticket_id === successor.ticket_id,
+    )).toMatchObject({
+      recovery_kind: expect.stringMatching(/capability/i),
+      source_ticket_id: source.ticket_id,
+    });
+
+    const audits = await capabilityRecoveryAuditLines(dir);
+    expect(audits).toEqual([expect.objectContaining({
+      run_id: started.run.run_id,
+      source_ticket_id: source.ticket_id,
+      added_claimed_paths: [],
+      added_test_paths: ['tests/recovered.test.js'],
+    })]);
+  }, 30_000);
+
+  it.each([
+    ['already authorized', { test_paths: ['tests/value.test.js'] }],
+    ['production path in the test channel', { test_paths: ['src/helper.js'] }],
+    ['test path in the production channel', { claimed_paths: ['tests/helper.test.js'] }],
+    ['absolute path', { test_paths: ['/tmp/helper.test.js'] }],
+    ['parent traversal', { test_paths: ['tests/../outside.test.js'] }],
+    ['empty claims', {}],
+    ['project root', { claimed_paths: ['.'] }],
+    ['unsafe separator', { test_paths: ['tests//helper.test.js'] }],
+    ['runtime state', { test_paths: ['.ape/runtime/private.test.js'] }],
+    ['private file', { claimed_paths: ['.env'] }],
+    ['package-manager execution config', { claimed_paths: ['.npmrc'] }],
+    ['private SSH key', { claimed_paths: ['.ssh/id_rsa'] }],
+    ['Codex execution config', { claimed_paths: ['.codex/config.toml'] }],
+    ['Claude execution config', { claimed_paths: ['.claude/settings.json'] }],
+    ['shell startup config', { claimed_paths: ['.zshrc'] }],
+    ['protected git state', { claimed_paths: ['.git/config'] }],
+    ['external resource', { claimed_paths: ['https://example.test/module.js'] }],
+    ['wildcard scope', { test_paths: ['tests/**/*.test.js'] }],
+    ['conflicting role', { required_role: 'implementer' }],
+  ])('refuses %s atomically before receipt, audit, scope, consent, or ticket mutation', async (
+    _label,
+    requiredClaims,
+  ) => {
+    const dir = await project();
+    const started = await startRun(dir, startInput({ auto_merge_authorized: true }));
+    const source = started.run.tickets[0];
+    const paths = runtimePaths(dir);
+    const before = await readFile(paths.active);
+    const rejected = await recordReceipt(dir, receipt(source, {
+      status: 'failed',
+      evidence: {
+        failure_kind: 'capability',
+        summary: `refuse ${_label}`,
+        required_claims: requiredClaims,
+      },
+    }));
+
+    expect(rejected).toMatchObject({ ok: false, rejected: true });
+    expect(rejected.errors.join(' ')).toMatch(/claim|path|role|additive|authorized|safe|scope/i);
+    expect(await readFile(paths.active)).toEqual(before);
+    expect(await capabilityRecoveryAuditLines(dir)).toEqual([]);
+    const after = await statusRun(dir);
+    expect(after.run.tickets).toHaveLength(1);
+    expect(after.run.receipts).toHaveLength(0);
+    expect(after.run.auto_merge_authorized).toBe(started.run.auto_merge_authorized);
+  }, 30_000);
+
+  it('blocks a second additive request without ticket churn or budget reset', async () => {
+    const dir = await project();
+    const started = await startRun(dir, startInput());
+    const source = started.run.tickets[0];
+    const first = await recordReceipt(dir, receipt(source, {
+      status: 'failed',
+      evidence: {
+        failure_kind: 'capability',
+        summary: 'first bounded addition',
+        required_claims: { test_paths: ['tests/first.test.js'] },
+      },
+    }));
+    expect(first.ok, JSON.stringify(first.errors ?? [])).toBe(true);
+    const successor = first.run.tickets.at(-1);
+    const ticketCount = first.run.tickets.length;
+    const attempts = structuredClone(first.run.attempts);
+
+    const second = await recordReceipt(dir, receipt(successor, {
+      status: 'failed',
+      evidence: {
+        failure_kind: 'capability',
+        summary: 'second addition must not create an unbounded chain',
+        required_claims: { test_paths: ['tests/second.test.js'] },
+      },
+    }));
+    expect(second.ok).toBe(true);
+    expect(second.run).toMatchObject({
+      status: 'blocked',
+      stage: 'test',
+      attempts,
+    });
+    expect(second.run.tickets).toHaveLength(ticketCount);
+    expect(second.run.test_paths).toEqual([
+      'tests/value.test.js',
+      'tests/first.test.js',
+    ]);
+    expect(await capabilityRecoveryAuditLines(dir)).toHaveLength(1);
+  }, 30_000);
+
+  it('rejects an aggregate test-scope overflow before writing any part of the expansion', async () => {
+    const dir = await project();
+    const started = await startRun(dir, startInput());
+    const source = started.run.tickets[0];
+    const paths = runtimePaths(dir);
+    const before = await readFile(paths.active);
+    const additions = Array.from(
+      { length: 64 },
+      (_, index) => `tests/generated-${String(index).padStart(2, '0')}.test.js`,
+    );
+
+    const rejected = await recordReceipt(dir, receipt(source, {
+      status: 'failed',
+      evidence: {
+        failure_kind: 'capability',
+        summary: 'the union would exceed the run-wide test-path ceiling',
+        required_claims: { test_paths: additions },
+      },
+    }));
+    expect(rejected).toMatchObject({ ok: false, rejected: true });
+    expect(rejected.errors.join(' ')).toMatch(/64|limit|bound|aggregate|test_paths/i);
+    expect(await readFile(paths.active)).toEqual(before);
+    expect(await capabilityRecoveryAuditLines(dir)).toEqual([]);
   }, 30_000);
 });
 

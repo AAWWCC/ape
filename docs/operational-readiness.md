@@ -178,11 +178,48 @@ thrown unsafe-input error before it can reach MCP output, host transcripts, or p
 results. Redaction authority comes only from the canonical draft field matching the dispatch
 intent's one-way capability hash. A missing, non-string, or substituted canonical field cannot
 select a redaction target: hooks and service/task/MCP edges emit fixed non-reflective refusals
-instead, so copying the live bearer elsewhere cannot expose it. Directed planning retries and remediation cycles continue only when their normalized
-structured assurance/finding identity set is a strict proper subset with no additions. Per-ticket
-evidence anchors are provenance rather than semantic assurance identity; equality, expansion,
-incomparability, malformed evidence, or the independent two-replan/three-remediation ceilings end in
-the existing audited blocked outcome.
+instead, so copying the live bearer elsewhere cannot expose it. Directed planning retries retain
+their strict-proper-subset assurance rule. Code-review remediation instead uses durable bounded
+history: with `P` as the immediately prior identity set, `N` as the current set, and `H` as the
+union of recorded cycles, continuation requires non-empty `P - N`, no member of `N - P` in `H`,
+and remaining cycle budget. Reviewer-local ids, role/order, remediation ownership, and line anchors
+are provenance rather than finding identity; raw findings alone authorize remediation routing.
+Project-relative path aliases are normalized to one contained identity, while absolute, escaping,
+unsafe, or otherwise invalid paths fail closed; a path whose Unicode compatibility normalization
+changes its spelling is rejected before separator and dot-segment canonicalization. Bounded descriptor aliases carry harmless wording
+drift transitively as flattened self-rooted mappings only when the semantic evidence is strong and
+unambiguous. The current `N` fingerprint preserves canonical file and title/detail boundaries plus
+fixed flow/mechanism tags while ignoring presentation symbols and token multiplicity. Login-next,
+logout-return, host, port, encoded-separator/backslash, path-normalization, and JWT-claim evidence
+can prove separation; overlap, symbols, repetition, anchors, and reviewer metadata cannot. Coarse
+flow overlap between distinct current findings fails closed. Aliases are bound to the exact sorted descriptor
+and receipt provenance for each cycle. Aggregate history items and canonical bytes are capped;
+descriptor, normalized-token, serialized-byte, and worst-case allocation/clique-work ceilings cover
+the full current-plus-history domain before nested matching. Equality, retain-all growth, repeated
+or reintroduced identities, oscillation,
+ambiguity, malformed or inconsistent history, and the independent remediation ceiling end in the
+existing audited blocked outcome. The optional version-1 history has no default; legacy state stays
+readable, but an in-progress legacy remediation cannot infer missing aliases, provenance, or history.
+A complete unmarked checkpoint history is replayed byte-exactly with its legacy `L` fingerprint
+before an atomic epoch upgrade retains every `L` root and receipt hash, records normalized
+provenance, and adds collision-checked `N` aliases. Later cycles retain both `L` compatibility proof
+and `N` authority; `L` alone cannot create progress, and two established roots may never collapse.
+Prepared-successor replay reconciles the same ticket and cycle exactly once.
+
+Implementer and test-writer capability failures have one scheduler-owned recovery per stage. The
+receipt must name exact additive canonical repository-local paths in the correct production or test
+claim channel and remain compatible with the immutable role. Admission rejects unsafe separators,
+traversal, globs, absolute/external resources, private `.git`/`.ape`/`.env` state, duplicates,
+already-authorized claims, cross-channel paths, role changes, and aggregate overflow before writing
+the receipt, transaction, audit, state, or successor. A valid request is audited, preserves the run
+and logical attempt, and issues one fresh immutable same-stage ticket; the next valid request blocks
+without further growth. Prepared-transaction replay verifies the predecessor, receipt, active-state,
+and successor hashes and restores the exact persisted successor bytes.
+
+Explicit run-local auto-merge consent remains set across that scheduler-owned recovery. Persistent
+shipping configuration, receipt evidence, a predecessor run, or a new run is never treated as
+consent; auto-merge refuses before GitHub mutation unless the active run carries explicit consent or
+the separate audited ship lever is active.
 
 ## Recovery development rule
 

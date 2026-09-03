@@ -30,6 +30,109 @@ afterEach(async () => {
     rm(directory, { recursive: true, force: true })));
 });
 
+describe('live capability-recovery receipt contract', () => {
+  it('attests the exact failed draft, preserves its receipt, and binds one fresh immutable successor', async () => {
+    const value = await fixture('codex', {
+      stage_id: 'build',
+      role: 'implementer',
+      writable: true,
+      manifest_growth_contract_version: 1,
+      manifest_roles: ['implementer', 'reviewer', 'security_reviewer'],
+    });
+    const exactDraft = {
+      ...draft(value.ticket, value.capability, 'failed'),
+      evidence: {
+        failure_kind: 'capability',
+        summary: 'the implementation needs one exact repository-local module',
+        required_claims: {
+          claimed_paths: ['src/helper.js'],
+          required_role: 'implementer',
+        },
+      },
+    };
+    const requiredRoleSchema = value.ticket.output_schema.properties.evidence
+      .properties.required_claims.properties.required_role;
+    expect(requiredRoleSchema.enum).toEqual(['implementer']);
+
+    const validation = await validateReceiptForDispatch(
+      value.directory,
+      exactDraft,
+      value.ticket.ticket_id,
+    );
+    expect(validation).toMatchObject({
+      ok: true,
+      valid: true,
+      attested: true,
+      validation: { attempt: 1 },
+    });
+
+    const recorded = await recordReceipt(value.directory, exactDraft);
+    expect(recorded.ok, JSON.stringify(recorded.errors ?? [])).toBe(true);
+    expect(recorded.run).toMatchObject({
+      run_id: value.state.run_id,
+      status: 'running',
+      stage: 'build',
+      claimed_paths: ['value.js', 'src/helper.js'],
+      test_paths: [],
+      attempts: {},
+    });
+    expect(recorded.receipt).toMatchObject({
+      ticket_id: value.ticket.ticket_id,
+      status: 'failed',
+      evidence: exactDraft.evidence,
+      receipt_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+
+    const successor = recorded.run.tickets.at(-1);
+    expect(successor.ticket_id).not.toBe(value.ticket.ticket_id);
+    expect(successor).toMatchObject({
+      run_id: value.state.run_id,
+      stage_id: value.ticket.stage_id,
+      role: value.ticket.role,
+      attempt: value.ticket.attempt,
+      claimed_paths: ['value.js', 'src/helper.js'],
+      test_paths: [],
+      prior_attempts: [expect.stringMatching(/implementation needs.*src\/helper\.js/i)],
+      ticket_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(successor).not.toHaveProperty('retry_of');
+    expect(successor.capability_manifest.field_bounds)
+      .toEqual(value.ticket.capability_manifest.field_bounds);
+    expect(successor.output_schema.properties.ticket_id.const).toBe(successor.ticket_id);
+    expect(successor.capability_manifest.receipt_schema.hash)
+      .toBe(sha256(successor.output_schema));
+    expect(recorded.actions.find((entry) =>
+      entry.type === 'dispatch_agent' && entry.ticket?.ticket_id === successor.ticket_id,
+    )).toMatchObject({
+      recovery_kind: expect.stringMatching(/capability/i),
+      source_ticket_id: value.ticket.ticket_id,
+    });
+
+    const successorPath = path.join(
+      value.paths.tickets,
+      `${successor.ticket_id.replaceAll(':', '_')}.json`,
+    );
+    expect(await readJson(successorPath)).toEqual(successor);
+    const transactions = await readdir(value.paths.receiptTransactions);
+    expect(transactions).toHaveLength(1);
+    const transaction = await readJson(path.join(value.paths.receiptTransactions, transactions[0]));
+    expect(transaction.status).toBe('committed');
+    expect(JSON.stringify(transaction)).toContain(successor.ticket_id);
+    expect(JSON.stringify(transaction)).toContain(successor.ticket_hash);
+    expect(JSON.stringify(transaction)).toContain(recorded.run.updated_at);
+
+    const audits = (await readFile(value.paths.overrideLog, 'utf8'))
+      .trim().split('\n').map((line) => JSON.parse(line))
+      .filter((entry) => /capability/.test(entry.operation ?? ''));
+    expect(audits).toEqual([expect.objectContaining({
+      run_id: value.state.run_id,
+      source_ticket_id: value.ticket.ticket_id,
+      added_claimed_paths: ['src/helper.js'],
+      added_test_paths: [],
+    })]);
+  }, 30_000);
+});
+
 function rawDigest(value) {
   return createHash('sha256').update(value).digest('hex');
 }

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { sha256 } from '../lib/runtime/canonical.js';
@@ -131,6 +131,18 @@ function pureRun(overrides = {}) {
   };
 }
 
+function structuredBlocker(id, file, line, title, detail = `${title} must be corrected`) {
+  return {
+    id,
+    file,
+    line,
+    title,
+    detail,
+    blocking: true,
+    remediation: { owner: 'production' },
+  };
+}
+
 let pureTicketCounter = 0;
 
 function applyPureActions(state, actions) {
@@ -178,6 +190,54 @@ function recordPure(state, ticket, rawReceipt) {
   });
   applyPureActions(state, actions);
   return actions;
+}
+
+async function walkIntegrationToReview(dir) {
+  const started = await startRun(dir, {
+    objective: 'Exercise durable remediation convergence recovery',
+    mode: 'phase',
+    lane: 'fast',
+    host: 'codex',
+    claimed_paths: ['src/value.js'],
+    test_paths: ['tests/value.test.js'],
+    requirements: [],
+    risk_triggers: [],
+    behavioral: true,
+    hooks_trusted: true,
+    subagents_available: true,
+    explicit_invocation: true,
+  });
+  expect(started.ok).toBe(true);
+  const testTicket = started.run.tickets.at(-1);
+  expect(testTicket.stage_id).toBe('test');
+  await writeFile(
+    path.join(dir, 'tests', 'value.test.js'),
+    "const { value } = require('../src/value.js');\nif (value !== 2) throw new Error('red');\n",
+  );
+  const tested = await recordReceipt(dir, receipt(testTicket, {
+    tests: [{
+      command: 'node tests/value.test.js',
+      passed: false,
+      exit_code: 1,
+      duration_ms: 1,
+    }],
+  }));
+  expect(tested.ok, JSON.stringify(tested.errors ?? [])).toBe(true);
+  const buildTicket = tested.run.tickets.at(-1);
+  expect(buildTicket.stage_id).toBe('build');
+  await writeFile(path.join(dir, 'src', 'value.js'), 'module.exports = { value: 2 };\n');
+  const built = await recordReceipt(dir, receipt(buildTicket, {
+    tests: [{
+      command: 'node tests/value.test.js',
+      passed: true,
+      exit_code: 0,
+      duration_ms: 1,
+    }],
+  }));
+  expect(built.ok, JSON.stringify(built.errors ?? [])).toBe(true);
+  const reviewTicket = built.run.tickets.at(-1);
+  expect(reviewTicket.stage_id).toBe('review');
+  return reviewTicket;
 }
 
 describe('APE v2 bounded false-block recovery operational replay corpus', () => {
@@ -458,22 +518,22 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
     });
   });
 
-  it('stable-review-finding-identity converges same-anchor findings despite new IDs and wording', () => {
+  it('stable-review-finding-identity ignores local IDs and line drift while preserving raw anchors', () => {
     const firstFinding = {
       id: 'defect.original',
       file: 'src/value.js',
       line: 17,
-      title: 'Incorrect boundary',
-      detail: 'The boundary excludes the last supported value.',
+      title: 'Unchecked redirect accepts external target',
+      detail: 'The redirect accepts an external URL without allow-list validation.',
       blocking: true,
       remediation: { owner: 'production' },
     };
     const secondFinding = {
       id: 'defect.reallocated',
       file: 'src/value.js',
-      line: 17,
-      title: 'Final value still rejected',
-      detail: 'Rephrased evidence for the same anchored production defect.',
+      line: 29,
+      title: 'UNCHECKED REDIRECT accepts an external target.',
+      detail: 'The redirect accepts external URL without allowlist validation!',
       blocking: true,
       remediation: { owner: 'production' },
     };
@@ -517,6 +577,7 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
     const secondEvidence = reviewFindings.evidence(secondState, [secondReceipt]);
     expect(firstEvidence[0].id).toBe(secondEvidence[0].id);
     expect(firstEvidence[0].evidence_anchor).toBe('src/value.js:L17');
+    expect(secondEvidence[0].evidence_anchor).toBe('src/value.js:L29');
 
     // Producer/schema round-trip: a file+line anchored finding must yield the
     // exact strict side-channel shape accepted and covered by ticket_hash.
@@ -554,6 +615,8 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
       stage: 'remediation-review',
       remediation_cycles: 1,
       remediation_finding_fingerprints: firstFingerprints,
+      remediation_finding_count: firstFingerprints.length,
+      remediation_finding_history: { version: 1, cycles: [firstFingerprints] },
       tickets: secondState.tickets,
       receipts: secondState.receipts,
     });
@@ -574,10 +637,434 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
       patch: {
         status: 'blocked',
         stage: 'remediation',
-        block_reason: 'a repeated review finding made no remediation progress',
+        block_reason: expect.stringMatching(/repeat|unchanged|progress/i),
       },
     });
   });
+
+  it('keeps distinct defects in the same file and at the same line as distinct identities', () => {
+    const receiptWithDistinctDefects = {
+      ticket_id: 'ticket-review-distinct',
+      status: 'passed',
+      findings: [
+        structuredBlocker(
+          'cache.stale-read',
+          'src/cache.js',
+          44,
+          'Stale cache read crosses tenant boundary',
+          'A tenant can observe a cached record belonging to another tenant.',
+        ),
+        structuredBlocker(
+          'cache.lost-write',
+          'src/cache.js',
+          44,
+          'Concurrent cache write is lost',
+          'Two writers can overwrite each other because the update is not atomic.',
+        ),
+      ],
+      evidence: { verdict: 'fail' },
+    };
+
+    const identities = reviewFindings.fingerprints([receiptWithDistinctDefects]);
+    expect(identities).toHaveLength(2);
+    expect(new Set(identities).size).toBe(2);
+  });
+
+  it('does not coalesce one distinct newly discovered defect with a similar prior defect', () => {
+    const priorReceipt = {
+      ticket_id: 'ticket-review-prior-lost-data',
+      status: 'passed',
+      findings: [structuredBlocker(
+        'cache.lost-data',
+        'src/cache.js',
+        18,
+        'Concurrent cache update loses stored data',
+        'A cache write can overwrite stored data before the atomic update completes.',
+      )],
+      evidence: { verdict: 'fail' },
+    };
+    const currentReceipt = {
+      ticket_id: 'ticket-review-current-dirty-read',
+      status: 'passed',
+      findings: [structuredBlocker(
+        'cache.dirty-read',
+        'src/cache.js',
+        47,
+        'Concurrent cache update exposes uncommitted data',
+        'A cache read can expose uncommitted data before the atomic update completes.',
+      )],
+      evidence: { verdict: 'fail' },
+    };
+    const known = reviewFindings.fingerprints([priorReceipt]);
+
+    const analyzed = reviewFindings.analyzeIdentities(
+      [currentReceipt],
+      [priorReceipt],
+      known,
+    );
+    expect(analyzed).toMatchObject({ valid: true, fingerprints: [expect.any(String)] });
+    expect(analyzed.fingerprints[0]).not.toBe(known[0]);
+  });
+
+  it.each([
+    ['title', structuredBlocker(
+      'compatibility-expansion.title',
+      'src/value.js',
+      8,
+      '\ufdfa'.repeat(200),
+      'The redirect target is not validated.',
+    )],
+    ['detail', structuredBlocker(
+      'compatibility-expansion.detail',
+      'src/value.js',
+      8,
+      'Unchecked redirect target',
+      '\ufdfa'.repeat(4_000),
+    )],
+    ['file', structuredBlocker(
+      'compatibility-expansion.file',
+      '\ufdfa'.repeat(512),
+      8,
+      'Unchecked redirect target',
+      'The redirect target is not validated.',
+    )],
+  ])('rejects %s identity material whose NFKC form exceeds its bound', (_field, finding) => {
+    const analyzed = reviewFindings.analyzeIdentities([{
+      ticket_id: `ticket-review-expanded-${_field}`,
+      status: 'passed',
+      findings: [finding],
+      evidence: { verdict: 'fail' },
+    }]);
+
+    expect(analyzed).toMatchObject({ valid: false, reason: 'malformed', fingerprints: [] });
+  });
+
+  it('rejects an ambiguous many-to-one match instead of collapsing distinct current defects', () => {
+    const priorReceipt = {
+      ticket_id: 'ticket-review-prior-cache-write',
+      status: 'passed',
+      findings: [structuredBlocker(
+        'cache.prior-lost-write',
+        'src/cache.js',
+        18,
+        'Concurrent cache update loses stored data',
+        'A cache write can overwrite stored data before the atomic update completes.',
+      )],
+      evidence: { verdict: 'fail' },
+    };
+    const currentReceipt = {
+      ticket_id: 'ticket-review-current-cache-defects',
+      status: 'passed',
+      findings: [
+        structuredBlocker(
+          'cache.renamed-lost-write',
+          'src/cache.js',
+          31,
+          'Stored data is lost during a concurrent cache update',
+          'The atomic update completes after another cache write overwrites stored data.',
+        ),
+        structuredBlocker(
+          'cache.dirty-read',
+          'src/cache.js',
+          47,
+          'Concurrent cache update exposes uncommitted data',
+          'A cache read can expose uncommitted data before the atomic update completes.',
+        ),
+      ],
+      evidence: { verdict: 'fail' },
+    };
+    const known = reviewFindings.fingerprints([priorReceipt]);
+
+    expect(reviewFindings.analyzeIdentities(
+      [currentReceipt],
+      [priorReceipt],
+      known,
+    )).toMatchObject({ valid: false, reason: 'ambiguous', fingerprints: [] });
+  });
+
+  it.each([
+    ['empty finding evidence', []],
+    ['malformed finding evidence', [{ blocking: true }]],
+    ['control-bearing material', [structuredBlocker(
+      'crafted.control',
+      'src/value.js',
+      8,
+      `Unchecked redirect${String.fromCharCode(0x202e)}hidden`,
+      'The redirect target is not validated.',
+    )]],
+    ['oversized collision-prone material', [
+      structuredBlocker(
+        'crafted.alpha',
+        'src/value.js',
+        8,
+        'Ambiguous validation defect',
+        `${'shared bounded identity material '.repeat(200)}alpha-only consequence`,
+      ),
+      structuredBlocker(
+        'crafted.bravo',
+        'src/value.js',
+        19,
+        'Ambiguous validation defect',
+        `${'shared bounded identity material '.repeat(200)}bravo-only consequence`,
+      ),
+    ]],
+  ])('blocks %s before issuing the first remediation writer', (_label, findings) => {
+    const ticket = {
+      ticket_id: 'ticket-incomparable-review',
+      stage_id: 'review',
+      role: 'reviewer',
+      parallel_group: 'code-review',
+    };
+    const state = pureRun({ stage: 'review', tickets: [ticket] });
+    const actions = recordPure(state, ticket, {
+      status: 'passed',
+      findings,
+      evidence: { verdict: 'fail' },
+    });
+
+    expect(actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
+    expect(actions.map((entry) => entry.type)).toEqual([
+      'transition', 'archive_history', 'release_lock', 'persist_state',
+    ]);
+    expect(state).toMatchObject({ status: 'blocked', stage: 'remediation' });
+    expect(state.block_reason).toMatch(/ambiguous|incomparable|malformed|identity/i);
+    expect(state).not.toHaveProperty('remediation_finding_history');
+  });
+
+  it('rejects a current finding that can ambiguously match two prior defects', () => {
+    const priorFindings = [
+      structuredBlocker(
+        'redirect.host-only',
+        'src/redirect.js',
+        18,
+        'Redirect allowlist compares only the host',
+        'The port is ignored, so a disallowed destination can pass validation.',
+      ),
+      structuredBlocker(
+        'redirect.port-only',
+        'src/redirect.js',
+        33,
+        'Redirect allowlist compares only the port',
+        'The host is ignored, so a disallowed destination can pass validation.',
+      ),
+    ];
+    const reviewTicket = {
+      ticket_id: 'ticket-ambiguous-initial-review',
+      stage_id: 'review',
+      role: 'reviewer',
+      parallel_group: 'code-review',
+    };
+    const state = pureRun({ stage: 'review', tickets: [reviewTicket] });
+    const started = recordPure(state, reviewTicket, {
+      status: 'passed',
+      findings: priorFindings,
+      evidence: { verdict: 'fail' },
+    });
+    expect(started.some((entry) => entry.type === 'issue_ticket')).toBe(true);
+    recordPure(state, state.tickets.at(-1), {
+      status: 'passed', findings: [], evidence: { verdict: 'pass' },
+    });
+
+    const blocked = recordPure(state, state.tickets.at(-1), {
+      status: 'passed',
+      findings: [structuredBlocker(
+        'redirect.combined',
+        'src/redirect.js',
+        51,
+        'Redirect allowlist comparison is incomplete',
+        'The host or port can bypass destination validation.',
+      )],
+      evidence: { verdict: 'fail' },
+    });
+    expect(blocked.some((entry) => entry.type === 'issue_ticket')).toBe(false);
+    expect(blocked.map((entry) => entry.type)).toEqual([
+      'transition', 'archive_history', 'release_lock', 'persist_state',
+    ]);
+    expect(state).toMatchObject({ status: 'blocked', stage: 'remediation' });
+    expect(state.block_reason).toMatch(/ambiguous|incomparable|identity/i);
+    expect(state.remediation_finding_history.cycles).toHaveLength(1);
+  });
+
+  it('migrates legacy finding history and replays its prepared successor exactly once after restart', async () => {
+    const dir = await integrationProject();
+    const reviewTicket = await walkIntegrationToReview(dir);
+    const firstFindings = [
+      structuredBlocker(
+        'value.boundary',
+        'src/value.js',
+        4,
+        'Supported boundary is rejected',
+        'The final supported value is rejected by the boundary check.',
+      ),
+      structuredBlocker(
+        'cache.atomicity',
+        'src/cache.js',
+        9,
+        'Cache update is not atomic',
+        'Concurrent writers can lose a cache update.',
+      ),
+    ];
+    const firstReview = await recordReceipt(dir, receipt(reviewTicket, {
+      tests: [{
+        command: 'node tests/value.test.js',
+        passed: true,
+        exit_code: 0,
+        duration_ms: 1,
+      }],
+      findings: firstFindings,
+      evidence: { verdict: 'fail' },
+    }));
+    expect(firstReview.ok, JSON.stringify(firstReview.errors ?? [])).toBe(true);
+    expect(firstReview.run.remediation_finding_history).toMatchObject({
+      version: 1,
+      cycles: [expect.any(Array)],
+    });
+
+    const firstWriter = firstReview.run.tickets.at(-1);
+    expect(firstWriter.stage_id).toBe('remediation-build');
+    const remediated = await recordReceipt(dir, receipt(firstWriter, {
+      tests: [{
+        command: 'node tests/value.test.js',
+        passed: true,
+        exit_code: 0,
+        duration_ms: 1,
+      }],
+    }));
+    expect(remediated.ok, JSON.stringify(remediated.errors ?? [])).toBe(true);
+    const remediationReview = remediated.run.tickets.at(-1);
+    expect(remediationReview.stage_id).toBe('remediation-review');
+
+    const paths = runtimePaths(dir);
+    const staleActive = await readJson(paths.active);
+    const durablePriorReceipt = staleActive.receipts.find(
+      (entry) => entry.ticket_id === reviewTicket.ticket_id,
+    );
+    expect(durablePriorReceipt?.receipt_hash).toMatch(/^[0-9a-f]{64}$/);
+    const legacyIdentity = reviewFindings.analyzeLegacyIdentities([durablePriorReceipt]);
+    expect(legacyIdentity).toMatchObject({ valid: true, fingerprints: expect.any(Array) });
+    expect(legacyIdentity.fingerprints).toHaveLength(2);
+    const embeddedCheckpoint = {
+      version: 1,
+      cycles: [legacyIdentity.fingerprints],
+      aliases: legacyIdentity.aliases,
+      provenance: [legacyIdentity.provenance],
+    };
+    staleActive.remediation_finding_fingerprints = legacyIdentity.fingerprints;
+    staleActive.remediation_finding_count = legacyIdentity.fingerprints.length;
+    staleActive.remediation_finding_history = structuredClone(embeddedCheckpoint);
+    await atomicWriteJson(paths.active, staleActive);
+    const reloadedCheckpoint = await statusRun(dir);
+    expect(reloadedCheckpoint).toMatchObject({ ok: true, active: true });
+    expect(reloadedCheckpoint.run.remediation_finding_history).toEqual(embeddedCheckpoint);
+    expect(reloadedCheckpoint.run.remediation_finding_history)
+      .not.toHaveProperty('identity_epoch');
+
+    const migration = reviewFindings.migrateLegacyHistory(
+      [[durablePriorReceipt]],
+      embeddedCheckpoint.cycles,
+      embeddedCheckpoint.aliases,
+      embeddedCheckpoint.provenance,
+    );
+    expect(migration).toMatchObject({
+      valid: true,
+      legacyCycleCount: 1,
+      normalizedProvenance: [expect.any(Object)],
+    });
+    const expectedIdentityEpoch = {
+      version: 1,
+      legacy_cycle_count: 1,
+      legacy_history_hash: sha256({
+        cycles: embeddedCheckpoint.cycles,
+        aliases: embeddedCheckpoint.aliases,
+        provenance: embeddedCheckpoint.provenance,
+      }),
+      normalized_history_hash: sha256({
+        aliases: migration.aliases,
+        provenance: migration.normalizedProvenance,
+      }),
+      normalized_provenance: migration.normalizedProvenance,
+    };
+    const receiptTransactionsBefore = await readdir(paths.receiptTransactions);
+    const replayedDraft = receipt(remediationReview, {
+      tests: [{
+        command: 'node tests/value.test.js',
+        passed: true,
+        exit_code: 0,
+        duration_ms: 1,
+      }],
+      findings: [
+        structuredBlocker(
+          'cache.renumbered',
+          'src/cache.js',
+          23,
+          'Cache update is not atomic.',
+          'Concurrent writers can lose a cache update!',
+        ),
+        structuredBlocker(
+          'log.newly-observed',
+          'src/log.js',
+          12,
+          'Audit write can be lost',
+          'A crash between the data write and audit append loses the audit record.',
+        ),
+      ],
+      evidence: { verdict: 'fail' },
+    });
+    const firstRecord = await recordReceipt(dir, replayedDraft);
+    expect(firstRecord.ok, JSON.stringify(firstRecord.errors ?? [])).toBe(true);
+    expect(firstRecord.run.remediation_cycles).toBe(2);
+    const successor = firstRecord.run.tickets.at(-1);
+    expect(successor.stage_id).toBe('remediation-build');
+    expect(firstRecord.run.remediation_finding_history.cycles).toHaveLength(2);
+    expect(firstRecord.run.remediation_finding_history.identity_epoch)
+      .toEqual(expectedIdentityEpoch);
+    expect(firstRecord.run.remediation_finding_history.cycles[0])
+      .toEqual(embeddedCheckpoint.cycles[0]);
+    expect(firstRecord.run.remediation_finding_history.provenance[0])
+      .toEqual(embeddedCheckpoint.provenance[0]);
+    const migratedHistory = structuredClone(firstRecord.run.remediation_finding_history);
+    const successorPath = path.join(
+      paths.tickets,
+      `${successor.ticket_id.replaceAll(':', '_')}.json`,
+    );
+    const durableBytesBeforeReplay = {
+      active: await readFile(paths.active),
+      successor: await readFile(successorPath),
+    };
+
+    const durableBeforeReplay = {
+      tickets: (await readdir(paths.tickets)).sort(),
+      receipts: (await readdir(paths.receipts)).sort(),
+      transactions: (await readdir(paths.receiptTransactions)).sort(),
+    };
+    const newReceiptTransactions = durableBeforeReplay.transactions.filter(
+      (file) => !receiptTransactionsBefore.includes(file),
+    );
+    expect(newReceiptTransactions).toHaveLength(1);
+    const transactionFile = path.join(paths.receiptTransactions, newReceiptTransactions[0]);
+    const preparedTransaction = await readJson(transactionFile);
+    expect(preparedTransaction.status).toBe('committed');
+    delete preparedTransaction.committed_at;
+    preparedTransaction.status = 'prepared';
+    await atomicWriteJson(transactionFile, preparedTransaction);
+    await atomicWriteJson(paths.active, staleActive);
+
+    const replayed = await recordReceipt(dir, replayedDraft);
+    expect(replayed.ok, JSON.stringify(replayed.errors ?? [])).toBe(true);
+    expect(replayed.run.remediation_cycles).toBe(2);
+    expect(replayed.run.remediation_finding_history).toEqual(migratedHistory);
+    expect(replayed.run.tickets.filter((ticket) => ticket.ticket_id === successor.ticket_id))
+      .toHaveLength(1);
+    expect(replayed.run.receipts.filter((entry) => entry.ticket_id === remediationReview.ticket_id))
+      .toHaveLength(1);
+    expect(await readFile(paths.active)).toEqual(durableBytesBeforeReplay.active);
+    expect(await readFile(successorPath)).toEqual(durableBytesBeforeReplay.successor);
+    expect({
+      tickets: (await readdir(paths.tickets)).sort(),
+      receipts: (await readdir(paths.receipts)).sort(),
+      transactions: (await readdir(paths.receiptTransactions)).sort(),
+    }).toEqual(durableBeforeReplay);
+  }, 30_000);
 
   it('actionable-scope-denial preserves exact additive paths, role, and successor requirements', () => {
     const ticket = {
@@ -1252,5 +1739,344 @@ describe('APE v2 recovery-stage active-state compatibility', () => {
       run: { stage, tickets: [{ stage_id: stage, role }] },
     });
     expect(status.diagnostic?.reason_code).not.toBe('corrupt_state');
+  });
+
+  it('keeps legacy remediation state readable but refuses to infer missing history', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'ape-remediation-history-legacy-'));
+    cleanups.push(dir);
+    const priorFinding = structuredBlocker(
+      'legacy.value',
+      'src/value.js',
+      4,
+      'Supported boundary is rejected',
+      'The final supported value is rejected by the boundary check.',
+    );
+    const remainingFinding = structuredBlocker(
+      'legacy.cache',
+      'src/cache.js',
+      9,
+      'Cache update is not atomic',
+      'Concurrent writers can lose a cache update.',
+    );
+    const priorFingerprints = reviewFindings.fingerprints([{
+      ticket_id: 'legacy-review',
+      status: 'passed',
+      findings: [priorFinding, remainingFinding],
+      evidence: { verdict: 'fail' },
+    }]);
+    const reviewTicket = {
+      ticket_id: 'legacy-remediation-review',
+      stage_id: 'remediation-review',
+      role: 'reviewer',
+      parallel_group: 'code-review',
+    };
+    const legacy = pureRun({
+      schema_version: SCHEMA_VERSION,
+      host: 'codex',
+      stage: 'remediation-review',
+      dispatch_state: 'none',
+      remediation_cycles: 1,
+      remediation_finding_fingerprints: priorFingerprints,
+      remediation_finding_count: priorFingerprints.length,
+      tickets: [reviewTicket],
+    });
+    await atomicWriteJson(runtimePaths(dir).active, legacy);
+
+    const status = await statusRun(dir);
+    expect(status).toMatchObject({ ok: true, active: true });
+    expect(status.run).not.toHaveProperty('remediation_finding_history');
+
+    const actions = recordPure(legacy, reviewTicket, {
+      status: 'passed',
+      findings: [remainingFinding],
+      evidence: { verdict: 'fail' },
+    });
+    expect(actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
+    expect(actions.map((entry) => entry.type)).toEqual([
+      'transition', 'archive_history', 'release_lock', 'persist_state',
+    ]);
+    expect(legacy).toMatchObject({ status: 'blocked', stage: 'remediation' });
+    expect(legacy.block_reason).toMatch(/history|inconsistent|comparable/i);
+  });
+});
+
+describe('APE v2 remediation identity input bounds and path containment', () => {
+  function identityBlocker(id, file, title = 'Unchecked redirect target') {
+    return {
+      id,
+      file,
+      line: 12,
+      title,
+      detail: 'A caller-controlled destination can send the user to an external origin.',
+      blocking: true,
+      remediation: { owner: 'production' },
+    };
+  }
+
+  function dissent(ticketId, findings) {
+    return {
+      ticket_id: ticketId,
+      status: 'passed',
+      findings,
+      evidence: { verdict: 'fail' },
+    };
+  }
+
+  it('does not mistake bare path wording for encoded-path normalization in one login flow', () => {
+    const externalHost = dissent('ticket-login-external-host', [structuredBlocker(
+      'login.external-host',
+      'src/auth/redirect.js',
+      21,
+      'Login callback path follows external host',
+      'Signin destination path accepts attacker origin',
+    )]);
+    const encodedBackslash = dissent('ticket-login-encoded-backslash', [structuredBlocker(
+      'login.encoded-backslash',
+      'src/auth/redirect.js',
+      47,
+      'Next navigation accepts untrusted encoded backslash path',
+      'Login location lets an untrusted path escape normalization',
+    )]);
+
+    const known = reviewFindings.fingerprints([externalHost]);
+    expect(known).toHaveLength(1);
+    const analyzed = reviewFindings.analyzeIdentities(
+      [encodedBackslash],
+      [externalHost],
+      known,
+    );
+    expect(analyzed).toMatchObject({ valid: true, fingerprints: [expect.any(String)] });
+    expect(analyzed.fingerprints[0]).not.toBe(known[0]);
+  });
+
+  it('fails closed when one redirect finding names both authority and path-normalization mechanisms', () => {
+    const analyzed = reviewFindings.analyzeIdentities([
+      dissent('ticket-login-mixed-mechanisms', [structuredBlocker(
+        'login.mixed-mechanisms',
+        'src/auth/redirect.js',
+        63,
+        'Login redirect lacks an external host allowlist and encoded backslash normalization',
+        'Signin callback accepts an attacker origin after path separator normalization.',
+      )]),
+    ]);
+
+    expect(analyzed).toMatchObject({
+      valid: false,
+      reason: 'ambiguous',
+      fingerprints: [],
+    });
+  });
+
+  it.each([
+    [
+      'symbol insertion',
+      'Cache update loses stored value',
+      'Atomic writer drops committed record',
+      '$ Cache update loses stored value',
+      'Atomic writer drops committed record $',
+    ],
+    [
+      'symbol position',
+      '$ Cache update loses stored value',
+      'Atomic writer $ drops committed record',
+      'Cache update $ loses stored value',
+      'Atomic writer drops committed $ record',
+    ],
+    [
+      'duplicate-word count',
+      'Cache update loses stored value',
+      'Atomic writer drops committed record',
+      'Cache cache update update loses stored stored value',
+      'Atomic writer writer drops committed committed record record',
+    ],
+  ])('maps cosmetic %s churn to the established root', (
+    _label,
+    priorTitle,
+    priorDetail,
+    currentTitle,
+    currentDetail,
+  ) => {
+    const prior = dissent(`ticket-cosmetic-${_label}-prior`, [structuredBlocker(
+      `cosmetic.${_label}.prior`,
+      'src/cache.js',
+      18,
+      priorTitle,
+      priorDetail,
+    )]);
+    const current = dissent(`ticket-cosmetic-${_label}-current`, [structuredBlocker(
+      `cosmetic.${_label}.current`,
+      'src/cache.js',
+      52,
+      currentTitle,
+      currentDetail,
+    )]);
+    const known = reviewFindings.fingerprints([prior]);
+
+    expect(reviewFindings.analyzeIdentities([current], [prior], known)).toMatchObject({
+      valid: true,
+      fingerprints: known,
+    });
+  });
+
+  it('canonicalizes dot segments and platform separators before identity comparison', () => {
+    const aliasFindings = [
+      identityBlocker('redirect.canonical', 'src/redirect.js'),
+      identityBlocker('redirect.dot-segment', 'src/security/../redirect.js'),
+      identityBlocker('redirect.backslash', 'src\\redirect.js'),
+      identityBlocker('redirect.dot-prefix', './src/redirect.js'),
+    ];
+    const aliases = dissent('ticket-path-aliases', aliasFindings);
+
+    expect(reviewFindings.fingerprints([aliases])).toHaveLength(1);
+    const receiptCycles = aliasFindings.map((finding, index) =>
+      dissent(`ticket-path-alias-cycle-${index}`, [finding]));
+    const known = reviewFindings.fingerprints([receiptCycles[0]]);
+    for (let index = 1; index < receiptCycles.length; index += 1) {
+      expect(reviewFindings.analyzeIdentities(
+        [receiptCycles[index]],
+        receiptCycles.slice(0, index),
+        known,
+      )).toMatchObject({ valid: true, fingerprints: known });
+    }
+    const state = {
+      tickets: [{
+        ticket_id: aliases.ticket_id,
+        stage_id: 'review',
+        role: 'reviewer',
+        parallel_group: 'code-review',
+      }],
+    };
+    expect(reviewFindings.evidence(state, [aliases])).toEqual([
+      expect.objectContaining({ evidence_anchor: 'src/redirect.js:L12' }),
+    ]);
+  });
+
+  it.each([
+    ['/absolute path', '/src/redirect.js'],
+    ['parent escape', '../src/redirect.js'],
+    ['nested parent escape', 'src/../../outside.js'],
+    ['drive-qualified path', 'C:\\src\\redirect.js'],
+    ['empty segment', 'src//redirect.js'],
+    ['trailing separator', 'src/redirect.js/'],
+  ])('rejects a non-contained or noncanonical identity %s', (_label, file) => {
+    const analyzed = reviewFindings.analyzeIdentities([
+      dissent(`ticket-unsafe-${_label}`, [identityBlocker(`unsafe.${_label}`, file)]),
+    ]);
+    expect(analyzed).toMatchObject({ valid: false, fingerprints: [] });
+    expect(analyzed.reason).toMatch(/path|malformed|contain|canonical/i);
+  });
+
+  it('rejects a Unicode compatibility separator before it can collide with a real path separator', () => {
+    const canonical = identityBlocker(
+      'compatibility-separator.canonical',
+      'src/auth.js',
+      'JWT audience validation is missing',
+    );
+    const compatibilitySeparator = identityBlocker(
+      'compatibility-separator.fullwidth',
+      'src\uFF0Fauth.js',
+      'JWT audience validation is missing',
+    );
+
+    const analyzed = reviewFindings.analyzeIdentities([
+      dissent('ticket-compatibility-separator-collision', [
+        canonical,
+        compatibilitySeparator,
+      ]),
+    ]);
+
+    expect(analyzed).toMatchObject({ valid: false, fingerprints: [] });
+    expect(analyzed.reason).toMatch(/path|canonical|malformed/i);
+  });
+
+  it('fails closed when distinct current redirects share only a coarse login-flow tag', () => {
+    const analyzed = reviewFindings.analyzeIdentities([
+      dissent('ticket-coarse-login-redirects', [
+        structuredBlocker(
+          'login.next-redirect',
+          'src/auth/redirect.js',
+          21,
+          'Login redirect trusts next',
+          'External destination accepted',
+        ),
+        structuredBlocker(
+          'login.return-redirect',
+          'src/auth/redirect.js',
+          37,
+          'Login handler follows return',
+          'Untrusted location leaves site',
+        ),
+      ]),
+    ]);
+
+    expect(analyzed).toMatchObject({
+      valid: false,
+      reason: 'ambiguous',
+      fingerprints: [],
+    });
+  });
+
+  it('rejects an aggregate descriptor overflow before entering nested descriptor work', () => {
+    const ordinary = Array.from({ length: 64 }, (_, index) =>
+      identityBlocker(`bounded.${index}`, `src/bounded-${index}.js`, `Bounded defect ${index}`));
+    const nestedWorkSentinel = new Proxy(identityBlocker(
+      'bounded.overflow',
+      'src/overflow.js',
+      'Overflow descriptor must not be inspected',
+    ), {
+      get() {
+        throw new Error('nested identity work ran before the aggregate descriptor ceiling');
+      },
+    });
+    let analyzed;
+    expect(() => {
+      analyzed = reviewFindings.analyzeIdentities([
+        dissent('ticket-bounded-prefix', ordinary),
+        dissent('ticket-bounded-overflow', [nestedWorkSentinel]),
+      ]);
+    }).not.toThrow();
+    expect(analyzed).toMatchObject({ valid: false, fingerprints: [] });
+    expect(analyzed.reason).toMatch(/limit|bound|resource|malformed/i);
+  });
+
+  it('rejects aggregate normalized-token and serialized-byte history at the maximum item count', () => {
+    const findings = Array.from({ length: 64 }, (_, index) => ({
+      ...identityBlocker(
+        `aggregate.${index}`,
+        `src/aggregate-${index}.js`,
+        `Aggregate descriptor ${index}`,
+      ),
+      // Every descriptor is individually admissible (< 4,000 characters),
+      // while the 64-item history is intentionally oversized in aggregate.
+      detail: `Aggregate descriptor ${index} ${'bounded comparison material '.repeat(120)}`,
+    }));
+    const analyzed = reviewFindings.analyzeIdentities([
+      dissent('ticket-aggregate-maximum', findings),
+    ]);
+    expect(analyzed).toMatchObject({ valid: false, fingerprints: [] });
+    expect(analyzed.reason).toMatch(/limit|bound|resource|malformed/i);
+  });
+
+  it('charges both component-building and clique-validation work before maximum-size comparison', () => {
+    const ignoredComparisonWords = ['another', 'after', 'before', 'can', 'during', 'only'];
+    const equivalent = Array.from({ length: 64 }, (_, index) => {
+      const suffix = ignoredComparisonWords
+        .filter((_word, bit) => (index & (1 << bit)) !== 0)
+        .join(' ');
+      return {
+        ...identityBlocker(
+          `work-bound.${index}`,
+          'src/cache.js',
+          `Cache transaction loses committed update ${suffix}`,
+        ),
+        detail: `Concurrent cache transaction loses committed update atomically ${suffix}`,
+      };
+    });
+
+    const analyzed = reviewFindings.analyzeIdentities([
+      dissent('ticket-maximum-clique-work', equivalent),
+    ]);
+    expect(analyzed).toMatchObject({ valid: false, fingerprints: [] });
+    expect(analyzed.reason).toMatch(/limit|bound|resource/i);
   });
 });

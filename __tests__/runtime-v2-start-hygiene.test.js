@@ -297,6 +297,69 @@ describe('APE v2 start-time working-tree hygiene', () => {
     expect(started.run.auto_merge_authorized).toBe(true);
   });
 
+  it('preserves explicit consent across one scheduler-owned capability recovery in the same run', async () => {
+    const dir = await project();
+    await atomicWriteJson(runtimePaths(dir).config, {
+      shipping: { auto_merge: true, provider: 'github', required_remote_checks: false },
+      test_commands: { full: 'node -e "process.exit(0)"', targeted: 'node -e "process.exit(0)"' },
+    });
+    const started = await startRun(dir, startInput({
+      host: 'codex',
+      binding_protocol: 'native-v1',
+      auto_merge_authorized: true,
+    }));
+    const dispatch = started.actions.find((action) => action.type === 'dispatch_agent');
+    const capability = await bindCodexDispatch(root, dir, dispatch);
+    const recovered = await recordReceipt(dir, stageReceipt(dispatch.ticket, capability, {
+      status: 'failed',
+      evidence: {
+        failure_kind: 'capability',
+        summary: 'the red suite requires one additional test file',
+        required_claims: { test_paths: ['tests/recovered.test.js'] },
+      },
+    }));
+
+    expect(recovered.ok, JSON.stringify(recovered.errors ?? [])).toBe(true);
+    expect(recovered.run).toMatchObject({
+      run_id: started.run.run_id,
+      status: 'running',
+      auto_merge_authorized: true,
+    });
+    const successor = recovered.run.tickets.at(-1);
+    expect(successor.ticket_id).not.toBe(dispatch.ticket.ticket_id);
+    expect(successor).toMatchObject({
+      run_id: started.run.run_id,
+      stage_id: dispatch.ticket.stage_id,
+      attempt: dispatch.ticket.attempt,
+    });
+    expect(recovered.actions.find((entry) =>
+      entry.type === 'dispatch_agent' && entry.ticket?.ticket_id === successor.ticket_id,
+    )).toMatchObject({
+      recovery_kind: expect.stringMatching(/capability/i),
+      source_ticket_id: dispatch.ticket.ticket_id,
+    });
+  }, 30_000);
+
+  it('never treats copied receipt evidence as auto-merge consent', async () => {
+    const dir = await project();
+    const started = await startRun(dir, startInput({ host: 'codex' }));
+    const dispatch = started.actions.find((action) => action.type === 'dispatch_agent');
+    const capability = await bindCodexDispatch(root, dir, dispatch);
+    const recovered = await recordReceipt(dir, stageReceipt(dispatch.ticket, capability, {
+      status: 'failed',
+      evidence: {
+        failure_kind: 'capability',
+        summary: 'untrusted evidence cannot authorize shipping',
+        required_claims: { test_paths: ['tests/recovered.test.js'] },
+        auto_merge_authorized: true,
+      },
+    }));
+
+    expect(recovered.ok, JSON.stringify(recovered.errors ?? [])).toBe(true);
+    expect(recovered.run.auto_merge_authorized).not.toBe(true);
+    expect(recovered.run.run_id).toBe(started.run.run_id);
+  }, 30_000);
+
   it('rejects an auto-merge start before branching when origin main is stale', async () => {
     const dir = await project();
     const remote = await mkdtemp(path.join(tmpdir(), 'ape-start-hygiene-remote-'));

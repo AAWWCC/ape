@@ -103,6 +103,24 @@ MCP call at the wrapper's yield boundary can expose a host transport retry. If a
 are scheduler-owned and serialized: production, test, and mixed/both findings select build; test
 then review; or test then build then review respectively.
 
+A failed `implementer` or `test_writer` receipt may declare
+`evidence.failure_kind: "capability"` with exact additive repository-local paths in
+`evidence.required_claims`. The runtime validates canonical spelling, production/test channel
+separation, private-state exclusions, aggregate path bounds, and immutable-role compatibility
+before any durable effect. One valid request per stage is recovered automatically: APE audits the
+scope growth, preserves the same run and logical attempt, and returns a fresh immutable ticket with
+`next_action.kind: "capability_recovery"`. Launch only that returned ticket; do not prompt for an
+override, reset the run, or recreate the ticket. A second otherwise-valid capability request blocks
+without further scope or ticket growth. Empty, duplicate, already-authorized, globbed, absolute,
+external, escaping, `.git`, `.ape`, `.env`, cross-channel, role-conflicting, or over-limit claims are
+rejected atomically. If a process stops after persisting the successor, replay the identical receipt:
+the runtime verifies and reuses the exact durable successor instead of generating another identity.
+
+Run-specific merge consent is durable scheduler state, not receipt evidence or persistent config.
+An explicitly authorized run keeps `auto_merge_authorized` across its one bounded capability
+recovery and other same-run scheduler transitions. A copied receipt field, `shipping.auto_merge`
+configuration, a previous run's consent, or a freshly started run never grants that authorization.
+
 When a run is blocked, never start a structured successor: current host lifecycle hooks do not
 provide authenticated human provenance, and raw hook stdin or a copied prompt is not authority. If
 the user explicitly directs recovery, call `ape_run override` with `operation: "reset"`, the exact

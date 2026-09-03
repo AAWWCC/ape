@@ -71,6 +71,107 @@ describe('APE v2 capability-blocked failure (reducer)', () => {
     expect(actions[1].prior_attempts).toEqual([`attempt 1: ${DENIAL}`]);
   });
 
+  it('issues one fresh same-attempt ticket for an exact additive capability claim', () => {
+    const source = {
+      ticket_id: 't-capability-source',
+      stage_id: 'build',
+      role: 'implementer',
+      parallel_group: null,
+      attempt: 1,
+      claimed_paths: ['src/value.js'],
+      test_paths: ['tests/value.test.js'],
+    };
+    const state = run({
+      claimed_paths: [...source.claimed_paths],
+      test_paths: [...source.test_paths],
+      attempts: { build: 1 },
+      tickets: [source],
+    });
+    const actions = reduceRun(state, {
+      type: 'RECEIPT_RECORDED',
+      ticket: source,
+      receipt: {
+        ticket_id: source.ticket_id,
+        status: 'failed',
+        evidence: {
+          failure_kind: 'capability',
+          summary: 'implementation also requires src/helper.js',
+          required_claims: { claimed_paths: ['src/helper.js'] },
+        },
+      },
+      stage: { id: 'build', role: 'implementer', parallel_group: null },
+    });
+
+    expect(actions.some((entry) => entry.type === 'archive_history')).toBe(false);
+    expect(actions.some((entry) => entry.type === 'release_lock')).toBe(false);
+    const transition = actions.find((entry) => entry.type === 'transition');
+    expect(transition.patch).not.toHaveProperty('status', 'blocked');
+    expect(transition.patch).not.toHaveProperty('attempts');
+    const successor = actions.find((entry) => entry.type === 'issue_ticket');
+    expect(successor).toMatchObject({
+      stage: { id: 'build', role: 'implementer' },
+      source_ticket_id: source.ticket_id,
+      recovery_kind: expect.stringMatching(/capability/i),
+    });
+    expect(successor).not.toHaveProperty('retry_of');
+    expect(successor.prior_attempts).toContain('attempt 1: implementation also requires src/helper.js');
+  });
+
+  it('does not mint a third ticket when an automatic capability successor asks to grow again', () => {
+    const source = {
+      ticket_id: 't-capability-source',
+      stage_id: 'build',
+      role: 'implementer',
+      parallel_group: null,
+      attempt: 1,
+      claimed_paths: ['src/value.js'],
+      test_paths: [],
+    };
+    const successor = {
+      ...source,
+      ticket_id: 't-capability-successor',
+      claimed_paths: ['src/value.js', 'src/helper.js'],
+      recovery_kind: 'capability_scope_expansion',
+      source_ticket_id: source.ticket_id,
+    };
+    const firstReceipt = {
+      ticket_id: source.ticket_id,
+      status: 'failed',
+      evidence: {
+        failure_kind: 'capability',
+        required_claims: { claimed_paths: ['src/helper.js'] },
+      },
+    };
+    const state = run({
+      claimed_paths: [...successor.claimed_paths],
+      attempts: { build: 1 },
+      tickets: [source, successor],
+      receipts: [firstReceipt],
+      capability_recoveries: { build: 1 },
+    });
+    const actions = reduceRun(state, {
+      type: 'RECEIPT_RECORDED',
+      ticket: successor,
+      receipt: {
+        ticket_id: successor.ticket_id,
+        status: 'failed',
+        evidence: {
+          failure_kind: 'capability',
+          summary: 'a second expansion would churn tickets',
+          required_claims: { claimed_paths: ['src/again.js'] },
+        },
+      },
+      stage: { id: 'build', role: 'implementer', parallel_group: null },
+    });
+
+    expect(actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
+    expect(actions.find((entry) => entry.type === 'transition').patch).toMatchObject({
+      status: 'blocked',
+      stage: 'build',
+    });
+    expect(actions.find((entry) => entry.type === 'transition').patch.attempts).toBeUndefined();
+  });
+
   it('still issues the verbatim retry for an unmarked failure', () => {
     const state = run({
       attempts: { build: 1 },
