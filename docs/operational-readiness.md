@@ -184,6 +184,22 @@ evidence anchors are provenance rather than semantic assurance identity; equalit
 incomparability, malformed evidence, or the independent two-replan/three-remediation ceilings end in
 the existing audited blocked outcome.
 
+Capability recovery is a receipt-contract continuation, not a product-stage retry. Validation and
+recording derive the same canonical additive test-path union and reject it before mutation if it is
+non-unique, non-project-relative, reserved/option-like, over 64 items, or over 4096 serialized UTF-8
+JSON bytes. A recovery lineage carries validation submissions and physical-worker consumption
+forward monotonically under the three-submissions-per-worker and two-workers-per-ticket ceilings.
+
+An accepted recovery has one runtime-minted UUID successor and one exact prepared binding over its
+schemas, hashes, predecessor, claims, policy, risk/lane, deadlines, capability manifest, run
+contract, ceilings, counters, and provenance. Publication stages all authoritative records in an
+immutable hash-manifested generation and exposes that generation by one same-filesystem rename
+while holding the owner-token receipt lock. Canonical compatibility files land before the atomic
+active-state adoption. A crash or response loss is recovered by validating and reusing that same
+generation; it cannot regenerate the successor or double-charge the lineage. Live locks exclude a
+writer, while stale or corrupt locks are handled by the verified tombstone protocol. Valid legacy
+bytes are not rewritten, and malformed or incompletely bound legacy recovery fails loudly.
+
 ## Recovery development rule
 
 When dispatch, binding, or ticket orchestration is under repair, make the fix through ordinary

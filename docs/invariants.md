@@ -27,12 +27,15 @@ enforces.
    runtime runs identically under Claude and Codex.
 7. **Serialized writers and atomic state.** Each runtime state domain has one lock-held writer and
    uses atomic writes. Receipt/service effects and MCP task generations have separate locks with a
-   strict no-nesting boundary; task generations are append-only and hash-chained.
+   strict no-nesting boundary; task and capability-recovery generations are append-only and
+   hash-chained.
 8. **Truthful completion.** A stage is complete only when its evidence independently reproduces; an
    agent returns `failed` rather than claiming unearned success. A proven remote merge is not
    rewritten as failed merely because local checkout cleanup must be retried.
-9. **Gated auto-merge.** A run merges only after every merge gate passes; protected-branch
-   auto-merge remains pending until the exact attested head is observed merged.
+9. **Gated and authorized auto-merge.** A run merges only after every merge gate passes and the
+   shipping sink rechecks either the run's explicit `auto_merge_authorized` bit or its audited,
+   one-shot `SHIP` marker; protected-branch auto-merge remains pending until the exact attested head
+   is observed merged.
 
 ## Where each is enforced
 
@@ -47,6 +50,42 @@ enforces.
 | Serialized writers + atomic state | `lib/runtime/lock.js` + `storage.js` atomic writes; `lib/runtime/task-store.js` owns the MCP-only tasks lock and immutable generation journal, never nested with the receipt-effects lock |
 | Truthful completion | receipt hash chain + independent recompute in `receipt-validator.js` |
 | Gated auto-merge | `lib/runtime/gates.js` `runMergeGates` / `autoMergeGithub` |
+
+## Capability-recovery generations
+
+A receipt-contract-v1 capability denial may request one additive successor rather than consume a
+product retry. Before any receipt, ticket, contract, state, audit, history, or shipping sink, the
+runtime recomputes and validates one exact prepared-effect binding. It covers the source
+ticket/receipt/stage/role/attempt, policy and model, lane and risks, production and test scope,
+orchestration counters, issue/deadline times, field and byte budgets, capability manifest, run
+contract, recovery lineage, and both the predecessor and successor generation identities.
+
+The successor is runtime-derived exactly once. Its v4 UUID ticket id and canonical filename,
+receipt/output schemas and hashes, predecessor receipt hash, claims, policy, risk/lane, timing,
+manifest/run-contract pointers, ceilings, and runtime provenance must all agree. Missing, extra,
+stale, duplicate, replayed, caller-forged, or self-consistently rebound material is rejected before
+consumption. Every lineage monotonically retains validation usage: no physical worker may submit
+more than three validations and no ticket lineage may consume more than two physical workers.
+
+Initial admission and recovery use the same exact test-path representation. Paths must be unique,
+canonical, contained project-relative names; absolute, parent-relative, `.ape`-reserved, alias, and
+option-like values are refused. The complete additive union is computed before mutation and is
+limited to 64 items and 4096 serialized UTF-8 JSON bytes.
+
+After validation, the runtime writes a complete immutable recovery generation, including the
+successor, receipt, run-contract/schema, transaction, and adopted state, beside the generation
+store. A single same-filesystem directory rename publishes it under its hash-bound canonical name.
+Only after its manifest and every member revalidate are compatibility projections installed and
+`active.json` atomically moved to the new complete state. A process death therefore leaves the old
+active generation or a complete new generation that retry can adopt; incomplete staging data is
+inert. The receipt-effects owner-token heartbeat lock serializes cooperating writers. Live owners
+are never stolen, and stale/corrupt generations are recovered only through verified rename
+tombstones, so two writers cannot mint or charge two successors.
+
+Legacy receipt-v1 artifacts remain readable without default insertion or byte rewriting. Legacy
+recovery that lacks the complete binding is deliberately non-adoptable. Worker receipts, recovery
+payloads, path arrays, persisted recovery records, lock bytes, and crash timing are untrusted; only
+runtime-derived canonical material and a validated lock owner cross the adoption boundary.
 
 ## The per-agent slice
 
