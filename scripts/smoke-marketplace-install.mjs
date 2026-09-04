@@ -12,6 +12,8 @@ const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const pkg = JSON.parse(await readFile(join(REPO_ROOT, 'package.json'), 'utf8'));
 const compatibility = JSON.parse(await readFile(join(REPO_ROOT, 'compatibility.json'), 'utf8'));
 const VERSION = pkg.version;
+const COMMAND_TIMEOUT_MS = 60_000;
+const HOST_PACKAGE_INSTALL_TIMEOUT_MS = 5 * 60_000;
 
 async function exists(path) {
   try {
@@ -23,14 +25,19 @@ async function exists(path) {
 }
 
 function command(program, args, options = {}) {
+  const { timeoutMs = COMMAND_TIMEOUT_MS, ...spawnOptions } = options;
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(program, args, { ...options, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(program, args, {
+      ...spawnOptions,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error(`${program} ${args.join(' ')} timed out`));
-    }, 60_000);
+    }, timeoutMs);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -215,6 +222,10 @@ async function main(argv = process.argv.slice(2)) {
       await npmCommand(['install', '--no-save', '--prefix', toolsRoot, ...packages], {
         cwd: scratch,
         env: pinnedNpmEnv(process.env),
+        // A cold install downloads the pinned host's platform package. Keep
+        // CLI and MCP probes bounded at one minute, but do not classify a
+        // merely slow package registry as a broken APE marketplace package.
+        timeoutMs: HOST_PACKAGE_INSTALL_TIMEOUT_MS,
       });
       modulesRoot = join(toolsRoot, 'node_modules');
     } else {

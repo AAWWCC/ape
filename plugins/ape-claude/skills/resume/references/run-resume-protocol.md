@@ -10,7 +10,14 @@ identical complete prospective fields except `action` and use the same
 deterministic readiness evaluator. Report readiness failures and the pipeline's deterministic
 dispatch bounds. For behavioral work,
 if grounded gate commands are missing, call `ape_config init` for a repository-grounded proposal.
-Apply only a complete proposal with operator approval; otherwise stop before any agent dispatch.
+Pass the exact prospective `behavioral` and `test_paths` facts. In a repository containing only Git,
+APE state, and conventional metadata files, one unambiguous JavaScript/TypeScript or Python test-path
+extension family grounds dependency-free blank-repository commands. Apply a complete proposal and
+repeat preview automatically; mixed or unsupported extensions require an outcome-changing ecosystem
+choice rather than a guessed toolchain.
+An explicit run invocation authorizes applying a complete proposal that only fills missing required
+slots. Ask only before overwriting an existing, conflicting project policy; otherwise continue to
+dispatch without a separate configuration approval.
 
 Behavioral readiness requires a grounded `test_commands.full` command.
 When acceptance requires browser or visual inspection, require either a configured
@@ -44,8 +51,9 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    bootstrap because Codex encrypts it before APE can inspect it. It carries no stage authority.
    `ticket_projection: "hook-injected"` means the trusted `SubagentStart` hook injects the complete
    common prompt, complete role prompt, and immutable ticket reference after binding the native
-   child. The child must load and verify the complete ticket from the injected sanctioned
-   `.ape/runtime/tickets/` path before stage work.
+   child. It also injects a mechanically concrete receipt envelope and a role-specific excerpt of
+   the immutable `output_schema`. The child must load and verify the complete ticket from the
+   injected sanctioned `.ape/runtime/tickets/` path before stage work.
    The exact native arguments include `fork_turns: "none"`: model/reasoning overrides are
    incompatible with the host's inherited-history default, and the worker needs no parent history.
    Never reread `prompt_paths`, assemble a replacement message, or copy the compatibility
@@ -63,7 +71,9 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    injected `receipt_capability`. Before returning it, the worker must call `ape_validate_receipt`
    with `ticket_id` set to the immutable ticket ID and `draft` set to the exact complete receipt. A
    valid result attests the normalized draft hash; the worker must
-   return that draft unchanged. Invalid results carry bounded field corrections, plan byte usage,
+   return that draft unchanged. `SubagentStop` refuses termination when the final draft is absent or
+   malformed and returns exact bounded corrections to the same physical worker. Invalid validator
+   results carry bounded field corrections, plan byte usage,
    and remaining attempts. Each physical worker gets an initial validation plus at most two
    corrections. Call `ape_run` with `action: "record"` and place that complete
    receipt inside `receipt`. At the control-call top level send only `action`, `project_dir`, and
@@ -94,7 +104,9 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    and additive-only `claimed_paths`, `test_paths`, and canonical `risk_triggers`. Do not dispatch a
    writer while the hold remains.
 7. After all receipts in the returned group are recorded, call `ape_run next` and repeat until the
-runtime reports `completed` or `blocked`. Never start a successor automatically.
+runtime reports `completed` or `blocked`. The explicit run or resume invocation is continuous
+authority for every scheduler-owned transition; never pause between stages or ask the user to say
+`continue`. Never start a successor automatically.
 When it reports `gating_pending` or `shipping_pending`,
 make the next call with `wait_ms: 300000` so APE performs bounded server-side polling with progress
 heartbeats. On Codex, do not sleep inside a `functions.exec` wrapper before the APE call: starting an

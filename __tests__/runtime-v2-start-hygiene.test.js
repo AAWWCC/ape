@@ -1,14 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runtimePaths } from '../lib/runtime/paths.js';
-import { abortRun, recordReceipt, resumeRun, startRun, statusRun } from '../lib/runtime/service.js';
+import { abortRun, configAction, recordReceipt, resumeRun, startRun, statusRun } from '../lib/runtime/service.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { existsSync, readFileSync } from 'node:fs';
-import { acquireRunLock, releaseRunLock } from '../lib/runtime/lock.js';
+import { acquireRunLock, releaseRunLock, withDirLock } from '../lib/runtime/lock.js';
 import { currentTreeSha } from '../lib/runtime/git.js';
 import { archiveRun } from '../lib/runtime/history.js';
 import { bindCodexDispatch } from './codex-native-test-helper.js';
@@ -66,6 +66,133 @@ function startInput(overrides = {}) {
   };
 }
 
+function boundedInitialTestPath(index, bytes) {
+  const prefix = `tests/${index}/`;
+  const suffix = '.test.js';
+  const bodyBytes = bytes - Buffer.byteLength(prefix + suffix, 'utf8');
+  return `${prefix}${bodyBytes % 2 === 0 ? '' : 'x'}${'é'.repeat(Math.floor(bodyBytes / 2))}${suffix}`;
+}
+
+function initialTestPathsAt4096Bytes(extraBytes = 0) {
+  const paths = [
+    ...Array.from({ length: 7 }, (_, index) => boundedInitialTestPath(index, 511)),
+    boundedInitialTestPath(7, 494 + extraBytes),
+  ];
+  expect(Buffer.byteLength(JSON.stringify(paths), 'utf8')).toBe(4_096 + extraBytes);
+  return paths;
+}
+
+async function refusedStart(dir, input) {
+  const outcome = await startRun(dir, input).then(
+    (value) => ({ value, error: null }),
+    (error) => ({ value: null, error }),
+  );
+  const message = outcome.error?.message ?? outcome.value?.errors?.join(' ') ?? '';
+  return { ...outcome, message };
+}
+
+async function shippingHarness({
+  remotes = ['git@github.com:AAWWCC/ape.git'],
+  remoteTree = 'f'.repeat(40),
+  gh = {},
+} = {}) {
+  vi.resetModules();
+  const events = [];
+  let remoteReads = 0;
+  const ghRouteCalls = new Map();
+  const runGit = vi.fn(async (_dir, args) => {
+    if (args[0] === 'remote' && args[1] === 'get-url') {
+      const remote = remotes[Math.min(remoteReads, remotes.length - 1)];
+      remoteReads += 1;
+      events.push({ kind: 'origin', remote });
+      return remote;
+    }
+    events.push({ kind: 'git', args: [...args] });
+    if (args[0] === 'branch' && args[1] === '--show-current') return 'ape/phase-public';
+    if (args[0] === 'ls-files') return 'src/value.js\0';
+    if (args[0] === 'ls-tree') return 'src/value.js\0';
+    if (args[0] === 'diff') return 'src/value.js';
+    if (args[0] === 'show-ref') return '';
+    if (args[0] === 'rev-parse' && String(args[1]).includes('origin/main') &&
+      String(args[1]).endsWith('^{tree}')) return remoteTree;
+    if (args[0] === 'rev-parse') return 'c'.repeat(40);
+    return '';
+  });
+  const spawnWithTimeout = vi.fn(async (command, args) => {
+    events.push({ kind: 'gh', command, args: [...args] });
+    const route = args[1];
+    const configured = gh[route] ?? (
+      route === 'view'
+        ? { exit_code: 1, combined: 'no pull request found\n' }
+        : route === 'create'
+          ? { exit_code: 0, combined: 'https://github.com/AAWWCC/ape/pull/7\n' }
+          : { exit_code: 0, combined: 'passed\n' }
+    );
+    const callIndex = ghRouteCalls.get(route) ?? 0;
+    ghRouteCalls.set(route, callIndex + 1);
+    const response = Array.isArray(configured)
+      ? configured[Math.min(callIndex, configured.length - 1)]
+      : configured;
+    return {
+      spawn_error: null,
+      timed_out: false,
+      ...response,
+    };
+  });
+  const currentTreeShaMock = vi.fn(async (_dir, ref = 'HEAD') =>
+    String(ref).includes('origin/main') ? remoteTree : 'f'.repeat(40));
+  const remoteBranchTipMock = vi.fn(async () => 'c'.repeat(40));
+
+  vi.doMock('../lib/runtime/git.js', () => ({
+    currentTreeSha: currentTreeShaMock,
+    remoteBranchTip: remoteBranchTipMock,
+    runGit,
+    workingTreeStatus: vi.fn(async () => ''),
+  }));
+  vi.doMock('../lib/runtime/spawn.js', () => ({
+    spawnDetached: vi.fn(),
+    spawnWithTimeout,
+  }));
+  const shipping = await import('../lib/runtime/github-shipping.js');
+  vi.doUnmock('../lib/runtime/git.js');
+  vi.doUnmock('../lib/runtime/spawn.js');
+  return { ...shipping, events, runGit, spawnWithTimeout };
+}
+
+function shippingState(overrides = {}) {
+  return {
+    run_id: 'run-shipping-remediation',
+    objective: 'Ship only the attested public APE tree',
+    mode: 'phase',
+    lane: 'full',
+    branch: 'ape/phase-public',
+    base_branch: 'main',
+    auto_merge_authorized: true,
+    ship_requested: true,
+    created_at: '2026-09-03T08:00:00.000Z',
+    receipts: [{ changed_files: ['src/value.js'] }],
+    gates: { passed: true, tree_sha: 'f'.repeat(40) },
+    ...overrides,
+  };
+}
+
+function shippingWatchState(overrides = {}) {
+  return shippingState({
+    shipping_watch: {
+      provider: 'github',
+      pr_url: 'https://github.com/AAWWCC/ape/pull/7',
+      branch: 'ape/phase-public',
+      base: 'main',
+      head_oid: 'c'.repeat(40),
+      created_at: '2026-09-03T08:00:00.000Z',
+      last_poll_at: null,
+      poll_count: 0,
+      last_checks_summary: null,
+    },
+    ...overrides,
+  });
+}
+
 function stageReceipt(ticket, receipt_capability, overrides = {}) {
   return {
     ticket_id: ticket.ticket_id,
@@ -109,6 +236,38 @@ describe('APE v2 start-time working-tree hygiene', () => {
     const dir = await project();
     const started = await startRun(dir, startInput());
     expect(started.ok).toBe(true);
+  });
+
+  it('bootstraps a clean unborn repository with a root commit before creating the APE run branch', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'ape-start-unborn-'));
+    cleanups.push(dir);
+    git(dir, 'init', '-q', '-b', 'main');
+    git(dir, 'config', 'user.email', 'ape@example.test');
+    git(dir, 'config', 'user.name', 'APE Test');
+    const initialized = await configAction(dir, 'init', {
+      apply: true,
+      behavioral: true,
+      test_paths: ['tests/value.test.js'],
+    });
+    expect(initialized.init.applied_keys).toEqual([
+      'test_commands.targeted_template',
+      'test_commands.full',
+    ]);
+
+    const started = await startRun(dir, startInput({
+      host: 'claude',
+      binding_protocol: 'native-v1',
+    }));
+
+    expect(started.ok).toBe(true);
+    expect(started.run.base_branch).toBe('main');
+    expect(started.run.base_commit_sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(git(dir, 'rev-parse', 'refs/heads/main')).toBe(started.run.base_commit_sha);
+    expect(git(dir, 'show', '-s', '--format=%s', started.run.base_commit_sha))
+      .toBe('Initialize repository for APE');
+    expect(git(dir, 'rev-list', '--parents', '-n', '1', started.run.base_commit_sha).split(' '))
+      .toHaveLength(1);
+    expect(git(dir, 'branch', '--show-current')).toBe(started.run.branch);
   });
 
   it('mode land still starts from the dirty tree it exists to gate', async () => {
@@ -274,24 +433,16 @@ describe('APE v2 start-time working-tree hygiene', () => {
     expect(await currentTreeSha(dir)).toBe(blocked.tree_sha);
   });
 
-  it('requires explicit per-run authorization when automatic merging is enabled', async () => {
+  it('derives automatic shipping authority from the explicit APE invocation and repository config', async () => {
     const dir = await project();
     await atomicWriteJson(runtimePaths(dir).config, {
       shipping: { auto_merge: true, provider: 'github', required_remote_checks: false },
       test_commands: { full: 'node -e "process.exit(0)"', targeted: 'node -e "process.exit(0)"' },
     });
 
-    await expect(startRun(dir, startInput({
-      host: 'claude',
-      binding_protocol: 'native-v1',
-    }))).rejects.toThrow(/auto_merge_authorized: true/);
-    expect((await statusRun(dir)).active).toBe(false);
-    expect(git(dir, 'branch', '--list', 'ape/*')).toBe('');
-
     const started = await startRun(dir, startInput({
       host: 'claude',
       binding_protocol: 'native-v1',
-      auto_merge_authorized: true,
     }));
     expect(started.ok).toBe(true);
     expect(started.run.auto_merge_authorized).toBe(true);
@@ -326,7 +477,6 @@ describe('APE v2 start-time working-tree hygiene', () => {
     await expect(startRun(dir, startInput({
       host: 'claude',
       binding_protocol: 'native-v1',
-      auto_merge_authorized: true,
     }))).rejects.toThrow(/origin\/main is stale.*git fetch origin main/);
 
     expect((await statusRun(dir)).active).toBe(false);
@@ -496,6 +646,41 @@ function apeBranches(dir) {
 // dying; (2) a new ape/* run branches off a leftover ape/* checkout's tip, so
 // the leftover's unmerged commits become the new run's attested baseline.
 describe('APE v2 start-time git/lock hygiene (baseline integrity)', () => {
+  it('does not accept an untrusted retiring process record as proof that the receipt-lock owner died', async () => {
+    const dir = await project();
+    const lockPath = runtimePaths(dir).receiptLock;
+    const ownerToken = 'forged-retiring-owner';
+    await mkdir(lockPath, { recursive: true });
+    await writeFile(path.join(lockPath, 'owner'), ownerToken);
+    await writeFile(path.join(lockPath, 'process'), `${JSON.stringify({
+      version: 1,
+      token: ownerToken,
+      pid: process.pid,
+      host: hostname(),
+      state: 'retiring',
+    })}\n`);
+    const stale = new Date(Date.now() - 60_000);
+    await utimes(lockPath, stale, stale);
+    let rivalEntered = false;
+
+    const attempted = await withDirLock(lockPath, async () => {
+      rivalEntered = true;
+    }, {
+      staleMs: 5,
+      heartbeatMs: 60_000,
+      busyMs: 50,
+      busyMessage: 'receipt effect lock owner is still authoritative',
+      serializeLocal: false,
+    }).then(
+      (value) => ({ value, error: null }),
+      (error) => ({ value: null, error }),
+    );
+
+    expect(rivalEntered).toBe(false);
+    expect(attempted.error?.message).toMatch(/authoritative|busy|owner|process/i);
+    expect(await readFile(path.join(lockPath, 'owner'), 'utf8')).toBe(ownerToken);
+  });
+
   it('makes no git side effect when the run lock is already held', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
@@ -588,5 +773,272 @@ describe('APE v2 start-time git/lock hygiene (baseline integrity)', () => {
       .rejects.toThrow(/requires the finished diff to descend from the resolved default branch tip/);
     expect(apeBranches(dir)).toEqual([]);
     expect(git(dir, 'branch', '--show-current')).toBe('feature/unrelated');
+  });
+});
+
+describe('APE v2 canonical initial test-path admission', () => {
+  it('admits the exact 64-item and 4096-byte boundaries without rewriting order or bytes', async () => {
+    const itemDir = await project('ape-start-path-items-');
+    const itemBoundary = Array.from(
+      { length: 64 },
+      (_, index) => `tests/generated-${String(index).padStart(2, '0')}.test.js`,
+    );
+    const itemStarted = await startRun(itemDir, startInput({ test_paths: itemBoundary }));
+    expect(itemStarted.ok).toBe(true);
+    expect(itemStarted.run.test_paths).toEqual(itemBoundary);
+
+    const byteDir = await project('ape-start-path-bytes-');
+    const byteBoundary = initialTestPathsAt4096Bytes();
+    const byteStarted = await startRun(byteDir, startInput({ test_paths: byteBoundary }));
+    expect(byteStarted.ok).toBe(true);
+    expect(byteStarted.run.test_paths).toEqual(byteBoundary);
+  });
+
+  it.each([
+    [
+      '65 canonical items',
+      Array.from(
+        { length: 65 },
+        (_, index) => `tests/generated-${String(index).padStart(2, '0')}.test.js`,
+      ),
+      /64.*test_paths|test_paths.*64/i,
+    ],
+    [
+      '4097 serialized UTF-8 bytes',
+      initialTestPathsAt4096Bytes(1),
+      /4096.*test_paths|test_paths.*4096/i,
+    ],
+    [
+      'a canonical alias duplicate',
+      ['tests/value.test.js', 'tests/./value.test.js'],
+      /canonical|duplicate|unique/i,
+    ],
+    [
+      'an absolute path outside the governed project',
+      ['/tmp/ape-outside.test.js'],
+      /canonical|contained|project.relative|outside/i,
+    ],
+    [
+      'a parent-relative path outside the governed project',
+      ['../outside.test.js'],
+      /canonical|contained|project.relative|outside/i,
+    ],
+    [
+      'a reserved runtime path',
+      ['.ape/runtime/forged.test.js'],
+      /canonical|reserved|\.ape|runtime/i,
+    ],
+    [
+      'an option-like test-runner argument',
+      ['--runInBand'],
+      /canonical|option|project.relative|test.path/i,
+    ],
+    [
+      'the project root rather than a test path',
+      ['.'],
+      /canonical|project.relative|root|test.path/i,
+    ],
+    [
+      'a Windows drive-relative path',
+      ['C:relative.test.js'],
+      /canonical|drive|windows|project.relative|contained/i,
+    ],
+    [
+      'a Windows UNC path',
+      [String.raw`\\server\share\value.test.js`],
+      /canonical|UNC|windows|project.relative|contained/i,
+    ],
+    [
+      'a Windows device path',
+      [String.raw`\\?\C:\tests\value.test.js`],
+      /canonical|device|windows|project.relative|contained/i,
+    ],
+    [
+      'a Windows alternate-data-stream path',
+      ['tests/value.test.js:payload'],
+      /canonical|alternate.data|stream|windows|project.relative/i,
+    ],
+    [
+      'a case-folded Windows alias of the reserved runtime directory',
+      ['.APE/runtime/forged.test.js'],
+      /canonical|reserved|\.ape|runtime/i,
+    ],
+    [
+      'a control-character path',
+      [`tests/value${String.fromCharCode(1)}.test.js`],
+      /control|canonical|project.relative/i,
+    ],
+  ])('rejects %s before creating state, a lock, or a branch', async (_label, testPaths, error) => {
+    const dir = await project('ape-start-path-reject-');
+    const branchBefore = git(dir, 'branch', '--show-current');
+    const headBefore = git(dir, 'rev-parse', 'HEAD');
+    const attempted = await refusedStart(dir, startInput({ test_paths: testPaths }));
+    const paths = runtimePaths(dir);
+
+    expect(attempted.value?.ok).not.toBe(true);
+    expect(attempted.message).toMatch(error);
+    expect(existsSync(paths.active)).toBe(false);
+    expect(existsSync(paths.lock)).toBe(false);
+    expect(existsSync(paths.receiptLock)).toBe(false);
+    expect(existsSync(paths.tickets)).toBe(false);
+    expect(existsSync(paths.contracts)).toBe(false);
+    expect((await statusRun(dir)).active).toBe(false);
+    expect(git(dir, 'branch', '--show-current')).toBe(branchBefore);
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(headBefore);
+    expect(git(dir, 'branch', '--list', 'ape/*')).toBe('');
+  });
+});
+
+describe('APE v2 public-origin and frozen auto-merge authority', () => {
+  const config = {
+    shipping: {
+      auto_merge: true,
+      provider: 'github',
+      required_remote_checks: false,
+    },
+  };
+
+  it('rejects a foreign github.com origin before the first Git or GitHub mutation', async () => {
+    const harness = await shippingHarness({
+      remotes: ['https://github.com/attacker/ape.git'],
+    });
+
+    const outcome = await harness.autoMergeGithub('/tmp/ape-public-origin', shippingState(), config)
+      .then((value) => ({ value, error: null }), (error) => ({ value: null, error }));
+
+    expect(outcome.value).toBeNull();
+    expect(outcome.error?.message).toMatch(/AAWWCC\/ape|public origin|authorized origin/i);
+    expect(harness.events.some((entry) =>
+      entry.kind === 'git' && ['add', 'commit', 'push'].includes(entry.args[0]))).toBe(false);
+    expect(harness.events.some((entry) =>
+      entry.kind === 'gh' && ['create', 'merge'].includes(entry.args[1]))).toBe(false);
+  });
+
+  it('binds every remote mutation to one immutable public target', async () => {
+    const harness = await shippingHarness();
+
+    const result = await harness.autoMergeGithub('/tmp/ape-public-origin', shippingState(), config);
+    expect(result.provider).toBe('github');
+
+    expect(harness.events.filter((entry) => entry.kind === 'origin')).toEqual([{
+      kind: 'origin',
+      remote: 'git@github.com:AAWWCC/ape.git',
+    }]);
+    expect(harness.events.find((entry) =>
+      entry.kind === 'git' && entry.args[0] === 'push')?.args).toEqual([
+      'push',
+      'git@github.com:AAWWCC/ape.git',
+      'HEAD:refs/heads/ape/phase-public',
+    ]);
+    for (const entry of harness.events.filter((candidate) => candidate.kind === 'gh')) {
+      expect(entry.args.slice(-2)).toEqual(['--repo', 'AAWWCC/ape']);
+    }
+    expect(harness.events.find((entry) =>
+      entry.kind === 'gh' && entry.args[1] === 'merge')?.args)
+      .toContain('https://github.com/AAWWCC/ape/pull/7');
+  });
+
+  it('cannot be retargeted when origin changes after entry but before staging', async () => {
+    const harness = await shippingHarness({
+      remotes: [
+        'git@github.com:AAWWCC/ape.git',
+        'git@github.com:attacker/ape.git',
+      ],
+    });
+
+    const result = await harness.autoMergeGithub(
+      '/tmp/ape-public-origin',
+      shippingState(),
+      config,
+    );
+
+    expect(result.provider).toBe('github');
+    expect(harness.events.filter((entry) => entry.kind === 'origin')).toHaveLength(1);
+    expect(JSON.stringify(harness.events)).not.toContain('attacker/ape');
+    expect(harness.events.find((entry) =>
+      entry.kind === 'git' && entry.args[0] === 'push')?.args[1])
+      .toBe('git@github.com:AAWWCC/ape.git');
+  });
+
+  it('pins poll, merge, and auto-merge commands to the persisted PR and public repository', async () => {
+    const harness = await shippingHarness({
+      remotes: [
+        'git@github.com:AAWWCC/ape.git',
+        'git@github.com:attacker/ape.git',
+      ],
+      gh: {
+        checks: { exit_code: 0, combined: 'passed\n' },
+        view: {
+          exit_code: 0,
+          combined: `OPEN https://github.com/AAWWCC/ape/pull/7 - ${'c'.repeat(40)}\n`,
+        },
+        merge: [
+          { exit_code: 1, combined: 'branch policy prohibits the merge; add --auto\n' },
+          { exit_code: 0, combined: 'auto-merge enabled\n' },
+        ],
+      },
+    });
+
+    const result = await harness.pollRemoteChecksAndMerge(
+      '/tmp/ape-public-origin',
+      shippingWatchState(),
+      config,
+    );
+
+    expect(result.pending?.reason).toBe('awaiting auto-merge');
+    expect(harness.events.filter((entry) => entry.kind === 'origin')).toHaveLength(1);
+    expect(JSON.stringify(harness.events)).not.toContain('attacker/ape');
+    for (const entry of harness.events.filter((candidate) => candidate.kind === 'gh')) {
+      expect(entry.args).toContain('https://github.com/AAWWCC/ape/pull/7');
+      expect(entry.args.slice(-2)).toEqual(['--repo', 'AAWWCC/ape']);
+    }
+  });
+
+  it.each([
+    ['frozen auto-merge consent', { auto_merge_authorized: false, ship_requested: true }],
+    ['the audited SHIP marker', { auto_merge_authorized: true, ship_requested: false }],
+  ])('does not reach the resumed merge sink without %s', async (_label, overrides) => {
+    const harness = await shippingHarness({
+      gh: {
+        checks: { exit_code: 0, combined: 'passed\n' },
+        view: {
+          exit_code: 0,
+          combined: `OPEN https://github.com/AAWWCC/ape/pull/7 - ${'c'.repeat(40)}\n`,
+        },
+      },
+    });
+    const outcome = await harness.pollRemoteChecksAndMerge(
+      '/tmp/ape-public-origin',
+      shippingWatchState(overrides),
+      config,
+    ).then((value) => ({ value, error: null }), (error) => ({ value: null, error }));
+    const message = outcome.error?.message ?? outcome.value?.failed ?? '';
+
+    expect(message).toMatch(/auto.?merge|authoriz|SHIP|consent/i);
+    expect(harness.events.some((entry) =>
+      entry.kind === 'gh' && entry.args[1] === 'merge')).toBe(false);
+  });
+
+  it('does not report a merge until public origin/main has the attested tree', async () => {
+    const harness = await shippingHarness({
+      remoteTree: 'd'.repeat(40),
+      gh: {
+        checks: { exit_code: 0, combined: 'passed\n' },
+        view: {
+          exit_code: 0,
+          combined: `MERGED https://github.com/AAWWCC/ape/pull/7 2026-09-03T09:00:00Z ${'c'.repeat(40)}\n`,
+        },
+      },
+    });
+
+    const outcome = await harness.pollRemoteChecksAndMerge(
+      '/tmp/ape-public-origin',
+      shippingWatchState(),
+      config,
+    ).then((value) => ({ value, error: null }), (error) => ({ value: null, error }));
+    const message = outcome.error?.message ?? outcome.value?.failed ?? '';
+
+    expect(outcome.value?.merged).toBeUndefined();
+    expect(message).toMatch(/origin\/main|attested tree|tree.*drift|merged.*tree/i);
   });
 });

@@ -82,11 +82,32 @@ schedulable preflight.
   `failure_kind: command-shape`, the runtime still applies its ordinary single stage retry and puts a
   compact copy of the exact denied command in `prior_attempts`; the replacement can correct syntax
   without gaining new authority.
-- `failure_kind: capability` means the immutable ticket truly lacks required authority and blocks
-  immediately with exact additive claims and bounded recovery guidance. Current hosts provide no
-  authenticated human provenance for structured successor starts, so recovery requires an explicit,
-  reason-audited override reset followed by an ordinary fresh run. Eligible guidance is derived from
-  the durable terminal state and remains available on full and compact status reads.
+- `failure_kind: capability` means the immutable ticket truly lacks required authority. For a
+  receipt-contract-v1 ticket, one runtime-derived capability successor may continue the same logical
+  stage without consuming a product retry. The successor keeps validation/worker usage monotonic
+  under the 3-per-worker/2-workers-per-ticket ceilings and accepts only canonical additive scope.
+  Test-path unions are unique project-relative names capped at 64 items and 4096 serialized UTF-8
+  JSON bytes. The exact successor binding is checked before every sink, then receipt, ticket,
+  run-contract/schema, transaction, and next state are published as one immutable hash-manifested
+  generation under the receipt lock. The exact regular-file manifest binds raw bytes, sizes, and
+  filesystem identities, and an append-only content-addressed selector-edge chain is the sole
+  recovery head; a fork or substituted member fails closed. Invalid selector source slots remain
+  in place as retained semantic evidence whose collision-safe record binds pathname, device/inode
+  identity, raw bytes and byte hash, and lineage. A changed or rebound pathname is rescanned,
+  while the selector/head chain stays the authoritative source of truth. Replay reuses the uniquely reachable
+  generation, repairs compatibility projections from it, and returns an explicit
+  `capability_recovery` dispatch. Legacy or malformed recovery that cannot prove the complete
+  runtime provenance remains blocked and requires the audited reset/fresh-run path.
+  Recovery authority is frozen in the immutable run contract, and an adopted-receipt replay repeats
+  full prepared-runtime validation. A selectorless validated legacy generation advances from `N`
+  to immutable `N+1`; a replay of a reachable ancestor is idempotent and never rolls the selector
+  head or projections backward. Member and cumulative bytes plus directory entries are bounded
+  before allocation, while selector mutation and semantic-evidence recording require an immediately
+  revalidated token-and-filesystem-identity lease and a non-clobbering retained-slot record. Every
+  later compatibility projection, active-state, receipt-binding, and dispatch sink is wrapped by
+  one lease mutation primitive with checks on both sides. The process-bound owner cannot be stolen
+  by a cooperating contender while its callback is live; a lease failure prevents every successor
+  sink.
 - `failure_kind: test-contradiction` also blocks immediately. The marker is an implementer claim,
   not a runtime finding. Recovery is the normal audited path: ABORT the run or OVERRIDE reset with
   a reason, then correct the work outside that blocked run. For a worked blocked-run instance, see
@@ -142,4 +163,14 @@ retained in terminal checkout metadata for `ape_run resume` and does not falsify
 With `shipping.required_remote_checks: false`, a project explicitly declares that it has no CI and
 can merge in-call. With `shipping.auto_merge: false`, green work is held at merge. The audited
 `ship` action re-runs every gate against the current tree and merges only on green; one `ship`
-authorization covers one evaluation.
+authorization covers one evaluation. Immediately before any Git or GitHub operation, the shipping
+sink rechecks frozen run authority: a new explicit APE invocation with configured auto-merge derives
+`auto_merge_authorized: true`, while an audited one-shot `ship_requested` marker authorizes a held
+run. This removes a second approval prompt without allowing mutable configuration to authorize a
+legacy, recovered, or already-started run.
+
+For marker-bearing public runs, shipping resolves `origin` once at entry and freezes both the exact
+verified public remote URL and `AAWWCC/ape`. Git network operations receive the frozen URL rather
+than the mutable remote name, and every `gh` operation receives `--repo AAWWCC/ape` plus an explicit
+branch or PR URL. Changing local remote configuration after authorization therefore cannot retarget
+push, PR creation, checks, merge, auto-merge, reconciliation, or merged-tree verification.

@@ -89,9 +89,20 @@ export function runtimePaths(projectDir) {
     contracts: path.join(runtime, 'contracts'),
     receipts: path.join(runtime, 'receipts'),
     receiptTransactions: path.join(runtime, 'receipt-transactions'),
+    // Immutable, hash-bound capability-recovery generations. A complete
+    // candidate is staged beside this directory and published by one rename;
+    // active.json adopts it only after its manifest and every member verify.
+    recoveryGenerations: path.join(runtime, 'recovery-generations'),
+    recoverySelectors: path.join(runtime, 'recovery-selectors'),
+    recoveryQuarantine: path.join(runtime, 'recovery-quarantine'),
+    recoverySelectorQuarantine: path.join(runtime, 'recovery-selector-quarantine'),
     receiptLock: path.join(runtime, 'receipt-effects.lock'),
     dispatchIntents: path.join(runtime, 'dispatch-intents'),
     dispatchLock: path.join(runtime, 'dispatch-intents.lock'),
+    // Project-local secret used only to re-derive a prepared native launch
+    // capability after response/process loss. Intent records persist a random
+    // public seed and one-way capability hash, never the bearer itself.
+    dispatchLaunchKey: path.join(runtime, 'dispatch-launch.key'),
     // Pre-run native-binding canary. This deliberately does not live under
     // dispatch-intents: it is infrastructure evidence, never a StageTicket,
     // run attempt, or receipt authority.
