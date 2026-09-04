@@ -78,6 +78,11 @@ metrics calls do not mutate that cache or send telemetry anywhere.
   frozen as a required capability. Do not set `operator_authorized: true` until the operator has
   approved the exact literal command; repository tree reconciliation does not make arbitrary code
   execution intrinsically safe.
+- `ape_config init` normally grounds commands in existing manifests. For a metadata-only blank
+  repository, pass the prospective `behavioral` and `test_paths` values; an unambiguous JS/TS or
+  Python family yields dependency-free targeted and full commands. The parent auto-applies a
+  complete missing-slot proposal during an explicit run. A clean unborn Git repository is given an
+  empty root commit under the run lock before its isolated APE branch is created.
 - `record` accepts an agent receipt draft. The runtime adds and verifies identity, tree/test
   evidence, hashes, and the next transition. New-contract tickets
   also require a matching `ape_validate_receipt` attestation for the normalized exact draft.
@@ -165,11 +170,13 @@ duplicate physical agent.
 to `ape_run next`, which is the action that advances those states. A gate-blocked run points to
 `regate`; a green auto-merge hold points to `ship`.
 
-A public/native `start` also treats shipping authority as run-scoped. If
-`shipping.auto_merge` is true, the caller must obtain explicit operator authorization for that run
-and send `auto_merge_authorized: true`; persistent configuration alone is not consent. Authorized
-starts compare the local remote-tracking base with the server-advertised branch tip before creating
-a run branch, and shipping repeats that check before its first Git mutation.
+A public/native `start` treats the explicit APE invocation as authority for the complete
+scheduler-owned run. When `shipping.auto_merge` is true, the runtime derives and freezes
+`auto_merge_authorized: true`; callers normally omit that backward-compatible field and do not ask
+for separate merge consent. Between start and a terminal result, callers advance stages, reviews,
+remediation, gates, waits, and configured shipping without asking the operator to say continue.
+Authorized starts compare the local remote-tracking base with the server-advertised branch tip
+before creating a run branch, and shipping repeats that check before its first Git mutation.
 
 ### Recovery actions
 
@@ -206,6 +213,12 @@ Manifest wiring is only a static package check; it does not prove that the curre
 delivers lifecycle events. Missing, expired, replayed, or observed-but-unbound probes fail as
 infrastructure without creating a run or consuming a stage attempt. Claude uses its existing native
 binding path and does not run this preflight.
+
+For ordinary stage workers, binding injects the immutable ticket reference, exact receipt envelope,
+and a role-specific excerpt of its `output_schema`. `SubagentStop` refuses an absent or malformed
+final receipt and returns field-level corrections to the same worker. The worker must still attest
+the exact draft with `ape_validate_receipt`; the hook scaffold prevents avoidable shape mistakes but
+does not weaken independent validation.
 
 ### Behavioral plan preflight evidence
 

@@ -1,5 +1,15 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { reduceRun } from '../lib/runtime/scheduler.js';
+import { SCHEMA_VERSION } from '../lib/runtime/constants.js';
+import {
+  finalizeReceipt,
+  finalizeTicket,
+  validateReceipt,
+  validateTicket,
+} from '../lib/runtime/schemas.js';
 
 // F1/F25: drive the pure reducer through the full remediation lifecycle the way
 // service.applyActions would, asserting the run converges instead of looping or
@@ -306,5 +316,101 @@ describe('APE v2 phantom verify stage removal (F27)', () => {
     const state = baseRun({ stage: 'verify' });
     const actions = reduceRun(state, { type: 'NEXT', at: new Date().toISOString() });
     expect(actions.map((action) => action.type)).toEqual(['status']);
+  });
+});
+
+describe('APE v2 legacy receipt-contract byte stability', () => {
+  it('validates an already-materialized legacy ticket and receipt without adding recovery defaults', () => {
+    const ticket = finalizeTicket({
+      schema_version: SCHEMA_VERSION,
+      ticket_id: 'ticket-legacy-byte-stable',
+      run_id: 'run-legacy-byte-stable',
+      stage_id: 'build',
+      parallel_group: null,
+      role: 'implementer',
+      objective: 'Preserve an already-valid legacy artifact byte for byte',
+      claimed_paths: ['src/value.js'],
+      test_paths: ['tests/value.test.js'],
+      model_tier: 'balanced',
+      model: { model: 'legacy-model' },
+      deadline_at: '2026-09-03T04:30:00.000Z',
+      output_schema: {},
+      required_checks: ['targeted-tests'],
+      parent_hash: null,
+      base_tree_sha: 'a'.repeat(40),
+      attempt: 1,
+      writable: true,
+      issued_at: '2026-09-03T04:00:00.000Z',
+    });
+    const receipt = finalizeReceipt({
+      schema_version: SCHEMA_VERSION,
+      receipt_id: 'receipt-legacy-byte-stable',
+      run_id: ticket.run_id,
+      ticket_id: ticket.ticket_id,
+      ticket_hash: ticket.ticket_hash,
+      agent: {
+        host: 'codex',
+        role: ticket.role,
+        identity: 'legacy-worker',
+        model: null,
+      },
+      status: 'passed',
+      base_tree_sha: ticket.base_tree_sha,
+      head_tree_sha: 'b'.repeat(40),
+      changed_files: ['src/value.js'],
+      tests: [{ command: 'npm test', passed: true, exit_code: 0, duration_ms: 1 }],
+      findings: [],
+      evidence: { verdict: 'pass' },
+      timing: {
+        started_at: ticket.issued_at,
+        completed_at: '2026-09-03T04:00:01.000Z',
+        duration_ms: 1_000,
+      },
+      previous_receipt_hash: null,
+    });
+    const ticketBytes = JSON.stringify(ticket);
+    const receiptBytes = JSON.stringify(receipt);
+
+    const ticketValidation = validateTicket(JSON.parse(ticketBytes));
+    const receiptValidation = validateReceipt(JSON.parse(receiptBytes));
+    expect(ticketValidation).toMatchObject({ valid: true });
+    expect(receiptValidation).toMatchObject({ valid: true });
+    expect(JSON.stringify(ticketValidation.value)).toBe(ticketBytes);
+    expect(JSON.stringify(receiptValidation.value)).toBe(receiptBytes);
+
+    for (const artifact of [ticketValidation.value, receiptValidation.value]) {
+      expect(artifact).not.toHaveProperty('recovery_generation');
+      expect(artifact).not.toHaveProperty('recovery_lineage');
+      expect(artifact).not.toHaveProperty('validation_submissions');
+      expect(artifact).not.toHaveProperty('physical_workers');
+    }
+    expect(ticketValidation.value).not.toHaveProperty('receipt_contract_version');
+    expect(ticketValidation.value).not.toHaveProperty('capability_manifest');
+  });
+});
+
+describe('APE v2 retained-selector public documentation', () => {
+  it('documents invalid selector slots as retained semantic evidence rather than moved quarantine state', () => {
+    const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+    const documents = [
+      'docs/invariants.md',
+      'docs/operational-readiness.md',
+      'docs/pipeline.md',
+    ].map((relative) => readFileSync(path.join(root, relative), 'utf8'));
+    const publicContract = documents.join('\n');
+
+    expect(publicContract).toMatch(/semantic evidence/i);
+    expect(publicContract).toMatch(/invalid selector[\s\S]{0,800}(?:retained|remain(?:s)? in place)/i);
+    expect(publicContract).toMatch(/(?:pathname|slot).*?(?:identity|device|inode)/is);
+    expect(publicContract).toMatch(/raw bytes|byte hash/i);
+    expect(publicContract).toMatch(/lineage/i);
+    expect(publicContract).toMatch(/(?:rebound|changed).*?(?:rescan|scan again)/is);
+    expect(publicContract).toMatch(/(?:selector|head).*?(?:source of truth|authoritative)/is);
+    expect(publicContract).toMatch(/collision|non-clobber/i);
+    for (const document of documents) {
+      expect(document).not.toMatch(
+        /\bmove(?:d|s)?\b[^.\n]{0,120}\b(?:selector|slot|identity)\b|\b(?:selector|slot|identity)\b[^.\n]{0,120}\bmove(?:d|s)?\b/i,
+      );
+    }
   });
 });

@@ -271,9 +271,17 @@ describe('APE v2 dispatch binding resume across the launch_expires_at boundary',
     });
     expect(subagentStartOutcome(resumed)).toBe('allow');
     // Re-admission mints no fresh capability (the one already injected at the
-    // original bind still stands), so the wire response is the documented
-    // bare-allow shape (formatHookResponse) — never a top-level `reason`.
-    expect(resumed).toEqual({});
+    // original bind still stands), but it repeats the hook-enforced receipt
+    // scaffold so a resumed worker cannot lose its artifact contract. Claude
+    // has no cleartext capability recovery seam, so the context must not
+    // synthesize a null or replacement bearer.
+    const context = resumed?.hookSpecificOutput?.additionalContext;
+    expect(context).toContain('APE hook-enforced receipt construction (authoritative)');
+    expect(context).toContain('Receipt envelope scaffold');
+    expect(context).toContain(`"ticket_id":"${ticket.ticket_id}"`);
+    expect(context).toContain('"receipt_capability":"$APE_RECEIPT_CAPABILITY"');
+    expect(context).not.toContain('APE_RECEIPT_CAPABILITY=null');
+    expect(resumed).not.toHaveProperty('reason');
 
     // The ticket's own authority is unchanged: the same identity can still act
     // on its claims after being re-admitted post-launch-window.

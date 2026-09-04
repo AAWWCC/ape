@@ -7,9 +7,9 @@ Common actions:
 
 - `get`: return the effective configuration.
 - `set`: validate and store one dotted key.
-- `init`: inspect project manifests and propose grounded test commands/evidence scripts. It may
-  separately propose a managed APE orientation block for the effective project instruction file;
-  config and instruction changes require explicit, separate approval.
+- `init`: inspect project manifests and propose grounded test commands/evidence scripts. On a blank
+  repository, exact prospective JavaScript/TypeScript or Python `test_paths` ground dependency-free
+  bootstrap commands. It may separately propose a managed APE orientation block.
 - `doctor`: check git, state, locks, configuration, bundles, host preconditions, and recognized
   project types. MCP discovery and permissions remain host-owned.
 - `wire` / `unwire`: opt a host statusline in or out.
@@ -85,8 +85,16 @@ in [MCP tools](mcp-tools.md#history-observability-and-metrics).
 ## Test commands
 
 Run `ape_config init` first. It recognizes common JavaScript, Python, Go, Rust, Ruby, Maven,
-Gradle, and `script/test` layouts and proposes only commands grounded in project files. The proposal
-is not applied unless the operator approves it.
+Gradle, and `script/test` layouts and proposes only commands grounded in project files. During an
+explicit APE run, the parent automatically applies a complete proposal that fills missing required
+slots; standalone init remains proposal-only unless called with `apply:true`.
+
+For a repository containing only Git state, APE state, and conventional metadata files, pass the
+prospective run's exact `behavioral` and `test_paths` values. One unambiguous JavaScript/TypeScript
+or Python extension family produces standard-library bootstrap commands (`node --test` or
+`python -m unittest`) without inventing a dependency. Mixed or unsupported test extensions remain
+incomplete because selecting that toolchain would change the requested outcome. A clean unborn Git
+repository receives an empty root commit under the run lock before APE creates its isolated branch.
 
 `init` may also propose a small managed orientation block so future model sessions know to use APE
 through its skills and immutable ticket contracts. APE resolves `AGENTS.override.md` before
@@ -127,7 +135,12 @@ the current tree and merges only on green. A failed proof moves back to the ordi
 reason-audited `roadmap-attest`; no other blocked shape is eligible, and the hold is not satisfying
 without the attestation.
 
-With auto-merge enabled, a protected base that rejects an immediate squash merge can require
+With auto-merge enabled, one explicit APE run invocation authorizes the full scheduler-owned run.
+The runtime derives and freezes the run's shipping bit at start, so callers do not request a second
+merge approval or send the legacy `auto_merge_authorized` field. Changing configuration after start
+cannot grant shipping authority to that run.
+
+A protected base that rejects an immediate squash merge can require
 GitHub's `--auto` path. APE enables it and keeps the run in `shipping` until `next` observes the
 exact pushed head merged. The runtime first honors repository commit signing, then retries only a
 signer/passphrase-specific feature-commit failure with `--no-gpg-sign`; unrelated Git failures still

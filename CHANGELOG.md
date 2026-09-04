@@ -2,9 +2,27 @@
 
 ## Unreleased
 
+## 2.24.10 — 2026-09-04
+
 Windows host-edge marketplace smoke now resolves each installed Codex and Claude package entrypoint
 and launches it directly without npm command shims or a command shell, preserving argv boundaries
 under current Node process-launch behavior.
+
+APE now bootstraps clean unborn repositories before creating isolated run branches and derives
+dependency-free JavaScript/TypeScript or Python test commands from exact prospective test paths.
+Unsupported or mixed test families and nonblank manifestless repositories still fail closed instead
+of guessing project tooling.
+
+Worker dispatches now carry a bounded, role-specific receipt envelope and schema scaffold, and both
+Codex and Claude bindings preserve the validation contract across corrections and resumes. Receipt
+validation, recovery, capability handling, path scope, durable projection, and shipping reconciliation
+were hardened so malformed artifacts are rejected at the boundary without leaking bearer material or
+turning recoverable worker mistakes into repeated run-wide blocks.
+
+An explicit APE invocation now freezes scheduler authority for continuation, remediation, gating, and
+configured auto-merge. The runtime and bundled skills no longer request redundant approval between
+owned stages, while destructive overrides and unconfigured shipping remain explicitly audited.
+Version 2.24.10 invalidates the prior source certification and starts a fresh release cycle.
 
 ## 2.24.9 — 2026-09-01
 

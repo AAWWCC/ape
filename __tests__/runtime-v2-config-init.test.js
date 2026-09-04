@@ -189,6 +189,74 @@ describe('ape v2 config init onboarding', () => {
     expect(existsSync(configFile(dir))).toBe(false);
   });
 
+  it('blank JavaScript repository: derives dependency-free commands from prospective test paths and applies them', async () => {
+    const dir = emptyProject();
+    const input = {
+      behavioral: true,
+      test_paths: ['test/value.test.js'],
+    };
+    const r = initResult(await configAction(dir, 'init', input));
+    expect(r.proposal.proposal_complete).toBe(true);
+    expect(r.proposal.detected_runner).toEqual({
+      family: 'node-test-bootstrap',
+      rationale: 'prospective-blank-repository-test-paths',
+    });
+    expect(r.proposal.blank_repository_bootstrap).toEqual({
+      version: 1,
+      family: 'node-test-bootstrap',
+      evidence: 'prospective-test-path-extensions',
+    });
+    expect(r.proposal.test_commands.targeted_template.value).toBe('node --test {paths}');
+    expect(r.proposal.test_commands.full.value).toBe('node --test');
+    expect(existsSync(configFile(dir))).toBe(false);
+
+    await configAction(dir, 'init', { ...input, apply: true });
+    const config = stored(dir);
+    expect(config.test_commands.targeted_template).toBe('node --test {paths}');
+    expect(config.test_commands.full).toBe('node --test');
+  });
+
+  it('blank Python repository: derives stdlib unittest commands without inventing a dependency', async () => {
+    const dir = emptyProject();
+    const input = {
+      behavioral: true,
+      test_paths: ['tests/test_value.py'],
+    };
+    const r = initResult(await configAction(dir, 'init', input));
+    expect(r.proposal.proposal_complete).toBe(true);
+    expect(r.proposal.detected_runner.family).toBe('python-unittest-bootstrap');
+    expect(r.proposal.test_commands.targeted_template.value).toBe('python -m unittest {paths}');
+    expect(r.proposal.test_commands.full.value).toBe('python -m unittest discover');
+  });
+
+  it('blank repository: refuses to guess across mixed or unsupported prospective test ecosystems', async () => {
+    const dir = emptyProject();
+    for (const test_paths of [
+      ['test/value.test.js', 'tests/test_value.py'],
+      ['tests/value_spec.rb'],
+    ]) {
+      const r = initResult(await configAction(dir, 'init', { behavioral: true, test_paths }));
+      expect(r.proposal.proposal_complete).toBe(false);
+      expect(r.proposal.test_commands).toEqual({});
+      expect(r.proposal.blank_repository_bootstrap).toMatchObject({
+        family: null,
+        blocker: 'unsupported-or-mixed-prospective-test-path-extensions',
+      });
+    }
+  });
+
+  it('nonblank manifest-less project does not use the blank-repository fallback', async () => {
+    const dir = emptyProject();
+    writeFileSync(join(dir, 'app.js'), 'export const value = 1;\n');
+    const r = initResult(await configAction(dir, 'init', {
+      behavioral: true,
+      test_paths: ['test/value.test.js'],
+    }));
+    expect(r.proposal.proposal_complete).toBe(false);
+    expect(r.proposal.test_commands).toEqual({});
+    expect(r.proposal.blank_repository_bootstrap).toBeUndefined();
+  });
+
   // ---- APPLY (configAction(dir, 'init', { apply: true, values? })) ------
 
   it('apply persists the proposal, reflects it through get, and records explicit_keys provenance', async () => {
@@ -260,5 +328,11 @@ describe('ape v2 config init onboarding', () => {
     expect(configTool.inputSchema.properties.action.enum).toContain('init');
     expect(configTool.inputSchema.properties.apply).toBeDefined();
     expect(configTool.inputSchema.properties.values).toBeDefined();
+    expect(configTool.inputSchema.properties.test_paths).toMatchObject({
+      type: 'array',
+      maxItems: 64,
+    });
+    expect(configTool.inputSchema.properties.test_paths.description)
+      .toMatch(/blank repository[\s\S]*JS\/TS or Python/iu);
   });
 });

@@ -67,7 +67,7 @@ const resolveMcpRoot = (explicitDir = null) => resolveGovernedRoot({ explicitDir
 const TOOLS = Object.freeze([
   {
     name: 'ape_run',
-    description: 'Start and advance the deterministic APE runtime. Preview and start require the same complete prospective run facts, including objective and host; only action differs. For a Codex probe, the first call must include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. Codex start is fail-closed until probe, native canary launch, probe-status, and probe-ack prove live child binding; the completed proof is consumed exactly once before Git mutation.',
+    description: 'Start and advance the deterministic APE runtime. One explicit invocation authorizes the complete scheduler-owned run through stages, corrections, replans, gates, waits, and configured automatic shipping; callers must not ask for continue or separate auto-merge consent between those transitions. Preview and start require the same complete prospective run facts, including objective and host; only action differs. For a Codex probe, the first call must include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. Codex start is fail-closed until probe, native canary launch, probe-status, and probe-ack prove live child binding; the completed proof is consumed exactly once before Git mutation.',
     inputSchema: {
       type: 'object',
       required: ['action'],
@@ -147,7 +147,7 @@ const TOOLS = Object.freeze([
         },
         auto_merge_authorized: {
           type: 'boolean',
-          description: 'Required true on each public start when shipping.auto_merge is enabled. Set it only after the operator explicitly authorizes this run to push, open a pull request, and merge; persistent config alone is not consent.',
+          description: 'Backward-compatible explicit override. Normally omit: explicit_invocation plus shipping.auto_merge:true automatically authorizes this run to push, open its pull request, and merge.',
         },
         plan_contract_version: {
           type: 'integer',
@@ -237,7 +237,7 @@ const TOOLS = Object.freeze([
         },
         hooks_trusted: { type: 'boolean', description: 'Required true on the initial Codex probe call after the operator has trusted the installed hooks.' },
         subagents_available: { type: 'boolean', description: 'Required true on the initial Codex probe call after confirming native subagents are available.' },
-        explicit_invocation: { type: 'boolean', description: 'Required true on the initial Codex probe call and start call only after an explicit operator invocation.' },
+        explicit_invocation: { type: 'boolean', description: 'Required true on the initial Codex probe call and start after an explicit operator invocation. It authorizes autonomous scheduler-owned continuation for this objective, including configured auto-merge; it is not repeated between stages.' },
         wait_ms: { type: 'number', description: 'Optional on next: best-effort max ms to server-side wait for a run resting in gating/shipping to resolve in one call; clamped to GATE_NEXT_MAX_WAIT_MS (300000); the receipt lock is released between internal polls; a non-number/<=0/omitted value = one poll (unchanged). A gating run that resolves into required-remote-checks shipping stops at shipping_started; call next again (with wait_ms) to drive shipping to merged.' },
         receipt: { type: 'object' },
         receipt_input_hash: {
@@ -405,7 +405,7 @@ const TOOLS = Object.freeze([
   },
   {
     name: 'ape_config',
-    description: 'Read, update, diagnose, wire the host statusline for, or init (onboard a foreign repo with grounded gate commands) APE runtime configuration.',
+    description: 'Read, update, diagnose, wire the host statusline for, or initialize APE runtime configuration. Init detects existing project runners and can bootstrap a blank repository from exact prospective JavaScript/TypeScript or Python test paths without inventing dependencies.',
     inputSchema: {
       type: 'object',
       required: ['action'],
@@ -423,8 +423,16 @@ const TOOLS = Object.freeze([
         hooks_trusted: { type: 'boolean' },
         subagents_available: { type: 'boolean' },
         explicit_invocation: { type: 'boolean' },
-        behavioral: { type: 'boolean' },
-        test_paths: { type: 'array', items: { type: 'string' } },
+        behavioral: {
+          type: 'boolean',
+          description: 'Doctor/init prospective run fact. On blank-repository init, false disables behavioral runner bootstrap.',
+        },
+        test_paths: {
+          type: 'array',
+          maxItems: 64,
+          items: { type: 'string' },
+          description: 'Doctor/init prospective authored test paths. On a blank repository, one unambiguous JS/TS or Python extension family grounds dependency-free bootstrap commands.',
+        },
         evidence_scripts: {
           type: 'array',
           items: { type: 'string' },
@@ -495,7 +503,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.24.9' };
+    return { name: 'ape', version: '2.24.10' };
   }
 }
 

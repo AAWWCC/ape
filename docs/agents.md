@@ -41,6 +41,12 @@ remain available without APE-specific names, claims, adapters, or provider allow
 operator own discovery and permission decisions. APE still verifies repository changes at stage
 and receipt boundaries, so ordinary filesystem changes must fit `claimed_paths` or `test_paths`.
 
+Every bound worker receives a hook-injected receipt envelope and a role-specific excerpt of the
+immutable ticket `output_schema`. The final response is the receipt object itself. `SubagentStop`
+refuses termination when that draft is absent or malformed and returns bounded field corrections to
+the same worker before the parent can record it; `ape_validate_receipt` independently attests the
+exact corrected draft.
+
 Every canonical and packaged Claude role explicitly grants the receipt validator under both known
 host-qualified names: `mcp__ape__ape_validate_receipt` and
 `mcp__plugin_ape_ape__ape_validate_receipt`. The broad external-MCP wildcard is not treated as proof

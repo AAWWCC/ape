@@ -184,6 +184,44 @@ evidence anchors are provenance rather than semantic assurance identity; equalit
 incomparability, malformed evidence, or the independent two-replan/three-remediation ceilings end in
 the existing audited blocked outcome.
 
+Capability recovery is a receipt-contract continuation, not a product-stage retry. Validation and
+recording derive the same canonical additive test-path union and reject it before mutation if it is
+non-unique, non-project-relative, reserved/option-like, over 64 items, or over 4096 serialized UTF-8
+JSON bytes. A recovery lineage carries validation submissions and physical-worker consumption
+forward monotonically under the three-submissions-per-worker and two-workers-per-ticket ceilings.
+
+An accepted recovery has one runtime-minted UUID successor and one exact prepared binding over its
+schemas, hashes, predecessor, claims, policy, risk/lane, deadlines, capability manifest, run
+contract, ceilings, counters, and provenance. Publication stages all authoritative records in an
+immutable hash-manifested generation and exposes that generation by one same-filesystem rename
+while holding the owner-token receipt lock. Canonical compatibility files land before the atomic
+active-state adoption. A crash or response loss is recovered by validating and reusing that same
+generation; it cannot regenerate the successor or double-charge the lineage. Live locks exclude a
+writer, while stale or corrupt locks are handled by the verified tombstone protocol. Valid legacy
+bytes are not rewritten, and malformed or incompletely bound legacy recovery fails loudly.
+
+The generation manifest enumerates the exact regular-file set and binds raw bytes, sizes, and
+filesystem identities. Its append-only content-addressed selector edge—not mutable `active.json`
+generation metadata—selects the unique recovery head. Invalid selector slots remain in place as
+retained semantic evidence: collision-safe records bind the source pathname, device/inode identity,
+raw bytes and byte hash, and claimed lineage. A changed or rebound pathname is rescanned;
+selector/head semantics remain the authoritative source of truth. Replays reject forks, revalidate
+both sides of publication, and repair compatibility projections only from that exact generation.
+Every post-selector projection, active-state, receipt-binding, and dispatch mutation is enclosed by
+the same token/device/inode lease guard before and after the sink; loss stops all later sinks.
+Process probing treats `EPERM` and unknown errors as alive; a stale active owner is never evicted
+merely because its heartbeat aged, and a cooperating contender cannot retire a live callback's
+generation.
+
+The readiness gate also exercises frozen run-contract authority, full validation on adopted replay,
+selectorless `N` to `N+1` migration, non-head replay monotonicity, pre-allocation member/cumulative
+and directory-entry bounds, lease-token plus lock-directory identity checks at selector mutations,
+and non-clobbering semantic-evidence publication with retained-slot identity verification.
+
+Shipping readiness also exercises immutable target binding: strict runs freeze the verified remote
+URL and canonical `AAWWCC/ape` slug once, use that URL instead of the mutable `origin` name for Git
+network mutations, and pass `--repo AAWWCC/ape` plus an explicit selector to every GitHub command.
+
 ## Recovery development rule
 
 When dispatch, binding, or ticket orchestration is under repair, make the fix through ordinary

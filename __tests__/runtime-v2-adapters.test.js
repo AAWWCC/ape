@@ -9,6 +9,7 @@ import {
   nativeDispatch,
 } from '../lib/runtime/adapters.js';
 import { canonicalJson, sha256 } from '../lib/runtime/canonical.js';
+import { RECEIPT_INPUT_SCHEMA } from '../lib/runtime/receipt-input.js';
 import { evaluateLifecyclePolicy, normalizeLifecycleEvent } from '../lib/runtime/hooks.js';
 import { projectRunResponse, RESPONSE_BUDGET_CHARS } from '../lib/runtime/projection.js';
 import { reduceRun } from '../lib/runtime/scheduler.js';
@@ -27,6 +28,7 @@ const ticket = {
   ticket_id: 'ticket-1',
   ticket_hash: '1'.repeat(64),
   writable: true,
+  output_schema: RECEIPT_INPUT_SCHEMA,
 };
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -224,6 +226,11 @@ describe('APE v2 adapter conformance', () => {
     expect(injected).toMatch(/correction is denied[\s\S]*stage failed[\s\S]*never probe further/iu);
     expect(injected).toContain('APE common contract');
     expect(injected).toContain('APE implementer contract');
+    expect(injected).toContain('APE hook-enforced receipt construction (authoritative)');
+    expect(injected).toContain('Receipt envelope scaffold');
+    expect(injected).toContain('Role-specific output_schema excerpt');
+    expect(injected).toContain('"receipt_capability":"$APE_RECEIPT_CAPABILITY"');
+    expect(injected).toContain('SubagentStop hook refuses termination');
     expect(injected).toContain('Immutable StageTicket reference');
     expect(injected).toContain('"path":".ape/runtime/tickets/ticket-1.json"');
     expect(injected).toContain(`"ticket_hash":"${ticket.ticket_hash}"`);
@@ -231,7 +238,7 @@ describe('APE v2 adapter conformance', () => {
     expect(codex.spawn_args.message).not.toContain(ticket.ticket_id);
     expect(codex.next_control).toBe(CODEX_DISPATCH_NEXT_CONTROL);
     expect(codex.next_control).toBe(
-      'After native spawn returns, call ape_run action "status" with only action and project_dir; never send run_id on status. When active-bound, wait for the worker to validate its exact final draft with ape_validate_receipt and return it unchanged. Record it unchanged. Follow the runtime next_action exactly: continue_same_agent carries exact corrections; redispatch_same_ticket alone authorizes one fresh worker on the same ticket; receipt-contract failures never authorize product remediation, replan, abort, or a successor. After the group is fully recorded, call ape_run action "next".',
+      'After native spawn returns, call ape_run action "status" with only action and project_dir; never send run_id on status. When active-bound, wait for the worker to validate its exact final draft with ape_validate_receipt and return it unchanged. Record it unchanged. Follow the runtime next_action exactly: continue_same_agent carries exact corrections; redispatch_same_ticket alone authorizes one fresh worker on the same ticket; receipt-contract failures never authorize product remediation, replan, abort, or a successor. After the group is fully recorded, call ape_run action "next". Continue through scheduler-owned stages, reviews, replans, remediations, gates, waits, and configured auto-merge without asking the user to say continue; the explicit APE invocation already authorizes them. Yield only for completed, a genuinely terminal block, or an outcome-changing input request.',
     );
 
     // Compatibility and diagnostics stay available, but no installed-package
@@ -249,6 +256,7 @@ describe('APE v2 adapter conformance', () => {
       ticket_hash: ticket.ticket_hash,
       model: { reasoning_effort: 'medium', model: 'gpt-5.5' },
       role: ticket.role,
+      output_schema: ticket.output_schema,
     };
     const first = codexInjectedDispatchContext(ticket);
     const second = codexInjectedDispatchContext(reordered);

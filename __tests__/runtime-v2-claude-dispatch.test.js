@@ -1,5 +1,17 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { readFile, mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  link,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -179,6 +191,54 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     expect(Buffer.byteLength(stored)).toBeLessThan(256 * 1024);
   });
 
+  it.runIf(process.platform !== 'win32')(
+    'fails closed when the prepared-launch derivation key becomes group-readable',
+    async () => {
+      const dir = await project();
+      const { action, ticket } = await startClaude(dir);
+      const paths = runtimePaths(dir);
+      await chmod(paths.dispatchLaunchKey, 0o640);
+
+      await expect(prepareClaudeIntent(paths, ticket, action.dispatch.agent_type, {
+        allow_prepared_replay: true,
+      }))
+        .rejects.toThrow(/private regular file/u);
+    },
+  );
+
+  it.runIf(process.platform !== 'win32')(
+    'fails closed when the prepared-launch derivation key path is rebound through a symlink',
+    async () => {
+      const dir = await project();
+      const { action, ticket } = await startClaude(dir);
+      const paths = runtimePaths(dir);
+      const displaced = `${paths.dispatchLaunchKey}.displaced`;
+      await rename(paths.dispatchLaunchKey, displaced);
+      await symlink(displaced, paths.dispatchLaunchKey);
+
+      await expect(prepareClaudeIntent(paths, ticket, action.dispatch.agent_type, {
+        allow_prepared_replay: true,
+      }))
+        .rejects.toThrow(/private regular file/u);
+    },
+  );
+
+  it.runIf(process.platform !== 'win32')(
+    'fails closed when the prepared-launch derivation key gains a hardlink alias',
+    async () => {
+      const dir = await project();
+      const { action, ticket } = await startClaude(dir);
+      const paths = runtimePaths(dir);
+      await link(paths.dispatchLaunchKey, `${paths.dispatchLaunchKey}.alias`);
+      expect((await lstat(paths.dispatchLaunchKey)).nlink).toBe(2);
+
+      await expect(prepareClaudeIntent(paths, ticket, action.dispatch.agent_type, {
+        allow_prepared_replay: true,
+      }))
+        .rejects.toThrow(/private regular file/u);
+    },
+  );
+
   it('rejects an unlaunchable model before minting a Claude dispatch intent', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
@@ -308,6 +368,10 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     expect(context).toEqual(expect.any(String));
     expect(context.length).toBeGreaterThan(16);
     expect(context).not.toContain(nonce);
+    expect(context).toContain('APE hook-enforced receipt construction (authoritative)');
+    expect(context).toContain('Receipt envelope scaffold');
+    expect(context).toContain(`"ticket_id":"${ticket.ticket_id}"`);
+    expect(context).toContain('"receipt_capability":"$APE_RECEIPT_CAPABILITY"');
 
     const boundWrite = await invokeClaudeHook({
       hook_event_name: 'PreToolUse',

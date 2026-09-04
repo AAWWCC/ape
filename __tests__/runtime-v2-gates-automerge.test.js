@@ -60,6 +60,7 @@ function stateFor(changedFiles) {
     mode: 'phase',
     lane: 'fast',
     branch: 'feat/thing',
+    auto_merge_authorized: true,
     created_at: RUN_CREATED_AT,
     receipts: [{ changed_files: changedFiles }],
     // The tree the passed merge gates attested; shipping must re-verify it.
@@ -85,6 +86,7 @@ function watchState(overrides = {}) {
     mode: 'phase',
     lane: 'fast',
     branch: 'feat/thing',
+    auto_merge_authorized: true,
     base: 'main',
     created_at: RUN_CREATED_AT,
     receipts: [{ changed_files: ['src/kept.js'] }],
@@ -199,6 +201,19 @@ describe('autoMergeGithub', () => {
       '--jq', '[.state, .url, (.mergedAt // "-"), .headRefOid] | join(" ")',
     ]);
     expect(ghCalls.some((call) => call[2] === 'create')).toBe(false);
+  });
+
+  it('fails before any git or GitHub mutation when configuration is enabled without run consent', async () => {
+    const dir = await project(['src/kept.js']);
+    ghResponses.tracked = 'src/kept.js\0';
+    const state = stateFor(['src/kept.js']);
+    delete state.auto_merge_authorized;
+
+    await expect(autoMergeGithub(dir, state, {
+      shipping: { auto_merge: true, provider: 'github', required_remote_checks: false },
+    })).rejects.toThrow(/explicit.*auto.?merge.*authoriz|auto_merge_authorized/i);
+    expect(gitCalls.some((args) => ['add', 'commit', 'push'].includes(args[0]))).toBe(false);
+    expect(ghCalls).toEqual([]);
   });
 
   it('still extracts the URL when gh interleaves warnings into the output', async () => {
