@@ -553,7 +553,9 @@ describe('autoMergeGithub', () => {
   // every gh call carrying a selector persisted in shipping_watch (A1).
   describe('poll-phase remote checks and merge (pollRemoteChecksAndMerge)', () => {
     const checksConfig = { shipping: { provider: 'github', required_remote_checks: true } };
-    const carriesSelector = (call) => call.includes('feat/thing') || call.includes(WATCH_PR);
+    const carriesSelector = (call) => call.some(
+      (argument) => argument === 'feat/thing' || argument === WATCH_PR,
+    );
 
     it('polls checks exactly once WITHOUT --watch and WITH the persisted selector, then merges WITH the selector and cleans up (A1)', async () => {
       const dir = await project(['src/kept.js']);
