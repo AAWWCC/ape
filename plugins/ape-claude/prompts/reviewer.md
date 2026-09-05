@@ -23,3 +23,4 @@ objective, and public contract. `pass` means tests are consistent and implementa
 
 Return `status: "passed"` with `evidence.verdict: "pass"` or `"fail"`; return `failed` only when
 review cannot be performed.
+Use `fail` for blocking findings and `pass` otherwise.

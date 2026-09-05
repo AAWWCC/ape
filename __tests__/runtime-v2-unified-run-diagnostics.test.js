@@ -5,10 +5,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { hashRecord } from '../lib/runtime/canonical.js';
+import { AUTO_MERGE_HOLD_REASON } from '../lib/runtime/constants.js';
 import { archiveRun, explainRun, logicalLineageForRun } from '../lib/runtime/history.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { RESPONSE_BUDGET_CHARS } from '../lib/runtime/projection.js';
-import { compactStatus, historyAction, startRun } from '../lib/runtime/service.js';
+import { compactStatus, historyAction, nextRun, startRun } from '../lib/runtime/service.js';
 import { renderStatusDoc } from '../lib/runtime/status-doc.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
 import { bindCodexDispatchContext, invokeCodexHook } from './codex-native-test-helper.js';
@@ -119,16 +120,37 @@ function expectDiagnostic(value, reason, action) {
 }
 
 describe('unified public run diagnostics', () => {
+  it('agrees with the scheduler when only recording the attested receipt remains', async () => {
+    const ticketId = 'run-fixture-diagnostics:implement:ticket';
+    const { dir, status } = await statusFor(runState({
+      status: 'input_required',
+      receipts: [],
+      input_required: { kind: 'receipt_retry', ticket_id: ticketId, input_hash: 'a'.repeat(64) },
+    }));
+    const continuation = await nextRun(dir);
+    expect(continuation.next_action).toMatchObject({
+      ticket_id: ticketId,
+      required_control_action: 'record_exact_attested_receipt',
+    });
+    expect(status.next_action).toEqual(continuation.next_action);
+    expectDiagnostic(status.diagnostic, 'receipt_retry_input_required',
+      'ape_run record with the identical attested receipt');
+    expect(status.diagnostic.recovery_rationale).toContain('no worker continuation or validation is required');
+    expect(renderStatusDoc(continuation.run)).toContain(
+      'Next: ape_run record with the identical attested receipt',
+    );
+  });
+
   it('uses a closed lifecycle vocabulary and fixed recovery action for each observable condition', async () => {
     const cases = [
       [{ status: 'running', stage: 'implement' }, 'stage_active', 'ape_run next'],
       [{ status: 'gating', stage: 'gates' }, 'gating', 'ape_run next'],
       [{ status: 'blocked', stage: 'gates', gates: { passed: false, checks: {} } }, 'gate_failed', 'ape_run regate'],
       [{ status: 'blocked', stage: 'review' }, 'blocked', 'ape_run abort or ape_run override reset'],
-      [{ status: 'blocked', stage: 'merge', gates: { passed: true } }, 'shipping_hold', 'ape_run ship'],
+      [{ status: 'blocked', stage: 'merge', gates: { passed: true }, block_reason: AUTO_MERGE_HOLD_REASON }, 'shipping_hold', 'ape_run ship'],
       [{ status: 'shipping', stage: 'merge' }, 'shipping', 'ape_run next'],
-      [{ status: 'completed', stage: 'completed' }, 'completed', 'ape_run start'],
-      [{ status: 'aborted', stage: 'aborted' }, 'aborted', 'ape_run start'],
+      [{ status: 'completed', stage: 'completed' }, 'completed', 'check host prerequisites, then ape_run start'],
+      [{ status: 'aborted', stage: 'aborted' }, 'aborted', 'check host prerequisites, then ape_run start'],
     ];
     for (const [overrides, reason, action] of cases) {
       const { status } = await statusFor(runState(overrides));
@@ -137,7 +159,7 @@ describe('unified public run diagnostics', () => {
     }
 
     const empty = await sandbox('ape-diagnostic-inactive-');
-    expectDiagnostic((await compactStatus(empty)).diagnostic, 'inactive', 'ape_run start');
+    expectDiagnostic((await compactStatus(empty)).diagnostic, 'inactive', 'check host prerequisites, then ape_run start');
     expect(explainRun({ run_id: 'run-imported-example', status: 'completed', imported: true }))
       .toContain('Reason code: legacy_record');
     expect(explainRun({ run_id: 'run-incomplete-example', status: 'completed' }))
@@ -901,7 +923,7 @@ describe('unified public run diagnostics', () => {
     expect(explained).toMatchObject({
       ok: true,
       run: { run_id: record.run_id, status: 'completed' },
-      diagnostic: { reason_code: 'completed', next_safe_action: 'ape_run start' },
+      diagnostic: { reason_code: 'completed', next_safe_action: 'check host prerequisites, then ape_run start' },
     });
     expect(explained).not.toHaveProperty('record');
     expect(JSON.stringify(explained)).not.toContain(record.objective);
@@ -981,7 +1003,7 @@ describe('unified public run diagnostics', () => {
     execFileSync('git', ['commit', '-qm', 'baseline'], { cwd: dir });
     await atomicWriteJson(runtimePaths(dir).config, {
       shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-      test_commands: { full: 'node --test' },
+      test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
     });
 
     const started = await startRun(dir, {
@@ -1014,6 +1036,7 @@ describe('unified public run diagnostics', () => {
       hook_event_name: 'SubagentStop',
       project_dir: dir,
       session_id: context.sessionId,
+      turn_id: context.turnId,
       agent_id: context.agentId,
       agent_type: 'default',
     });
@@ -1523,8 +1546,8 @@ describe('unified public run diagnostics', () => {
       'stage_timing',
     ]);
     expect(diagnostic).toMatchObject({
-      reason_code: 'gate_failed',
-      next_safe_action: 'ape_run regate',
+      reason_code: 'blocked',
+      next_safe_action: 'ape_run abort or ape_run override reset',
       recovery_rationale: expect.any(String),
       failed_checks: ['targeted-test'],
       stage_timing: {

@@ -1,17 +1,28 @@
 # APE documentation
 
-Start with the [README](../README.md) for installation and normal use.
+Start with the [README](../README.md) to install APE and run a task.
 
-| Document | Use it for |
-| --- | --- |
-| [Host compatibility](compatibility.md) | Canonical Node.js, Codex CLI, Claude Code, and platform support contract. |
-| [Pipeline](pipeline.md) | Modes, lanes, retries, remediation, gates, and shipping. |
-| [Configuration](configuration.md) | Every supported key, test commands, statusline wiring, and LARP MODE. |
-| [MCP tools](mcp-tools.md) | The `ape_run`, `ape_status`, `ape_history`, and `ape_config` contracts. |
-| [Hooks](hooks.md) | Ticket enforcement, shell policy, external MCP pass-through, and notification hooks. |
-| [Architecture](architecture.md) | Runtime components, persisted state, and trust boundaries. |
-| [Invariants](invariants.md) | The rules every run must preserve. |
-| [Skills](skills.md) | User-facing skill behavior and invocation policy. |
-| [Agents](agents.md) | Roles, model tiers, and host adapters. |
-| [Native-agent adapters](workflows.md) | Claude and Codex dispatch/binding details. |
-| [Operational readiness](operational-readiness.md) | Replay gates, live dogfood certification, and release-health claims. |
+## Using APE
+
+- [Current release status](prevention-release-status.md): what is fixed, tested, and still unverified.
+- [Compatibility](compatibility.md): supported hosts, versions, and platforms.
+- [Pipeline](pipeline.md): modes, lanes, tests, review, and shipping.
+- [Configuration](configuration.md): commands, models, shipping, and notifications.
+- [Skills](skills.md): the commands you invoke.
+- [Report a bug](incident-reporting.md): share a useful report without private data.
+
+## Technical reference
+
+- [MCP tools](mcp-tools.md): request fields, responses, and worker tools.
+- [Agents](agents.md): worker roles and model tiers.
+- [Native-agent adapters](workflows.md): launching and binding workers.
+- [Hooks](hooks.md): permissions, write checks, and command restrictions.
+- [Architecture](architecture.md): runtime components and saved state.
+- [Invariants](invariants.md): rules the runtime must preserve.
+
+## Development and releases
+
+- [Contributing](../CONTRIBUTING.md): changes, regression tests, and PRs.
+- [Operational readiness](operational-readiness.md): offline checks and live release requirements.
+- [Performance baselines](performance-baselines.md): measure test and run time.
+- [Prompt evaluations](../evals/README.md): offline checks and optional live evaluations.

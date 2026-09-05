@@ -1,13 +1,22 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { reduceRun } from '../lib/runtime/scheduler.js';
-import { resumeRun, startRun, statusRun } from '../lib/runtime/service.js';
+import { abortRun, nextRun, resumeRun, startRun, statusRun } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
+import { compactStatus } from '../lib/runtime/status-service.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
+import { loadSessionGuidance } from '../lib/runtime/session-guidance.js';
+import {
+  bindClaudeSubagent,
+  bindCodexSubagent,
+  bootstrapCodexSubagent,
+  launchClaudeIntent,
+  launchCodexIntent,
+} from '../lib/runtime/claude-dispatch.js';
 
 // F17: an expired pending ticket must move the run forward (retry once, then
 // block) instead of emitting un-launchable dispatches forever, and next/resume
@@ -143,7 +152,7 @@ async function project() {
   git(dir, 'commit', '-qm', 'baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
   });
   return dir;
 }
@@ -175,6 +184,89 @@ async function expireLatestTicket(dir) {
   return ticket;
 }
 
+async function bindLatestDispatch(dir, started, host) {
+  const paths = runtimePaths(dir);
+  const state = await readJson(paths.active, null);
+  const action = started.actions.find((entry) => entry.type === 'dispatch_agent');
+  const parentSessionId = `${host}-fixture-parent`;
+  const turnId = `${host}-fixture-turn`;
+  const launchInput = {
+    session_id: parentSessionId,
+    turn_id: turnId,
+    tool_use_id: `${host}-fixture-launch`,
+    tool_input: host === 'codex'
+      ? action.dispatch.spawn_args
+      : {
+          subagent_type: action.dispatch.agent_type,
+          prompt: action.dispatch.dispatch_intent.prompt,
+          model: action.dispatch.model.model,
+        },
+  };
+  const launched = host === 'codex'
+    ? await launchCodexIntent(paths, state, launchInput)
+    : await launchClaudeIntent(paths, state, launchInput);
+  expect(launched.valid).toBe(true);
+  const agentId = `${host}-physical-agent`;
+  const bindInput = {
+    session_id: parentSessionId,
+    turn_id: host === 'codex' ? `${host}-fixture-child-turn` : turnId,
+    agent_id: agentId,
+    agent_type: host === 'codex' ? 'default' : action.dispatch.agent_type,
+    ...(host === 'codex' ? { model: action.dispatch.model.model } : {}),
+  };
+  const observed = host === 'codex'
+    ? await bindCodexSubagent(paths, state, bindInput)
+    : await bindClaudeSubagent(paths, state, bindInput);
+  expect(observed.valid).toBe(true);
+  if (host === 'codex') expect(observed.bootstrap_required).toBe(true);
+  const bound = host === 'codex'
+    ? await bootstrapCodexSubagent(paths, state, {
+        ...bindInput,
+        session_id: agentId,
+        tool_name: 'mcp__ape__ape_bind',
+        tool_use_id: `${host}-fixture-bootstrap`,
+        tool_input: action.dispatch.bootstrap_args,
+      })
+    : observed;
+  expect(bound.valid).toBe(true);
+  const [intentFile] = (await readdir(paths.dispatchIntents))
+    .filter((name) => name.endsWith('.json'))
+    .map((name) => path.join(paths.dispatchIntents, name));
+  return { intentFile, record: await readJson(intentFile, null) };
+}
+
+function expireBoundRecord(record) {
+  const preparedAt = '2025-12-31T23:56:00.000Z';
+  const launchedAt = '2025-12-31T23:57:00.000Z';
+  const boundAt = '2025-12-31T23:58:00.000Z';
+  const launchExpiresAt = '2025-12-31T23:59:00.000Z';
+  return {
+    ...record,
+    prepared_at: preparedAt,
+    launched_at: launchedAt,
+    authorized_at: launchedAt,
+    bound_at: boundAt,
+    ...(record.bootstrap_invocation ? {
+      bootstrap_invocation: { ...record.bootstrap_invocation, admitted_at: boundAt },
+    } : {}),
+    launch_expires_at: launchExpiresAt,
+    expires_at: PAST,
+    launch_generations: record.launch_generations.map((entry) => (
+      entry.generation === record.launch_generation
+        ? {
+            ...entry,
+            prepared_at: preparedAt,
+            authorized_at: launchedAt,
+            ...(entry.launched_at ? { launched_at: launchedAt } : {}),
+            bound_at: boundAt,
+            launch_expires_at: launchExpiresAt,
+            expires_at: PAST,
+          }
+        : entry
+    )),
+  };
+}
+
 function observeSubagentStop(dir, host, intent) {
   const sessionId = host === 'codex' ? intent.bound_session_id : intent.parent_session_id;
   const env = { ...process.env };
@@ -190,8 +282,9 @@ function observeSubagentStop(dir, host, intent) {
       hook_event_name: 'SubagentStop',
       project_dir: dir,
       session_id: sessionId,
+      ...(host === 'codex' ? { turn_id: `${host}-fixture-child-turn` } : {}),
       agent_id: intent.bound_agent_id,
-      agent_type: intent.agent_type,
+      agent_type: host === 'codex' ? intent.binding_agent_type : intent.agent_type,
       agent_transcript_path: null,
       stop_hook_active: false,
       last_assistant_message: 'done',
@@ -228,12 +321,7 @@ describe('APE v2 deadline-expired ticket transition (F17, service)', () => {
     const dir = await project();
     const started = await startRun(dir, startInput({ host: 'claude' }));
     expect(started.ok).toBe(true);
-    const paths = runtimePaths(dir);
-    const [intentFile] = (await readdir(paths.dispatchIntents))
-      .filter((name) => name.endsWith('.json'))
-      .map((name) => path.join(paths.dispatchIntents, name));
-    const intent = await readJson(intentFile, null);
-    await atomicWriteJson(intentFile, { ...intent, status: 'bound' });
+    await bindLatestDispatch(dir, started, 'claude');
 
     const resumed = await resumeRun(dir);
     expect(resumed.ok).toBe(true);
@@ -253,21 +341,9 @@ describe('APE v2 deadline-expired ticket transition (F17, service)', () => {
       const started = await startRun(dir, startInput({ host }));
       expect(started.ok).toBe(true);
       const paths = runtimePaths(dir);
-      const [intentFile] = (await readdir(paths.dispatchIntents))
-        .filter((name) => name.endsWith('.json'))
-        .map((name) => path.join(paths.dispatchIntents, name));
-      const original = await readJson(intentFile, null);
-      const bound = {
-        ...original,
-        status: 'bound',
-        bound_agent_id: `${host}-physical-agent`,
-        ...(host === 'codex'
-          ? { bound_session_id: `${host}-child-session` }
-          : { parent_session_id: `${host}-parent-session` }),
-        capability_hash: 'non-secret-test-digest',
-        bound_at: new Date().toISOString(),
-        expires_at: PAST,
-      };
+      const canonical = await bindLatestDispatch(dir, started, host);
+      const { intentFile } = canonical;
+      const bound = expireBoundRecord(canonical.record);
       await atomicWriteJson(intentFile, bound);
       const state = await readJson(paths.active, null);
       state.tickets.at(-1).deadline_at = PAST;
@@ -314,4 +390,235 @@ describe('APE v2 deadline-expired ticket transition (F17, service)', () => {
       ]));
     },
   );
+
+  it('fails NEXT closed when an elapsed bound intent is corrupt instead of redispatching', async () => {
+    const dir = await project();
+    const started = await startRun(dir, startInput({ host: 'codex' }));
+    expect(started.ok).toBe(true);
+    const paths = runtimePaths(dir);
+    const [intentFile] = (await readdir(paths.dispatchIntents))
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => path.join(paths.dispatchIntents, name));
+    const original = await readJson(intentFile, null);
+    const bound = {
+      ...original,
+      status: 'bound',
+      bound_agent_id: 'codex-physical-agent',
+      bound_session_id: 'codex-child-session',
+      capability_hash: 'c'.repeat(64),
+      bound_at: new Date().toISOString(),
+      expires_at: PAST,
+    };
+    const state = await readJson(paths.active, null);
+    state.tickets.at(-1).deadline_at = PAST;
+    await atomicWriteJson(paths.active, state);
+    // Preserve enough of the former record in the torn bytes to make the
+    // regression's premise explicit while ensuring JSON.parse cannot recover
+    // it as a merely malformed-but-readable object.
+    await writeFile(intentFile, JSON.stringify(bound).slice(0, -1));
+
+    // Read-only status remains available, but its tolerant projection cannot
+    // authorize lifecycle work. NEXT performs a strict intent read and stops
+    // before the reducer can expire the ticket or issue its retry.
+    expect(await statusRun(dir)).toMatchObject({
+      dispatch_state: 'error',
+      dispatches: [{
+        ticket_id: bound.ticket_id,
+        status: 'corrupt',
+        agent_state: 'evidence-unreadable',
+        evidence_unreadable: true,
+      }],
+    });
+    await expect(nextRun(dir)).rejects.toThrow(/unreadable.*abort.*quarantine/iu);
+
+    const unchanged = await readJson(paths.active, null);
+    expect(unchanged.tickets).toHaveLength(1);
+    expect(unchanged.tickets[0].ticket_id).toBe(bound.ticket_id);
+    expect(unchanged.expired_tickets ?? []).not.toContain(bound.ticket_id);
+    expect(unchanged.attempts).toEqual(state.attempts);
+    expect((await readdir(paths.dispatchIntents)).filter((name) => name.endsWith('.json')))
+      .toHaveLength(1);
+  });
+
+  it('fails NEXT closed on a parseable field-damaged bound intent without overwriting it', async () => {
+    const dir = await project();
+    const started = await startRun(dir, startInput({ host: 'codex' }));
+    expect(started.ok).toBe(true);
+    const paths = runtimePaths(dir);
+    const [intentFile] = (await readdir(paths.dispatchIntents))
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => path.join(paths.dispatchIntents, name));
+    const original = await readJson(intentFile, null);
+    const formerlyBound = {
+      ...original,
+      status: 'bound',
+      bound_agent_id: 'codex-physical-agent',
+      bound_session_id: 'codex-child-session',
+      capability_hash: 'c'.repeat(64),
+      bound_at: new Date().toISOString(),
+      expires_at: PAST,
+    };
+    // The bytes still parse as an object and still carry the rest of the old
+    // binding, but its authoritative native agent identity was torn away.
+    const { bound_agent_id: _lostIdentity, ...damaged } = formerlyBound;
+    await atomicWriteJson(intentFile, damaged);
+    const damagedBytes = await readFile(intentFile, 'utf8');
+
+    const state = await readJson(paths.active, null);
+    state.tickets.at(-1).deadline_at = PAST;
+    await atomicWriteJson(paths.active, state);
+
+    // Status deliberately stays tolerant and projects no authority from the
+    // damaged record. NEXT uses the strict reader and must stop before either
+    // expiring the ticket or preparing a replacement over these same bytes.
+    expect(await statusRun(dir)).toMatchObject({
+      dispatch_state: 'error',
+      dispatches: [{
+        ticket_id: formerlyBound.ticket_id,
+        status: 'corrupt',
+        agent_state: 'evidence-unreadable',
+        evidence_unreadable: true,
+      }],
+    });
+    expect(await compactStatus(dir)).toMatchObject({
+      dispatch_state: 'error',
+      next_action: { kind: 'blocked', automatic_successor: false },
+      failure_domain: 'orchestration',
+      next_safe_action: 'ape_run abort',
+      diagnostic: {
+        reason_code: 'dispatch_evidence_unreadable',
+        next_safe_action: 'ape_run abort',
+      },
+    });
+
+    // Receipt correction normally routes back to the same worker, but damaged
+    // identity evidence makes that continuation unauthoritative. Corruption
+    // must outrank the input-required hint on both compact and SessionStart
+    // diagnostic surfaces.
+    await atomicWriteJson(paths.active, {
+      ...state,
+      status: 'input_required',
+      input_required: {
+        kind: 'receipt_retry',
+        ticket_id: formerlyBound.ticket_id,
+      },
+    });
+    expect(await compactStatus(dir)).toMatchObject({
+      dispatch_state: 'error',
+      next_action: { kind: 'blocked', automatic_successor: false },
+      next_safe_action: 'ape_run abort',
+      diagnostic: {
+        reason_code: 'dispatch_evidence_unreadable',
+        next_safe_action: 'ape_run abort',
+      },
+    });
+    const receiptRetryGuidance = await loadSessionGuidance(dir, { host: 'codex' });
+    expect(receiptRetryGuidance).toContain('Next safe action: ape_run abort');
+    expect(receiptRetryGuidance).not.toContain('continue the same agent');
+    await atomicWriteJson(paths.active, state);
+
+    await expect(nextRun(dir)).rejects.toThrow(/dispatch intent artifact is .*structurally invalid/);
+
+    expect(await readFile(intentFile, 'utf8')).toBe(damagedBytes);
+    const unchanged = await readJson(paths.active, null);
+    expect(unchanged.tickets).toHaveLength(1);
+    expect(unchanged.tickets[0].ticket_id).toBe(formerlyBound.ticket_id);
+    expect(unchanged.expired_tickets ?? []).not.toContain(formerlyBound.ticket_id);
+    expect(unchanged.attempts).toEqual(state.attempts);
+    expect((await readdir(paths.dispatchIntents)).filter((name) => name.endsWith('.json')))
+      .toHaveLength(1);
+
+    // ABORT is the audited escape hatch: it revokes the unreadable authority
+    // by moving the canonical JSON path out of the reader namespace before it
+    // seals the run, while retaining the inert bytes for forensics.
+    const aborted = await abortRun(dir, 'quarantine unreadable dispatch evidence');
+    expect(aborted).toMatchObject({ ok: true, run: { status: 'aborted' } });
+    await expect(readFile(intentFile, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    const quarantined = (await readdir(paths.dispatchIntents))
+      .filter((name) => name.includes('.json.corrupt-'));
+    expect(quarantined).toHaveLength(1);
+    expect(await readFile(path.join(paths.dispatchIntents, quarantined[0]), 'utf8'))
+      .toBe(damagedBytes);
+  });
+
+  it('projects a wrong-shaped intent container as corrupt and abort quarantines it intact', async () => {
+    const dir = await project();
+    expect((await startRun(dir, startInput({ host: 'codex' }))).ok).toBe(true);
+    const paths = runtimePaths(dir);
+    const forensicBytes = 'not-a-directory: retained dispatch evidence\n';
+    await rm(paths.dispatchIntents, { recursive: true, force: true });
+    await writeFile(paths.dispatchIntents, forensicBytes);
+
+    expect(await statusRun(dir)).toMatchObject({
+      dispatch_state: 'error',
+      dispatches: [{
+        status: 'corrupt',
+        agent_state: 'evidence-unreadable',
+        evidence_unreadable: true,
+      }],
+    });
+    expect(await compactStatus(dir)).toMatchObject({
+      dispatch_state: 'error',
+      next_safe_action: 'ape_run abort',
+      diagnostic: { reason_code: 'dispatch_evidence_unreadable' },
+    });
+    expect(await loadSessionGuidance(dir, { host: 'codex' }))
+      .toContain('Next safe action: ape_run abort');
+
+    const aborted = await abortRun(dir, 'quarantine wrong-shaped dispatch evidence');
+    expect(aborted).toMatchObject({ ok: true, run: { status: 'aborted' } });
+    const quarantined = (await readdir(paths.runtime))
+      .filter((name) => name.startsWith('dispatch-intents.corrupt-'));
+    expect(quarantined).toHaveLength(1);
+    expect(await readFile(path.join(paths.runtime, quarantined[0]), 'utf8'))
+      .toBe(forensicBytes);
+  });
+
+  it('treats a ticket-id/filename mismatch as corrupt without mutating retry state', async () => {
+    const dir = await project();
+    expect((await startRun(dir, startInput({ host: 'codex' }))).ok).toBe(true);
+    const paths = runtimePaths(dir);
+    const [intentFile] = (await readdir(paths.dispatchIntents))
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => path.join(paths.dispatchIntents, name));
+    const intent = await readJson(intentFile, null);
+    await atomicWriteJson(intentFile, {
+      ...intent,
+      ticket_id: `${intent.ticket_id}:forged-path-mismatch`,
+    });
+    const state = await readJson(paths.active, null);
+    state.tickets.at(-1).deadline_at = PAST;
+    await atomicWriteJson(paths.active, state);
+
+    expect(await statusRun(dir)).toMatchObject({ dispatch_state: 'error' });
+    await expect(nextRun(dir)).rejects.toThrow(/dispatch intent artifact/);
+    const unchanged = await readJson(paths.active, null);
+    expect(unchanged.tickets).toHaveLength(1);
+    expect(unchanged.expired_tickets ?? []).not.toContain(intent.ticket_id);
+    expect(unchanged.attempts).toEqual(state.attempts);
+  });
+
+  it('never follows a symlinked intent artifact and abort quarantines the link itself', async () => {
+    const dir = await project();
+    expect((await startRun(dir, startInput({ host: 'codex' }))).ok).toBe(true);
+    const paths = runtimePaths(dir);
+    const [intentFile] = (await readdir(paths.dispatchIntents))
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => path.join(paths.dispatchIntents, name));
+    const external = path.join(dir, 'outside-intent.json');
+    const externalBytes = await readFile(intentFile, 'utf8');
+    await writeFile(external, externalBytes);
+    await rm(intentFile);
+    await symlink(external, intentFile);
+
+    expect(await statusRun(dir)).toMatchObject({ dispatch_state: 'error' });
+    const aborted = await abortRun(dir, 'quarantine symlinked dispatch evidence');
+    expect(aborted).toMatchObject({ ok: true, run: { status: 'aborted' } });
+    expect(await readFile(external, 'utf8')).toBe(externalBytes);
+    const quarantined = (await readdir(paths.dispatchIntents))
+      .filter((name) => name.includes('.json.corrupt-'));
+    expect(quarantined).toHaveLength(1);
+    expect((await lstat(path.join(paths.dispatchIntents, quarantined[0]))).isSymbolicLink())
+      .toBe(true);
+  });
 });

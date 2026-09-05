@@ -34,6 +34,7 @@ const DIST_FILES = Object.freeze([
 const RUNTIME_FILES = Object.freeze(['runner.js', 'spawn.js']);
 const CLAUDE_STATUSLINE_FILES = Object.freeze([
   ['bin', 'ape-statusline.mjs'],
+  ['lib/runtime', 'constants.js'],
   ['lib/runtime', 'diagnostics.js'],
   ['lib/runtime', 'paths.js'],
 ]);

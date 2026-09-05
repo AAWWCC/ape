@@ -10,6 +10,8 @@ import { autoMergeGithub } from '../lib/runtime/gates.js';
 // (a red TypeError when called) instead of a module-link error that would
 // prevent every pre-existing test in this file from loading.
 import * as gatesModule from '../lib/runtime/gates.js';
+import { sha256 } from '../lib/runtime/canonical.js';
+import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identity.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 vi.mock('../lib/runtime/git.js', () => ({
@@ -39,6 +41,8 @@ afterEach(async () => {
 async function project(files = []) {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-automerge-'));
   cleanups.push(dir);
+  await mkdir(path.join(dir, '.git'));
+  await writeFile(path.join(dir, '.git', 'index'), 'mock-index');
   for (const file of files) {
     await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
     await writeFile(path.join(dir, file), 'content\n');
@@ -53,22 +57,37 @@ const HEAD_SHA = 'c'.repeat(40);
 // The run started at 10:00; merged-PR probes compare mergedAt against it.
 const RUN_CREATED_AT = '2026-07-09T10:00:00.000Z';
 
-function stateFor(changedFiles) {
-  return {
+const TARGET = { origin: 'git@github.com:acme/repo.git', repository: 'acme/repo', base: 'main' };
+function frozenTarget(requiredRemoteChecks = false, base = 'main') {
+  return { version: 1, provider: 'github', ...TARGET, base, required_remote_checks: requiredRemoteChecks };
+}
+function committedShippingState(state) {
+  const manifest = { version: 1, ready: true, shipping_target: structuredClone(state.shipping_target), repository: { base_branch: state.base_branch, base_commit: state.base_commit_sha } };
+  state.admission = { version: 1, manifest, digest: sha256(manifest) };
+  state.start_request_hash = 'a'.repeat(64);
+  state.admitted_start_identity_version = 1;
+  state.admitted_start_identity_hash = admittedStartIdentityHash(state);
+  return state;
+}
+function stateFor(changedFiles, requiredRemoteChecks = false, base = 'main') {
+  return committedShippingState({
     run_id: 'run-1',
     objective: 'Ship the feature',
     mode: 'phase',
     lane: 'fast',
     branch: 'feat/thing',
     auto_merge_authorized: true,
+    base_branch: base,
+    base_commit_sha: HEAD_SHA,
+    shipping_target: frozenTarget(requiredRemoteChecks, base),
     created_at: RUN_CREATED_AT,
     receipts: [{ changed_files: changedFiles }],
     // The tree the passed merge gates attested; shipping must re-verify it.
     gates: { passed: true, tree_sha: GATE_TREE },
-  };
+  });
 }
 
-const config = { shipping: { provider: 'github', required_remote_checks: false } };
+const config = { shipping: { auto_merge: true, provider: 'github', required_remote_checks: false, target: TARGET } };
 
 // The PR URL the phase-1 handoff persisted; the poll phase re-enters carrying it
 // (and the branch) as explicit selectors so no poll-phase gh call relies on the
@@ -79,19 +98,23 @@ const WATCH_PR = 'https://github.com/acme/repo/pull/7';
 // selector the bounded poll needs: BOTH branch and pr_url (A1), the pushed
 // feature-branch head_oid (A2), the base, and the phase-1 created_at that bounds
 // the checks-registration window.
-function watchState(overrides = {}) {
-  return {
+function watchState(overrides = {}, requiredRemoteChecks = true) {
+  return committedShippingState({
     run_id: 'run-1',
     objective: 'Ship the feature',
     mode: 'phase',
     lane: 'fast',
     branch: 'feat/thing',
     auto_merge_authorized: true,
+    base_branch: 'main',
+    base_commit_sha: HEAD_SHA,
+    shipping_target: frozenTarget(requiredRemoteChecks),
     base: 'main',
     created_at: RUN_CREATED_AT,
     receipts: [{ changed_files: ['src/kept.js'] }],
     gates: { passed: true, tree_sha: GATE_TREE },
     shipping_watch: {
+      shipping_target: frozenTarget(requiredRemoteChecks),
       provider: 'github',
       pr_url: WATCH_PR,
       branch: 'feat/thing',
@@ -103,7 +126,7 @@ function watchState(overrides = {}) {
       last_checks_summary: null,
     },
     ...overrides,
-  };
+  });
 }
 
 describe('autoMergeGithub', () => {
@@ -112,11 +135,13 @@ describe('autoMergeGithub', () => {
   let ghResponses;
   let ghCalls;
   let ghRouteCalls;
+  let observedSuccessfulMerge;
 
   beforeEach(() => {
     gitCalls = [];
     ghCalls = [];
-    ghRouteCalls = { view: 0, create: 0, checks: 0, merge: 0 };
+    observedSuccessfulMerge = null;
+    ghRouteCalls = { view: 0, create: 0, checks: 0, merge: 0, api: 0 };
     ghResponses = {
       // The probe emits `STATE URL MERGED_AT HEAD_OID` (mergedAt is `-` while
       // unmerged). The default is an existing OPEN PR, matching the historical
@@ -125,6 +150,7 @@ describe('autoMergeGithub', () => {
       create: { code: 0, output: 'https://github.com/acme/repo/pull/8\n' },
       checks: { code: 0, output: 'All checks were successful\n' },
       merge: { code: 0, output: '' },
+      api: { code: 0, output: JSON.stringify([{ type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'test' }] } }]) },
     };
     gitResponses = {
       branch: 'feat/thing',
@@ -145,13 +171,18 @@ describe('autoMergeGithub', () => {
     runGit.mockReset();
     runGit.mockImplementation(async (dir, args) => {
       gitCalls.push(args);
+      if (args[0] === 'ls-remote' && args[1] === '--get-url') return args[2];
       if (args[0] === 'remote') return 'git@github.com:acme/repo.git';
+      if (args[0] === 'write-tree') return GATE_TREE;
+      if (args[0] === 'rev-parse' && args[1] === '--git-path') return path.join(dir, '.git', 'index');
+      if (args[0] === 'rev-parse' && args[1] === 'HEAD^{tree}') return GATE_TREE;
       if (args[0] === 'branch' && args[1] === '--show-current') return gitResponses.branch;
       if (args[0] === 'symbolic-ref') return 'refs/remotes/origin/main';
       if (args[0] === 'ls-files') return ghResponses.tracked ?? '';
       if (args[0] === 'rev-parse' && args[1] === 'refs/remotes/origin/main^{tree}') {
         return gitResponses.remoteBaseTree;
       }
+      if (args[0] === 'rev-parse' && String(args[1]).endsWith('^{tree}')) return GATE_TREE;
       if (args[0] === 'rev-parse') return gitResponses.head;
       if (args[0] === 'diff') return gitResponses.staged;
       if (args[0] === 'commit' && gitResponses.commitErrors.length > 0) {
@@ -167,15 +198,29 @@ describe('autoMergeGithub', () => {
     });
     spawn.mockReset();
     spawn.mockImplementation((command, args) => {
+      if (command === 'git' && args[0] === 'config') {
+        const child = new FakeChild();
+        setImmediate(() => child.emit('close', 1));
+        return child;
+      }
       ghCalls.push([command, ...args]);
       const child = new FakeChild();
-      const route = ['view', 'create', 'checks', 'merge'].includes(args[1]) ? args[1] : 'merge';
+      const route = args[0] === 'api' ? 'api' : ['view', 'create', 'checks', 'merge'].includes(args[1]) ? args[1] : 'merge';
       const configured = ghResponses[route];
       // An array fixture yields per-call responses (the checks-registration
       // retry needs "no checks yet" then "passed"); the last entry repeats.
-      const result = Array.isArray(configured)
+      let result = Array.isArray(configured)
         ? configured[Math.min(ghRouteCalls[route], configured.length - 1)]
         : configured;
+      // Ordinary successful merge fixtures must model GitHub's subsequent
+      // MERGED observation, not leave the PR permanently OPEN while returning
+      // the future merged tree. Queue/race fixtures explicitly opt out.
+      if (route === 'view' && observedSuccessfulMerge && !ghResponses.mergeLeavesOpen) {
+        result = { code: 0, output: `MERGED ${observedSuccessfulMerge} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` };
+      }
+      if (route === 'merge' && result.code === 0 && !args.includes('--auto')) {
+        observedSuccessfulMerge = args[2];
+      }
       ghRouteCalls[route] += 1;
       setImmediate(() => {
         if (result.output) child.stdout.emit('data', result.output);
@@ -199,6 +244,7 @@ describe('autoMergeGithub', () => {
       'gh', 'pr', 'view', 'feat/thing',
       '--json', 'url,state,mergedAt,headRefOid',
       '--jq', '[.state, .url, (.mergedAt // "-"), .headRefOid] | join(" ")',
+      '--repo', 'acme/repo',
     ]);
     expect(ghCalls.some((call) => call[2] === 'create')).toBe(false);
   });
@@ -211,7 +257,7 @@ describe('autoMergeGithub', () => {
 
     await expect(autoMergeGithub(dir, state, {
       shipping: { auto_merge: true, provider: 'github', required_remote_checks: false },
-    })).rejects.toThrow(/explicit.*auto.?merge.*authoriz|auto_merge_authorized/i);
+    })).rejects.toThrow(/auto.?merge.*authoriz|auto_merge_authorized/i);
     expect(gitCalls.some((args) => ['add', 'commit', 'push'].includes(args[0]))).toBe(false);
     expect(ghCalls).toEqual([]);
   });
@@ -284,7 +330,7 @@ describe('autoMergeGithub', () => {
       base_branch: 'main',
       base_commit_sha: HEAD_SHA,
       auto_merge_authorized: true,
-    }, config)).rejects.toThrow(/origin\/main advanced.*start a successor run/);
+    }, config)).rejects.toThrow(/remote base advanced.*preserve this run/);
     expect(gitCalls.some((args) => ['add', 'commit', 'push'].includes(args[0]))).toBe(false);
   });
 
@@ -303,7 +349,11 @@ describe('autoMergeGithub', () => {
     function mockGit({ symbolicRef, presentRefs = [] }) {
       runGit.mockImplementation(async (dir, args) => {
         gitCalls.push(args);
+        if (args[0] === 'ls-remote' && args[1] === '--get-url') return args[2];
         if (args[0] === 'remote') return 'git@github.com:acme/repo.git';
+        if (args[0] === 'write-tree') return GATE_TREE;
+        if (args[0] === 'rev-parse' && args[1] === '--git-path') return path.join(dir, '.git', 'index');
+        if (args[0] === 'rev-parse' && String(args[1]).endsWith('^{tree}')) return GATE_TREE;
         if (args[0] === 'branch' && args[1] === '--show-current') return gitResponses.branch;
         if (args[0] === 'symbolic-ref') {
           if (symbolicRef === null) throw new Error('git symbolic-ref refs/remotes/origin/HEAD failed (128): fatal: ref refs/remotes/origin/HEAD is not a symbolic ref');
@@ -325,12 +375,14 @@ describe('autoMergeGithub', () => {
       ghResponses.tracked = 'src/kept.js\0';
       ghResponses.view = { code: 1, output: 'no pull requests found for branch "feat/thing"\n' };
       mockGit({ symbolicRef: 'refs/remotes/origin/release/stable' });
-      const result = await autoMergeGithub(dir, stateFor(['src/kept.js']), config);
+      const result = await autoMergeGithub(dir, stateFor(['src/kept.js'], false, 'release/stable'), {
+        shipping: { ...config.shipping, target: { ...TARGET, base: 'release/stable' } },
+      });
       expect(result.base).toBe('release/stable');
       const create = ghCalls.find((call) => call[2] === 'create');
       expect(create[create.indexOf('--base') + 1]).toBe('release/stable');
       // The truncated 'stable' would strand the local repo post-merge too.
-      expect(gitCalls).toContainEqual(['fetch', 'origin', 'release/stable']);
+      expect(gitCalls).toContainEqual(['fetch', TARGET.origin, '+refs/heads/release/stable:refs/remotes/origin/release/stable']);
       expect(gitCalls).toContainEqual([
         'switch',
         '-c',
@@ -338,10 +390,10 @@ describe('autoMergeGithub', () => {
         'refs/remotes/origin/release/stable',
         '--no-track',
       ]);
-      expect(gitCalls).toContainEqual(['pull', '--ff-only', 'origin', 'release/stable']);
+      expect(gitCalls).toContainEqual(['pull', '--ff-only', TARGET.origin, 'release/stable']);
     });
 
-    it('falls back to origin/main when origin/HEAD is unset', async () => {
+    it('keeps frozen main when origin/HEAD is unset', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
       mockGit({ symbolicRef: null, presentRefs: ['refs/remotes/origin/main'] });
@@ -349,20 +401,22 @@ describe('autoMergeGithub', () => {
       expect(result.base).toBe('main');
     });
 
-    it('falls back to origin/master when only it exists', async () => {
+    it('uses explicitly frozen master without inferring a different base', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
       mockGit({ symbolicRef: null, presentRefs: ['refs/remotes/origin/master'] });
-      const result = await autoMergeGithub(dir, stateFor(['src/kept.js']), config);
+      const result = await autoMergeGithub(dir, stateFor(['src/kept.js'], false, 'master'), {
+        shipping: { ...config.shipping, target: { ...TARGET, base: 'master' } },
+      });
       expect(result.base).toBe('master');
     });
 
-    it('names the remedy when no default branch is determinable, before staging anything', async () => {
+    it('refuses an unbound base instead of inferring one during shipping', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
       mockGit({ symbolicRef: null });
-      await expect(autoMergeGithub(dir, stateFor(['src/kept.js']), config))
-        .rejects.toThrow(/git remote set-head origin --auto/);
+      await expect(autoMergeGithub(dir, { ...stateFor(['src/kept.js']), base_branch: undefined }, config))
+        .rejects.toThrow(/admission commitment/);
       expect(gitCalls.some((args) => ['add', 'commit', 'push'].includes(args[0]))).toBe(false);
       expect(ghCalls).toEqual([]);
     });
@@ -383,20 +437,18 @@ describe('autoMergeGithub', () => {
       expect(gitCalls.some((args) => args[0] === 'push')).toBe(true);
     });
 
-    it('retries an interactive-signing failure as an unsigned automation commit', async () => {
+    it('preserves the signing requirement and never retries an unsigned commit', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
       gitResponses.commitErrors.push(
         'Enter passphrase for key /keys/id_ed25519: Load key: incorrect passphrase supplied to decrypt private key; fatal: failed to write commit object',
       );
 
-      const result = await autoMergeGithub(dir, stateFor(['src/kept.js']), config);
-
-      expect(result.url).toBe('https://github.com/acme/repo/pull/7');
+      await expect(autoMergeGithub(dir, stateFor(['src/kept.js']), config)).rejects.toThrow(/signing failed.*no unsigned fallback/);
       expect(gitCalls.filter((args) => args[0] === 'commit')).toEqual([
         ['commit', '-m', 'feat: Ship the feature'],
-        ['commit', '--no-gpg-sign', '-m', 'feat: Ship the feature'],
       ]);
+      expect(gitCalls.some((args) => ['push', 'reset', 'checkout', 'stash'].includes(args[0]))).toBe(false);
     });
 
     it('re-entry after the commit skips committing the clean tree and continues shipping', async () => {
@@ -437,9 +489,9 @@ describe('autoMergeGithub', () => {
       // it, and there is nothing left to commit, create, check, or merge.
       expect(gitCalls.some((args) => ['add', 'commit', 'push'].includes(args[0]))).toBe(false);
       expect(ghCalls.filter((call) => call[1] === 'pr').map((call) => call[2])).toEqual(['view']);
-      expect(gitCalls).toContainEqual(['fetch', 'origin', 'main']);
+      expect(gitCalls).toContainEqual(['fetch', TARGET.origin, '+refs/heads/main:refs/remotes/origin/main']);
       expect(gitCalls).toContainEqual(['switch', 'main']);
-      expect(gitCalls).toContainEqual(['pull', '--ff-only', 'origin', 'main']);
+      expect(gitCalls).toContainEqual(['pull', '--ff-only', TARGET.origin, 'main']);
     });
 
     it('re-entry from the base branch finishes cleanup for the run branch gh already merged and switched away from', async () => {
@@ -457,7 +509,7 @@ describe('autoMergeGithub', () => {
       expect(result.url).toBe('https://github.com/acme/repo/pull/7');
       expect(result.branch).toBe('feat/thing');
       expect(gitCalls.some((args) => args[0] === 'push')).toBe(false);
-      expect(gitCalls).toContainEqual(['pull', '--ff-only', 'origin', 'main']);
+      expect(gitCalls).toContainEqual(['pull', '--ff-only', TARGET.origin, 'main']);
       expect(gitCalls).toContainEqual(['branch', '-D', 'feat/thing']);
     });
 
@@ -509,13 +561,30 @@ describe('autoMergeGithub', () => {
   // drives the merge on a later call. required_remote_checks:false keeps the
   // zero-latency in-call merge for no-CI repos (unchanged).
   describe('non-blocking shipping watch handoff (autoMergeGithub)', () => {
-    const checksConfig = { shipping: { provider: 'github', required_remote_checks: true } };
+    const checksConfig = { shipping: { ...config.shipping, required_remote_checks: true } };
+
+    it('hands off a successful no-check enqueue without inventing CI or submitting twice', async () => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.tracked = 'src/kept.js\0';
+      ghResponses.mergeLeavesOpen = true;
+      gitResponses.remoteBaseTree = 'b'.repeat(40);
+      const state = stateFor(['src/kept.js']);
+      const first = await autoMergeGithub(dir, state, config);
+      expect(first.watch).toMatchObject({ merge_request_submitted: true, head_oid: HEAD_SHA });
+      expect(first.merged_at).toBeUndefined();
+      expect(gitCalls).not.toContainEqual(['switch', 'main']);
+      state.shipping_watch = structuredClone(first.watch);
+      const second = await gatesModule.pollRemoteChecksAndMerge(dir, state, config);
+      expect(second.pending).toBeDefined();
+      expect(ghCalls.filter((call) => call[2] === 'merge')).toHaveLength(1);
+      expect(ghCalls.some((call) => call[2] === 'checks')).toBe(false);
+    });
 
     it('returns a watch descriptor after push+create and invokes NO checks or merge', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
       ghResponses.view = { code: 1, output: 'no pull requests found for branch "feat/thing"\n' };
-      const result = await autoMergeGithub(dir, stateFor(['src/kept.js']), checksConfig);
+      const result = await autoMergeGithub(dir, stateFor(['src/kept.js'], true), checksConfig);
       // Phase 1 only: no synchronous checks watch and no in-call merge.
       expect(ghCalls.some((call) => call[2] === 'checks')).toBe(false);
       expect(ghCalls.some((call) => call[2] === 'merge')).toBe(false);
@@ -552,10 +621,94 @@ describe('autoMergeGithub', () => {
   // non-watch `gh pr checks`, a head-guarded re-probe, then the runtime merge —
   // every gh call carrying a selector persisted in shipping_watch (A1).
   describe('poll-phase remote checks and merge (pollRemoteChecksAndMerge)', () => {
-    const checksConfig = { shipping: { provider: 'github', required_remote_checks: true } };
+    const checksConfig = { shipping: { ...config.shipping, required_remote_checks: true } };
     const carriesSelector = (call) => call.some(
       (argument) => argument === 'feat/thing' || argument === WATCH_PR,
     );
+
+    it('keeps a successful enqueue pending across polls until the exact PR is observed merged', async () => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.mergeLeavesOpen = true;
+      gitResponses.remoteBaseTree = 'b'.repeat(40);
+      const state = watchState();
+
+      const first = await gatesModule.pollRemoteChecksAndMerge(dir, state, checksConfig);
+      expect(first).toMatchObject({ pending: { merge_request_submitted: true } });
+      expect(first.failed).toBeUndefined();
+      expect(first.merged).toBeUndefined();
+      expect(gitCalls.some((args) => ['fetch', 'switch', 'pull', 'branch'].includes(args[0]))).toBe(false);
+
+      // Mirror the service's durable deny-only cursor, then simulate re-entry.
+      state.shipping_watch.merge_request_submitted = first.pending.merge_request_submitted;
+      const second = await gatesModule.pollRemoteChecksAndMerge(dir, structuredClone(state), checksConfig);
+      expect(second.pending).toBeDefined();
+      expect(ghCalls.filter((call) => call[2] === 'merge')).toHaveLength(1);
+
+      ghResponses.view = { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` };
+      gitResponses.remoteBaseTree = GATE_TREE;
+      const third = await gatesModule.pollRemoteChecksAndMerge(dir, structuredClone(state), checksConfig);
+      expect(third.merged).toMatchObject({ url: WATCH_PR });
+      expect(ghCalls.filter((call) => call[2] === 'merge')).toHaveLength(1);
+      expect(gitCalls).toContainEqual(['switch', 'main']);
+    });
+
+    it.each([
+      ['malformed response', 'not a PR observation', /malformed|unreadable/i],
+      ['malformed head', `OPEN ${WATCH_PR} - invalid`, /malformed|invalid/i],
+      ['foreign URL', `OPEN https://github.com/other/repo/pull/7 - ${HEAD_SHA}`, /URL|repository/i],
+      ['open head drift', `OPEN ${WATCH_PR} - ${'d'.repeat(40)}`, /drift|head/i],
+      ['merged head drift', `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${'d'.repeat(40)}`, /drift|head/i],
+      ['closed PR', `CLOSED ${WATCH_PR} - ${HEAD_SHA}`, /closed/i],
+    ])('refuses %s observed after a successful merge command', async (_label, observation, reason) => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.mergeLeavesOpen = true;
+      ghResponses.view = [
+        { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
+        { code: 0, output: `${observation}\n` },
+      ];
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+      expect(result.failed).toMatch(reason);
+      expect(result.merged).toBeUndefined();
+      expect(gitCalls.some((args) => ['fetch', 'switch', 'pull', 'branch'].includes(args[0]))).toBe(false);
+    });
+
+    it('retains a successful submission without retrying when its fresh PR read is unavailable', async () => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.mergeLeavesOpen = true;
+      ghResponses.view = [
+        { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
+        { code: 1, output: 'temporary transport fault' },
+      ];
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+      expect(result).toMatchObject({ pending: { merge_request_submitted: true } });
+      expect(result.failed).toBeUndefined();
+      expect(result.merged).toBeUndefined();
+      expect(ghCalls.filter((call) => call[2] === 'merge')).toHaveLength(1);
+      expect(gitCalls.some((args) => ['fetch', 'switch', 'pull', 'branch'].includes(args[0]))).toBe(false);
+    });
+
+    it('does not complete an exact merged PR whose remote tree lacks gate attestation', async () => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.mergeLeavesOpen = true;
+      ghResponses.view = [
+        { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
+        { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` },
+      ];
+      gitResponses.remoteBaseTree = 'b'.repeat(40);
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+      expect(result.failed).toMatch(/does not equal the attested tree/);
+      expect(result.merged).toBeUndefined();
+      expect(gitCalls).not.toContainEqual(['switch', 'main']);
+    });
+
+    it('refuses a malformed submission marker instead of issuing a merge', async () => {
+      const dir = await project(['src/kept.js']);
+      const state = watchState();
+      state.shipping_watch.merge_request_submitted = 'true';
+      await expect(gatesModule.pollRemoteChecksAndMerge(dir, state, checksConfig))
+        .rejects.toThrow(/submission|submitted|marker/i);
+      expect(ghCalls.some((call) => call[2] === 'merge')).toBe(false);
+    });
 
     it('polls checks exactly once WITHOUT --watch and WITH the persisted selector, then merges WITH the selector and cleans up (A1)', async () => {
       const dir = await project(['src/kept.js']);
@@ -571,6 +724,7 @@ describe('autoMergeGithub', () => {
       const mergeCall = ghCalls.find((call) => call[2] === 'merge');
       expect(mergeCall).toBeDefined();
       expect(carriesSelector(mergeCall)).toBe(true);
+      expect(mergeCall.slice(mergeCall.indexOf('--match-head-commit'), mergeCall.indexOf('--match-head-commit') + 2)).toEqual(['--match-head-commit', HEAD_SHA]);
       // Post-merge local cleanup ran against the persisted base.
       expect(gitCalls).toContainEqual(['switch', 'main']);
     });
@@ -610,7 +764,76 @@ describe('autoMergeGithub', () => {
       const mergeCalls = ghCalls.filter((call) => call[2] === 'merge');
       expect(mergeCalls).toHaveLength(2);
       expect(mergeCalls[1]).toContain('--auto');
+      expect(mergeCalls[1]).toContain('--match-head-commit');
       expect(gitCalls).not.toContainEqual(['switch', 'main']);
+    });
+
+    it('refuses merge when the frozen base advances after checks passed', async () => {
+      const dir = await project(['src/kept.js']);
+      remoteBranchTip.mockResolvedValue('d'.repeat(40));
+
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+
+      expect(result.failed).toMatch(/base.*advanced/i);
+      expect(ghCalls.some((call) => call[2] === 'merge')).toBe(false);
+      expect(gitCalls.some((call) => ['switch', 'reset', 'rebase'].includes(call[0]))).toBe(false);
+    });
+
+    it('rechecks the frozen base between a protected merge refusal and enabling auto-merge', async () => {
+      const dir = await project(['src/kept.js']);
+      remoteBranchTip.mockResolvedValueOnce(HEAD_SHA).mockResolvedValue('d'.repeat(40));
+      ghResponses.merge = { code: 1, output: 'branch policy prohibits the merge' };
+
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+
+      expect(result.failed).toMatch(/base.*advanced/i);
+      expect(ghCalls.filter((call) => call[2] === 'merge')).toHaveLength(1);
+      expect(ghCalls.some((call) => call.includes('--auto'))).toBe(false);
+    });
+
+    it.each([
+      ['missing protection', { code: 0, output: '[]' }],
+      ['loose status checks', { code: 0, output: JSON.stringify([{ type: 'required_status_checks', parameters: { strict_required_status_checks_policy: false, required_status_checks: [{ context: 'test' }] } }]) }],
+      ['strict without any checks', { code: 0, output: JSON.stringify([{ type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true, required_status_checks: [] } }]) }],
+      ['queue without checks', { code: 0, output: JSON.stringify([{ type: 'merge_queue', parameters: { grouping_strategy: 'ALLGREEN' } }]) }],
+      ['unreadable protection', { code: 1, output: 'permission denied' }],
+    ])('does not queue auto-merge with %s', async (_label, response) => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.merge = { code: 1, output: 'branch policy prohibits the merge' };
+      ghResponses.api = [response, { code: 1, output: 'no classic protection' }];
+
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+
+      expect(result.failed).toMatch(/up.to.date.*required checks|merge.queue/i);
+      expect(ghCalls.filter((call) => call[2] === 'merge')).toHaveLength(1);
+      expect(ghCalls.some((call) => call.includes('--auto'))).toBe(false);
+    });
+
+    it.each([
+      ['classic strict checks', [
+        { code: 0, output: '[]' },
+        { code: 0, output: JSON.stringify({ strict: true, contexts: ['test'], checks: [] }) },
+      ]],
+      ['ALLGREEN merge queue with required checks', [{ code: 0, output: JSON.stringify([
+        { type: 'merge_queue', parameters: { grouping_strategy: 'ALLGREEN' } },
+        { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: false, required_status_checks: [{ context: 'test' }] } },
+      ]) }]],
+    ])('allows protected auto-merge with %s pinned to the explicit repository API', async (_label, responses) => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.merge = [{ code: 1, output: 'branch policy prohibits the merge' }, { code: 0, output: '' }];
+      ghResponses.api = responses;
+
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+
+      expect(result.pending?.reason).toBe('awaiting auto-merge');
+      const apiCalls = ghCalls.filter((call) => call[1] === 'api');
+      expect(apiCalls.length).toBeGreaterThan(0);
+      for (const call of apiCalls) {
+        expect(call[2]).toMatch(/^repos\/acme\/repo\//);
+        expect(call).toContain('--hostname');
+        expect(call).toContain('github.com');
+        expect(call).not.toContain('--repo');
+      }
     });
 
     it('reconciles a merge-command race when GitHub merged the exact pushed head before reporting not mergeable', async () => {
@@ -689,7 +912,7 @@ describe('autoMergeGithub', () => {
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState({ mode: 'land' }), checksConfig);
 
       expect(result.merged).toBeDefined();
-      expect(gitCalls).toContainEqual(['pull', '--ff-only', 'origin', 'main']);
+      expect(gitCalls).toContainEqual(['pull', '--ff-only', TARGET.origin, 'main']);
       expect(gitCalls).toContainEqual(['rev-parse', 'refs/remotes/origin/main^{tree}']);
       expect(gitCalls).toContainEqual(['reset', '--hard', 'refs/remotes/origin/main']);
     });
@@ -753,7 +976,7 @@ describe('autoMergeGithub', () => {
       expect(ghCalls.some((call) => call[2] === 'merge')).toBe(false);
     });
 
-    it('past the registration window, a still-empty checks poll fails closed naming the config key', async () => {
+    it('past the registration window, a still-empty checks poll fails without suggesting a frozen-policy waiver', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
       ghResponses.view = { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` };
@@ -761,7 +984,8 @@ describe('autoMergeGithub', () => {
       // watchState()'s created_at is days in the past → past the window.
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
       expect(result.failed).toBeDefined();
-      expect(String(result.failed)).toMatch(/shipping\.required_remote_checks=false/);
+      expect(String(result.failed)).toMatch(/required remote checks are frozen/);
+      expect(String(result.failed)).not.toContain('required_remote_checks=false');
       expect(result.merged).toBeUndefined();
       expect(result.pending).toBeUndefined();
       expect(ghCalls.some((call) => call[2] === 'merge')).toBe(false);
@@ -789,7 +1013,7 @@ describe('autoMergeGithub', () => {
     function longState(objective) {
       const state = stateFor(['src/kept.js']);
       state.objective = objective;
-      return state;
+      return committedShippingState(state);
     }
 
     it('truncates the commit subject and PR title at a word boundary with an ellipsis', async () => {
@@ -859,7 +1083,7 @@ describe('autoMergeGithub', () => {
       // Re-entry after the push: the work is already committed, so the ship add
       // stages nothing.
       gitResponses.staged = '';
-      const result = await autoMergeGithub(dir, watchState(), config);
+      const result = await autoMergeGithub(dir, watchState({}, false), config);
       expect(result.url).toBe('https://github.com/acme/repo/pull/8');
       expect(ghCalls.some((call) => call[2] === 'create')).toBe(true);
       expect(ghCalls.some((call) => call[2] === 'merge')).toBe(true);
@@ -873,7 +1097,7 @@ describe('autoMergeGithub', () => {
         output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n`,
       };
       gitResponses.staged = '';
-      const result = await autoMergeGithub(dir, watchState(), config);
+      const result = await autoMergeGithub(dir, watchState({}, false), config);
       expect(result.url).toBe(WATCH_PR);
       expect(result.merged_at).toBe('2026-07-09T12:00:00Z');
       expect(ghCalls.some((call) => call[2] === 'create')).toBe(false);
@@ -888,7 +1112,7 @@ describe('autoMergeGithub', () => {
   // failure tail must arrive free of terminal escapes while keeping its
   // human-readable text.
   describe('failure tails reach the wire free of terminal escapes (boundedTail)', () => {
-    const checksConfig = { shipping: { provider: 'github', required_remote_checks: true } };
+    const checksConfig = { shipping: { ...config.shipping, required_remote_checks: true } };
 
     it('strips ANSI/control escapes from a failing-check descriptor while preserving the visible cause', async () => {
       const dir = await project(['src/kept.js']);

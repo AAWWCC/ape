@@ -73,6 +73,7 @@ async function project({ withRootTest = false } = {}) {
     tickets: [
       {
         ticket_id: 'run-root:test:root',
+        stage_id: 'test',
         role: 'test_writer',
         writable: true,
         claimed_paths: ['server.test.js'],
@@ -81,6 +82,7 @@ async function project({ withRootTest = false } = {}) {
       },
       {
         ticket_id: 'run-root:test:nested',
+        stage_id: 'test',
         role: 'test_writer',
         writable: true,
         claimed_paths: ['tests/value.test.js'],

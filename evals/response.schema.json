@@ -7,8 +7,8 @@
     "suite_version": {"type": "integer", "enum": [1]},
     "case_results": {
       "type": "array",
-      "minItems": 37,
-      "maxItems": 37,
+      "minItems": 52,
+      "maxItems": 52,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -28,7 +28,8 @@
               "retry-command-shape",
               "execute", "invoke-control-plane", "invoke-status", "invoke-run",
               "invoke-resume", "invoke-config", "invoke-history", "invoke-roadmap",
-              "invoke-override", "do-not-invoke"
+              "invoke-override", "do-not-invoke",
+              "request-input", "submit-plan", "continue-inspection", "apply-config", "record-receipt", "report-diagnosis", "recommend-option"
             ]
           },
           "reason_codes": {

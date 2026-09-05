@@ -1014,6 +1014,7 @@ async function project(status = 'running') {
     tickets: [
       {
         ticket_id: 'run-toolcfg:review:r',
+        stage_id: 'review',
         role: 'reviewer',
         writable: false,
         claimed_paths: [],

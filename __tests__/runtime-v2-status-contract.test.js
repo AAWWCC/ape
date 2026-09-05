@@ -38,7 +38,7 @@ async function project() {
   git(dir, 'commit', '-qm', 'baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { full: 'node --test', targeted_template: 'node --test {paths}' },
   });
   return dir;
 }
@@ -122,6 +122,8 @@ describe('APE v2 compact status and resume liveness contract', () => {
     const started = await startRun(dir, startInput());
     const paths = runtimePaths(dir);
     const ticketId = started.run.tickets[0].ticket_id;
+    const dispatched = started.actions.find((action) => action.type === 'dispatch_agent');
+    await bindCodexDispatch(root, dir, dispatched);
     const state = await readJson(paths.active, null);
     state.receipt_contract_exhaustions = { [ticketId]: 1 };
     await atomicWriteJson(paths.active, state);
@@ -130,11 +132,18 @@ describe('APE v2 compact status and resume liveness contract', () => {
       .filter((name) => name.endsWith('.json'));
     const intentPath = path.join(paths.dispatchIntents, intentName);
     const intent = await readJson(intentPath, null);
+    const stoppedAt = new Date().toISOString();
+    const expiredAt = new Date(Date.now() + 1).toISOString();
     await atomicWriteJson(intentPath, {
       ...intent,
       status: 'expired',
-      agent_stopped_at: '2026-08-29T00:00:00.000Z',
-      expired_at: '2026-08-29T00:00:01.000Z',
+      agent_stopped_at: stoppedAt,
+      expired_at: expiredAt,
+      launch_generations: intent.launch_generations.map((entry) => (
+        entry.generation === intent.launch_generation
+          ? { ...entry, status: 'expired', expired_at: expiredAt }
+          : entry
+      )),
     });
 
     expect(await compactStatus(dir)).toMatchObject({
@@ -160,10 +169,10 @@ describe('APE v2 compact status and resume liveness contract', () => {
       pending: null,
       gate: { state: 'inactive' },
       last_receipt: null,
-      next_safe_action: 'ape_run start',
+      next_safe_action: 'check host prerequisites, then ape_run start',
       diagnostic: {
         reason_code: 'inactive',
-        next_safe_action: 'ape_run start',
+        next_safe_action: 'check host prerequisites, then ape_run start',
       },
     });
     expect(compact).not.toHaveProperty('next_action');
@@ -283,10 +292,10 @@ describe('APE v2 compact status and resume liveness contract', () => {
       pending: null,
       dispatch_state: 'none',
       gate: { state: 'passed' },
-      next_safe_action: 'ape_run start',
+      next_safe_action: 'check host prerequisites, then ape_run start',
       diagnostic: {
         reason_code: 'completed',
-        next_safe_action: 'ape_run start',
+        next_safe_action: 'check host prerequisites, then ape_run start',
       },
     });
   }, 30_000);

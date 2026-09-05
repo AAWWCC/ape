@@ -46,7 +46,7 @@ async function project() {
   git(dir, 'commit', '-qm', 'test: baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { full: 'node --test', targeted_template: 'node --test {paths}' },
   });
   return dir;
 }
@@ -286,6 +286,30 @@ describe('APE v2 abort quarantine (end to end)', () => {
     expect(write.hookSpecificOutput.permissionDecision).toBe('deny');
     expect(write.hookSpecificOutput.permissionDecisionReason).toMatch(/sealed aborted/);
     expect(write.hookSpecificOutput.permissionDecisionReason).toMatch(/void/);
+
+    // An unrelated damaged artifact cannot hide the still-readable exact
+    // orphan, and damage to the exact artifact itself remains a conservative
+    // sealed fence rather than falling through the hook's no-live-run allow.
+    const paths = runtimePaths(dir);
+    await writeFile(path.join(paths.dispatchIntents, 'unrelated-corrupt.json'), '{');
+    const withUnrelatedCorruption = await invokeHook(
+      orphanEvent('Write', {
+        file_path: path.join(dir, 'src', 'value.js'),
+        content: 'sabotage through unrelated corruption',
+      }),
+      dir,
+    );
+    expect(withUnrelatedCorruption.hookSpecificOutput.permissionDecision).toBe('deny');
+    const exact = await intentForTicket(dir, dispatchAction.ticket.ticket_id);
+    await writeFile(exact.file, '{');
+    const withExactCorruption = await invokeHook(
+      orphanEvent('Write', {
+        file_path: path.join(dir, 'src', 'value.js'),
+        content: 'sabotage through exact corruption',
+      }),
+      dir,
+    );
+    expect(withExactCorruption.hookSpecificOutput.permissionDecision).toBe('deny');
 
     // The orphan can still read: the fence covers only write-capable tools.
     const read = await invokeHook(

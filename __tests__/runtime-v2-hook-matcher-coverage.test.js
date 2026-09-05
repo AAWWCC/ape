@@ -9,6 +9,7 @@ import {
   evaluateLifecyclePolicy,
   driftGuardApplies,
   isAgentDispatchTool,
+  isExternalMcpTool,
 } from '../lib/runtime/hooks.js';
 
 // APE invariant 2 (no main-session production writes) is only enforced for the
@@ -21,8 +22,10 @@ import {
 //   Edit|Write|MultiEdit|NotebookEdit|apply_patch|Bash|Agent|Task plus APE's
 //   exact control-plane and receipt-validator names.
 //
-// External MCP names are deliberately absent: APE neither forecasts nor
-// intercepts another server's dynamic operation surface.
+// External MCP names are deliberately absent from conventional run policy:
+// APE neither forecasts nor intercepts another server's dynamic operation
+// surface. A separate wildcard arm is canary-only and returns neutral output
+// for every identity except the exact production-bound diagnostic canary.
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -49,7 +52,15 @@ function refersToBundle(entry, bundle) {
       (typeof hook.command === 'string' && hook.command.includes(bundle)),
   );
 }
-const policyArms = (entries) => (entries ?? []).filter((entry) => refersToBundle(entry, POLICY_BUNDLE));
+const isCanaryArm = (entry) =>
+  refersToBundle(entry, POLICY_BUNDLE) &&
+  (entry.hooks ?? []).some((hook) =>
+    hook.command?.includes("process.argv.push('--ape-canary-only')") ||
+    hook.commandWindows?.includes("process.argv.push('--ape-canary-only')"));
+const canaryArms = (entries) => (entries ?? []).filter(isCanaryArm);
+const policyArms = (entries) => (entries ?? []).filter(
+  (entry) => refersToBundle(entry, POLICY_BUNDLE) && !isCanaryArm(entry),
+);
 const larpArms = (entries) => (entries ?? []).filter((entry) => refersToBundle(entry, LARP_BUNDLE));
 
 // Conservative full-match emulation of Claude's matcher semantics: a bare "*"
@@ -137,6 +148,17 @@ describe('policy-arm matcher coverage of the enforcement set (plan §2)', () => 
     expect(postPolicyMatchers).toHaveLength(1);
   });
 
+  it('runs one synchronous neutral-by-default canary fence on every PreToolUse tool', () => {
+    const arms = canaryArms(codexHooks.PreToolUse);
+    expect(arms).toHaveLength(1);
+    expect(arms[0].matcher).toBe('*');
+    expect(arms[0].hooks).toHaveLength(1);
+    expect(arms[0].hooks[0].async).toBeUndefined();
+    expect(arms[0].hooks[0].commandWindows).toBe(arms[0].hooks[0].command);
+    expect(canaryArms(codexHooks.PostToolUse)).toHaveLength(0);
+    expect(canaryArms(claudeHooks.PreToolUse)).toHaveLength(0);
+  });
+
   it('matches every write tool, Bash, the dispatch tool (Agent) and its host alias (Task) on BOTH events', () => {
     // 'Task' carries no runtime predicate of its own; it is the documented host
     // alias of the dispatch tool and is required in the matcher belt-and-braces.
@@ -191,18 +213,17 @@ describe('policy-arm matcher coverage of the enforcement set (plan §2)', () => 
     }
   });
 
-  it('matches only APE-owned receipt validation aliases', () => {
-    for (const sample of [
-      'ape_validate_receipt',
-      'mcp__ape__ape_validate_receipt',
-      'mcp__plugin_ape_ape__ape_validate_receipt',
-    ]) {
-      expect(SUBAGENT_PROTOCOL_TOOLS.test(sample)).toBe(true);
-      expect(coveredBy(prePolicyMatchers, sample)).toBe(true);
-      expect(coveredBy(postPolicyMatchers, sample)).toBe(true);
+  it.each(['ape_validate_receipt', 'ape_bind'])('matches only APE-owned %s aliases', (toolName) => {
+    for (const prefix of ['', 'mcp__ape__', 'mcp__plugin_ape_ape__']) {
+      const sample = `${prefix}${toolName}`;
+      expect(SUBAGENT_PROTOCOL_TOOLS.test(sample), sample).toBe(toolName === 'ape_validate_receipt');
+      expect(isExternalMcpTool(sample), sample).toBe(false);
+      expect(coveredBy(prePolicyMatchers, sample), sample).toBe(true);
+      expect(coveredBy(postPolicyMatchers, sample), sample).toBe(true);
     }
-    const collision = 'mcp__anyserver__ape_validate_receipt';
+    const collision = `mcp__anyserver__${toolName}`;
     expect(SUBAGENT_PROTOCOL_TOOLS.test(collision)).toBe(false);
+    expect(isExternalMcpTool(collision)).toBe(true);
     expect(coveredBy(prePolicyMatchers, collision)).toBe(false);
     expect(coveredBy(postPolicyMatchers, collision)).toBe(false);
   });
@@ -297,8 +318,21 @@ describe('Claude supplemental wiring and shared binding policy (plan §4)', () =
     expect(entries[0].hooks[0].async).toBe(true);
   };
 
-  it('SessionStart and Stop each carry exactly the async ape-larp entry', () => {
-    onlyLarpAsync(claudeHooks.SessionStart, 'SessionStart');
+  it('SessionStart keeps shared synchronous guidance conventional and explicit Claude supplemental-only', () => {
+    onlyLarpAsync(larpArms(claudeHooks.SessionStart), 'SessionStart LARP');
+    expect(policyArms(claudeHooks.SessionStart)).toHaveLength(0);
+    expect(policyArms(codexHooks.SessionStart)).toHaveLength(1);
+    expect(larpArms(codexHooks.SessionStart)).toHaveLength(1);
+    for (const guidance of policyArms(codexHooks.SessionStart)) {
+      expect(guidance.matcher).toBeUndefined();
+      expect(guidance.hooks).toHaveLength(1);
+      expect(guidance.hooks[0].async).toBeUndefined();
+    }
+    const [codexGuidance] = policyArms(codexHooks.SessionStart);
+    expect(codexGuidance.hooks[0].commandWindows).toBe(codexGuidance.hooks[0].command);
+  });
+
+  it('Stop carries exactly the async Claude LARP entry', () => {
     onlyLarpAsync(claudeHooks.Stop, 'Stop');
   });
 
@@ -351,12 +385,16 @@ describe('Claude supplemental wiring and shared binding policy (plan §4)', () =
 describe('Codex hooks parity guard (plan §5)', () => {
   it('covers shared write and dispatch surfaces while excluding external MCP', () => {
     for (const event of ['PreToolUse', 'PostToolUse']) {
-      const matchers = (codexHooks[event] ?? []).map((entry) => entry.matcher);
+      const matchers = policyArms(codexHooks[event]).map((entry) => entry.matcher);
       for (const tool of ['Bash', 'Edit', 'Write', 'apply_patch', 'Agent', 'spawn_agent', 'collaborationspawn_agent']) {
         expect(coveredBy(matchers, tool), `Codex ${event} must match ${tool}`).toBe(true);
       }
       expect(coveredBy(matchers, 'mcp__unity__save_scene')).toBe(false);
     }
+    expect(coveredBy(
+      canaryArms(codexHooks.PreToolUse).map((entry) => entry.matcher),
+      'mcp__unity__save_scene',
+    )).toBe(true);
   });
 
   it('registers Codex LARP lifecycle, question, and ape_run outcome cues without async handlers', () => {
@@ -383,34 +421,19 @@ describe('Codex hooks parity guard (plan §5)', () => {
 });
 
 describe('main-session shell-deny message precision (roadmap hook-denial-message-precision)', () => {
-  // The main-session fail-closed shell deny (lib/runtime/hooks.js:477) must name
-  // what it actually CLASSIFIED. SHELL_WRITE matches a large class of commands
-  // that are NOT writes — a quoted `>` (`grep 'a>b'`), a compound command, an
-  // inline interpreter — which are denied only because the guard
-  // cannot PROVE they are read-only (fail-closed, invariant 2), not because they
-  // are writes. This is a MESSAGE-ONLY change: the DECISION stays `deny` for
-  // every currently-denied input and `allow` for every currently-allowed one, so
-  // the denial SET is unchanged. Derived from the objective's public contract:
-  // the reason names the fail-closed classification (never "shell writes"), and
-  // — mirroring the deletion-channel gating message (hooks.js:439-441) — appends
-  // an `ape_run next` poll hint only while the run is 'gating', never 'running'.
+  // Inline code can be harmless without being provably read-only to this
+  // classifier. Its denial should describe that limitation accurately and
+  // include a gate-poll hint only while gating. Literal inspection is recognized
+  // separately, so a quoted regex operator no longer belongs in this deny set.
   const denyMain = (command, status) =>
     evaluateLifecyclePolicy(
       { event: 'PreToolUse', tool_name: 'Bash', host: 'claude', is_subagent: false, command },
       { state: { status }, ticket: null },
     );
 
-  // `grep 'a>b'` matches SHELL_WRITE via the bare-`>` arm (the quoted `>` reads
-  // as a redirect-shaped token to the pattern) yet is a pure read: the archetypal
-  // denied-but-not-a-write case whose old "shell writes are forbidden" message was
-  // simply false. Unlike a sole redirect to exactly /dev/null — now ALLOWED by the
-  // main-session fail-safe carve-out (see runtime-v2-hook-shell-policy.test.js) —
-  // this quoted-`>` false positive is NOT a /dev/null redirect, so the carve-out
-  // does not exempt it and it stays DENIED with the fail-closed message both pre-
-  // and post-fix, keeping these message-precision assertions valid throughout.
-  const NOT_A_WRITE = "grep 'a>b'";
+  const NOT_A_WRITE = "node -e 'console.log(1)'";
 
-  it('names the fail-closed classification (not "shell writes") for a non-write redirect under running, with no poll hint', () => {
+  it('names the fail-closed classification for inline code under running, with no poll hint', () => {
     const decision = denyMain(NOT_A_WRITE, 'running');
     expect(decision.decision).toBe('deny');
     expect(decision.reason).toMatch(/not provably read-only|cannot verify|fail-closed/i);
@@ -429,10 +452,12 @@ describe('main-session shell-deny message precision (roadmap hook-denial-message
     expect(decision.reason).not.toMatch(/shell writes are forbidden/);
   });
 
-  it('leaves the denial SET unchanged: real writes still deny, read-only commands still allow', () => {
-    // A genuine mutation stays denied (holds pre- and post-fix — message only).
+  it.each(['running', 'gating'])('allows a literal search operator while %s', (status) => {
+    expect(denyMain("grep 'a>b'", status).decision).toBe('allow');
+  });
+
+  it('denies real writes and allows read-only commands', () => {
     expect(denyMain('rm -rf build', 'running').decision).toBe('deny');
-    // Commands that never matched SHELL_WRITE stay allowed (pre- and post-fix).
     expect(denyMain('ls', 'running').decision).toBe('allow');
     expect(denyMain('git status', 'running').decision).toBe('allow');
   });

@@ -1,21 +1,23 @@
 # Host compatibility
 
-[`compatibility.json`](../compatibility.json) is APE's versioned, machine-readable compatibility
-contract. Package metadata, documentation, pull-request CI, tagged-release validation,
-marketplace smoke tests, and the public export are checked against it by
-`npm run compatibility:check`.
+APE supports Linux, macOS, and Windows. Node.js 22.12.0 or newer is required.
 
-The public Node.js minimum is 22.12.0. Blocking release validation uses Node.js 24.15.0,
-Codex CLI 0.147.0, and Claude Code 2.1.228 exactly. Linux, macOS, and Windows are supported.
-Codex is the sole required live release-certification host. The Claude package, manifest, pinned
-CLI, and marketplace installation remain structurally validated. Claude live operation is unverified
-and makes no authenticated operational certification claim.
+Release checks use these exact versions:
 
-Pull-request and tagged-release jobs use the exact blocking pins. Registry-installed host CLIs run
-only in unprivileged validation jobs, and the privileged publish job depends on successful host
-validation. The separate edge workflow follows current versions on ephemeral runners. Edge results
-are informational: they cannot satisfy or bypass a release gate and have no write, identity-token,
-attestation, secret, publication, or release authority.
+| Component | Pinned version |
+|---|---|
+| Node.js | 24.15.0 |
+| Codex CLI | 0.147.0 |
+| Claude Code | 2.1.228 |
 
-When compatibility changes, update the manifest and every consumer atomically. The deterministic
-checker rejects partial migrations and stale literals before release work begins.
+Codex is the sole required live release-certification host. Claude live operation is unverified;
+its package, manifest, pinned CLI, and marketplace installation receive structural checks only.
+
+[`compatibility.json`](../compatibility.json) owns these values.
+`npm run compatibility:check` checks its consumers for drift. Update the manifest
+and its consumers together; do not silently upgrade a host to pass a release gate.
+
+PR and release jobs use the pins above. Host validation runs without publish
+privileges, and publication depends on it. The separate edge workflow tests newer
+versions on temporary runners. It is informational only: no secrets, write,
+identity-token, attestation, or release authority, and no ability to waive a gate.

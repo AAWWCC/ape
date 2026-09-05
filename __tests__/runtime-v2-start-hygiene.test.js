@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
+import { sha256 } from '../lib/runtime/canonical.js';
+import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identity.js';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runtimePaths } from '../lib/runtime/paths.js';
@@ -97,10 +99,15 @@ async function shippingHarness({
   gh = {},
 } = {}) {
   vi.resetModules();
+  const scratchDirectory = await mkdtemp(path.join(tmpdir(), 'ape-shipping-mock-index-'));
+  cleanups.push(scratchDirectory);
+  const indexFile = path.join(scratchDirectory, 'index');
+  await writeFile(indexFile, 'mock index');
   const events = [];
   let remoteReads = 0;
   const ghRouteCalls = new Map();
   const runGit = vi.fn(async (_dir, args) => {
+    if (args[0] === 'ls-remote' && args[1] === '--get-url') return args[2];
     if (args[0] === 'remote' && args[1] === 'get-url') {
       const remote = remotes[Math.min(remoteReads, remotes.length - 1)];
       remoteReads += 1;
@@ -108,6 +115,9 @@ async function shippingHarness({
       return remote;
     }
     events.push({ kind: 'git', args: [...args] });
+    if (args[0] === 'write-tree') return 'f'.repeat(40);
+    if (args[0] === 'rev-parse' && args[1] === '--git-path') return indexFile;
+    if (args[0] === 'rev-parse' && args[1] === 'HEAD^{tree}') return 'f'.repeat(40);
     if (args[0] === 'branch' && args[1] === '--show-current') return 'ape/phase-public';
     if (args[0] === 'ls-files') return 'src/value.js\0';
     if (args[0] === 'ls-tree') return 'src/value.js\0';
@@ -115,18 +125,22 @@ async function shippingHarness({
     if (args[0] === 'show-ref') return '';
     if (args[0] === 'rev-parse' && String(args[1]).includes('origin/main') &&
       String(args[1]).endsWith('^{tree}')) return remoteTree;
+    if (args[0] === 'rev-parse' && String(args[1]).endsWith('^{tree}')) return 'f'.repeat(40);
     if (args[0] === 'rev-parse') return 'c'.repeat(40);
     return '';
   });
   const spawnWithTimeout = vi.fn(async (command, args) => {
+    if (command === 'git' && args[0] === 'config') return { exit_code: 1, combined: '', timed_out: false, spawn_error: null };
     events.push({ kind: 'gh', command, args: [...args] });
-    const route = args[1];
+    const route = args[0] === 'api' ? 'api' : args[1];
     const configured = gh[route] ?? (
       route === 'view'
         ? { exit_code: 1, combined: 'no pull request found\n' }
         : route === 'create'
           ? { exit_code: 0, combined: 'https://github.com/AAWWCC/ape/pull/7\n' }
-          : { exit_code: 0, combined: 'passed\n' }
+          : route === 'api'
+            ? { exit_code: 0, combined: JSON.stringify([{ type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'test' }] } }]) }
+            : { exit_code: 0, combined: 'passed\n' }
     );
     const callIndex = ghRouteCalls.get(route) ?? 0;
     ghRouteCalls.set(route, callIndex + 1);
@@ -159,26 +173,38 @@ async function shippingHarness({
   return { ...shipping, events, runGit, spawnWithTimeout };
 }
 
+const PUBLIC_SHIPPING_TARGET = { origin: 'git@github.com:AAWWCC/ape.git', repository: 'AAWWCC/ape', base: 'main' };
+const FROZEN_PUBLIC_SHIPPING_TARGET = { version: 1, provider: 'github', ...PUBLIC_SHIPPING_TARGET, required_remote_checks: false, project_guard: 'canonical-ape-public-v1' };
+
 function shippingState(overrides = {}) {
-  return {
+  const state = {
     run_id: 'run-shipping-remediation',
     objective: 'Ship only the attested public APE tree',
     mode: 'phase',
     lane: 'full',
     branch: 'ape/phase-public',
     base_branch: 'main',
+    base_commit_sha: 'c'.repeat(40),
     auto_merge_authorized: true,
     ship_requested: true,
+    shipping_target: FROZEN_PUBLIC_SHIPPING_TARGET,
     created_at: '2026-09-03T08:00:00.000Z',
     receipts: [{ changed_files: ['src/value.js'] }],
     gates: { passed: true, tree_sha: 'f'.repeat(40) },
     ...overrides,
   };
+  const manifest = { version: 1, ready: true, shipping_target: structuredClone(state.shipping_target), repository: { base_branch: state.base_branch, base_commit: state.base_commit_sha } };
+  state.admission = { version: 1, manifest, digest: sha256(manifest) };
+  state.start_request_hash = 'a'.repeat(64);
+  state.admitted_start_identity_version = 1;
+  state.admitted_start_identity_hash = admittedStartIdentityHash(state);
+  return state;
 }
 
 function shippingWatchState(overrides = {}) {
   return shippingState({
     shipping_watch: {
+      shipping_target: FROZEN_PUBLIC_SHIPPING_TARGET,
       provider: 'github',
       pr_url: 'https://github.com/AAWWCC/ape/pull/7',
       branch: 'ape/phase-public',
@@ -895,6 +921,7 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
       auto_merge: true,
       provider: 'github',
       required_remote_checks: false,
+      target: PUBLIC_SHIPPING_TARGET,
     },
   };
 
@@ -907,7 +934,7 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
       .then((value) => ({ value, error: null }), (error) => ({ value: null, error }));
 
     expect(outcome.value).toBeNull();
-    expect(outcome.error?.message).toMatch(/AAWWCC\/ape|public origin|authorized origin/i);
+    expect(outcome.error?.message).toMatch(/AAWWCC\/ape|origin.*frozen target/i);
     expect(harness.events.some((entry) =>
       entry.kind === 'git' && ['add', 'commit', 'push'].includes(entry.args[0]))).toBe(false);
     expect(harness.events.some((entry) =>
@@ -915,20 +942,21 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
   });
 
   it('binds every remote mutation to one immutable public target', async () => {
-    const harness = await shippingHarness();
+    const harness = await shippingHarness({ gh: { view: [
+      { exit_code: 1, combined: 'no pull request found\n' },
+      { exit_code: 0, combined: `MERGED https://github.com/AAWWCC/ape/pull/7 2026-07-09T12:00:00Z ${'c'.repeat(40)}\n` },
+    ] } });
 
     const result = await harness.autoMergeGithub('/tmp/ape-public-origin', shippingState(), config);
     expect(result.provider).toBe('github');
 
-    expect(harness.events.filter((entry) => entry.kind === 'origin')).toEqual([{
-      kind: 'origin',
-      remote: 'git@github.com:AAWWCC/ape.git',
-    }]);
+    expect(harness.events.filter((entry) => entry.kind === 'origin').length).toBeGreaterThanOrEqual(2);
+    expect(harness.events.filter((entry) => entry.kind === 'origin').every((entry) => entry.remote === PUBLIC_SHIPPING_TARGET.origin)).toBe(true);
     expect(harness.events.find((entry) =>
       entry.kind === 'git' && entry.args[0] === 'push')?.args).toEqual([
       'push',
       'git@github.com:AAWWCC/ape.git',
-      'HEAD:refs/heads/ape/phase-public',
+      `${'c'.repeat(40)}:refs/heads/ape/phase-public`,
     ]);
     for (const entry of harness.events.filter((candidate) => candidate.kind === 'gh')) {
       expect(entry.args.slice(-2)).toEqual(['--repo', 'AAWWCC/ape']);
@@ -946,26 +974,16 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
       ],
     });
 
-    const result = await harness.autoMergeGithub(
+    await expect(harness.autoMergeGithub(
       '/tmp/ape-public-origin',
       shippingState(),
       config,
-    );
-
-    expect(result.provider).toBe('github');
-    expect(harness.events.filter((entry) => entry.kind === 'origin')).toHaveLength(1);
-    expect(JSON.stringify(harness.events)).not.toContain('attacker/ape');
-    expect(harness.events.find((entry) =>
-      entry.kind === 'git' && entry.args[0] === 'push')?.args[1])
-      .toBe('git@github.com:AAWWCC/ape.git');
+    )).rejects.toThrow(/origin.*frozen target/);
+    expect(harness.events.some((entry) => entry.kind === 'git' && ['add', 'commit', 'push'].includes(entry.args[0]))).toBe(false);
   });
 
   it('pins poll, merge, and auto-merge commands to the persisted PR and public repository', async () => {
     const harness = await shippingHarness({
-      remotes: [
-        'git@github.com:AAWWCC/ape.git',
-        'git@github.com:attacker/ape.git',
-      ],
       gh: {
         checks: { exit_code: 0, combined: 'passed\n' },
         view: {
@@ -986,17 +1004,23 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
     );
 
     expect(result.pending?.reason).toBe('awaiting auto-merge');
-    expect(harness.events.filter((entry) => entry.kind === 'origin')).toHaveLength(1);
+    expect(harness.events.filter((entry) => entry.kind === 'origin').length).toBeGreaterThanOrEqual(2);
     expect(JSON.stringify(harness.events)).not.toContain('attacker/ape');
     for (const entry of harness.events.filter((candidate) => candidate.kind === 'gh')) {
+      if (entry.args[0] === 'api') {
+        expect(entry.args[1]).toMatch(/^repos\/AAWWCC\/ape\//);
+        expect(entry.args).toContain('github.com');
+        expect(entry.args).not.toContain('--repo');
+        continue;
+      }
       expect(entry.args).toContain('https://github.com/AAWWCC/ape/pull/7');
       expect(entry.args.slice(-2)).toEqual(['--repo', 'AAWWCC/ape']);
     }
   });
 
   it.each([
-    ['frozen auto-merge consent', { auto_merge_authorized: false, ship_requested: true }],
-    ['the audited SHIP marker', { auto_merge_authorized: true, ship_requested: false }],
+    ['frozen auto-merge consent', { auto_merge_authorized: false, ship_requested: false }],
+    ['the audited SHIP marker', { auto_merge_authorized: false, ship_requested: undefined }],
   ])('does not reach the resumed merge sink without %s', async (_label, overrides) => {
     const harness = await shippingHarness({
       gh: {

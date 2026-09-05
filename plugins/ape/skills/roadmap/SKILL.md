@@ -7,7 +7,8 @@ description: "Seed, inspect, and evolve the runtime-owned APE roadmap."
 
 Use only when the user explicitly requests roadmap work. The roadmap stores durable requirements;
 its statuses are always derived by the runtime, never supplied by the caller.
-On Google Antigravity / Gemini, pass the exact open project root as `project_dir`.
+Pass the governed project root as `project_dir`. Existing explicit approval covers the same entries
+and action; ask again only when a material change falls outside that approval.
 
 - `status`: call `ape_history` with `action: "roadmap-status"`. Optional `status_filter` narrows
   returned entries without changing aggregate counts. `roadmap: null` means no roadmap exists.

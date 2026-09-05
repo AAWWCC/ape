@@ -174,6 +174,9 @@ describe('Codex plugin cache retention reinstall', () => {
       await expect(readFile(path.join(installed, forbidden, 'must-not-ship.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     }
     expect(result.stdout).toContain('Installed lean cache');
+    expect(result.stdout).toContain('Desktop activation is not verified by this command');
+    expect(result.stdout).toContain(`verify that a fresh task loads ${nextVersion}`);
+    expect(result.stdout).not.toContain('New Codex tasks use');
     expect((await readFile(context.fakeCodexLog, 'utf8')).trim().split('\n')).toHaveLength(2);
   });
 

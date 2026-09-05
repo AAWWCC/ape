@@ -8,7 +8,9 @@
  * supported Codex installer validate and install it under an isolated
  * temporary CODEX_HOME, then atomically promotes that exact installed tree to
  * the real personal cache. Existing immutable cache versions are never moved
- * or deleted, so already-open tasks retain their pinned paths.
+ * or deleted, so already-open tasks retain their pinned paths. Cache promotion
+ * does not invalidate a running desktop app's in-memory plugin snapshot; its
+ * activation must be checked in a fresh task before relying on the update.
  */
 
 import { spawn } from 'node:child_process';
@@ -385,7 +387,10 @@ async function main(argv) {
 
   process.stdout.write(`Installed cache version: ${nextVersion} (source remains ${version})\n`);
   process.stdout.write(
-    `New Codex tasks use ${nextVersion}; existing cache versions remain available to open tasks.\n`,
+    'Existing cache versions remain available to open tasks.\n',
+  );
+  process.stdout.write(
+    `Desktop activation is not verified by this command. A running app may retain its previous plugin snapshot; verify that a fresh task loads ${nextVersion} before starting an APE run.\n`,
   );
 }
 

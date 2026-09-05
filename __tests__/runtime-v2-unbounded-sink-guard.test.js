@@ -120,8 +120,8 @@ import { describe, expect, it } from 'vitest';
 // rediscover.
 //
 // FILE SCOPE. This scan preserves the legacy service.js, scheduler.js,
-// gates.js, and pipeline.js inventory and adds the exact eleven domain-owner
-// paths required by this reorganization. It is NOT a lib/runtime-wide claim;
+// gates.js, and pipeline.js inventory and adds the exact domain owners and
+// shared leaf modules required by this reorganization. It is NOT a lib/runtime-wide claim;
 // the emptiness assertion's own failure message says so explicitly and names
 // how many other tracked lib/runtime/*.js files were never scanned. Required
 // owners are read from direct working-tree paths even while untracked.
@@ -519,7 +519,7 @@ function collectCandidates(file, text, acceptedOut) {
   return flagged;
 }
 
-// Exact inventory: the four legacy sink surfaces plus all eleven new owners.
+// Exact inventory: four legacy sink surfaces, domain owners, and shared leaves.
 // A rename, omission, unreadable file, or still-absent owner is a visible,
 // re-checked assertion below rather than silent scan narrowing.
 const CLAIMED_SOURCE_FILES = [
@@ -538,6 +538,9 @@ const CLAIMED_SOURCE_FILES = [
   'lib/runtime/github-shipping.js',
   'lib/runtime/reducer.js',
   'lib/runtime/review-evidence.js',
+  'lib/runtime/active-state.js',
+  'lib/runtime/bounded-summary.js',
+  'lib/runtime/codex-bootstrap.js',
 ];
 
 const REQUIRED_OWNER_FILES = CLAIMED_SOURCE_FILES.slice(4);

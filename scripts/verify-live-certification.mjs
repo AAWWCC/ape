@@ -9,7 +9,7 @@ import {
   TERMINAL_REASON_TAXONOMY_VERSION,
 } from '../lib/runtime/terminal-telemetry.js';
 
-export const LIVE_CERTIFICATION_SCHEMA_VERSION = 4;
+export const LIVE_CERTIFICATION_SCHEMA_VERSION = 5;
 export const LIVE_CERTIFICATION_PATH = 'evals/live-certification.json';
 export const LIVE_CERTIFICATION_HOSTS = Object.freeze(['codex']);
 export const LIVE_CERTIFICATION_UNVERIFIED_HOSTS = Object.freeze(['claude']);
@@ -65,12 +65,28 @@ const ATTEMPT_KEYS = Object.freeze([
 const LAND_PROOF_KEYS = Object.freeze([
   'target_branch',
   'merge_method',
-  'auto_merge_required',
+  'merge_path',
+  'bypass_used',
+  'required_checks_passed',
+  'checked_head_commit',
+  'gate_tree',
+  'merged_tree',
+  'branch_protection',
   'pr_state',
   'pushed_head_commit',
   'observed_merged_pr_head',
   'merge_commit',
   'remote_head_after_merge',
+]);
+const PROTECTION_PROOF_KEYS = Object.freeze([
+  'pull_request_required',
+  'required_checks_strict',
+  'required_checks_count',
+  'admins_enforced',
+  'force_pushes_allowed',
+  'deletions_allowed',
+  'before_sha256',
+  'after_sha256',
 ]);
 const CLEAN_RUN_FLAGS = Object.freeze([
   'manual_intervention',
@@ -136,10 +152,30 @@ function validateLandProof(value, attemptNumber) {
   }
   if (
     value.merge_method !== 'squash'
-    || value.auto_merge_required !== true
+    || !['immediate', 'auto'].includes(value.merge_path)
+    || value.bypass_used !== false
+    || value.required_checks_passed !== true
     || value.pr_state !== 'MERGED'
-  ) reject(`attempt ${attemptNumber} protected land did not use the required protected auto-merge path`);
+  ) reject(`attempt ${attemptNumber} protected land requires a completed, checked squash merge without bypass`);
+  const policy = value.branch_protection;
+  requireExactKeys(policy, PROTECTION_PROOF_KEYS, `attempt ${attemptNumber} protected branch policy`);
+  if (
+    policy.pull_request_required !== true
+    || policy.required_checks_strict !== true
+    || policy.admins_enforced !== true
+    || policy.force_pushes_allowed !== false
+    || policy.deletions_allowed !== false
+  ) reject(`attempt ${attemptNumber} protected branch policy must enforce pull requests and up-to-date checks for administrators without force-pushes or deletion`);
+  requireBoundedInteger(policy.required_checks_count, 1, 100, `attempt ${attemptNumber} required checks count`);
+  if (
+    typeof policy.before_sha256 !== 'string' || !SHA256.test(policy.before_sha256)
+    || typeof policy.after_sha256 !== 'string' || !SHA256.test(policy.after_sha256)
+    || policy.before_sha256 !== policy.after_sha256
+  ) reject(`attempt ${attemptNumber} protected branch policy evidence is missing or changed during shipping`);
   for (const key of [
+    'checked_head_commit',
+    'gate_tree',
+    'merged_tree',
     'pushed_head_commit',
     'observed_merged_pr_head',
     'merge_commit',
@@ -147,6 +183,12 @@ function validateLandProof(value, attemptNumber) {
   ]) requireHash(value[key], `attempt ${attemptNumber} protected_land.${key}`);
   if (value.observed_merged_pr_head !== value.pushed_head_commit) {
     reject(`attempt ${attemptNumber} protected land did not merge the exact pushed head`);
+  }
+  if (value.checked_head_commit !== value.pushed_head_commit) {
+    reject(`attempt ${attemptNumber} protected land checks did not attest the exact pushed head`);
+  }
+  if (value.gate_tree !== value.merged_tree) {
+    reject(`attempt ${attemptNumber} protected land did not merge the exact passed-gate tree`);
   }
   if (
     value.merge_commit === value.pushed_head_commit
@@ -278,12 +320,19 @@ export function validateLiveCertificationDocument(document, {
     cohorts.set(cohortKey, cohort);
   }
 
+  let expectedSequence = 0;
   for (const host of LIVE_CERTIFICATION_HOSTS) {
     for (const pipeline of LIVE_CERTIFICATION_PIPELINES) {
       const cohortKey = `${host}/${pipeline}`;
       const cohort = cohorts.get(cohortKey) ?? [];
       if (cohort.length !== REQUIRED_ATTEMPTS_PER_COHORT) {
         reject(`cohort ${cohortKey} must contain exactly one first-pass-perfect attempt`);
+      }
+      for (const attempt of cohort) {
+        if (document.attempts[expectedSequence] !== attempt) {
+          reject(`campaign order must follow ${LIVE_CERTIFICATION_PIPELINES.join(' → ')} for each certified host`);
+        }
+        expectedSequence += 1;
       }
     }
   }

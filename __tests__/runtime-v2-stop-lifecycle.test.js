@@ -131,6 +131,7 @@ async function project() {
     tickets: [
       {
         ticket_id: 'run-stop-lifecycle:build:b',
+        stage_id: 'build',
         role: 'implementer',
         writable: true,
         claimed_paths: ['src'],

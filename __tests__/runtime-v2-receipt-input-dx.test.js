@@ -37,7 +37,7 @@ async function project() {
   const paths = runtimePaths(dir);
   await atomicWriteJson(paths.config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
   });
   return dir;
 }

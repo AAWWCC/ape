@@ -139,7 +139,7 @@ describe('public commit identity gate', () => {
       exported,
       '--allow-dirty',
     ], { cwd: ROOT, encoding: 'utf8' });
-    expect(exportResult.status).toBe(0);
+    expect(exportResult.status, `${exportResult.stderr}\n${exportResult.stdout}`).toBe(0);
 
     const result = spawnSync(process.execPath, [
       path.join(exported, 'scripts', 'check-public-commit-identities.mjs'),

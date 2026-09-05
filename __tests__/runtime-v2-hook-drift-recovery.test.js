@@ -38,6 +38,7 @@ async function project(status = 'running') {
     tickets: [
       {
         ticket_id: 'run-drift-recovery:build:b',
+        stage_id: 'build',
         role: 'implementer',
         writable: true,
         claimed_paths: ['src'],
@@ -76,12 +77,17 @@ function invokeHook(input, cwd, host = 'claude') {
     });
     let stdout = '';
     let stderr = '';
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('hook did not finish within 10 seconds'));
+    }, 10_000);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.on('error', reject);
     child.on('close', (code) => {
+      clearTimeout(timeout);
       if (code !== 0) reject(new Error(stderr));
       else resolve(JSON.parse(stdout));
     });
@@ -297,6 +303,47 @@ describe('APE v2 hook failure paths consult the active run', () => {
     });
   });
 
+  it.each([
+    ['projectDir', (dir) => ({ projectDir: dir })],
+    ['cwd', (dir) => ({ cwd: dir })],
+    ['workspacePaths', (dir) => ({ workspacePaths: [dir] })],
+  ])('consults the streamed top-level %s root for oversized Codex input', async (_label, rootField) => {
+    const dir = await project();
+    const unrelated = await mkdtemp(path.join(tmpdir(), 'ape-drift-unrelated-cwd-'));
+    cleanups.push(unrelated);
+    const payload = `${JSON.stringify({
+      hook_event_name: 'PreToolUse',
+      ...rootField(dir),
+      tool_name: 'Edit',
+      tool_input: {
+        file_path: 'package-lock.json',
+        new_string: 'x'.repeat(9 * 1024 * 1024),
+      },
+    })}\n`;
+
+    const response = await invokeHook(payload, unrelated, 'codex');
+    expect(response.hookSpecificOutput?.permissionDecision ?? response.decision).toBe('block');
+    expect(response.hookSpecificOutput?.permissionDecisionReason ?? response.reason)
+      .toMatch(/failed closed.*exceeds/i);
+  });
+
+  it('does not trust nested root lookalikes in an oversized Codex tool payload', async () => {
+    const dir = await project();
+    const unrelated = await mkdtemp(path.join(tmpdir(), 'ape-drift-unrelated-nested-'));
+    cleanups.push(unrelated);
+    const payload = `${JSON.stringify({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'mcp__future_provider__mutate',
+      tool_input: {
+        projectDir: dir,
+        workspacePaths: [dir],
+        content: 'x'.repeat(9 * 1024 * 1024),
+      },
+    })}\n`;
+
+    expect(await invokeHook(payload, unrelated, 'codex')).toEqual({});
+  });
+
   // `blocked` is resumable (re-gate/reset) and `shipping` is mid-merge: for
   // both, the parseable path denies a write, so the unparseable path must not
   // quietly allow one.
@@ -322,6 +369,22 @@ describe('APE v2 hook failure paths consult the active run', () => {
       decision: 'block',
       reason: expect.stringMatching(/failed closed/),
     });
+  });
+
+  it.skipIf(process.platform === 'win32')('fails closed promptly when corrupt input recovery encounters an active-state FIFO', async () => {
+    const dir = await project();
+    await rm(runtimePaths(dir).active);
+    execFileSync('mkfifo', [runtimePaths(dir).active]);
+
+    expect(await invokeHook('not json\n', dir)).toEqual({
+      decision: 'block',
+      reason: expect.stringMatching(/failed closed/),
+    });
+    const ordinary = await invokeHook(preToolUse(dir, 'Write', {
+      file_path: 'src/value.js', content: 'export const value = 2;\n',
+    }), dir);
+    expect(ordinary.hookSpecificOutput?.permissionDecision ?? ordinary.decision)
+      .toMatch(/deny|block/);
   });
 
   it('applies normal policy, not a size denial, to a large in-cap Edit', async () => {

@@ -255,6 +255,7 @@ async function project(status = 'running') {
     tickets: [
       {
         ticket_id: 'run-out-of-project:build:b',
+        stage_id: 'build',
         role: 'implementer',
         writable: true,
         claimed_paths: ['src'],

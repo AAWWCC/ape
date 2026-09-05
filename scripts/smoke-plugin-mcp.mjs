@@ -16,6 +16,7 @@ const PACKAGES = Object.freeze([
 ]);
 const EXPECTED_TOOLS = Object.freeze([
   'ape_run',
+  'ape_bind',
   'ape_validate_receipt',
   'ape_status',
   'ape_history',
@@ -80,6 +81,21 @@ function assertToolContract(host, tools) {
     host,
     'evidence_command capability does not require a nonblank exact command ID',
   );
+
+  const bindTool = byName.get('ape_bind');
+  const bindSchema = bindTool?.inputSchema;
+  assertContract(bindSchema?.type === 'object' && bindSchema?.additionalProperties === false, host, 'ape_bind is not a closed object');
+  assertContract(
+    JSON.stringify([...(bindSchema?.required ?? [])].sort()) === JSON.stringify(['bootstrap_capability', 'project_dir']) &&
+      JSON.stringify(Object.keys(bindSchema?.properties ?? {}).sort()) === JSON.stringify(['bootstrap_capability', 'project_dir']),
+    host,
+    'ape_bind must accept exactly project_dir and bootstrap_capability without native identity fields',
+  );
+  assertContract(bindSchema?.properties?.project_dir?.minLength === 1, host, 'ape_bind project_dir is not nonblank');
+  const bearer = bindSchema?.properties?.bootstrap_capability;
+  assertContract(bearer?.minLength === 32 && bearer?.maxLength === 256 && bearer?.pattern === '^[A-Za-z0-9_-]+$', host, 'ape_bind bearer is not strictly bounded');
+  assertContract(/does not authorize work/i.test(bindTool?.description ?? ''), host, 'ape_bind omits the no-hook no-authority warning');
+  assertContract(/expected to be absent before this call; check for it only after/i.test(bindTool?.description ?? ''), host, 'ape_bind omits the pre-binding versus post-binding context order');
 
   const validateSchema = byName.get('ape_validate_receipt')?.inputSchema;
   assertContract(validateSchema?.type === 'object' && validateSchema?.additionalProperties === false, host, 'ape_validate_receipt is not a closed object');
@@ -192,6 +208,13 @@ async function smoke(host, pluginRoot) {
             },
           },
         },
+        {
+          jsonrpc: '2.0', id: 4, method: 'tools/call',
+          params: {
+            name: 'ape_bind',
+            arguments: { project_dir: fixture, bootstrap_capability: 'unobserved-bootstrap-capability-1234567890' },
+          },
+        },
       ].map((message) => JSON.stringify(message)).join('\n') + '\n');
     });
   } finally {
@@ -208,6 +231,11 @@ async function smoke(host, pluginRoot) {
   }
   assertToolContract(host, tools);
   assertPreviewContract(host, byId.get(3));
+  const bindResponse = byId.get(4);
+  assertContract(bindResponse?.result?.isError === true, host, 'ape_bind no-hook check did not report an unconfirmed binding');
+  const bindStatus = JSON.parse(bindResponse?.result?.content?.find((entry) => entry?.type === 'text')?.text ?? 'null');
+  assertContract(bindStatus?.ok === false && bindStatus?.bound === false, host, 'ape_bind granted authority without a native hook binding');
+  assertContract(!JSON.stringify(bindResponse).includes('unobserved-bootstrap-capability-1234567890'), host, 'ape_bind reflected its bearer');
   process.stdout.write(`${host} package local stdio MCP initialized with the bounded run contract\n`);
 }
 

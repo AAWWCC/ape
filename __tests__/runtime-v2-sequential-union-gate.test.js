@@ -50,6 +50,7 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { currentTreeSha } from '../lib/runtime/git.js';
 import { archiveRun } from '../lib/runtime/history.js';
+import { loadRuntimeConfig } from '../lib/runtime/config.js';
 
 // Detached gate runners plus real git init/commit take a few honest seconds.
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
@@ -409,6 +410,53 @@ function runnerEntry(fullSuite, id) {
   return (fullSuite?.runners ?? []).find((entry) => entry.id === id);
 }
 
+async function recheckHeldFullGate(dir, held) {
+  const paths = runtimePaths(dir);
+  const original = await readFile(paths.active, 'utf8');
+  const merges = gates.autoMergeGithub.mock.calls.length;
+  const remotePolls = gates.pollRemoteChecksAndMerge.mock.calls.length;
+  // These legacy gate fixtures carry no frozen shipping admission. Refusal
+  // must precede effects; the separate ship suite covers an admitted SHIP.
+  expect(await shipRun(dir, 'synthetic operator decision')).toMatchObject({
+    ok: false, code: 'shipping-admission-invalid', attempts_consumed: 0,
+  });
+  expect(await readFile(paths.active, 'utf8')).toBe(original);
+  // Evaluate cache/runner behavior using an isolated FULL-selection context,
+  // without persisting consent, modifying lifecycle state, or merging.
+  // Mirror the production detached union path: the compatibility runMergeGates
+  // helper evaluates only a single suite and cannot exercise runner_results.
+  const isolated = { ...structuredClone(held.run), ship_requested: true };
+  const config = await loadRuntimeConfig(paths.config);
+  const start = await gates.startGateSuite(dir, paths, isolated, config);
+  let ready = start.hit;
+  if (!ready) {
+    expect(start.watch).toBeDefined();
+    isolated.status = 'gating';
+    isolated.stage = 'gates';
+    isolated.gates_watch = start.watch;
+    trackPid(start.watch.pid);
+    for (let attempt = 0; attempt < 150 && !ready; attempt += 1) {
+      const poll = await gates.pollGateSuite(dir, paths, isolated, config);
+      expect(poll.failed).toBeUndefined();
+      if (poll.ready) ready = poll.ready;
+      if (poll.pending?.watch) {
+        isolated.gates_watch = { ...isolated.gates_watch, ...poll.pending.watch };
+        trackPid(isolated.gates_watch.pid);
+      }
+      if (!ready) await sleep(100);
+    }
+  }
+  expect(ready, 'the isolated detached runner union must finish within the poll budget').toBeDefined();
+  const evaluated = await gates.evaluateGates(dir, paths, isolated, config, {
+    ...ready.ctx, full: ready.full, cached: ready.cached,
+  });
+  expect(evaluated.passed).toBe(true);
+  expect(await readFile(paths.active, 'utf8')).toBe(original);
+  expect(gates.autoMergeGithub.mock.calls.length).toBe(merges);
+  expect(gates.pollRemoteChecksAndMerge.mock.calls.length).toBe(remotePolls);
+  return evaluated.checks.full_suite;
+}
+
 describe('APE v2 sequential-union polyglot merge gate', () => {
   it('unions two green runners into a passing gate with a truthful per-runner full_suite.runners[] (T1)', async () => {
     const { dir, outside, probe } = await makeProject();
@@ -524,7 +572,7 @@ describe('APE v2 sequential-union polyglot merge gate', () => {
     const api = makeRunner(outside, probe, { id: 'api', owns: OWNS_API });
     const web = makeRunner(outside, probe, { id: 'web', owns: OWNS_WEB });
     // cache ON so the passing runners persist; auto_merge OFF so the passing
-    // union HOLDS at merge (not merged), letting a ship re-evaluate the SAME
+    // union HOLDS at merge (not merged), letting a FULL gate re-evaluate the SAME
     // tree where every runner must serve cached-green.
     await writeConfig(dir, {
       runners: [api.config, web.config],
@@ -548,11 +596,7 @@ describe('APE v2 sequential-union polyglot merge gate', () => {
 
     // Re-evaluate at the same tree: every runner is served from its own cache
     // entry — counters stay flat and each runners[] entry reports cached:true.
-    const shipped = track(await shipRun(dir, 'operator ships after out-of-band acceptance'));
-    expect(shipped.ok).toBe(true);
-    const done = await settle(dir, shipped);
-    expect(done.run.status).toBe('completed');
-    const shipFull = fullSuiteOf(done);
+    const shipFull = await recheckHeldFullGate(dir, held);
     for (const id of ['api', 'web']) expect(runnerEntry(shipFull, id).cached).toBe(true);
     expect(await api.full.executions()).toBe(1);
     expect(await web.full.executions()).toBe(1);
@@ -587,11 +631,7 @@ describe('APE v2 sequential-union polyglot merge gate', () => {
       autoMerge: false,
       cache: true,
     });
-    const shipped = track(await shipRun(dir, 'operator ships the second workspace'));
-    expect(shipped.ok).toBe(true);
-    const done = await settle(dir, shipped);
-    expect(done.run.status).toBe('completed');
-    const shipFull = fullSuiteOf(done);
+    const shipFull = await recheckHeldFullGate(dir, held);
     expect(runnerEntry(shipFull, 'api').cached).toBe(true);
     expect(runnerEntry(shipFull, 'web').cached).toBe(false);
     expect(await api.full.executions()).toBe(1); // served, never re-ran
@@ -601,7 +641,7 @@ describe('APE v2 sequential-union polyglot merge gate', () => {
   it('never lets a runner IMPACTED cache entry satisfy that runner FULL suite at one tree (T5)', async () => {
     const { dir, outside, probe } = await makeProject();
     // One runner with both a full and an impacted profile; cache ON, auto_merge
-    // OFF so the impacted pass HOLDS at merge, then a ship re-runs FULL.
+    // OFF so the impacted pass HOLDS at merge, then the evaluator re-runs FULL.
     const api = makeRunner(outside, probe, { id: 'api', owns: OWNS_API, template: true });
     await writeConfig(dir, {
       runners: [api.config],
@@ -620,13 +660,9 @@ describe('APE v2 sequential-union polyglot merge gate', () => {
     expect(await api.impacted.executions()).toBe(1);
     expect(await api.full.executions()).toBe(0);
 
-    // Ship forbids impacted and re-runs the runner's FULL suite: the impacted
+    // The isolated ship-selection context re-runs the runner's FULL suite: the impacted
     // cache entry must NOT satisfy the distinct full key at the same tree.
-    const shipped = track(await shipRun(dir, 'operator ships after acceptance'));
-    expect(shipped.ok).toBe(true);
-    const done = await settle(dir, shipped);
-    expect(done.run.status).toBe('completed');
-    const shipEntry = runnerEntry(fullSuiteOf(done), 'api');
+    const shipEntry = runnerEntry(await recheckHeldFullGate(dir, held), 'api');
     expect(shipEntry.mode).toBe('full');
     expect(shipEntry.cached).toBe(false);
     expect(await api.full.executions()).toBe(1);

@@ -82,7 +82,7 @@ describe('run-scoped read-only command profiles', () => {
     const runSkill = readFileSync(new URL('../plugin-src/skills/run/body.md', import.meta.url), 'utf8');
     expect(common).toMatch(/`deadline_at` is the runtime-issued authorization horizon/iu);
     expect(common).toMatch(/never stop early[\s\S]*because of that prose/iu);
-    expect(runSkill).toMatch(/Do not embed an execution budget[\s\S]*ticket deadline separately/iu);
+    expect(runSkill).toMatch(/Omit execution budgets and dispatch limits[\s\S]*preview reports the runtime-owned ticket deadline/iu);
     expect(resolveTicketDeadline({ deadlines_ms: { spike: 0, full: 123 } }, 'spike', 'full'))
       .toEqual({ deadline_ms: 0, source: 'mode:spike' });
     expect(resolveTicketDeadline({ deadlines_ms: { debug: 420_000, full: 123 } }, 'debug', 'full'))

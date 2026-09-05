@@ -195,6 +195,66 @@ describe('audited preflight answers', () => {
   });
 
   it.each([
+    {
+      name: 'stale run while the active run is at another stage',
+      supplied: 'run-stale-answer',
+      active: '"run-answer"',
+      mutate: (state) => ({ ...state, status: 'running', stage: 'test' }),
+    },
+    {
+      name: 'aim with no active run',
+      supplied: 'run-stale-answer',
+      active: '(none)',
+      mutate: () => null,
+    },
+  ])('checks $name before lifecycle-stage validation and names both sides', async ({ supplied, active, mutate }) => {
+    const dir = await heldProject();
+    const paths = runtimePaths(dir);
+    const before = await readJson(paths.active);
+    const next = mutate(before);
+    if (next) await atomicWriteJson(paths.active, next);
+    else await rm(paths.active);
+
+    await expect(service.answerPreflight(dir, { ...valid(), run_id: supplied }))
+      .rejects.toThrow(
+        `answer-preflight run_id confirmation mismatch: provided ${JSON.stringify(supplied)}; active ${active}`,
+      );
+    expect(await readJson(paths.active, null)).toEqual(next);
+  });
+
+  it('rejects an explicit null aim at the static schema boundary without reading or changing active state', async () => {
+    const dir = await heldProject();
+    const paths = runtimePaths(dir);
+    const before = await readFile(paths.active, 'utf8');
+    await expect(service.answerPreflight(dir, { ...valid(), run_id: null })).rejects.toThrow(/run_id/);
+    expect(await readFile(paths.active, 'utf8')).toBe(before);
+  });
+
+  it.each([
+    ['unparseable JSON', '{'],
+    ['parseable scalar', 'false\n'],
+    ['run-looking but schema-invalid object', JSON.stringify({
+      run_id: 'run-answer',
+      status: 'input_required',
+      stage: 'preflight',
+      preflight: { artifact_hash: 'a'.repeat(64) },
+    })],
+  ])('rejects answer-preflight against %s through canonical corrupt-state recovery', async (_label, bytes) => {
+    const dir = await heldProject();
+    const paths = runtimePaths(dir);
+    await writeFile(paths.active, bytes);
+    const before = await readFile(paths.active, 'utf8');
+
+    const error = await service.answerPreflight(dir, valid()).then(
+      () => null,
+      (cause) => cause,
+    );
+    expect(error?.code).toBe('APE_CORRUPT_ACTIVE_STATE');
+    expect(error?.message).toMatch(/override operation reset/i);
+    expect(await readFile(paths.active, 'utf8')).toBe(before);
+  });
+
+  it.each([
     ['partial answers', () => ({ ...valid(), answers: valid().answers.slice(0, 1) })],
     ['duplicate answers', () => ({ ...valid(), answers: [valid().answers[0], valid().answers[0], valid().answers[1]] })],
     ['unknown answer', () => ({ ...valid(), answers: [...valid().answers, { id: 'other', answer: 'x' }] })],

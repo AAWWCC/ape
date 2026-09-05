@@ -68,7 +68,7 @@ async function project(label) {
   git(dir, 'commit', '-qm', 'test: baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
   });
   return dir;
 }
@@ -88,7 +88,7 @@ async function startClaude(dir) {
     subagents_available: true,
     explicit_invocation: true,
   });
-  expect(result.ok).toBe(true);
+  expect(result.ok, JSON.stringify({ reason: result.reason, blocking: result.readiness?.blocking })).toBe(true);
   const action = result.actions.find((entry) => entry.type === 'dispatch_agent');
   expect(action).toBeDefined();
   return { result, action, ticket: action.ticket };
@@ -231,7 +231,23 @@ async function expireTicketDeadline(dir, ticketId) {
   await atomicWriteJson(paths.active, state);
   const { file, intent } = await readOnlyIntent(dir);
   expect(intent.status).toBe('bound');
-  await atomicWriteJson(file, { ...intent, expires_at: deadline });
+  // Move the complete launch timeline so the fixture represents an old,
+  // coherent binding rather than a corrupt record whose expiry predates bind.
+  const deltaMs = Date.parse(deadline) - Date.parse(intent.expires_at);
+  const shiftTimeline = (record) => {
+    const shifted = { ...record };
+    for (const key of [
+      'prepared_at', 'authorized_at', 'launched_at', 'launch_expires_at',
+      'bound_at', 'expires_at',
+    ]) {
+      if (record[key]) shifted[key] = new Date(Date.parse(record[key]) + deltaMs).toISOString();
+    }
+    return shifted;
+  };
+  await atomicWriteJson(file, {
+    ...shiftTimeline(intent),
+    launch_generations: intent.launch_generations.map(shiftTimeline),
+  });
 }
 
 describe('APE v2 Claude subagent binding denial names its cause', () => {

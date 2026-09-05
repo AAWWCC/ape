@@ -23,6 +23,7 @@ import {
   statusRun,
 } from '../lib/runtime/service.js';
 import { autoMergeGithub, pollRemoteChecksAndMerge } from '../lib/runtime/gates.js';
+import { applyActions } from '../lib/runtime/receipt-service.js';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { queryHistory } from '../lib/runtime/history.js';
 import { acquireRunLock } from '../lib/runtime/lock.js';
@@ -61,7 +62,7 @@ async function project() {
   const paths = runtimePaths(dir);
   await atomicWriteJson(paths.config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
   });
   return dir;
 }
@@ -124,7 +125,7 @@ describe('APE v2 service integration', () => {
       subagents_available: true,
       explicit_invocation: true,
     });
-    expect(started.ok).toBe(true);
+    expect(started.ok, JSON.stringify({ reason: started.reason, blocking: started.readiness?.blocking })).toBe(true);
     const objective = started.run.tickets[0].objective;
     expect(objective).toBe('Change behavior');
   });
@@ -660,6 +661,51 @@ describe('APE v2 resting shipping-watch levers (service)', () => {
     expect(await exists(paths.lock)).toBe(true);
     const records = await queryHistory(paths, { run_id: runId });
     expect(records.some((record) => record.status === 'completed')).toBe(false);
+  });
+
+  it('persists the phase-one no-check submitted-merge watch without declaring completion', async () => {
+    const dir = await project();
+    const paths = runtimePaths(dir);
+    const runId = 'run-shipping-submitted-handoff';
+    const state = restingShipping(runId);
+    const watch = { ...state.shipping_watch, merge_request_submitted: true };
+    state.shipping_watch = null;
+    autoMergeGithub.mockResolvedValueOnce({ watch });
+    await acquireRunLock(paths.lock, runId);
+    const actions = await applyActions(paths, state, [{ type: 'auto_merge' }, { type: 'persist_state' }], {
+      shipping: { provider: 'github', auto_merge: true, required_remote_checks: false },
+    });
+    expect(actions.some((action) => action.type === 'shipping_started')).toBe(true);
+    expect((await readJson(paths.active)).shipping_watch.merge_request_submitted).toBe(true);
+    expect(state.status).toBe('shipping');
+    expect(await exists(paths.lock)).toBe(true);
+    expect(await queryHistory(paths, { run_id: runId })).toEqual([]);
+    expect(pollRemoteChecksAndMerge).not.toHaveBeenCalled();
+  });
+
+  it('next: persists a successful merge submission across later shipping polls without clearing the watch', async () => {
+    const dir = await project();
+    const paths = runtimePaths(dir);
+    const runId = 'run-shipping-submitted';
+    await atomicWriteJson(paths.active, restingShipping(runId));
+    await acquireRunLock(paths.lock, runId);
+    pollRemoteChecksAndMerge.mockResolvedValueOnce({ pending: {
+      summary: 'merge request submitted; awaiting the exact PR merge',
+      reason: 'awaiting merge', merge_request_submitted: true,
+    } });
+    const first = await nextRun(dir);
+    expect(first.run.status).toBe('shipping');
+    expect((await readJson(paths.active)).shipping_watch.merge_request_submitted).toBe(true);
+    pollRemoteChecksAndMerge.mockImplementationOnce(async (_root, state) => {
+      expect(state.shipping_watch.merge_request_submitted).toBe(true);
+      return { pending: { summary: 'awaiting the exact PR merge' } };
+    });
+    const second = await nextRun(dir);
+    expect(second.run.status).toBe('shipping');
+    expect((await readJson(paths.active)).shipping_watch.merge_request_submitted).toBe(true);
+    expect(await exists(paths.lock)).toBe(true);
+    expect(await queryHistory(paths, { run_id: runId })).toEqual([]);
+    expect(autoMergeGithub).not.toHaveBeenCalled();
   });
 
   it('next: a failed-check poll blocks at the gates with the real tail; regate is then accepted', async () => {

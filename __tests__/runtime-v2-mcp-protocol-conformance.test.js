@@ -212,6 +212,7 @@ describe('MCP 2026-07-28: per-request protocol version negotiation (defect 1)', 
     expect(accepted.error, 'a supported _meta version must not be refused').toBeUndefined();
     expect(accepted.result.tools.map((tool) => tool.name)).toEqual([
       'ape_run',
+      'ape_bind',
       'ape_validate_receipt',
       'ape_status',
       'ape_history',
@@ -245,7 +246,7 @@ describe('MCP 2026-07-28: per-request protocol version negotiation (defect 1)', 
     // The refusal is per-request: the server keeps answering afterwards.
     const after = byId(responses, 2);
     expect(after.error).toBeUndefined();
-    expect(after.result.tools).toHaveLength(5);
+    expect(after.result.tools).toHaveLength(6);
   }, 20_000);
 
   it('answers an unsupported initialize with a LEGACY revision, never the modern one', async () => {
@@ -380,7 +381,7 @@ describe('MCP 2026-07-28: required resultType (defect 3)', () => {
     }
 
     // resultType is additive: the payload each result already carried is intact.
-    expect(byId(responses, 2).result.tools).toHaveLength(5);
+    expect(byId(responses, 2).result.tools).toHaveLength(6);
     const status = byId(responses, 3).result;
     expect(status.isError).toBeUndefined();
     expect(JSON.parse(status.content[0].text)).toMatchObject({ ok: true, active: false });
@@ -404,7 +405,7 @@ describe('MCP 2026-07-28: CacheableResult on every cacheable result (defect 4)',
     const first = byId(responses, 1).result;
     const second = byId(responses, 2).result;
     expect(second.tools).toEqual(first.tools);
-    expect(first.tools.map((tool) => tool.name)).toEqual(['ape_run', 'ape_validate_receipt', 'ape_status', 'ape_history', 'ape_config']);
+    expect(first.tools.map((tool) => tool.name)).toEqual(['ape_run', 'ape_bind', 'ape_validate_receipt', 'ape_status', 'ape_history', 'ape_config']);
   }, 20_000);
 
   it('returns ttlMs and cacheScope on server/discover, which heads the MUST list', async () => {
@@ -467,6 +468,7 @@ describe('MCP 2026-07-28: retained pre-2026-07-28 surface (defect 5 and the era 
 
     expect(byId(responses, 2).result.tools.map((tool) => tool.name)).toEqual([
       'ape_run',
+      'ape_bind',
       'ape_validate_receipt',
       'ape_status',
       'ape_history',
@@ -600,7 +602,7 @@ describe('structured preflight MCP surface', () => {
     const responses = await session([toolsList(1, modern(MODERN))]);
     const tools = byId(responses, 1).result.tools;
     expect(tools.map((tool) => tool.name)).toEqual([
-      'ape_run', 'ape_validate_receipt', 'ape_status', 'ape_history', 'ape_config',
+      'ape_run', 'ape_bind', 'ape_validate_receipt', 'ape_status', 'ape_history', 'ape_config',
     ]);
     const runTool = tools.find((tool) => tool.name === 'ape_run');
     const schemaText = JSON.stringify(runTool.inputSchema);

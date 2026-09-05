@@ -8,7 +8,8 @@ disable-model-invocation: false
 
 Call the dedicated read-only `ape_status` tool. This is the only APE skill that may be selected
 implicitly. Do not dispatch agents, advance the run, mutate state, or reinterpret a blocked result.
-On Google Antigravity / Gemini, pass the exact open project root as `project_dir`.
+Pass the governed project root as `project_dir`. Report no active run or sealed history accurately;
+neither result authorizes starting or resetting a run.
 
 Render the current run, pending tickets or dispatches, lane, stage, gates, typed
 `next_action.kind`, and `failure_domain` compactly. When present, show exact token-counter coverage

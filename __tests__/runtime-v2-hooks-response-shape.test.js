@@ -95,4 +95,21 @@ describe('APE v2 host-compatible hook response shapes', () => {
       reason: 'fine',
     })).toEqual({});
   });
+
+  it('delivers trusted bootstrap context without changing Codex permission decisions', () => {
+    const event = { host: 'codex', event: 'PreToolUse' };
+    const response = formatHookResponse(event, {
+      decision: 'allow',
+      additional_context: 'Authoritative native bootstrap context',
+    });
+    expect(response).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        additionalContext: 'Authoritative native bootstrap context',
+      },
+    });
+    expect(formatHookResponse(event, {
+      decision: 'deny', reason: 'bootstrap rejected', additional_context: 'must not leak',
+    }).hookSpecificOutput.additionalContext).toBeUndefined();
+  });
 });

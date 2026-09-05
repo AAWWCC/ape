@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmod,
   link,
@@ -61,7 +62,7 @@ async function project() {
   git(dir, 'commit', '-qm', 'test: baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
   });
   return dir;
 }
@@ -81,7 +82,7 @@ async function startClaude(dir) {
     subagents_available: true,
     explicit_invocation: true,
   });
-  expect(result.ok).toBe(true);
+  expect(result.ok, JSON.stringify({ reason: result.reason, blocking: result.readiness?.blocking })).toBe(true);
   const action = result.actions.find((entry) => entry.type === 'dispatch_agent');
   expect(action).toBeDefined();
   return { result, action, ticket: action.ticket };
@@ -151,6 +152,34 @@ function decision(response) {
 function receiptCapability(response) {
   const context = response?.hookSpecificOutput?.additionalContext ?? '';
   return context.match(/APE_RECEIPT_CAPABILITY=([A-Za-z0-9_-]+)/)?.[1] ?? null;
+}
+
+function moveIntentDeadline(record, deadline, patch = {}) {
+  const deltaMs = Date.parse(deadline) - Date.parse(record.expires_at);
+  const shift = (value) => new Date(Date.parse(value) + deltaMs).toISOString();
+  const timestampKeys = [
+    'prepared_at',
+    'launched_at',
+    'authorized_at',
+    'launch_expires_at',
+    'bound_at',
+    'completed_at',
+    'expired_at',
+  ];
+  const moved = { ...record, ...patch, expires_at: deadline };
+  for (const key of timestampKeys) {
+    if (record[key]) moved[key] = shift(record[key]);
+  }
+  if (Array.isArray(record.launch_generations)) {
+    moved.launch_generations = record.launch_generations.map((entry) => {
+      const generation = { ...entry, ...patch, expires_at: deadline };
+      for (const key of timestampKeys) {
+        if (entry[key]) generation[key] = shift(entry[key]);
+      }
+      return generation;
+    });
+  }
+  return moved;
 }
 
 describe('APE v2 standard Claude Agent dispatch binding', () => {
@@ -239,6 +268,65 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     },
   );
 
+  it.runIf(process.platform !== 'win32').each(['fifo', 'symlink'])(
+    'rejects a derivation-key %s replacement between lstat and open without blocking or following it',
+    async (replacement) => {
+      const dir = await project();
+      const { action, ticket } = await startClaude(dir);
+      const paths = runtimePaths(dir);
+      const before = await readFile(paths.dispatchLaunchKey, 'utf8');
+      // Run the actual descriptor operation in a bounded child: an unsafe
+      // FIFO open must fail this regression instead of wedging the test run.
+      // Rebind the filesystem export only to force the real replacement into
+      // the otherwise nondeterministic lstat/open interval.
+      const script = `
+        import fs from 'node:fs/promises';
+        import { execFileSync } from 'node:child_process';
+        import { syncBuiltinESMExports } from 'node:module';
+        const paths = ${JSON.stringify(paths)};
+        const originalLstat = fs.lstat;
+        let armed = true;
+        fs.lstat = async (...args) => {
+          const metadata = await originalLstat(...args);
+          if (armed && args[0] === paths.dispatchLaunchKey) {
+            armed = false;
+            await fs.rename(paths.dispatchLaunchKey, paths.dispatchLaunchKey + '.displaced');
+            if (${JSON.stringify(replacement)} === 'fifo') {
+              execFileSync('mkfifo', [paths.dispatchLaunchKey]);
+            } else {
+              await fs.symlink(paths.dispatchLaunchKey + '.displaced', paths.dispatchLaunchKey);
+            }
+          }
+          return metadata;
+        };
+        syncBuiltinESMExports();
+        const { prepareClaudeIntent } = await import(${JSON.stringify(new URL('../lib/runtime/claude-dispatch.js', import.meta.url).href)});
+        try {
+          await prepareClaudeIntent(paths, ${JSON.stringify(ticket)}, ${JSON.stringify(action.dispatch.agent_type)}, {
+            allow_prepared_replay: true,
+          });
+          process.stdout.write(JSON.stringify({ ok: true }));
+        } catch (error) {
+          process.stdout.write(JSON.stringify({ ok: false, code: error.code, message: error.message }));
+        }
+      `;
+      const result = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '--eval', script], {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 5_000,
+      }));
+      expect(result.ok).toBe(false);
+      if (replacement === 'fifo') {
+        expect(result.message).toMatch(/changed while opening/u);
+        expect((await lstat(paths.dispatchLaunchKey)).isFIFO()).toBe(true);
+      } else {
+        expect(result.code).toBe('ELOOP');
+        expect((await lstat(paths.dispatchLaunchKey)).isSymbolicLink()).toBe(true);
+      }
+      expect(await readFile(`${paths.dispatchLaunchKey}.displaced`, 'utf8')).toBe(before);
+    },
+  );
+
   it('rejects an unlaunchable model before minting a Claude dispatch intent', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
@@ -269,14 +357,34 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     expect(JSON.stringify(intent)).not.toContain(prepared.nonce);
   });
 
+  it('never overwrites a parseable but structurally damaged existing intent during prepare replay', async () => {
+    const dir = await project();
+    const { action, ticket } = await startClaude(dir);
+    const paths = runtimePaths(dir);
+    const { file } = await readOnlyIntent(dir);
+    await atomicWriteJson(file, {});
+    const damagedBytes = await readFile(file, 'utf8');
+
+    await expect(prepareClaudeIntent(paths, ticket, action.dispatch.agent_type, {
+      allow_prepared_replay: true,
+    })).rejects.toThrow(/structurally invalid.*abort.*quarantine/iu);
+    expect(await readFile(file, 'utf8')).toBe(damagedBytes);
+  });
+
   it('recovers a legacy prepared intent after its five-minute nonce lease and still consumes it once', async () => {
     const dir = await project();
     const { action, ticket } = await startClaude(dir);
     const nonce = launchNonce(action.dispatch);
     const prompt = launchPrompt(action.dispatch, nonce, ticket);
     const { file, intent } = await readOnlyIntent(dir);
+    const {
+      launch_seed: _launchSeed,
+      launch_generation: _launchGeneration,
+      launch_generations: _launchGenerations,
+      ...legacyIntent
+    } = intent;
     await atomicWriteJson(file, {
-      ...intent,
+      ...legacyIntent,
       prepared_at: new Date(Date.now() - 10 * 60_000).toISOString(),
       nonce_expires_at: new Date(Date.now() - 5 * 60_000).toISOString(),
     });
@@ -298,8 +406,76 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     const identicalRetry = await invokeClaudeHook({ ...base, tool_use_id: 'slow-planning-launch' });
     expect(decision(identicalRetry)).toBe('allow');
 
+    const bound = await invokeClaudeHook({
+      hook_event_name: 'SubagentStart',
+      project_dir: dir,
+      session_id: 'slow-planning-parent',
+      agent_id: 'slow-planning-agent',
+      agent_type: action.dispatch.agent_type,
+    });
+    expect(bound?.hookSpecificOutput?.additionalContext).toEqual(expect.any(String));
+    expect((await readOnlyIntent(dir)).intent.status).toBe('bound');
+
     const replay = await invokeClaudeHook({ ...base, tool_use_id: 'slow-planning-replay' });
     expect(decision(replay)).toBe('deny');
+  });
+
+  it('binds the exact generation-less launched shape written by an older public release', async () => {
+    const dir = await project();
+    const { action, ticket } = await startClaude(dir);
+    const nonce = launchNonce(action.dispatch);
+    const prompt = launchPrompt(action.dispatch, nonce, ticket);
+    const launch = await invokeClaudeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: 'legacy-launched-parent',
+      tool_use_id: 'legacy-launched-tool',
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: action.dispatch.agent_type,
+        prompt,
+        model: launchModel(action.dispatch),
+      },
+    });
+    expect(decision(launch)).toBe('allow');
+
+    const { file, intent } = await readOnlyIntent(dir);
+    const {
+      launch_seed: _launchSeed,
+      launch_generation: _launchGeneration,
+      launch_generations: _launchGenerations,
+      authorized_at: _authorizedAt,
+      turn_id_hash: _turnIdHash,
+      ...legacyLaunched
+    } = intent;
+    await atomicWriteJson(file, legacyLaunched);
+
+    const started = await invokeClaudeHook({
+      hook_event_name: 'SubagentStart',
+      project_dir: dir,
+      session_id: 'legacy-launched-parent',
+      agent_id: 'legacy-launched-agent',
+      agent_type: action.dispatch.agent_type,
+    });
+    expect(started?.hookSpecificOutput?.additionalContext).toEqual(expect.any(String));
+    const upgraded = (await readOnlyIntent(dir)).intent;
+    expect(upgraded).toMatchObject({
+      status: 'bound',
+      launch_generation: 1,
+      bound_agent_id: 'legacy-launched-agent',
+    });
+    expect(upgraded).not.toHaveProperty('launch_seed');
+
+    const write = await invokeClaudeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: 'legacy-launched-parent',
+      agent_id: 'legacy-launched-agent',
+      agent_type: action.dispatch.agent_type,
+      tool_name: 'Write',
+      tool_input: { file_path: path.join(dir, 'tests', 'legacy.test.js'), content: 'test' },
+    });
+    expect(decision(write)).toBe('allow');
   });
 
   it('denies a prepared intent once its ticket deadline has elapsed', async () => {
@@ -309,8 +485,7 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     const deadline = new Date(Date.now() - 1_000).toISOString();
     const { file, intent } = await readOnlyIntent(dir);
     await atomicWriteJson(file, {
-      ...intent,
-      expires_at: deadline,
+      ...moveIntentDeadline(intent, deadline),
       nonce_expires_at: new Date(Date.now() + 60_000).toISOString(),
     });
     const paths = runtimePaths(dir);
@@ -425,6 +600,22 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
       tool_input: { subagent_type: action.dispatch.agent_type, prompt, model },
     });
     expect(decision(first)).toBe('allow');
+
+    // A lost-response retry must repeat the exact host-observed model, not
+    // merely another spelling in the same ticket-approved Claude family.
+    // Otherwise the same native tool-call identity could authorize a changed
+    // execution request after its first durable write.
+    expect(model).toBe('sonnet');
+    const changedModelRetry = await invokeClaudeHook({
+      ...base,
+      tool_use_id: 'agent-tool-use-first',
+      tool_input: {
+        subagent_type: action.dispatch.agent_type,
+        prompt,
+        model: 'claude-sonnet-4-5',
+      },
+    });
+    expect(decision(changedModelRetry)).toBe('deny');
 
     const identicalLostResponseRetry = await invokeClaudeHook({
       ...base,
@@ -566,11 +757,10 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
       entry.ticket_id === ticket.ticket_id ? lateTicket : entry
     ));
     await atomicWriteJson(paths.active, state);
-    await atomicWriteJson(file, {
-      ...intent,
-      expires_at: deadline,
-      ticket_hash: lateTicket.ticket_hash,
-    });
+    await atomicWriteJson(
+      file,
+      moveIntentDeadline(intent, deadline, { ticket_hash: lateTicket.ticket_hash }),
+    );
 
     const completedAt = new Date().toISOString();
     const raw = {
@@ -877,35 +1067,95 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     expect(survivor.status).toBe('prepared');
   });
 
-  it('pruneClaudeIntents keeps every keepRunId record regardless of status', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'ape-prune-'));
-    cleanups.push(dir);
+  it('recovers a symlinked dispatch-intent container without writing outside the runtime root', async () => {
+    const dir = await project();
+    const outside = await mkdtemp(path.join(tmpdir(), 'ape-dispatch-outside-'));
+    cleanups.push(outside);
     const paths = runtimePaths(dir);
-    const record = (runId, status, name) => atomicWriteJson(
-      path.join(paths.dispatchIntents, `${name}.json`),
-      { version: 2, run_id: runId, ticket_id: `${runId}:test:t`, status },
-    );
-    // Every lifecycle status of the kept run must survive: prepared (not yet
-    // launched), expired (voided capability the sealed fence still names),
-    // completed (backs the idempotent receipt retry), bound (live flight).
-    await record('run-keep', 'prepared', 'keep-prepared');
-    await record('run-keep', 'expired', 'keep-expired');
-    await record('run-keep', 'completed', 'keep-completed');
-    await record('run-keep', 'bound', 'keep-bound');
-    await record('run-dead', 'bound', 'dead-bound');
+    await mkdir(paths.runtime, { recursive: true });
+    await symlink(outside, paths.dispatchIntents, 'dir');
+
+    const started = await startRun(dir, {
+      objective: 'Reject redirected dispatch intent storage',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'claude',
+      claimed_paths: ['src/value.js'],
+      test_paths: ['tests/value.test.js'],
+      requirements: ['R-DISPATCH-CONTAINER'],
+      risk_triggers: [],
+      behavioral: true,
+      hooks_trusted: true,
+      subagents_available: true,
+      explicit_invocation: true,
+    });
+    expect(started.ok).toBe(true);
+    expect(await readdir(outside)).toEqual([]);
+    expect((await lstat(paths.dispatchIntents)).isDirectory()).toBe(true);
+    const quarantined = (await readdir(paths.runtime))
+      .filter((name) => name.startsWith('dispatch-intents.corrupt-'));
+    expect(quarantined).toHaveLength(1);
+    expect((await lstat(path.join(paths.runtime, quarantined[0]))).isSymbolicLink()).toBe(true);
+  });
+
+  it.each(['ape', 'runtime'])('rejects a symlinked %s state ancestor before any external write', async (level) => {
+    const dir = await project();
+    const outside = await mkdtemp(path.join(tmpdir(), `ape-${level}-outside-`));
+    cleanups.push(outside);
+    const paths = runtimePaths(dir);
+    const target = level === 'ape' ? paths.ape : paths.runtime;
+    await rm(target, { recursive: true, force: true });
+    await symlink(outside, target, 'dir');
+
+    await expect(startRun(dir, {
+      objective: 'Reject redirected runtime ancestors',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'claude',
+      claimed_paths: ['src/value.js'],
+      test_paths: ['tests/value.test.js'],
+      requirements: [],
+      risk_triggers: [],
+      behavioral: true,
+      hooks_trusted: true,
+      subagents_available: true,
+      explicit_invocation: true,
+    })).rejects.toThrow(/APE (?:task operation store path is unsafe|(?:state|runtime) path resolves outside the governed private path)/);
+    expect(await readdir(outside)).toEqual([]);
+    expect((await lstat(target)).isSymbolicLink()).toBe(true);
+  });
+
+  it('pruneClaudeIntents keeps canonical current-run evidence and quarantines malformed entries', async () => {
+    const dir = await project();
+    const paths = runtimePaths(dir);
+    const { result } = await startClaude(dir);
+    const current = await readOnlyIntent(dir);
+    const deadTicketId = 'run-dead:test:t';
+    const deadName = `${createHash('sha256').update(deadTicketId).digest('hex')}.json`;
+    await atomicWriteJson(path.join(paths.dispatchIntents, deadName), {
+      ...current.intent,
+      run_id: 'run-dead',
+      ticket_id: deadTicketId,
+      launch_generations: current.intent.launch_generations.map((entry) => ({
+        ...entry,
+        run_id: 'run-dead',
+        ticket_id: deadTicketId,
+      })),
+    });
     await writeFile(path.join(paths.dispatchIntents, 'dead-corrupt.json'), 'garbage');
     await writeFile(path.join(paths.dispatchIntents, 'not-an-intent.txt'), 'ignored');
 
-    const pruned = await pruneClaudeIntents(paths, 'run-keep');
-    expect(pruned.sort()).toEqual(['dead-bound.json', 'dead-corrupt.json']);
+    const pruned = await pruneClaudeIntents(paths, result.run.run_id);
+    expect(pruned.sort()).toEqual([deadName, 'dead-corrupt.json'].sort());
     const names = (await readdir(paths.dispatchIntents)).sort();
-    expect(names).toEqual([
-      'keep-bound.json',
-      'keep-completed.json',
-      'keep-expired.json',
-      'keep-prepared.json',
-      'not-an-intent.txt',
+    expect(names.filter((name) => name.endsWith('.json'))).toEqual([
+      path.basename(current.file),
     ]);
+    expect(names).toContain('not-an-intent.txt');
+    const quarantined = names.filter((name) => name.startsWith('dead-corrupt.json.corrupt-'));
+    expect(quarantined).toHaveLength(1);
+    expect(await readFile(path.join(paths.dispatchIntents, quarantined[0]), 'utf8'))
+      .toBe('garbage');
   });
 
   it('pruneClaudeIntents is a no-op when no intents directory exists yet', async () => {
@@ -927,7 +1177,7 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     expect(intent.status).toBe('expired');
   });
 
-  it('registers a single Agent-covering PreToolUse policy entry plus synchronous SubagentStart hooks', async () => {
+  it('registers one Agent-covering policy plus the isolated canary wildcard and synchronous SubagentStart', async () => {
     const manifest = JSON.parse(await readFile(path.join(root, 'hooks', 'claude-hooks.json'), 'utf8'));
     const common = JSON.parse(await readFile(path.join(root, 'hooks', 'hooks.json'), 'utf8'));
     const preTool = common.hooks?.PreToolUse ?? [];
@@ -935,6 +1185,8 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     const isPolicyHook = (hook) =>
       [hook.command ?? '', ...(hook.args ?? [])].join(' ').includes('ape-hooks.bundle');
     const policyEntries = (entries) => entries.filter((entry) => entry.hooks?.some(isPolicyHook));
+    const isCanaryEntry = (entry) => entry.hooks?.some((hook) =>
+      [hook.command ?? '', ...(hook.args ?? [])].join(' ').includes('--ape-canary-only'));
 
     // The single policy matcher itself covers Agent launches and its host alias
     // Task, so a separate identical Agent entry would be redundant (the host
@@ -944,8 +1196,13 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     // runtime-v2-hook-matcher-coverage.test.js. Advisory LARP entries
     // (ape-larp.bundle) are additive: they must be async and must never
     // re-register the policy bundle.
-    expect(policyEntries(preTool)).toHaveLength(1);
-    const [prePolicy] = policyEntries(preTool);
+    const preToolPolicies = policyEntries(preTool);
+    const primaryPolicies = preToolPolicies.filter((entry) => !isCanaryEntry(entry));
+    const canaryPolicies = preToolPolicies.filter(isCanaryEntry);
+    expect(primaryPolicies).toHaveLength(1);
+    expect(canaryPolicies).toHaveLength(1);
+    expect(canaryPolicies[0].matcher).toBe('*');
+    const [prePolicy] = primaryPolicies;
     const coversDispatchTool = (matcher, tool) =>
       matcher == null || matcher === '*' || new RegExp(`^(?:${matcher})$`).test(tool);
     for (const tool of ['Agent', 'Task']) {

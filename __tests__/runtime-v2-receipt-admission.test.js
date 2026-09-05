@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -126,7 +126,7 @@ describe('deadline-aware receipt admission', () => {
     });
     expect(result.valid).toBe(false);
     expect(result.errors).toContain(
-      "receipt head tree does not match the current tree (diverged: src/value.js); an external or orphaned writer may have mutated the shared tree; recover with ape_run action override operation reset, then restore a clean tree",
+      "receipt head tree does not match the current tree (diverged: src/value.js); the writer cannot be attributed; preserve the current tree and inspect the state-aware recovery guidance before any operator-authorized lifecycle change",
     );
     expect(result.errors).toContain('stage deadline exceeded');
   });
@@ -175,7 +175,7 @@ describe('contamination diagnostics', () => {
     });
     expect(result.valid).toBe(false);
     expect(result.errors).toContain(
-      "receipt head tree does not match the current tree (diverged: src/extra.js); an external or orphaned writer may have mutated the shared tree; recover with ape_run action override operation reset, then restore a clean tree",
+      "receipt head tree does not match the current tree (diverged: src/extra.js); the writer cannot be attributed; preserve the current tree and inspect the state-aware recovery guidance before any operator-authorized lifecycle change",
     );
     expect(result.errors).not.toContain('stage deadline exceeded');
     expect(result.errors.some((e) => e.startsWith('role-boundary violations'))).toBe(false);
@@ -202,7 +202,7 @@ describe('contamination diagnostics', () => {
     expect(result.valid).toBe(false);
     expect(result.errors).toContain('unclaimed write: src/rogue.js');
     expect(result.errors).toContain(
-      "role-boundary violations (src/rogue.js) may not be the ticketed agent's own writes; an external or orphaned writer may have mutated the shared tree; recover with ape_run action override operation reset, then restore a clean tree",
+      "role-boundary violations (src/rogue.js) may not be the ticketed agent's own writes; the writer cannot be attributed; preserve the current tree and inspect the state-aware recovery guidance before any operator-authorized lifecycle change",
     );
     expect(result.errors.some((e) => e.startsWith('receipt head tree does not match'))).toBe(false);
   });
@@ -320,6 +320,35 @@ describe('receipt completed_at provenance (T5)', () => {
     const after = Date.now();
     return { result, before, after };
   }
+
+  it('rejects contamination without changing the running run or advising an impossible reset', async () => {
+    const dir = await mechanicalProject();
+    const started = await startRun(dir, mechanicalStart());
+    expect(started.ok).toBe(true);
+    const ticket = started.run.tickets[0];
+    await writeFile(path.join(dir, 'docs', 'rogue.md'), '# unrelated retained work\n');
+    const paths = runtimePaths(dir);
+    const before = await readFile(paths.active, 'utf8');
+    const treeBefore = await currentTreeSha(dir);
+    const result = await recordReceipt(dir, {
+      ticket_id: ticket.ticket_id,
+      status: 'passed',
+      agent_identity: 'agent-implementer',
+      tests: [], findings: [], evidence: { verdict: 'pass' },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.rejected).toBe(true);
+    expect(result.recovery).toMatchObject({
+      version: 1, cause: 'receipt-role-boundary', run_status: 'running',
+      state_changed: false, operator_required: true, preserves_worktree: true,
+      eligible_actions: ['diagnose', 'override-abort'],
+    });
+    expect(result.recovery.eligible_actions).not.toContain('override-reset');
+    expect(result.errors.join(' ')).not.toMatch(/recover with.*reset|restore a clean tree/);
+    expect(await readFile(paths.active, 'utf8')).toBe(before);
+    expect(await currentTreeSha(dir)).toBe(treeBefore);
+    expect(await readFile(path.join(dir, 'docs', 'rogue.md'), 'utf8')).toBe('# unrelated retained work\n');
+  });
 
   it.each([
     ['a far-past wire completed_at', () => '1999-01-01T00:00:00.000Z'],

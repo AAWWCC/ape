@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { currentTreeSha } from '../lib/runtime/git.js';
+import * as gitRuntime from '../lib/runtime/git.js';
+import * as spawning from '../lib/runtime/spawn.js';
 import { autoMergeGithub } from '../lib/runtime/gates.js';
+import { sha256 } from '../lib/runtime/canonical.js';
+import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identity.js';
 
 // Behavioral contract (derived from the public shape of autoMergeGithub, not its
 // internals): a land run whose only validated change is a deletion must be
@@ -34,12 +38,8 @@ import { autoMergeGithub } from '../lib/runtime/gates.js';
 // HEAD. Only real git reproduces `git ls-files` omitting a staged deletion;
 // mocking git would let the fixture assert whatever it liked and hide the defect.
 //
-// No real network side effects: the origin is a github.com-shaped URL for a
-// guaranteed-nonexistent repo, so the `gh pr view` probe fails closed (it can
-// never return a MERGED PR) and execution reaches the addable filter; and any
-// push fails fast because interactive credential prompts are disabled. Shipping
-// is therefore exercised up to — and, once past the filter, through the commit to
-// — the push against the fake origin, which is exactly the seam this ticket pins.
+// All gh and network Git commands are intercepted below. Repository existence
+// is never used as a substitute for an offline test boundary.
 process.env.GIT_TERMINAL_PROMPT = '0';
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
 process.env.GIT_CONFIG_SYSTEM = '/dev/null';
@@ -49,10 +49,12 @@ process.env.GIT_CONFIG_SYSTEM = '/dev/null';
 vi.setConfig({ testTimeout: 45_000, hookTimeout: 45_000 });
 
 const NO_VALIDATED = 'shipping has no validated changed files';
-const config = { shipping: { provider: 'github', required_remote_checks: false } };
+const config = { shipping: { auto_merge: true, provider: 'github', required_remote_checks: false } };
+const originalSpawn = spawning.spawnWithTimeout;
 
 const cleanups = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     cleanups
       .splice(0)
@@ -139,6 +141,8 @@ function shipState(branch, changedFiles, treeSha, baseCommitSha) {
     mode: 'phase',
     lane: 'mechanical',
     branch,
+    base_branch: 'main',
+    auto_merge_authorized: true,
     // The commit the run started at (its attested base). The real runtime always
     // carries it; the re-entry heuristic resolves its tree to keep the
     // already-committed decision run-bound instead of trusting the global origin
@@ -156,7 +160,23 @@ function shipState(branch, changedFiles, treeSha, baseCommitSha) {
 // rejects; capture the rejection reason (a resolved value returns null and is a
 // harness fault we assert against).
 function shipError(dir, state) {
-  return autoMergeGithub(dir, state, config).then(() => null, (err) => err);
+  const origin = git(dir, 'remote', 'get-url', 'origin');
+  const repository = origin.slice('https://github.com/'.length).replace(/\.git$/, '');
+  const target = { origin, repository, base: 'main' };
+  state.shipping_target = { version: 1, provider: 'github', ...target, required_remote_checks: false };
+  const manifest = { version: 1, ready: true, shipping_target: structuredClone(state.shipping_target), repository: { base_branch: state.base_branch, base_commit: state.base_commit_sha } };
+  state.admission = { version: 1, manifest, digest: sha256(manifest) };
+  state.start_request_hash = 'a'.repeat(64);
+  state.admitted_start_identity_version = 1;
+  state.admitted_start_identity_hash = admittedStartIdentityHash(state);
+  vi.spyOn(gitRuntime, 'remoteBranchTip').mockResolvedValue(state.base_commit_sha);
+  vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
+    if (command === 'gh' || (command === 'git' && ['push', 'fetch', 'pull', 'ls-remote'].includes(args[0]) && !args.includes('--get-url'))) {
+      return Promise.resolve({ exit_code: 128, timed_out: false, spawn_error: null, combined: 'offline sink', stdout: '', stderr: 'offline sink' });
+    }
+    return originalSpawn(command, args, options);
+  });
+  return autoMergeGithub(dir, state, { shipping: { ...config.shipping, target } }).then(() => null, (err) => err);
 }
 
 // The terminal failure is the push against the fake origin (runGit surfaces the

@@ -3,12 +3,17 @@ import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { reduceRun } from '../lib/runtime/scheduler.js';
 import { queryHistory } from '../lib/runtime/history.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import * as service from '../lib/runtime/service.js';
+import * as spawning from '../lib/runtime/spawn.js';
+import { sha256 } from '../lib/runtime/canonical.js';
+import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identity.js';
+import { inspectShippingAdmission } from '../lib/runtime/shipping-target.js';
+import { loadRuntimeConfig } from '../lib/runtime/config.js';
 
 // Ship is host-neutral and runtime-owned, so shipping (GitHub) is the only side
 // effect these behavioral tests must not perform for real: the merge path is a
@@ -29,6 +34,25 @@ import { autoMergeGithub } from '../lib/runtime/gates.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const HOLD_REASON = 'auto-merge is disabled by configuration';
+const SHIPPING_TARGET = { origin: 'https://github.com/acme/repo.git', repository: 'acme/repo', base: 'main' };
+let githubInspections = [];
+let githubAccess = true;
+beforeEach(() => {
+  githubInspections = [];
+  githubAccess = true;
+  const originalSpawn = spawning.spawnWithTimeout;
+  vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
+    if (command !== 'gh') return originalSpawn(command, args, options);
+    githubInspections.push([...args]);
+    if (args[0] !== '--version' && !(args[0] === 'api' && args[1] === 'repos/acme/repo')) {
+      throw new Error('offline SHIP harness refused unexpected GitHub command');
+    }
+    return Promise.resolve({ exit_code: 0, timed_out: false, spawn_error: null, combined: args[0] === '--version' ? 'gh version offline' : JSON.stringify({
+      full_name: 'acme/repo', archived: false, disabled: false,
+      permissions: { pull: true, push: githubAccess }, allow_squash_merge: true,
+    }) });
+  });
+});
 
 // These tests do real filesystem work — `git init/add/commit` via execFileSync
 // and spawned `node` gate probes — so on a loaded Windows CI runner a single
@@ -41,6 +65,7 @@ vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 const cleanups = [];
 afterEach(async () => {
   autoMergeGithub.mockClear();
+  vi.restoreAllMocks();
   await Promise.all(
     cleanups
       .splice(0)
@@ -232,10 +257,15 @@ describe('APE v2 ship service (shipRun)', () => {
     await mkdir(path.join(project, 'docs'));
     await writeFile(path.join(project, 'docs', 'note.md'), '# note\n');
     git(project, 'init', '-q');
+    git(project, 'symbolic-ref', 'HEAD', 'refs/heads/main');
     git(project, 'config', 'user.email', 'ape@example.test');
     git(project, 'config', 'user.name', 'APE Test');
+    git(project, 'config', 'commit.gpgsign', 'false');
     git(project, 'add', '.');
     git(project, 'commit', '-qm', 'test: baseline');
+    git(project, 'remote', 'add', 'origin', SHIPPING_TARGET.origin);
+    git(project, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(project, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
 
     const probe = path.join(outside, 'probe.cjs');
     await writeFile(probe, [
@@ -259,7 +289,7 @@ describe('APE v2 ship service (shipRun)', () => {
       },
     };
     await atomicWriteJson(runtimePaths(project).config, {
-      shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
+      shipping: { auto_merge: false, provider: 'github', required_remote_checks: false, target: SHIPPING_TARGET },
       // Re-executes the suite on every gate evaluation so a ship's re-run is
       // observable (no cached pass masquerading as a real re-proof).
       policy: { full_suite_cache: false },
@@ -271,6 +301,18 @@ describe('APE v2 ship service (shipRun)', () => {
   async function buildToHold(dir) {
     const started = await service.startRun(dir, mechanicalStart());
     expect(started.ok).toBe(true);
+    // The simulator bypasses host admission, so explicitly construct its
+    // test-only commitment before receipt publication. Production SHIP never
+    // backfills a missing admission on an already-running/held legacy state.
+    const paths = runtimePaths(dir);
+    const state = await readJson(paths.active);
+    const admission = await inspectShippingAdmission(dir, {}, await loadRuntimeConfig(paths.config));
+    expect(admission.ready).toBe(true);
+    state.shipping_target = admission.shipping_target;
+    const manifest = { version: 1, ready: true, shipping_target: structuredClone(state.shipping_target), repository: { base_branch: state.base_branch, base_commit: state.base_commit_sha } };
+    state.admission = { version: 1, manifest, digest: sha256(manifest) };
+    state.admitted_start_identity_hash = admittedStartIdentityHash(state);
+    await atomicWriteJson(paths.active, state);
     const build = started.run.tickets[0];
     expect(build.role).toBe('implementer');
     await writeFile(path.join(dir, 'docs', 'note.md'), '# note\n\nUpdated.\n');
@@ -322,6 +364,7 @@ describe('APE v2 ship service (shipRun)', () => {
     const beforeDisk = await readJson(path.join(paths.history, `${runId}.json`));
     expect(beforeDisk.status).toBe('blocked');
     const executionsBeforeShip = await suite.executions();
+    const targetBeforeShip = (await readJson(paths.active)).shipping_target;
 
     const result = await service.shipRun(dir, 'hardware validation passed out of band');
     expect(result.ok).toBe(true);
@@ -330,6 +373,8 @@ describe('APE v2 ship service (shipRun)', () => {
     expect(await suite.executions()).toBeGreaterThan(executionsBeforeShip);
     // The audited SHIP lever passed the hold that config alone would keep closed.
     expect(autoMergeGithub).toHaveBeenCalledTimes(1);
+    expect(result.run.shipping_target).toEqual(targetBeforeShip);
+    expect(githubInspections.some((args) => args[1] === 'repos/acme/repo')).toBe(true);
 
     // The immutable block-time hold record is byte-identical; completion did not
     // mutate it.
@@ -354,6 +399,46 @@ describe('APE v2 ship service (shipRun)', () => {
     await expect(service.shipRun(dir, undefined)).rejects.toThrow(/ship requires an audit reason/);
   });
 
+  it.each(['legacy target absent', 'admission digest changed'])('refuses %s before prerequisite queries or gates and preserves the held state', async (variant) => {
+    const { project: dir, suite } = await heldProject();
+    await suite.arm();
+    await buildToHold(dir);
+    const paths = runtimePaths(dir);
+    const state = await readJson(paths.active);
+    if (variant === 'legacy target absent') delete state.shipping_target;
+    else state.admission.digest = 'b'.repeat(64);
+    await atomicWriteJson(paths.active, state);
+    const before = await readFile(paths.active);
+    const executions = await suite.executions();
+
+    const result = await service.shipRun(dir, 'explicit shipping request');
+
+    expect(result).toMatchObject({ ok: false, code: 'shipping-admission-invalid', attempts_consumed: 0 });
+    expect(result.reason).toMatch(/fresh reviewed admission with operator approval/);
+    expect(await readFile(paths.active)).toEqual(before);
+    expect(await suite.executions()).toBe(executions);
+    expect(githubInspections).toEqual([]);
+    expect(autoMergeGithub).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unavailable shipping prerequisite before gates without replacing the admitted target', async () => {
+    const { project: dir, suite } = await heldProject();
+    await suite.arm();
+    await buildToHold(dir);
+    const paths = runtimePaths(dir);
+    const before = await readFile(paths.active);
+    const executions = await suite.executions();
+    githubAccess = false;
+
+    const result = await service.shipRun(dir, 'explicit shipping request');
+
+    expect(result).toMatchObject({ ok: false, code: 'shipping-prerequisites-unverified', attempts_consumed: 0 });
+    expect(result.blocking.map((entry) => entry.code)).toContain('shipping_repository_access_unverified');
+    expect(await readFile(paths.active)).toEqual(before);
+    expect(await suite.executions()).toBe(executions);
+    expect(autoMergeGithub).not.toHaveBeenCalled();
+  });
+
   it('rejects ship for a gate-blocked run and leaves its state untouched', async () => {
     const { project: dir } = await heldProject();
     // The suite never passes, so the run blocks at the GATES, not the merge hold.
@@ -366,6 +451,7 @@ describe('APE v2 ship service (shipRun)', () => {
     const shipResult = await service.shipRun(dir, 'try to ship a gate block');
     expect(shipResult.ok).toBe(false);
     expect(shipResult.reason).toMatch(/REGATE/);
+    expect(githubInspections).toEqual([]);
 
     const after = await readJson(paths.active);
     expect(after).toEqual(before);

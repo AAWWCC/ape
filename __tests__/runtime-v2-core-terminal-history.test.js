@@ -61,7 +61,7 @@ async function project() {
   git(dir, 'commit', '-qm', 'baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { full: 'node --test', targeted_template: 'node --test {paths}' },
   });
   return dir;
 }
@@ -384,12 +384,66 @@ describe('APE v2 blocked runs reach history (F7, service)', () => {
     const started = await startRun(dir, startInput());
     expect(started.ok).toBe(true);
     const paths = runtimePaths(dir);
-    const overridden = await overrideRun(dir, 'abort', 'operator abandons the run');
+    const reason = 'operator abandons the run';
+    const overridden = await overrideRun(dir, 'abort', reason);
     expect(overridden.ok).toBe(true);
-    expect(overridden.run.status).toBe('aborted');
+    expect(overridden.run).toMatchObject({ status: 'aborted', abort_reason: reason });
+    expect(await readJson(paths.active)).toMatchObject({ abort_reason: reason });
+    expect(await readJson(path.join(paths.runs, `${started.run.run_id}.json`))).toMatchObject({ abort_reason: reason });
     const record = await readJson(path.join(paths.history, `${started.run.run_id}.json`));
     expect(record.status).toBe('aborted');
+    expect(record.abort_reason).toBe(reason);
     expect(record.completed_at).toBe(overridden.run.terminal_at);
+  });
+
+  it('a repeated override abort preserves the original terminal reason and history', async () => {
+    const dir = await project();
+    const started = await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    await overrideRun(dir, 'abort', 'original operator stop');
+    const historyFile = path.join(paths.history, `${started.run.run_id}.json`);
+    const record = await readJson(historyFile);
+    const originalState = await readJson(paths.active);
+
+    const repeated = await overrideRun(dir, 'abort', 'repeat cleanup after interruption');
+    expect(repeated.ok).toBe(true);
+    expect(repeated.run.abort_reason).toBe('original operator stop');
+    expect(repeated.run.terminal_at).toBe(originalState.terminal_at);
+    expect(await readJson(historyFile)).toEqual(record);
+  });
+
+  it('override abort preserves an existing blocked history record while recording the new state reason', async () => {
+    const { dir, paths, runId } = await blockedRun();
+    const state = await readJson(paths.active);
+    await archiveRun(paths, state);
+    const historyFile = path.join(paths.history, `${runId}.json`);
+    const record = await readJson(historyFile);
+
+    const aborted = await overrideRun(dir, 'abort', 'stop after investigating the failed gate');
+    expect(aborted.ok).toBe(true);
+    expect(aborted.run).toMatchObject({
+      status: 'aborted',
+      abort_reason: 'stop after investigating the failed gate',
+    });
+    expect(await readJson(historyFile)).toEqual(record);
+    expect(record.status).toBe('blocked');
+  });
+
+  it('override abort cannot change a completed state or its history', async () => {
+    const dir = await project();
+    const started = await startRun(dir, startInput());
+    const paths = runtimePaths(dir);
+    const state = { ...started.run, status: 'completed', stage: 'complete', terminal_at: started.run.updated_at };
+    await atomicWriteJson(paths.active, state);
+    await archiveRun(paths, state);
+    const historyFile = path.join(paths.history, `${state.run_id}.json`);
+    const record = await readJson(historyFile);
+
+    const refused = await overrideRun(dir, 'abort', 'attempt to replace the completed outcome');
+    expect(refused.ok).toBe(false);
+    expect(await readJson(paths.active)).toEqual(state);
+    expect(await readJson(historyFile)).toEqual(record);
+    expect(await exists(paths.overrideLog)).toBe(false);
   });
 
   it('a rejected override surfaces ok:false and appends nothing to overrides.ndjson', async () => {

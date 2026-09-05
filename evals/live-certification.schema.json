@@ -16,7 +16,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 4
+      "const": 5
     },
     "ape_version": {
       "$ref": "#/$defs/version"
@@ -107,7 +107,13 @@
       "required": [
         "target_branch",
         "merge_method",
-        "auto_merge_required",
+        "merge_path",
+        "bypass_used",
+        "required_checks_passed",
+        "checked_head_commit",
+        "gate_tree",
+        "merged_tree",
+        "branch_protection",
         "pr_state",
         "pushed_head_commit",
         "observed_merged_pr_head",
@@ -121,8 +127,27 @@
         "merge_method": {
           "const": "squash"
         },
-        "auto_merge_required": {
+        "merge_path": {
+          "enum": ["immediate", "auto"],
+          "description": "The observed merge path, not a demand to force auto-merge. Auto means the retained shipping events actually enabled automatic merging; immediate means ordinary protected squash. Neither a queued command nor its exit status proves completion."
+        },
+        "bypass_used": {
+          "const": false
+        },
+        "required_checks_passed": {
           "const": true
+        },
+        "checked_head_commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "gate_tree": {
+          "$ref": "#/$defs/commit"
+        },
+        "merged_tree": {
+          "$ref": "#/$defs/commit"
+        },
+        "branch_protection": {
+          "$ref": "#/$defs/branch_protection"
         },
         "pr_state": {
           "const": "MERGED"
@@ -138,6 +163,36 @@
         },
         "remote_head_after_merge": {
           "$ref": "#/$defs/commit"
+        }
+      }
+    },
+    "branch_protection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pull_request_required",
+        "required_checks_strict",
+        "required_checks_count",
+        "admins_enforced",
+        "force_pushes_allowed",
+        "deletions_allowed",
+        "before_sha256",
+        "after_sha256"
+      ],
+      "properties": {
+        "pull_request_required": { "const": true },
+        "required_checks_strict": { "const": true },
+        "required_checks_count": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "admins_enforced": { "const": true },
+        "force_pushes_allowed": { "const": false },
+        "deletions_allowed": { "const": false },
+        "before_sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "certificationProtectionPolicyDigest of the externally retained complete policy immediately before shipping, including the frozen target, all required check identities and providers, bypass allowances and every effective branch restriction."
+        },
+        "after_sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "Same normalized policy observed after proven remote completion; must equal before_sha256. The operator retains both observations and their timestamps outside the public repository."
         }
       }
     },

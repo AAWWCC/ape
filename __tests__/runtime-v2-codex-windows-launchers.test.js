@@ -25,11 +25,14 @@ const claudeHookEntries = Object.entries(readJson('hooks/claude-hooks.json').hoo
 );
 
 const PORTABLE_HOOK_COMMAND =
-  'node --input-type=module -e "import{join}from\'node:path\';import{pathToFileURL}from\'node:url\';const r=process.env.PLUGIN_ROOT,c=process.env.CLAUDE_PLUGIN_ROOT,p=r||c;if(!p)throw new Error(\'APE hook could not resolve its plugin root\');if(r){delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;delete process.env.CLAUDE_PLUGIN_ROOT;delete process.env.CLAUDE_PROJECT_DIR}else{process.env.CLAUDECODE=\'1\';delete process.env.CLAUDE_CODE;delete process.env.CODEX_CWD}await import(pathToFileURL(join(p,\'dist\',\'ape-hooks.bundle.mjs\')))"';
+  'node --input-type=module -e "import{join}from\'node:path\';import{pathToFileURL}from\'node:url\';const r=process.env.PLUGIN_ROOT,c=process.env.CLAUDE_PLUGIN_ROOT,p=r||c;if(!p)throw new Error(\'APE hook could not resolve its plugin root\');if(r){delete process.env.APE_HOST;delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;delete process.env.CLAUDE_PLUGIN_ROOT;delete process.env.CLAUDE_PROJECT_DIR}else{process.env.CLAUDECODE=\'1\';delete process.env.CLAUDE_CODE;delete process.env.CODEX_CWD}await import(pathToFileURL(join(p,\'dist\',\'ape-hooks.bundle.mjs\')))"';
+const PORTABLE_CANARY_COMMAND =
+  'node --input-type=module -e "import{join}from\'node:path\';import{pathToFileURL}from\'node:url\';const r=process.env.PLUGIN_ROOT,c=process.env.CLAUDE_PLUGIN_ROOT;if(!r){for await(const _ of process.stdin){};if(!c)throw new Error(\'APE canary hook could not resolve its plugin root\');process.stdout.write(\'{}\\n\')}else{process.argv.push(\'--ape-canary-only\');delete process.env.APE_HOST;delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;delete process.env.CLAUDE_PLUGIN_ROOT;delete process.env.CLAUDE_PROJECT_DIR;await import(pathToFileURL(join(r,\'dist\',\'ape-hooks.bundle.mjs\')))}"';
 const PORTABLE_LARP_COMMAND =
-  'node --input-type=module -e "import{join}from\'node:path\';import{pathToFileURL}from\'node:url\';const p=process.env.PLUGIN_ROOT,c=process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};if(!c)throw new Error(\'APE LARP hook could not resolve its plugin root\')}else{delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;delete process.env.CLAUDE_PLUGIN_ROOT;delete process.env.CLAUDE_PROJECT_DIR;await import(pathToFileURL(join(p,\'dist\',\'ape-larp.bundle.mjs\')))}"';
+  'node --input-type=module -e "import{join}from\'node:path\';import{pathToFileURL}from\'node:url\';const p=process.env.PLUGIN_ROOT,c=process.env.CLAUDE_PLUGIN_ROOT;if(!p){for await(const _ of process.stdin){};if(!c)throw new Error(\'APE LARP hook could not resolve its plugin root\')}else{delete process.env.APE_HOST;delete process.env.CLAUDECODE;delete process.env.CLAUDE_CODE;delete process.env.CLAUDE_PLUGIN_ROOT;delete process.env.CLAUDE_PROJECT_DIR;await import(pathToFileURL(join(p,\'dist\',\'ape-larp.bundle.mjs\')))}"';
 
 const isLarpHook = (hook) => hook.command.includes('ape-larp.bundle.mjs');
+const isCanaryHook = (hook) => hook.command.includes("process.argv.push('--ape-canary-only')");
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -153,7 +156,7 @@ function payload(event, projectDir, matcher = '*') {
 function pluginHostEnv(overrides = {}) {
   const hostEnv = { ...process.env };
   for (const key of Object.keys(hostEnv)) {
-    if (/^(?:PLUGIN_ROOT|CLAUDE_PLUGIN_ROOT|CLAUDECODE|CLAUDE_CODE|CLAUDE_PROJECT_DIR|CODEX_CWD)$/i.test(key)) {
+    if (/^(?:PLUGIN_ROOT|CLAUDE_PLUGIN_ROOT|CLAUDECODE|CLAUDE_CODE|CLAUDE_PROJECT_DIR|CODEX_CWD|APE_HOST)$/i.test(key)) {
       delete hostEnv[key];
     }
   }
@@ -208,17 +211,21 @@ describe('every Codex plugin hook launcher is host-portable', () => {
     expect(codexHookEntries.map(({ event }) => event)).toEqual([
       'PreToolUse',
       'PreToolUse',
+      'PreToolUse',
       'SubagentStart',
       'PostToolUse',
       'PostToolUse',
       'SubagentStop',
       'SubagentStop',
       'SessionStart',
+      'SessionStart',
       'Stop',
     ]);
     for (const { event, hook } of codexHookEntries) {
       expect(hook.type, `${event} hook type`).toBe('command');
-      const expected = isLarpHook(hook) ? PORTABLE_LARP_COMMAND : PORTABLE_HOOK_COMMAND;
+      const expected = isLarpHook(hook)
+        ? PORTABLE_LARP_COMMAND
+        : isCanaryHook(hook) ? PORTABLE_CANARY_COMMAND : PORTABLE_HOOK_COMMAND;
       expect(hook.command, `${event} default command`).toBe(expected);
       expect(hook.commandWindows, `${event} Windows command`).toBe(expected);
     }
@@ -286,7 +293,7 @@ describe('every Codex plugin hook launcher is host-portable', () => {
       );
       expect(result.signal).toBeNull();
       expect(result.code).not.toBe(0);
-      expect(result.stderr).toMatch(/APE(?: LARP)? hook could not resolve its plugin root/);
+      expect(result.stderr).toMatch(/APE(?: LARP| canary)? hook could not resolve its plugin root/);
       expect(result.stderr).not.toMatch(/ERR_INVALID_ARG_TYPE|node:path:\d+/);
     },
   );
@@ -446,6 +453,49 @@ describe('every Codex plugin hook launcher is host-portable', () => {
     expect(JSON.parse(result.stdout)).toBeTypeOf('object');
   });
 
+  it('does not let an inherited canary-like environment variable disable ordinary policy', async () => {
+    const { pluginRoot, projectDir } = await activeFixture();
+    const { event, hook } = codexHookEntries.find(
+      (entry) =>
+        entry.event === 'PreToolUse' &&
+        !isCanaryHook(entry.hook) &&
+        !isLarpHook(entry.hook),
+    );
+    const input = payload(event, projectDir);
+    input.tool_input.command = 'touch forbidden-by-policy';
+    const result = await runShellHook(
+      hook.command,
+      input,
+      projectDir,
+      pluginHostEnv({ PLUGIN_ROOT: pluginRoot, APE_CANARY_ONLY: '1' }),
+    );
+    expect(result.code, result.stderr || result.stdout).toBe(0);
+    const response = JSON.parse(result.stdout);
+    expect(response.hookSpecificOutput?.permissionDecision ?? response.decision).toBe('deny');
+  });
+
+  it('does not let an inherited APE_HOST misclassify a Codex wrapper as Claude', async () => {
+    const { pluginRoot, projectDir } = await fixture();
+    await mkdir(path.join(projectDir, '.ape', 'runtime'), { recursive: true });
+    const { event, hook } = codexHookEntries.find(
+      (entry) =>
+        entry.event === 'SessionStart' &&
+        !isCanaryHook(entry.hook) &&
+        !isLarpHook(entry.hook),
+    );
+    const result = await runShellHook(
+      hook.command,
+      payload(event, projectDir),
+      projectDir,
+      pluginHostEnv({ PLUGIN_ROOT: pluginRoot, APE_HOST: 'claude' }),
+    );
+    expect(result.code, result.stderr || result.stdout).toBe(0);
+    const response = JSON.parse(result.stdout);
+    expect(response.hookSpecificOutput?.additionalContext).toContain('complete ape_run probe');
+    expect(response.hookSpecificOutput?.additionalContext)
+      .toContain('send ape_run probe-ack, then ape_run start');
+  });
+
   it('processes the largest supported Claude hook payload through the shared policy entry', async () => {
     const { pluginRoot, projectDir } = await fixture();
     const { event, hook } = codexHookEntries.find((entry) => entry.event === 'PreToolUse');
@@ -479,7 +529,7 @@ describe('every Codex plugin hook launcher is host-portable', () => {
     ]);
   });
 
-  it('keeps all seven Claude-only supplemental handlers behind Node command-plus-args launchers', () => {
+  it('keeps all seven supplemental Claude-manifest handlers behind Node command-plus-args launchers', () => {
     expect(claudeHookEntries).toHaveLength(7);
     for (const { hook } of claudeHookEntries) {
       expect(hook.command).toBe('node');

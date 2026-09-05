@@ -9,13 +9,13 @@ disable-model-invocation: true
 Use only when the user explicitly asks to resume APE. Call `ape_run` with `action: "resume"` and
 continue from the returned machine state; never reconstruct completed work or pending tickets from
 conversation memory.
-On Google Antigravity / Gemini, pass the exact open project root as `project_dir` on every APE MCP
-call.
+Pass the governed project root as `project_dir` on every APE MCP call. If there is no active run,
+report that result; a resume request does not authorize a fresh start or reset.
 
 Follow [`references/run-resume-protocol.md`](references/run-resume-protocol.md) for dispatch,
 receipt recording, waiting, and advancement. Never spawn a replacement for an already-bound ticket
 unless the runtime returns `next_action: {"kind":"redispatch_same_ticket", ...}`; that action authorizes at most
-one fresh worker on the same immutable ticket after receipt-contract correction exhaustion.
+one fresh worker on the same immutable ticket after the runtime confirms the original has stopped.
 When the runtime instead returns `next_action.kind: "capability_recovery"`, dispatch only the
 included runtime-derived successor. It consumes no product attempt and already binds the exact
 additive scope, policy, deadlines, manifests, run contract, lineage ceilings, and provenance. Never
@@ -28,9 +28,11 @@ The resume invocation authorizes continuous scheduler-owned progress. Drive ever
 transition, wait, review, replan, remediation, gate, and configured shipping action to a terminal
 result without asking the user to say continue. Yield only for completion, a terminal block, or
 input that would change the requested outcome.
-When a dispatch remains active, wait through the host's native agent primitive. Use
-`expire-dispatch` only for a genuinely orphaned or wedged flight, with the exact pending ticket ID
-and a non-empty user-provided audit reason.
+When a dispatch remains active, wait through the host's native agent primitive. Follow returned
+`required_control_action` before interpreting a generic continuation label: retrying an identical
+attested receipt does not require another worker validation. Use `expire-dispatch` only for an
+explicitly authorized orphaned or wedged flight, with the exact pending ticket ID and a non-empty
+audit reason grounded in that authorization.
 
 Accept the runtime's current lane, model policy, retry count, remediation state, and gate state.
 Do not redo stages, free-hand transitions, or edit files from the parent session.

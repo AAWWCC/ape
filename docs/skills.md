@@ -1,45 +1,51 @@
 # Skills
 
-APE packages the same seven skills for Claude Code and Codex:
+APE provides the same seven skills in Claude Code and Codex.
 
-| Skill | Behavior |
+| Skill | What it does |
 | --- | --- |
-| `run` | Gather scope and start/advance a run. |
-| `status` | Read the active run and optional roadmap projection. |
-| `resume` | Continue an interrupted native-agent loop. |
-| `history` | Query/explain history, import legacy history, and inspect or compact artifacts. |
-| `config` | Get/set config, run doctor, initialize test commands, or wire/unwire statuslines. |
-| `override` | Use audited abort, reset, or dispatch-expiry recovery. |
-| `roadmap` | Inspect, register, or supersede optional roadmap entries. |
+| `run` | Confirm scope, then start and advance a run. |
+| `status` | Show the active run and optional roadmap. |
+| `resume` | Continue an interrupted run. |
+| `history` | Search or explain past runs; import history or compact artifacts. |
+| `config` | Read or change settings, check setup, detect test commands, or configure a statusline. |
+| `override` | Abort, reset, or expire a dispatch with an audit reason. |
+| `roadmap` | View, register, or supersede roadmap entries. |
 
 ## Invocation
 
-`run`, `resume`, `config`, and `override` declare `disable-model-invocation: true`. They start agents
-or mutate state and therefore load only after an explicit `/ape:<skill>` invocation. `status`, the
-read-only history paths, and roadmap views may be loaded when the host decides they are relevant;
-their mutating actions still require the same runtime validation and explicit approval described by
-the skill.
+Use `/ape:<skill>`, for example `/ape:run Fix the checkout validation`.
+Argument hints such as `[--lane …]` and `[--mode …]` help gather input; they do not
+bypass validation.
 
-Argument hints such as `/ape:run [objective] [--lane …] [--mode …]` help intake but do not bypass
-runtime validation.
+Only `status` may be selected automatically. The other six skills require explicit
+invocation, including `history` and `roadmap`, which also offer state-changing
+actions. Their host metadata disables implicit invocation. Invoking a skill does
+not waive its approval or validation requirements.
 
 ## Run intake
 
-For a greenfield project, `run` asks only for constraints the repository cannot answer and proposes
-undetermined stack, storage, or deployment choices. If one objective clearly spans several runs and
-the project has no roadmap, it may propose roadmap entries; registration still waits for operator
-approval.
+APE reads what it can from the repository, then asks for missing decisions.
+For a new project, this can include stack, storage, or deployment choices.
+It may propose roadmap entries when the objective spans several runs, but does
+not register them without approval.
 
-The intake must align behavioral intent with the requested contract. Behavioral fast/full phase
-runs provide test paths and may use plan contract v2 preflight. They default to red-first; use the
-explicit green-maintenance test intent only for a green-on-arrival regression net or test deflake.
-Pure data/baseline work remains non-behavioral and omits the test-writer stage. Non-behavioral phase
-runs use contract v1 and may still classify fast/full when scope is not mechanical. `land` may start
-from committed feature work plus dirty finishing edits only when HEAD descends from the resolved
-default tip and the full diff is claimed.
+Choose the contract that matches the work:
 
-The roadmap is an optional audited ledger above the scheduler. It never starts or sequences runs,
-but it gates roadmap-backed start and completion on satisfied prerequisites. Entry status is
-derived from active state, requirements, and immutable history. A receipt can declare bounded
-`evidence.roadmap_followups`; exact accepted-receipt provenance is required before a later,
-separately approved registration can name the discovering run.
+- Behavioral fast/full phase work needs `test_paths`, defaults to `red-first`,
+  and may use plan contract v2.
+- Use `green-maintenance` for green-on-arrival regression coverage or deflaking.
+- Pure data or baseline work is non-behavioral: contract v1, no test writer.
+  Larger non-behavioral work can still use fast/full lanes.
+- `land` accepts committed feature work plus dirty finishing edits only when HEAD
+  descends from the resolved default tip and the entire diff is claimed.
+
+## Roadmap
+
+The roadmap tracks work and dependencies; it does not start or sequence runs.
+Roadmap-backed runs can start or complete only when their prerequisites are
+satisfied. Status comes from active state, requirements, and saved history.
+
+Workers can propose `evidence.roadmap_followups` in a receipt. Registering them
+later still needs separate approval and an exact match to the accepted receipt.
+See [roadmap actions](mcp-tools.md#roadmap-verbs).

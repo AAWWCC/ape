@@ -2,6 +2,144 @@
 
 ## Unreleased
 
+## 2.24.11 — 2026-09-05
+
+Local release candidate; not published or fully live-certified.
+See [release status](docs/prevention-release-status.md) for completed checks and
+remaining limits.
+
+### Keep ordinary work moving
+
+- Retained execution-budget work now names the required `ape_run next` action
+  instead of suggesting passive waiting. Physical worker-retirement waits keep
+  precedence over that guidance.
+- Parent reads and unchanged commands no longer relabel existing worker work.
+  Retained host-call outcomes keep duplicate post events idempotent.
+- Parent-tool refusals persist affected reference entries and prevent later
+  worker-result or receipt acceptance until an authorized repair is observed.
+  Reads, in-scope repairs, unrelated edits, and committed receipt retries remain
+  available; no files are automatically restored.
+- Git branch filters, list patterns, and spaced format/sort values no longer
+  trigger false denials. Branch-creation and mutation combinations remain refused.
+  Option-shaped filenames after a proven `--` path separator and grouped `ls-files` read switches are
+  also recognized without permitting actual output-writing flags.
+- A single quoted working directory supports spaces and literal special
+  characters while preserving command effects and path containment checks.
+- Informational Node/npm commands no longer invent missing entry prerequisites.
+  Forwarded script arguments cannot change the inspected package root; script
+  help/version arguments remain subject to writer scope where the package manager
+  runs the script.
+- Recovery guidance respects the remaining gate retry budget and the exact
+  shipping hold. Resuming active gate or shipping watches retains polling advice.
+- Public export accepts the approved project name without exempting unrelated
+  author identities or other protected content from the public-safety checks.
+- Routine `rg`, `grep`, `head`, and `tail` inspection is available within ticket
+  policy. Complete quoted inspection words support spaces and literal regex
+  syntax without granting shell chaining, redirects, or subprocess hooks.
+- Equivalent long-option path spellings and `git ls-files -o` no longer cause
+  false containment or output-write denials.
+- Admission follows the selected workflow. Unused global generators do not
+  demand extra output scope, and debug/spike runs do not require unrelated test
+  runners, test-authoring paths, or shipping setup. Required capabilities and
+  configured writer output bounds remain enforced.
+- Missing optional verification directories remain visible in preview without
+  preventing start. They cannot be selected until available; required profiles
+  still fail admission early.
+- Preflight reuses settled decisions and keeps optional refactors out of input
+  holds. Receipt retry guidance keeps exact recording with the parent instead
+  of unnecessarily continuing a worker.
+- Compact run and ticket references retain the plan contract version so response
+  size limits cannot hide the worker's legacy or v2 contract.
+
+### Prevent failures before workers start
+
+- Preview and start now use the same admission checks. New starts require the
+  reviewed preview digest and reject changes to scope, files, staging, or config.
+- Admission checks all reachable stages for missing artifacts, incompatible
+  schemas, unavailable capabilities, commands, and scope limits.
+- Planner templates must fit the plan contract. A valid template is not approval
+  of the plan itself.
+- Generated files need approved writer scope. A command that changes files cannot
+  be treated as read-only verification.
+- APE checks command entry scripts, package scripts, and interpreters without
+  running them during preview.
+- Admission retains Node preload dependencies for inline commands and follows
+  nested package scripts, literal environment prefixes, and npm's default start
+  entry when checking the resolved base checkout.
+
+### Clearer inputs, receipts, and recovery
+
+- Agent prompts follow each ticket's test intent and receipt requirements,
+  including green maintenance, runtime-owned test correction, and executed
+  targeted-test evidence during remediation. Planning prompts distinguish legacy
+  v1 plans from v2, and completed preflight can return questions for the runtime.
+- Skills retain existing authorization, permit a bounded harmless inspection
+  correction, and recognize a bound worker that has already finished. Receipt
+  recovery uses the returned input hash and preserves the validator's remaining
+  correction allowance. Obsolete host instructions were removed.
+- Independently confirmed post-build test repairs use runtime-observed
+  `test-correction`: stable passing and stable failing tests both reach the
+  implementer's remaining retry. Initial red-first admission still requires
+  failure; flaky, empty, and out-of-scope corrections remain rejected.
+- Override-abort preserves its bounded reason in run state and new history
+  records. Repeated aborts keep the original terminal explanation.
+- Stopped-worker receipt settlement preserves aborted runs and input holds;
+  calling next or resume cannot reopen their recovery path.
+- Issued receipt schemas include each ticket's required tests, authorized paths,
+  and preflight objective. Capability successors retain that specialization.
+- Evidence commands resolve relative paths from their actual working directory,
+  including an admitted leading `cd`, while preserving project containment.
+- `answer-preflight` now identifies its required audit reason. Omitted optional
+  fields no longer hide that message behind a generic undefined-data error.
+- Preflight answers diagnose stale run IDs. Receipt corrections keep the
+  same-worker correction action instead of incorrectly suggesting the next stage.
+- Recovery guidance lists actions allowed in the current state and their
+  prerequisites. It no longer recommends resetting an active run.
+- Malformed calls fail before runtime storage changes. Receipt credentials are
+  not echoed in errors, corrections, or recovery responses.
+
+### Reliable native worker startup
+
+- Runtime instructions arrive through session hooks and run responses, not
+  changes to `AGENTS.md` or `CLAUDE.md`.
+- A new child discovers `ape_bind`, calls it, receives trusted task context,
+  and acknowledges it before starting work. Discovery itself grants no authority.
+- Binding probes return the exact native launch arguments and retain their
+  identity across lost responses. Diagnostics distinguish waiting, rejection,
+  and expiration.
+- Stale, replaced, or corrupt worker evidence cannot authorize another writer.
+  The restrictions stay scoped to the affected children.
+- Saved state and worker records reject symlinks, unsafe files, and invalid
+  ancestry. Status remains available for diagnosis when execution must stop.
+
+### Responses and shipping
+
+- Codex responses omit repeated metadata so valid startup results fit the host's
+  output boundary. Full records and exact worker launch arguments are preserved.
+  Response limits also account for escaped MCP framing.
+- Shipping freezes each project's explicit origin, repository, and base.
+  Other projects no longer inherit APE's upstream target.
+- Shipping checks the admitted, staged, committed, and pushed trees. A successful
+  merge command is treated as a request until GitHub confirms the merge.
+  Local cleanup failure is recorded separately from proven remote success.
+- Queued merges keep their existing watch instead of being submitted again on
+  each poll. This does not guarantee exactly-once submission across a crash.
+
+### Verification
+
+- The launcher checks the pinned executable, prompts, selected provider settings,
+  and headless MCP approvals before starting a parent. It does not add approval
+  or sandbox bypass flags.
+- Certification schema v5 accepts immediate or automatic protected squash merges.
+  Both require passing checks on the pushed head, matching trees, and unchanged
+  branch protection.
+- Synthetic tests and model-free host checks cover the fixes. Full live
+  certification remains incomplete; Claude live operation is unverified.
+- Prompt evaluation now covers 52 synthetic scenarios, including 13 earlier new cases
+  for agent and skill decisions; offline harness checks do not certify model behavior.
+- Codex stays pinned to 0.147.0. Retry budgets have not increased.
+  Expanded automatic repair remains deferred.
+
 ## 2.24.10 — 2026-09-04
 
 Windows host-edge marketplace smoke now resolves each installed Codex and Claude package entrypoint

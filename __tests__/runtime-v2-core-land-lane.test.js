@@ -43,7 +43,8 @@ async function project(config = {}) {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
     test_commands: {
       full: 'node -e "process.exit(0)"',
-      targeted: 'node -e "process.exit(0)"',
+      targeted: 'node --test tests/value.test.js',
+      targeted_template: 'node --test {paths}',
     },
     ...config,
   });

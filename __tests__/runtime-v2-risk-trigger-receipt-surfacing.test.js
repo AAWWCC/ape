@@ -170,7 +170,7 @@ function receiptTransactionFile(dir, ticketId) {
 // assertions or the crash-replay reconstruction).
 async function walkToBuild(dir) {
   const started = await startRun(dir, startInput());
-  expect(started.ok).toBe(true);
+  expect(started.ok, JSON.stringify({ reason: started.reason, blocking: started.readiness?.blocking })).toBe(true);
   expect(started.run.lane).toBe('fast');
   const testTicket = started.run.tickets[0];
   expect(testTicket.role).toBe('test_writer');

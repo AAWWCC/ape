@@ -29,7 +29,7 @@ async function project() {
   git(dir, 'commit', '-qm', 'test: baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'npm test' },
+    test_commands: { full: 'npm test', targeted_template: 'npm test -- {paths}' },
     verification: {
       profiles: [{ id: 'unit', description: 'Run unit tests', command: 'npm test', root: '.', timeout_ms: 30_000 }],
     },
@@ -137,7 +137,7 @@ describe('versioned preflight artifact contract', () => {
 
     await atomicWriteJson(paths.config, {
       shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-      test_commands: { full: 'npm test' },
+      test_commands: { full: 'npm test', targeted_template: 'npm test -- {paths}' },
       verification: {
         profiles: [{ id: 'changed', description: 'A later live edit', command: 'npm test', root: '.', timeout_ms: 30_000 }],
       },

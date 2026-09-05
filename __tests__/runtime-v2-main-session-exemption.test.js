@@ -200,6 +200,7 @@ async function project(status = 'running') {
     tree_sha: baseTree,
     tickets: [{
       ticket_id: PENDING_TICKET_ID,
+      stage_id: 'build',
       role: 'implementer',
       writable: true,
       claimed_paths: ['src'],

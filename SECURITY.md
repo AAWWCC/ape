@@ -2,25 +2,26 @@
 
 ## Supported versions
 
-Security fixes are made on the latest release line and `main`. Older releases may not receive
-backports.
+Security fixes target the latest release line and `main`. Older versions may
+not receive backports.
 
 ## Reporting a vulnerability
 
-Please do not open a public issue for a suspected vulnerability. Use GitHub's private vulnerability
-reporting for this repository (the **Security** tab, then **Report a vulnerability**). Include the
-affected version, a minimal reproduction, the impact you observed, and any suggested mitigation.
+Do not post vulnerability details in a public issue. Use this repository's
+**Security → Report a vulnerability** page. Include the affected version, a
+minimal reproduction, the observed impact, and any workaround.
 
-If private vulnerability reporting is unavailable, open a public issue that contains no exploit,
-secret, or sensitive detail and ask the maintainer to establish a private reporting channel.
+If private reporting is unavailable, open an issue asking for a private channel.
+Do not include exploit details, secrets, or other sensitive information.
 
 ## Scope
 
-APE coordinates coding agents, invokes configured test commands, writes machine state under
-`.ape/runtime/`, and can interact with GitHub when shipping is requested. Reports about authorization
-bypasses, unapproved writes, command execution, evidence forgery, secret disclosure, or unsafe
-shipping behavior are especially valuable.
+APE coordinates agents, runs configured commands, stores state in `.ape/runtime/`,
+and can push and merge through GitHub. Please report authorization bypasses,
+unapproved writes, unsafe command execution, forged evidence, secret leaks, and
+unsafe shipping behavior.
 
-APE defaults to holding green work for an explicit audited `ship` action. Enabling
-`shipping.auto_merge` grants the runtime permission to push, open or reuse a pull request, and merge
-after its configured gates pass.
+Green work waits for an audited `ship` action by default. Setting
+`shipping.auto_merge: true` is not enough to authorize shipping: each new run
+also needs explicit shipping approval and an explicit repository target.
+Tests, reviews, and the remaining shipping gates must still pass.

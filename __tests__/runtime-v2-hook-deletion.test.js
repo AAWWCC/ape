@@ -447,6 +447,7 @@ async function project(status = 'running') {
     tickets: [
       {
         ticket_id: 'run-del:build:b',
+        stage_id: 'build',
         role: 'implementer',
         writable: true,
         claimed_paths: ['src'],
@@ -455,6 +456,7 @@ async function project(status = 'running') {
       },
       {
         ticket_id: 'run-del:test:t',
+        stage_id: 'test',
         role: 'test_writer',
         writable: true,
         claimed_paths: [],

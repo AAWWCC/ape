@@ -115,7 +115,7 @@ async function project() {
 function goodConfig() {
   return {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
   };
 }
 

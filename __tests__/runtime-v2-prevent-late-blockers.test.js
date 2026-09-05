@@ -55,7 +55,7 @@ describe('APE prevents late blocker discovery', () => {
     const resume = read('plugin-src/skills/resume/body.md');
     const protocol = read('plugin-src/skills/references/run-resume-protocol.md');
     expect(run).toMatch(/ape_run preview/i);
-    expect(run).toMatch(/deterministic dispatch bounds/i);
+    expect(run).toMatch(/deterministic\s+dispatch\s+bounds/i);
     expect(run).not.toMatch(/max_worker_dispatches|max_active_seconds|extend-budget/i);
     expect(protocol).toMatch(/ape_validate_receipt/i);
     expect(protocol).toMatch(/initial validation plus at most two[\s\S]*corrections/i);

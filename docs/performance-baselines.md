@@ -1,78 +1,75 @@
 # Performance baselines
 
-APE treats CI timing and runtime latency as qualified measurements, not universal performance
-claims. An empty ledger or an insufficient sample does not certify anything.
+Timings describe a particular commit and environment, not a universal speed
+guarantee. Empty or insufficient data is not a certification.
 
 ## Reproducible CI wall-clock method
 
-Record the commit SHA and the committed `.github/test-durations.json` snapshot. Start from a clean
-checkout with the committed lockfile, record the operating system and architecture, the exact
-Node.js version, npm version, and worker setting, and install with `npm ci`. The production CI
-partition is one smoke set and three shards:
+Start with a clean checkout and `npm ci`. Record the commit, lockfile digest,
+`.github/test-durations.json` digest, operating system and architecture,
+Node.js version, npm version, and worker resources/settings.
 
-```text
+Run the production partitions on comparable clean workers:
+
+```sh
 node scripts/run-ci-tests.mjs smoke
 node scripts/run-ci-tests.mjs shard 1 3
 node scripts/run-ci-tests.mjs shard 2 3
 node scripts/run-ci-tests.mjs shard 3 3
 ```
 
-Measure each command with monotonic timestamps immediately before process launch and after process
-exit. Run the four commands on comparable clean workers, use the wall-clock interval from the first
-partition start through the last partition finish, and retain individual partition durations.
-Repeat the observation rather than reporting one unusually favorable run. Report the commit,
-snapshot digest, OS, Node version, lockfile digest, worker resources/settings, command lines,
-monotonic-clock source, repetition count, and every observed value. Results apply only to that
-environment and commit; scheduling, caches, virtualization, and provider load can change them.
+Use a monotonic clock around each process. Report each duration and the interval
+from the first start to the last finish. Repeat the measurement and report every
+value, command, clock source, and repetition count—not just the fastest result.
+Caches, scheduling, virtualization, and provider load can change the outcome.
 
-Refresh the snapshot with `npm run test:timings`. The refresh runs every supported test file without
-file parallelism, requires a successful complete report, and atomically replaces the sorted snapshot.
+`npm run test:timings` refreshes the duration snapshot. It runs all supported test
+files without file parallelism and replaces the sorted snapshot only after a
+successful complete report.
 
 ## Runtime latency and adjusted p90
 
-Each reference run records `raw_ms`, optionally `test_ms`, and optionally `remote_ci_ms`.
-`adjusted_ms = raw_ms - test_ms - remote_ci_ms`; inconsistent negative adjusted values are rejected.
-For both raw and adjusted observations, nearest-rank p90 sorts ascending and selects rank
-`ceil(0.90 * count)`. Report raw p90 and adjusted p90 rather than substituting one for the other.
+Each run records `raw_ms`, with optional `test_ms` and `remote_ci_ms`:
 
-The six independently governed groups are Claude and Codex crossed with the `mechanical`, `fast`,
-and `full` lanes. Their thresholds come from the runtime lane deadlines. Every group reports count,
-required count, passing count, required passing, threshold, raw p90, adjusted p90, and an explicit
-status. Certification requires at least 20 records and at least 18 passing records in every group.
-Fewer than 20 records is `insufficient-records`; 20 records with fewer than 18 passes is
-`insufficient-passes`. Empty or insufficient data is not a certification.
+```text
+adjusted_ms = raw_ms - test_ms - remote_ci_ms
+```
+
+Negative adjusted values are rejected. Nearest-rank p90 sorts values in ascending
+order and selects rank `ceil(0.90 * count)`. Report both raw and adjusted p90.
+
+Measure six groups separately: Claude and Codex, each with `mechanical`, `fast`,
+and `full` lanes. Thresholds come from runtime lane deadlines. Each group needs
+at least 20 records and 18 passing records. Report count, required count, passing
+count, required passing, threshold, both p90 values, and status.
+Fewer than 20 records is `insufficient-records`; fewer than 18 passes is
+`insufficient-passes` once the record minimum is met.
 
 ## Persistence, privacy, and bounds
 
-History import rebuilds the complete current effective history-derived subset, preserves validated
-manual rows, and removes source run identifiers before persistence. Diagnostics aggregate skip
-reasons and do not print run identifiers, hashes, filenames, project paths, objectives, or receipts.
-Re-importing unchanged effective content leaves the ledger byte-identical.
+History import rebuilds the history-derived rows, preserves valid manual rows,
+and removes source run identifiers. Diagnostics show aggregate skip reasons—not
+identifiers, hashes, filenames, project paths, objectives, or receipts. Importing
+unchanged content leaves the ledger byte-identical.
 
-Before parsing, the producer limits an existing ledger to 1 MiB and 512 records. Serialized ledger
-output is limited to 2 MiB. History import limits candidates to 2,048 entries, each entry to 256 KiB,
-and total history input to 16 MiB. Existing-ledger metadata is checked before a bounded read or JSON
-parse. Ledger replacements and duration-snapshot replacements use randomized same-directory,
-exclusive private staging, sync and validation before atomic rename, destination identity checks,
-and ownership-proven cleanup.
+Limits are 1 MiB and 512 records for an existing ledger, 2 MiB for output, and
+2,048 history entries of at most 256 KiB each, totaling at most 16 MiB.
+Metadata is checked before reading or parsing. Replacements use exclusive private
+staging in the same directory, validate and sync before atomic rename, verify
+destination identity, and clean up only owned files.
 
 ## Cooperative writer and crash-recovery boundary
 
-Replacement safety assumes the current writer and other cooperative writers honor the exclusive
-lock. Ledger bytes, timing reports, history entries, destination and staging paths, lock metadata,
-PID values, timestamps, and mutations injected at an observable validation boundary are untrusted.
-The implementation validates the exact expected bytes and file identity immediately before rename;
-rename, unlink, persistent destination bytes, and identifier-free diagnostics are the resulting
-sinks.
+Safety assumes cooperative writers honor the exclusive lock. Inputs and file
+metadata are untrusted; exact bytes and file identity are checked at the final
+observable validation boundary before rename.
 
-Each lock records its owner PID. An unchanged metadata-bearing lock is reclaimed only for a
-confirmed-dead PID. A live owner, an `EPERM` result, or any other permission-ambiguous liveness
-result is retained and not evicted. An unchanged empty, malformed, pre-metadata, or otherwise
-unidentifiable lock is retained while young and reclaimed only after a conservative 60-second
-lease. Consequently, a live process paused in the pre-metadata window is lease-bound and is not
-protected indefinitely after those 60 seconds.
+A PID-bearing lock is reclaimed only for a confirmed-dead owner. Live owners,
+`EPERM`, and permission-ambiguous results are retained, not evicted. An empty,
+malformed, pre-metadata, or unidentifiable lock has a 60-second lease. This means a
+live process paused in the pre-metadata window is lease-bound, not protected
+indefinitely.
 
-These guarantees cover cooperative lock-honoring writers and mutations observed at the final
-validation boundary. They do not cover lock-ignoring writers or an arbitrary same-UID process that
-changes destination or staging bytes in the final validation-to-rename syscall gap; that gap is
-outside the portable protection available across Ubuntu, macOS, and Windows.
+The final validation-to-rename syscall gap remains outside this guarantee: a
+same-UID process or lock-ignoring writer can change bytes during that gap. The
+portable implementation does not claim to prevent this on any supported OS.

@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -121,6 +121,17 @@ describe('APE v2 project-root resolution (resolveProjectRoot)', () => {
     cleanups.push(bare);
     const nested = path.join(bare, 'a', 'b');
     await mkdir(nested, { recursive: true });
+    expect(resolveProjectRoot(nested)).toBe(path.resolve(nested));
+  });
+
+  it.skipIf(process.platform === 'win32')('does not walk up to a symlinked .ape marker', async () => {
+    const bare = await mkdtemp(path.join(tmpdir(), 'ape-symlink-marker-'));
+    const outside = await mkdtemp(path.join(tmpdir(), 'ape-symlink-marker-target-'));
+    cleanups.push(bare, outside);
+    const nested = path.join(bare, 'src', 'nested');
+    await mkdir(nested, { recursive: true });
+    await symlink(outside, path.join(bare, '.ape'), 'dir');
+
     expect(resolveProjectRoot(nested)).toBe(path.resolve(nested));
   });
 

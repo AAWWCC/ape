@@ -9,6 +9,8 @@ import { archiveRun, explainRun } from '../lib/runtime/history.js';
 import { historyAction } from '../lib/runtime/service.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
 import { hashRecord } from '../lib/runtime/canonical.js';
+import { AUTO_MERGE_HOLD_REASON } from '../lib/runtime/constants.js';
+import { reduceRun } from '../lib/runtime/scheduler.js';
 import { createSuccessorAttestation } from '../lib/runtime/successor-attestation.js';
 import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identity.js';
 
@@ -121,7 +123,7 @@ describe('APE v2 History Explain & Lifecycle Telemetry Output', () => {
       expect(explanation).not.toContain('Implement rich history explanation and lifecycle telemetry');
       expect(explanation).toContain('Status: completed; lane: fast; mode: phase.');
       expect(explanation).toContain('Reason code: completed');
-      expect(explanation).toContain('Next safe action: ape_run start');
+      expect(explanation).toContain('Next safe action: check host prerequisites, then ape_run start');
       expect(explanation).toContain('Agents: 2 passed receipts, 0 non-passing receipts.');
       expect(explanation).toContain('Merged:');
       expect(explanation).not.toContain('github.com/acme/repo');
@@ -320,7 +322,7 @@ describe('APE v2 History Explain & Lifecycle Telemetry Output', () => {
       expect(res.run).toMatchObject({ run_id: 'run-explain-e2e', status: 'completed' });
       expect(res.diagnostic).toMatchObject({
         reason_code: 'completed',
-        next_safe_action: 'ape_run start',
+        next_safe_action: 'check host prerequisites, then ape_run start',
       });
       expect(res.text).toBeTypeOf('string');
       expect(res.text).toContain('Run run-explain-e2e');
@@ -500,13 +502,17 @@ describe('APE v2 History Explain & Lifecycle Telemetry Output', () => {
       cleanups.push(dir);
       const paths = runtimePaths(dir);
       const runId = 'run-archived-shipping-hold';
-      await archiveRun(paths, createHistoryRecord({
+      const archived = await archiveRun(paths, createHistoryRecord({
         run_id: runId,
         status: 'blocked',
         stage: 'merge',
-        block_reason: 'all local gates passed; explicit shipping approval required',
+        block_reason: AUTO_MERGE_HOLD_REASON,
         gates: { passed: true, checks: {} },
+        merge: null,
       }));
+      expect(archived.block_reason).toBe(AUTO_MERGE_HOLD_REASON);
+      expect(reduceRun(archived, { type: 'SHIP', reason: 'synthetic operator request' }))
+        .toContainEqual(expect.objectContaining({ type: 'run_gates' }));
       const file = path.join(paths.history, `${runId}.json`);
       const before = await readFile(file, 'utf8');
 
@@ -517,6 +523,38 @@ describe('APE v2 History Explain & Lifecycle Telemetry Output', () => {
       });
       expect(explained.text).toContain('Reason code: shipping_hold');
       expect(explained.text).toContain('Next safe action: ape_run ship');
+      expect(await readFile(file, 'utf8')).toBe(before);
+    });
+
+    it.each([
+      'all local gates passed; explicit shipping approval required',
+      'shipping failed: synthetic provider failure',
+    ])('does not offer ship for an archived merge block with reason %s', async (blockReason) => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'ape-history-unshippable-block-'));
+      cleanups.push(dir);
+      const paths = runtimePaths(dir);
+      const runId = 'run-archived-unshippable-block';
+      const archived = await archiveRun(paths, createHistoryRecord({
+        run_id: runId,
+        status: 'blocked',
+        stage: 'merge',
+        block_reason: blockReason,
+        gates: { passed: true, checks: {} },
+        merge: null,
+      }));
+      expect(archived.block_reason).toBe(blockReason);
+      expect(reduceRun(archived, { type: 'SHIP', reason: 'synthetic operator request' }))
+        .toContainEqual(expect.objectContaining({ type: 'reject' }));
+      const file = path.join(paths.history, `${runId}.json`);
+      const before = await readFile(file, 'utf8');
+
+      const explained = await historyAction(dir, 'explain', { run_id: runId });
+      expect(explained.diagnostic).toMatchObject({
+        reason_code: 'blocked',
+        next_safe_action: 'ape_run abort or ape_run override reset',
+      });
+      expect(explained.text).toContain('Reason code: blocked');
+      expect(explained.text).not.toContain('Next safe action: ape_run ship');
       expect(await readFile(file, 'utf8')).toBe(before);
     });
 

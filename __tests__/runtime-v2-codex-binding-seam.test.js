@@ -1,11 +1,23 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { evaluateLifecyclePolicy } from '../lib/runtime/hooks.js';
-import { recordReceipt, startRun, statusRun } from '../lib/runtime/service.js';
+import {
+  completeClaudeReceiptBinding,
+  corroboratesCodexProbeBinding,
+  corroboratesCodexProbeLifecycle,
+  expireClaudeIntent,
+  prepareCodexIntent,
+  readDispatchReceiptCapabilityHash,
+  resolveCodexBindingOutcome,
+} from '../lib/runtime/claude-dispatch.js';
+import { nativeDispatch } from '../lib/runtime/adapters.js';
+import { runtimePaths } from '../lib/runtime/paths.js';
+import { recordReceipt, startRun, statusRun, validateReceiptForDispatch } from '../lib/runtime/service.js';
 
 // Codex binding compatibility covers the visible task-name handshake and the older
 // explicit lifecycle-ticket seam. Two observable contracts:
@@ -166,6 +178,7 @@ async function codexProject(status = 'running') {
   }).trim();
   const ticket = (ticketId) => ({
     ticket_id: ticketId,
+    stage_id: 'build',
     role: 'implementer',
     writable: true,
     claimed_paths: ['src'],
@@ -202,7 +215,7 @@ function codexEnv(overrides = {}) {
   return { ...env, ...overrides };
 }
 
-function invokeHook(input, env = codexEnv()) {
+function invokeHook(input, env = codexEnv(), { timeoutMs = null } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [hookBinary], {
       cwd: root,
@@ -215,8 +228,21 @@ function invokeHook(input, env = codexEnv()) {
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', reject);
+    let timedOut = false;
+    const timeout = timeoutMs === null ? null : setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+    child.on('error', (error) => {
+      if (timeout !== null) clearTimeout(timeout);
+      reject(error);
+    });
     child.on('close', (code) => {
+      if (timeout !== null) clearTimeout(timeout);
+      if (timedOut) {
+        reject(new Error(`APE hook did not exit within ${timeoutMs}ms`));
+        return;
+      }
       if (code !== 0) reject(new Error(stderr));
       else {
         const parsed = JSON.parse(stdout);
@@ -228,6 +254,29 @@ function invokeHook(input, env = codexEnv()) {
     });
     child.stdin.end(`${JSON.stringify(input)}\n`);
   });
+}
+
+const serviceModuleUrl = new URL('../lib/runtime/service.js', import.meta.url).href;
+
+// Keep special-file regressions from wedging the Vitest worker itself. The
+// child is forcibly bounded, while its result still comes from the public
+// status surface and the current unbundled source tree.
+function statusRunInFreshProcess(dir, timeoutMs = 3_000) {
+  const program = [
+    `import { statusRun } from ${JSON.stringify(serviceModuleUrl)};`,
+    'const result = await statusRun(process.argv[1]);',
+    'process.stdout.write(JSON.stringify(result));',
+  ].join('\n');
+  return JSON.parse(execFileSync(
+    process.execPath,
+    ['--input-type=module', '--eval', program, dir],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      maxBuffer: 1024 * 1024,
+    },
+  ));
 }
 
 async function startedCodexProject() {
@@ -272,7 +321,255 @@ async function onlyCodexIntentFile(dir) {
   return path.join(intentDirectory, files[0]);
 }
 
+async function bootstrapNativeChild(dir, action, {
+  parent = 'codex-parent-session', agent = 'codex-native-agent-1',
+  turn = 'distinct-child-turn', type = 'default', toolUseId = `bootstrap-${turn}`,
+} = {}) {
+  const provisional = await invokeHook({
+    hook_event_name: 'SubagentStart', project_dir: dir, session_id: parent,
+    turn_id: turn, agent_id: agent, agent_type: type, model: action.dispatch.model.model,
+  });
+  expect(provisional.decision, JSON.stringify(provisional)).toBe('allow');
+  expect(provisional.hookSpecificOutput?.additionalContext ?? '').not.toContain('APE_RECEIPT_CAPABILITY=');
+  return invokeHook({
+    hook_event_name: 'PreToolUse', project_dir: dir, session_id: agent,
+    turn_id: turn, tool_use_id: toolUseId, model: action.dispatch.model.model,
+    tool_name: 'mcp__ape__ape_bind', tool_input: action.dispatch.dispatch_intent.bootstrap_args,
+  });
+}
+
+async function boundCodexIntent({ legacy = false } = {}) {
+  const { dir, action } = await startedCodexProject();
+  if (legacy) {
+    // Author a genuine old-protocol intent through its public writer. Never
+    // strip bootstrap fields from an already-authorized modern generation.
+    const paths = runtimePaths(dir);
+    await expireClaudeIntent(paths, action.ticket.ticket_id);
+    const prepared = await prepareCodexIntent(paths, action.ticket, action.dispatch.agent_type);
+    action.dispatch = nativeDispatch('codex', action.ticket, prepared);
+  }
+  const sessionId = legacy ? 'strict-intent-child-session' : 'strict-intent-parent-session';
+  const agentId = 'strict-intent-agent';
+  const launch = await invokeHook({
+    hook_event_name: 'PreToolUse',
+    project_dir: dir,
+    session_id: 'strict-intent-parent-session',
+    turn_id: 'strict-intent-turn',
+    tool_use_id: 'strict-intent-tool',
+    tool_name: 'collaborationspawn_agent',
+    tool_input: action.dispatch.spawn_args,
+  });
+  expect(launch.decision).toBe('allow');
+  const binding = legacy ? await invokeHook({
+    hook_event_name: 'SubagentStart',
+    project_dir: dir,
+    session_id: sessionId,
+    turn_id: 'strict-intent-turn',
+    agent_id: agentId,
+    agent_type: 'default',
+  }) : await bootstrapNativeChild(dir, action, {
+    parent: sessionId, agent: agentId, turn: 'strict-child-turn',
+  });
+  expect(binding.decision).toBe('allow');
+  const paths = runtimePaths(dir);
+  return {
+    dir,
+    paths,
+    file: await onlyCodexIntentFile(dir),
+    state: JSON.parse(await readFile(paths.active, 'utf8')),
+    ticket: action.ticket,
+    sessionId,
+    agentId,
+  };
+}
+
 describe('APE v2 native Codex dispatch handshake', () => {
+  it('rejects parseable bound intents whose lifecycle authority is partial or downgraded', async () => {
+    const { paths, file, state, sessionId, agentId } = await boundCodexIntent();
+    const original = JSON.parse(await readFile(file, 'utf8'));
+    const mutations = [
+      ['launch capability', (record) => { delete record.launch_name_hash; }],
+      ['launch attempt', (record) => { record.launch_attempts = 0; }],
+      ['parent session', (record) => { delete record.parent_session_id; }],
+      ['tool call', (record) => { delete record.tool_use_id; }],
+      ['requested model', (record) => { delete record.requested_model; }],
+      ['launch timestamp', (record) => { delete record.launched_at; }],
+      ['launch expiry', (record) => { delete record.launch_expires_at; }],
+      ['authorization timestamp', (record) => { delete record.authorized_at; }],
+      ['launch turn', (record) => { delete record.turn_id_hash; }],
+      ['launch generation', (record) => { delete record.launch_generation; }],
+      ['launch history', (record) => { delete record.launch_generations; }],
+      ['authoritative context', (record) => { delete record.injected_context_hash; }],
+      ['binding agent type', (record) => { delete record.binding_agent_type; }],
+      ['bound session', (record) => { delete record.bound_session_id; }],
+      ['bound agent', (record) => { delete record.bound_agent_id; }],
+      ['receipt capability', (record) => { delete record.capability_hash; }],
+      ['binding timestamp', (record) => { delete record.bound_at; }],
+    ];
+    for (const [label, mutate] of mutations) {
+      const damaged = structuredClone(original);
+      mutate(damaged);
+      await writeFile(file, `${JSON.stringify(damaged)}\n`);
+      await expect(resolveCodexBindingOutcome(paths, state, {
+        session_id: sessionId,
+        agent_id: agentId,
+        agent_type: 'default',
+      }), label).rejects.toThrow(/structurally invalid/iu);
+    }
+
+    for (const status of ['authorized', 'launched', 'bound', 'completed']) {
+      const minimal = {
+        version: 2,
+        host: 'codex',
+        run_id: original.run_id,
+        ticket_id: original.ticket_id,
+        ticket_hash: original.ticket_hash,
+        agent_type: original.agent_type,
+        launch_name_hash: original.launch_name_hash,
+        status,
+        prepared_at: original.prepared_at,
+        expires_at: original.expires_at,
+        launch_attempts: 0,
+        ...(status === 'bound' || status === 'completed'
+          ? {
+              bound_session_id: sessionId,
+              bound_agent_id: agentId,
+              capability_hash: original.capability_hash,
+              bound_at: original.bound_at,
+            }
+          : {}),
+      };
+      await writeFile(file, `${JSON.stringify(minimal)}\n`);
+      await expect(resolveCodexBindingOutcome(paths, state, {
+        session_id: sessionId,
+        agent_id: agentId,
+        agent_type: 'default',
+      }), status).rejects.toThrow(/structurally invalid/iu);
+    }
+  });
+
+  it('keeps the exact pre-generation Codex bound shape resolvable after upgrade', async () => {
+    const { paths, file, state, sessionId, agentId } = await boundCodexIntent({ legacy: true });
+    const current = JSON.parse(await readFile(file, 'utf8'));
+    const {
+      launch_seed: _launchSeed,
+      launch_generation: _launchGeneration,
+      launch_generations: _launchGenerations,
+      authorized_at: _authorizedAt,
+      turn_id_hash: _turnIdHash,
+      injected_context_hash: _injectedContextHash,
+      binding_agent_type: _bindingAgentType,
+      bound_session_id: _boundSessionId,
+      ...legacy
+    } = current;
+    await writeFile(file, `${JSON.stringify({
+      ...legacy,
+      parent_session_id: sessionId,
+    })}\n`);
+
+    await expect(resolveCodexBindingOutcome(paths, state, {
+      session_id: sessionId,
+      agent_id: agentId,
+      agent_type: 'default',
+    })).resolves.toMatchObject({
+      record: { status: 'bound', bound_agent_id: agentId },
+      cause: null,
+    });
+  });
+
+  it('keeps an upgraded pre-generation Codex completion readable for idempotent receipt checks', async () => {
+    const { paths, file, ticket, sessionId, agentId } = await boundCodexIntent({ legacy: true });
+    const current = JSON.parse(await readFile(file, 'utf8'));
+    const {
+      launch_seed: _launchSeed,
+      launch_generation: _launchGeneration,
+      launch_generations: _launchGenerations,
+      authorized_at: _authorizedAt,
+      turn_id_hash: _turnIdHash,
+      injected_context_hash: _injectedContextHash,
+      binding_agent_type: _BindingAgentType,
+      bound_session_id: _boundSessionId,
+      ...legacy
+    } = current;
+    const legacyBound = { ...legacy, parent_session_id: sessionId };
+    await writeFile(file, `${JSON.stringify(legacyBound)}\n`);
+    const inputHash = 'd'.repeat(64);
+    await completeClaudeReceiptBinding(
+      paths,
+      ticket,
+      { file, record: legacyBound },
+      inputHash,
+      {
+        receipt_id: 'legacy-upgraded-receipt',
+        receipt_hash: 'e'.repeat(64),
+      },
+    );
+    await expect(readDispatchReceiptCapabilityHash(paths, ticket.ticket_id))
+      .resolves.toBe(current.capability_hash);
+    const completed = JSON.parse(await readFile(file, 'utf8'));
+    expect(completed).toMatchObject({
+      status: 'completed',
+      launch_generation: 1,
+      bound_agent_id: agentId,
+      receipt_input_hash: inputHash,
+    });
+    expect(completed).not.toHaveProperty('launch_seed');
+  });
+
+  it('does not let a minimal bound object corroborate native probe proof', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'ape-probe-intent-validator-'));
+    cleanups.push(dir);
+    const paths = runtimePaths(dir);
+    await mkdir(paths.dispatchIntents, { recursive: true });
+    const preparedAt = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const expected = {
+      probe_id: 'probe-strict-dispatch-intent',
+      host: 'codex',
+      agent_type: 'explorer',
+      ticket_id: 'probe-strict-dispatch-intent:binding-probe:ticket',
+      ticket_hash: 'a'.repeat(64),
+      launch_name_hash: 'b'.repeat(64),
+      status: 'bound',
+      prepared_at: preparedAt,
+      expires_at: expiresAt,
+      parent_session_id: 'probe-parent',
+      tool_use_id: 'probe-tool',
+      binding_agent_type: 'default',
+      bound_session_id: 'probe-child',
+      bound_agent_id: 'probe-agent',
+      capability_hash: 'c'.repeat(64),
+    };
+    const file = path.join(
+      paths.dispatchIntents,
+      `${createHash('sha256').update(expected.ticket_id).digest('hex')}.json`,
+    );
+    await writeFile(file, `${JSON.stringify({
+      version: 2,
+      codex_task_namespace: 'probe',
+      run_id: expected.probe_id,
+      ticket_id: expected.ticket_id,
+      ticket_hash: expected.ticket_hash,
+      launch_name_hash: expected.launch_name_hash,
+      host: expected.host,
+      agent_type: expected.agent_type,
+      status: 'bound',
+      prepared_at: preparedAt,
+      expires_at: expiresAt,
+      launch_attempts: 0,
+      parent_session_id: expected.parent_session_id,
+      tool_use_id: expected.tool_use_id,
+      binding_agent_type: expected.binding_agent_type,
+      bound_session_id: expected.bound_session_id,
+      bound_agent_id: expected.bound_agent_id,
+      capability_hash: expected.capability_hash,
+      bound_at: preparedAt,
+    })}\n`);
+
+    await expect(corroboratesCodexProbeBinding(paths, expected)).resolves.toBe(false);
+    await expect(corroboratesCodexProbeLifecycle(paths, expected)).resolves.toBe(false);
+  });
+
   it('rejects a forged task-name capability and keeps the dispatch prepared', async () => {
     const { dir, action } = await startedCodexProject();
     const launch = await invokeHook({
@@ -284,6 +581,7 @@ describe('APE v2 native Codex dispatch handshake', () => {
       tool_name: 'collaborationspawn_agent',
       tool_input: {
         task_name: `ape_${action.ticket.role}_00000000000000000000000000000000`,
+        fork_turns: 'none',
         agent_type: action.dispatch.agent_type,
         message: 'gAAAAABencrypted-v2-message',
         model: action.dispatch.model.model,
@@ -296,6 +594,12 @@ describe('APE v2 native Codex dispatch handshake', () => {
         ticket_id: action.ticket.ticket_id,
         status: 'prepared',
         launch_attempts: 0,
+        binding_observation: {
+          state: 'not_observed',
+          observed_at: null,
+          code: null,
+          attempt_count: 0,
+        },
       }),
     ]);
   });
@@ -311,6 +615,7 @@ describe('APE v2 native Codex dispatch handshake', () => {
       tool_name: 'collaborationspawn_agent',
       tool_input: {
         task_name: action.dispatch.agent_name,
+        fork_turns: 'none',
         agent_type: 'explorer',
         message: 'gAAAAABencrypted-v2-message',
         model: action.dispatch.model.model,
@@ -323,7 +628,37 @@ describe('APE v2 native Codex dispatch handshake', () => {
     ]);
   });
 
-  it('authorizes spawn_agent, binds SubagentStart, injects a receipt capability, and admits the claimed write', async () => {
+  it('rejects inherited conversation history and keeps the production intent prepared', async () => {
+    const { dir, action } = await startedCodexProject();
+    const launch = await invokeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: 'codex-parent-session',
+      turn_id: 'turn-fork-history',
+      tool_use_id: 'spawn-fork-history',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: {
+        ...action.dispatch.spawn_args,
+        fork_turns: '1',
+        message: 'gAAAAABencrypted-v2-message',
+      },
+    });
+    expect(launch.decision).toBe('deny');
+    expect(
+      launch.hookSpecificOutput?.permissionDecisionReason ??
+        launch.reason ??
+        launch.systemMessage,
+    ).toMatch(/fork_turns must be exactly 'none'/i);
+    expect((await statusRun(dir)).dispatches).toEqual([
+      expect.objectContaining({
+        ticket_id: action.ticket.ticket_id,
+        status: 'prepared',
+        launch_attempts: 0,
+      }),
+    ]);
+  });
+
+  it('authorizes spawn_agent, bootstraps a native child, injects a receipt capability, and admits the claimed write', async () => {
     const { dir, action } = await startedCodexProject();
     expect(action.dispatch.spawn_args).toMatchObject({
       task_name: action.dispatch.agent_name,
@@ -331,8 +666,8 @@ describe('APE v2 native Codex dispatch handshake', () => {
       model: action.dispatch.model.model,
       reasoning_effort: action.dispatch.model.reasoning_effort,
     });
-    expect(action.dispatch.ticket_projection).toBe('hook-injected');
-    expect(action.dispatch.spawn_args.message).toContain('trusted SubagentStart hook');
+    expect(action.dispatch.ticket_projection).toBe('bootstrap-hook-injected');
+    expect(action.dispatch.spawn_args.message).toContain('ape_bind');
     expect(action.dispatch.spawn_args.message).not.toContain('APE common contract');
     expect(action.dispatch.spawn_args.message).not.toContain(action.ticket.ticket_id);
     expect((await statusRun(dir)).dispatches).toEqual([
@@ -351,40 +686,87 @@ describe('APE v2 native Codex dispatch handshake', () => {
       turn_id: 'turn-1',
       tool_use_id: 'spawn-1',
       tool_name: 'collaborationspawn_agent',
+      toolCall: {
+        args: {
+          ...action.dispatch.spawn_args,
+          message: 'gAAAAABencrypted-v2-message',
+        },
+      },
+    });
+    expect(launch.decision).toBe('allow');
+    const changedModelRetry = await invokeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: sessionId,
+      turn_id: 'turn-1',
+      tool_use_id: 'spawn-1',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: {
+        ...action.dispatch.spawn_args,
+        message: 'gAAAAABencrypted-v2-message',
+        model: `${action.dispatch.model.model}-changed`,
+      },
+    });
+    expect(changedModelRetry.decision).toBe('deny');
+    const {
+      reasoning_effort: _omittedEffort,
+      ...withoutReasoningEffort
+    } = action.dispatch.spawn_args;
+    expect(_omittedEffort).toEqual(expect.any(String));
+    const omittedEffortRetry = await invokeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: sessionId,
+      turn_id: 'turn-1',
+      tool_use_id: 'spawn-1',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: {
+        ...withoutReasoningEffort,
+        message: 'gAAAAABencrypted-v2-message',
+      },
+    });
+    expect(omittedEffortRetry.decision).toBe('deny');
+    const exactLostResponseRetry = await invokeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: sessionId,
+      turn_id: 'turn-1',
+      tool_use_id: 'spawn-1',
+      tool_name: 'collaborationspawn_agent',
       tool_input: {
         ...action.dispatch.spawn_args,
         message: 'gAAAAABencrypted-v2-message',
       },
     });
-    expect(launch.decision).toBe('allow');
+    expect(exactLostResponseRetry.decision).toBe('allow');
+    expect((await statusRun(dir)).dispatches[0].binding_observation).toMatchObject({
+      state: 'not_observed',
+      observed_at: null,
+      attempt_count: 0,
+    });
 
-    const explicitMismatch = await invokeHook({
-      hook_event_name: 'SubagentStart',
-      project_dir: dir,
-      session_id: 'codex-child-session',
-      turn_id: 'turn-1',
-      agent_id: agentId,
-      agent_type: 'ape:wrong-role',
+    const explicitMismatch = await bootstrapNativeChild(dir, action, {
+      parent: sessionId, agent: 'wrong-type-child', turn: 'wrong-type-child-turn', type: 'ape:wrong-role',
     });
     expect(explicitMismatch.decision).toBe('deny');
+    expect((await statusRun(dir)).dispatches[0].binding_observation).toMatchObject({
+      state: 'rejected',
+      code: 'agent_type_mismatch',
+      attempt_count: 1,
+    });
 
     // Multi-Agent V2 does not accept a requested agent_type on spawn_agent,
     // and reports its effective default role on the lifecycle event. APE keeps
     // the logical ticket role separate from that host-attested binding role.
-    const start = await invokeHook({
-      hook_event_name: 'SubagentStart',
-      project_dir: dir,
-      session_id: 'codex-child-session',
-      turn_id: 'turn-1',
-      agent_id: agentId,
-      agent_type: 'default',
+    const start = await bootstrapNativeChild(dir, action, {
+      parent: sessionId, agent: agentId, turn: 'actual-child-turn',
     });
     expect(start.decision).toBe('allow');
     expect(start.hookSpecificOutput?.additionalContext).toMatch(
       /APE_RECEIPT_CAPABILITY=[A-Za-z0-9_-]{32,256}/,
     );
     expect(start.hookSpecificOutput?.additionalContext).toContain(
-      'APE trusted SubagentStart context (authoritative)',
+      'APE trusted native binding context (authoritative)',
     );
     expect(start.hookSpecificOutput?.additionalContext).toContain(
       'Never invoke rg, grep, sed, find, awk',
@@ -412,6 +794,10 @@ describe('APE v2 native Codex dispatch handshake', () => {
         ticket_id: action.ticket.ticket_id,
         status: 'bound',
         launch_attempts: 1,
+        binding_observation: expect.objectContaining({
+          state: 'accepted',
+          code: 'bound',
+        }),
       }),
     ]);
 
@@ -419,9 +805,8 @@ describe('APE v2 native Codex dispatch handshake', () => {
     const write = await invokeHook({
       hook_event_name: 'PreToolUse',
       project_dir: dir,
-      session_id: 'codex-child-session',
-      turn_id: 'turn-1',
-      agent_id: agentId,
+      session_id: agentId,
+      turn_id: 'actual-child-turn',
       tool_name: 'Write',
       tool_input: { file_path: target, content: 'export const changed = true;\n' },
     });
@@ -440,7 +825,7 @@ describe('APE v2 native Codex dispatch handshake', () => {
     });
     expect(missingCapability.ok).toBe(false);
 
-    const recorded = await recordReceipt(dir, {
+    const draft = {
       ticket_id: action.ticket.ticket_id,
       receipt_capability: capability,
       status: 'passed',
@@ -452,8 +837,16 @@ describe('APE v2 native Codex dispatch handshake', () => {
         completed_at: new Date().toISOString(),
         duration_ms: 1,
       },
-    });
-    expect(recorded.ok).toBe(true);
+    };
+    const unvalidated = await recordReceipt(dir, draft);
+    expect(unvalidated.ok).toBe(false);
+    expect(unvalidated.errors).toContain(
+      'receipt draft was not pre-validated and attested byte-for-byte for this physical dispatch',
+    );
+    expect(await validateReceiptForDispatch(dir, draft, action.ticket.ticket_id))
+      .toMatchObject({ ok: true, valid: true, attested: true });
+    const recorded = await recordReceipt(dir, draft);
+    expect(recorded.ok, JSON.stringify({ reason: recorded.reason, errors: recorded.errors })).toBe(true);
 
     const impostor = await invokeHook({
       hook_event_name: 'PreToolUse',
@@ -492,18 +885,21 @@ describe('APE v2 native Codex dispatch handshake', () => {
       injected_context_hash: '0'.repeat(64),
     })}\n`);
 
-    const start = await invokeHook({
-      hook_event_name: 'SubagentStart',
-      project_dir: dir,
-      session_id: 'codex-child-context-hash',
-      turn_id: 'turn-context-hash',
-      agent_id: 'codex-agent-context-hash',
-      agent_type: 'default',
+    const start = await bootstrapNativeChild(dir, action, {
+      agent: 'codex-agent-context-hash', turn: 'child-context-hash-turn',
     });
     expect(start.decision).toBe('deny');
-    expect(start.systemMessage).toMatch(/authoritative context hash mismatch/i);
+    expect(start.hookSpecificOutput?.permissionDecisionReason).toMatch(/authoritative context hash mismatch/i);
     expect((await statusRun(dir)).dispatches).toEqual([
-      expect.objectContaining({ status: 'launched', launch_attempts: 1 }),
+      expect.objectContaining({
+        status: 'launched',
+        launch_attempts: 1,
+        binding_observation: expect.objectContaining({
+          state: 'rejected',
+          code: 'context_hash_mismatch',
+          attempt_count: 1,
+        }),
+      }),
     ]);
   });
 
@@ -522,26 +918,350 @@ describe('APE v2 native Codex dispatch handshake', () => {
 
     const intentFile = await onlyCodexIntentFile(dir);
     const intent = JSON.parse(await readFile(intentFile, 'utf8'));
+    const mismatchedTicketHash = 'f'.repeat(64);
     await writeFile(intentFile, `${JSON.stringify({
       ...intent,
-      ticket_hash: 'f'.repeat(64),
+      ticket_hash: mismatchedTicketHash,
+      launch_generations: intent.launch_generations.map((entry) => ({
+        ...entry,
+        ticket_hash: mismatchedTicketHash,
+      })),
+    })}\n`);
+
+    const start = await bootstrapNativeChild(dir, action, {
+      agent: 'codex-agent-ticket-hash', turn: 'child-ticket-hash-turn',
+    });
+    expect(start.decision).toBe('deny');
+    expect(start.hookSpecificOutput?.permissionDecisionReason).toMatch(/dispatch ticket hash mismatch/i);
+    expect((await statusRun(dir)).dispatches[0].binding_observation).toMatchObject({
+      state: 'rejected',
+      code: 'ticket_hash_mismatch',
+      attempt_count: 1,
+    });
+  });
+
+  it('persists bounded malformed-identity observations without native identities or reasons', async () => {
+    const { dir, action } = await startedCodexProject();
+    const launch = await invokeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: 'diagnostic-parent-session',
+      turn_id: 'turn-malformed-diagnostic',
+      tool_use_id: 'spawn-malformed-diagnostic',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: action.dispatch.spawn_args,
+    });
+    expect(launch.decision).toBe('allow');
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const start = await invokeHook({
+        hook_event_name: 'SubagentStart',
+        project_dir: dir,
+        session_id: `private-child-session-${attempt}`,
+        turn_id: `turn-malformed-${attempt}`,
+        agent_type: 'default',
+      });
+      expect(start.decision).toBe('deny');
+    }
+
+    expect((await statusRun(dir)).dispatches[0].binding_observation).toMatchObject({
+      state: 'rejected',
+      code: 'malformed_agent_identity',
+      attempt_count: 10,
+    });
+    const diagnosticText = await readFile(
+      path.join(dir, '.ape', 'runtime', 'subagent-start-diagnostics.json'),
+      'utf8',
+    );
+    const diagnostic = JSON.parse(diagnosticText);
+    expect(diagnostic.observations).toHaveLength(8);
+    expect(diagnosticText).not.toContain('private-child-session');
+    expect(diagnosticText).not.toContain('malformed native identity');
+  });
+
+  it('reconstructs retained diagnostic observations without legacy extra fields', async () => {
+    const { dir, action } = await startedCodexProject();
+    const diagnosticPath = path.join(
+      dir,
+      '.ape',
+      'runtime',
+      'subagent-start-diagnostics.json',
+    );
+    await writeFile(diagnosticPath, `${JSON.stringify({
+      version: 1,
+      run_hash: createHash('sha256').update(action.ticket.run_id).digest('hex'),
+      host: 'codex',
+      total: 1,
+      observations: [{
+        observed_at: new Date().toISOString(),
+        outcome: 'rejected',
+        code: 'malformed_agent_identity',
+        session_id: 'private-seeded-session',
+        reason: 'private seeded reason',
+        oversized: 'x'.repeat(20_000),
+      }],
     })}\n`);
 
     const start = await invokeHook({
       hook_event_name: 'SubagentStart',
       project_dir: dir,
-      session_id: 'codex-child-ticket-hash',
-      turn_id: 'turn-ticket-hash',
-      agent_id: 'codex-agent-ticket-hash',
+      session_id: 'private-next-session',
+      turn_id: 'diagnostic-rewrite-turn',
       agent_type: 'default',
     });
     expect(start.decision).toBe('deny');
-    expect(start.systemMessage).toMatch(/dispatch ticket hash mismatch/i);
+    const diagnosticText = await readFile(diagnosticPath, 'utf8');
+    const diagnostic = JSON.parse(diagnosticText);
+    expect(diagnostic.total).toBe(2);
+    expect(diagnostic.observations).toHaveLength(2);
+    expect(diagnostic.observations[0]).toEqual({
+      observed_at: expect.any(String),
+      outcome: 'rejected',
+      code: 'malformed_agent_identity',
+    });
+    expect(diagnosticText).not.toContain('private-seeded');
+    expect(diagnosticText).not.toContain('oversized');
   });
 
-  it('re-injects the authoritative context and rotates the capability on native identity resume', async () => {
+  it.skipIf(process.platform === 'win32')(
+    'does not follow a symlinked diagnostic leaf while projecting or recording observations',
+    async () => {
+      const { dir, action } = await startedCodexProject();
+      const diagnosticPath = path.join(
+        dir,
+        '.ape',
+        'runtime',
+        'subagent-start-diagnostics.json',
+      );
+      const outsidePath = path.join(dir, 'symlink-target-diagnostics.json');
+      const outsideText = `${JSON.stringify({
+        version: 1,
+        run_hash: createHash('sha256').update(action.ticket.run_id).digest('hex'),
+        host: 'codex',
+        total: 41,
+        observations: [{
+          observed_at: new Date().toISOString(),
+          outcome: 'rejected',
+          code: 'unexpected_exception',
+        }],
+      })}\n`;
+      await writeFile(outsidePath, outsideText);
+      await symlink(outsidePath, diagnosticPath);
+
+      expect(statusRunInFreshProcess(dir).dispatches[0].binding_observation).toEqual({
+        state: 'not_observed',
+        observed_at: null,
+        code: null,
+        attempt_count: 0,
+      });
+
+      const start = await invokeHook({
+        hook_event_name: 'SubagentStart',
+        project_dir: dir,
+        session_id: 'symlink-diagnostic-session',
+        turn_id: 'symlink-diagnostic-turn',
+        agent_type: 'default',
+      });
+      expect(start.decision).toBe('deny');
+      expect(await readFile(outsidePath, 'utf8')).toBe(outsideText);
+      const replacementMetadata = await lstat(diagnosticPath);
+      expect(replacementMetadata.isFile()).toBe(true);
+      expect(replacementMetadata.isSymbolicLink()).toBe(false);
+      expect(JSON.parse(await readFile(diagnosticPath, 'utf8'))).toMatchObject({
+        version: 1,
+        total: 1,
+        observations: [{
+          outcome: 'rejected',
+          code: 'malformed_agent_identity',
+        }],
+      });
+    },
+  );
+
+  it('ignores and replaces an oversized diagnostic leaf with a fresh bounded observation', async () => {
     const { dir, action } = await startedCodexProject();
-    const sessionId = 'codex-child-resume';
+    const diagnosticPath = path.join(
+      dir,
+      '.ape',
+      'runtime',
+      'subagent-start-diagnostics.json',
+    );
+    await writeFile(diagnosticPath, `${JSON.stringify({
+      version: 1,
+      run_hash: createHash('sha256').update(action.ticket.run_id).digest('hex'),
+      host: 'codex',
+      total: 17,
+      observations: [{
+        observed_at: new Date().toISOString(),
+        outcome: 'error',
+        code: 'unexpected_exception',
+      }],
+      padding: 'x'.repeat(2 * 1024 * 1024),
+    })}\n`);
+
+    expect(statusRunInFreshProcess(dir).dispatches[0].binding_observation).toEqual({
+      state: 'not_observed',
+      observed_at: null,
+      code: null,
+      attempt_count: 0,
+    });
+
+    const start = await invokeHook({
+      hook_event_name: 'SubagentStart',
+      project_dir: dir,
+      session_id: 'oversized-diagnostic-session',
+      turn_id: 'oversized-diagnostic-turn',
+      agent_type: 'default',
+    });
+    expect(start.decision).toBe('deny');
+    const replacementText = await readFile(diagnosticPath, 'utf8');
+    expect(Buffer.byteLength(replacementText)).toBeLessThan(64 * 1024);
+    expect(JSON.parse(replacementText)).toMatchObject({
+      version: 1,
+      total: 1,
+      observations: [{
+        outcome: 'rejected',
+        code: 'malformed_agent_identity',
+      }],
+    });
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'does not open a diagnostic FIFO while projecting or recording observations',
+    async () => {
+      const { dir } = await startedCodexProject();
+      const diagnosticPath = path.join(
+        dir,
+        '.ape',
+        'runtime',
+        'subagent-start-diagnostics.json',
+      );
+      execFileSync('mkfifo', [diagnosticPath]);
+
+      expect(statusRunInFreshProcess(dir).dispatches[0].binding_observation).toEqual({
+        state: 'not_observed',
+        observed_at: null,
+        code: null,
+        attempt_count: 0,
+      });
+
+      const start = await invokeHook({
+        hook_event_name: 'SubagentStart',
+        project_dir: dir,
+        session_id: 'fifo-diagnostic-session',
+        turn_id: 'fifo-diagnostic-turn',
+        agent_type: 'default',
+      }, codexEnv(), { timeoutMs: 3_000 });
+      expect(start.decision).toBe('deny');
+      const replacementMetadata = await lstat(diagnosticPath);
+      expect(replacementMetadata.isFile()).toBe(true);
+      expect(JSON.parse(await readFile(diagnosticPath, 'utf8'))).toMatchObject({
+        version: 1,
+        total: 1,
+        observations: [{
+          outcome: 'rejected',
+          code: 'malformed_agent_identity',
+        }],
+      });
+    },
+  );
+
+  it('does not project an oversized parseable diagnostic timestamp', async () => {
+    const { dir, action } = await startedCodexProject();
+    await writeFile(
+      path.join(dir, '.ape', 'runtime', 'subagent-start-diagnostics.json'),
+      `${JSON.stringify({
+        version: 1,
+        run_hash: createHash('sha256').update(action.ticket.run_id).digest('hex'),
+        host: 'codex',
+        total: 1,
+        observations: [{
+          observed_at: `2020-01-01${' '.repeat(20_000)}`,
+          outcome: 'error',
+          code: 'unexpected_exception',
+        }],
+      })}\n`,
+    );
+
+    expect((await statusRun(dir)).dispatches[0].binding_observation).toEqual({
+      state: 'not_observed',
+      observed_at: null,
+      code: null,
+      attempt_count: 0,
+    });
+  });
+
+  it('does not project an oversized legacy bound timestamp', async () => {
+    const { dir } = await startedCodexProject();
+    const intentFile = await onlyCodexIntentFile(dir);
+    const intent = JSON.parse(await readFile(intentFile, 'utf8'));
+    await writeFile(intentFile, `${JSON.stringify({
+      ...intent,
+      status: 'bound',
+      bound_at: `2020-01-01${' '.repeat(20_000)}`,
+    })}\n`);
+
+    expect((await statusRun(dir)).dispatches[0].binding_observation).toEqual({
+      state: 'not_observed',
+      observed_at: null,
+      code: null,
+      attempt_count: 0,
+    });
+  });
+
+  it('records an unexpected production binding exception as a typed error', async () => {
+    const { dir, action } = await startedCodexProject();
+    const launch = await invokeHook({
+      hook_event_name: 'PreToolUse',
+      project_dir: dir,
+      session_id: 'exception-parent-session',
+      turn_id: 'turn-exception-diagnostic',
+      tool_use_id: 'spawn-exception-diagnostic',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: action.dispatch.spawn_args,
+    });
+    expect(launch.decision).toBe('allow');
+    await writeFile(await onlyCodexIntentFile(dir), '{invalid-json');
+
+    const start = await invokeHook({
+      hook_event_name: 'SubagentStart',
+      project_dir: dir,
+      session_id: 'private-exception-child-session',
+      turn_id: 'turn-exception-diagnostic',
+      agent_id: 'private-exception-agent-id',
+      agent_type: 'default',
+    });
+    expect(start.decision).toBe('deny');
+    const diagnosticText = await readFile(
+      path.join(dir, '.ape', 'runtime', 'subagent-start-diagnostics.json'),
+      'utf8',
+    );
+    expect(JSON.parse(diagnosticText).observations.at(-1)).toMatchObject({
+      outcome: 'error',
+      code: 'unexpected_exception',
+    });
+    expect(diagnosticText).not.toContain('private-exception');
+    expect(diagnosticText).not.toContain('invalid-json');
+    const status = await statusRun(dir);
+    expect(status.dispatch_state).toBe('error');
+    expect(status.dispatches).toEqual([
+      expect.objectContaining({
+        ticket_id: action.ticket.ticket_id,
+        status: 'corrupt',
+        agent_state: 'evidence-unreadable',
+        evidence_unreadable: true,
+        binding_observation: expect.objectContaining({
+          state: 'error',
+          code: 'unexpected_exception',
+          attempt_count: 1,
+        }),
+      }),
+    ]);
+  });
+
+  it('re-injects the authoritative context idempotently after a fresh native child-turn bootstrap', async () => {
+    const { dir, action } = await startedCodexProject();
+    const sessionId = 'codex-parent-resume';
     const agentId = 'codex-agent-resume';
     const launch = await invokeHook({
       hook_event_name: 'PreToolUse',
@@ -553,34 +1273,24 @@ describe('APE v2 native Codex dispatch handshake', () => {
       tool_input: action.dispatch.spawn_args,
     });
     expect(launch.decision).toBe('allow');
-    const first = await invokeHook({
-      hook_event_name: 'SubagentStart',
-      project_dir: dir,
-      session_id: sessionId,
-      turn_id: 'turn-resume',
-      agent_id: agentId,
-      agent_type: 'default',
+    const first = await bootstrapNativeChild(dir, action, {
+      parent: sessionId, agent: agentId, turn: 'child-resume-turn-1',
     });
     expect(first.decision, JSON.stringify(first)).toBe('allow');
     const firstCapability = first.hookSpecificOutput.additionalContext
       .match(/APE_RECEIPT_CAPABILITY=([A-Za-z0-9_-]+)/)?.[1];
 
-    const resumed = await invokeHook({
-      hook_event_name: 'SubagentStart',
-      project_dir: dir,
-      session_id: sessionId,
-      turn_id: 'turn-resume-2',
-      agent_id: agentId,
-      agent_type: 'default',
+    const resumed = await bootstrapNativeChild(dir, action, {
+      parent: sessionId, agent: agentId, turn: 'child-resume-turn-2',
     });
     expect(resumed.decision, JSON.stringify(resumed)).toBe('allow');
     expect(resumed.hookSpecificOutput.additionalContext).toContain(
-      'APE trusted SubagentStart context (authoritative)',
+      'APE trusted native binding context (authoritative)',
     );
     const resumedCapability = resumed.hookSpecificOutput.additionalContext
       .match(/APE_RECEIPT_CAPABILITY=([A-Za-z0-9_-]+)/)?.[1];
     expect(resumedCapability).toMatch(/^[A-Za-z0-9_-]{32,256}$/);
-    expect(resumedCapability).not.toBe(firstCapability);
+    expect(resumedCapability).toBe(firstCapability);
   });
 });
 
@@ -691,6 +1401,24 @@ describe('APE v2 codex binding seam (installed hook binary)', () => {
       hook_event_name: 'SubagentStart',
       project_dir: dir,
       agent_id: 'codex-agent-1',
+      agent_type: 'worker',
+      ticket_id: 'run-1:build:ticket-1',
+    });
+    expect(response.decision).toBe('allow');
+  });
+
+  it('keeps a valid compatibility binding allowed when diagnostic persistence fails', async () => {
+    const dir = await codexProject();
+    // A directory at the diagnostic file path makes the best-effort atomic
+    // replacement fail without weakening the independently valid binding.
+    await mkdir(
+      path.join(dir, '.ape', 'runtime', 'subagent-start-diagnostics.json'),
+      { recursive: true },
+    );
+    const response = await invokeHook({
+      hook_event_name: 'SubagentStart',
+      project_dir: dir,
+      agent_id: 'codex-agent-diagnostic-fault',
       agent_type: 'worker',
       ticket_id: 'run-1:build:ticket-1',
     });
