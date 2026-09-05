@@ -2,54 +2,60 @@
 
 ## Unreleased
 
+## 2.24.12 — 2026-09-05
+
+Release candidate; tagged publication awaits the required live certification.
+See [release status](docs/prevention-release-status.md) for evidence and limits.
+
+### Keep authorized work moving
+
+- Align prerequisites with the selected workflow. Unused generators and optional
+  verification directories no longer impose unrelated scope or block admission;
+  debug/spike runs avoid unrelated test-authoring and shipping requirements.
+- Support routine searches, literal quoted paths and regexes, quoted working
+  directories, Git branch filters, and inspection options without relaxing
+  command effects, executable identity, or path containment.
+- Distinguish informational Node/npm commands from scripts that actually run,
+  retain Node preload dependencies, and stop forwarded script arguments from
+  changing the inspected package root.
+- Reuse settled user decisions in agent and skill prompts. Keep optional refactors
+  advisory and retry exact attested receipts in the parent without restarting workers.
+- Preserve plan contract versions in compact responses, match recovery advice to
+  retry eligibility, and retain polling for active gate and shipping watches.
+- Name the required next action for retained execution-budget continuations while
+  preserving explicit worker-retirement waits.
+
+### Preserve evidence and recovery
+
+- Persist parent-tool change observations outside active run state. Duplicate
+  host outcomes remain idempotent; reads and authorized repairs remain available.
+- Require observed restoration of affected entries before accepting fresh or
+  prepared receipts. Committed receipt retries retain their existing result.
+- Observe Git inspection before and after execution because configured helpers
+  can write files. These observations are bounded and do not prove authorship
+  under arbitrary concurrent external writes or replace an operating-system sandbox.
+- Accept independently authorized, stable post-build test corrections before the
+  implementer's remaining retry. Initial red-first requirements remain enforced.
+- Preserve abort reasons and prevent stopped-worker settlement from reopening
+  aborted runs or input holds. Issued receipt schemas retain ticket-specific fields.
+- Use the command's actual working directory for evidence paths, including an
+  admitted leading directory change, while preserving containment checks.
+
+### Packaging and verification
+
+- Use the project name **Aidan’s Phase Engine** consistently and allow that exact
+  name through public export while retaining the other public-safety checks.
+- Include the constants required by the standalone Claude status renderer.
+- Expand synthetic prompt evaluation to 52 scenarios and add focused regression
+  coverage for admission, inspection, attribution, recovery, and receipt handling.
+- Rebuild both host packages for 2.24.12. Full live certification remains incomplete;
+  earlier 2.24.11 host observations do not certify this candidate.
+
 ## 2.24.11 — 2026-09-05
 
 Local release candidate; not published or fully live-certified.
 See [release status](docs/prevention-release-status.md) for completed checks and
 remaining limits.
-
-### Keep ordinary work moving
-
-- Retained execution-budget work now names the required `ape_run next` action
-  instead of suggesting passive waiting. Physical worker-retirement waits keep
-  precedence over that guidance.
-- Parent reads and unchanged commands no longer relabel existing worker work.
-  Retained host-call outcomes keep duplicate post events idempotent.
-- Parent-tool refusals persist affected reference entries and prevent later
-  worker-result or receipt acceptance until an authorized repair is observed.
-  Reads, in-scope repairs, unrelated edits, and committed receipt retries remain
-  available; no files are automatically restored.
-- Git branch filters, list patterns, and spaced format/sort values no longer
-  trigger false denials. Branch-creation and mutation combinations remain refused.
-  Option-shaped filenames after a proven `--` path separator and grouped `ls-files` read switches are
-  also recognized without permitting actual output-writing flags.
-- A single quoted working directory supports spaces and literal special
-  characters while preserving command effects and path containment checks.
-- Informational Node/npm commands no longer invent missing entry prerequisites.
-  Forwarded script arguments cannot change the inspected package root; script
-  help/version arguments remain subject to writer scope where the package manager
-  runs the script.
-- Recovery guidance respects the remaining gate retry budget and the exact
-  shipping hold. Resuming active gate or shipping watches retains polling advice.
-- Public export accepts the approved project name without exempting unrelated
-  author identities or other protected content from the public-safety checks.
-- Routine `rg`, `grep`, `head`, and `tail` inspection is available within ticket
-  policy. Complete quoted inspection words support spaces and literal regex
-  syntax without granting shell chaining, redirects, or subprocess hooks.
-- Equivalent long-option path spellings and `git ls-files -o` no longer cause
-  false containment or output-write denials.
-- Admission follows the selected workflow. Unused global generators do not
-  demand extra output scope, and debug/spike runs do not require unrelated test
-  runners, test-authoring paths, or shipping setup. Required capabilities and
-  configured writer output bounds remain enforced.
-- Missing optional verification directories remain visible in preview without
-  preventing start. They cannot be selected until available; required profiles
-  still fail admission early.
-- Preflight reuses settled decisions and keeps optional refactors out of input
-  holds. Receipt retry guidance keeps exact recording with the parent instead
-  of unnecessarily continuing a worker.
-- Compact run and ticket references retain the plan contract version so response
-  size limits cannot hide the worker's legacy or v2 contract.
 
 ### Prevent failures before workers start
 
@@ -63,32 +69,9 @@ remaining limits.
   be treated as read-only verification.
 - APE checks command entry scripts, package scripts, and interpreters without
   running them during preview.
-- Admission retains Node preload dependencies for inline commands and follows
-  nested package scripts, literal environment prefixes, and npm's default start
-  entry when checking the resolved base checkout.
 
 ### Clearer inputs, receipts, and recovery
 
-- Agent prompts follow each ticket's test intent and receipt requirements,
-  including green maintenance, runtime-owned test correction, and executed
-  targeted-test evidence during remediation. Planning prompts distinguish legacy
-  v1 plans from v2, and completed preflight can return questions for the runtime.
-- Skills retain existing authorization, permit a bounded harmless inspection
-  correction, and recognize a bound worker that has already finished. Receipt
-  recovery uses the returned input hash and preserves the validator's remaining
-  correction allowance. Obsolete host instructions were removed.
-- Independently confirmed post-build test repairs use runtime-observed
-  `test-correction`: stable passing and stable failing tests both reach the
-  implementer's remaining retry. Initial red-first admission still requires
-  failure; flaky, empty, and out-of-scope corrections remain rejected.
-- Override-abort preserves its bounded reason in run state and new history
-  records. Repeated aborts keep the original terminal explanation.
-- Stopped-worker receipt settlement preserves aborted runs and input holds;
-  calling next or resume cannot reopen their recovery path.
-- Issued receipt schemas include each ticket's required tests, authorized paths,
-  and preflight objective. Capability successors retain that specialization.
-- Evidence commands resolve relative paths from their actual working directory,
-  including an admitted leading `cd`, while preserving project containment.
 - `answer-preflight` now identifies its required audit reason. Omitted optional
   fields no longer hide that message behind a generic undefined-data error.
 - Preflight answers diagnose stale run IDs. Receipt corrections keep the
@@ -135,8 +118,6 @@ remaining limits.
   branch protection.
 - Synthetic tests and model-free host checks cover the fixes. Full live
   certification remains incomplete; Claude live operation is unverified.
-- Prompt evaluation now covers 52 synthetic scenarios, including 13 earlier new cases
-  for agent and skill decisions; offline harness checks do not certify model behavior.
 - Codex stays pinned to 0.147.0. Retry budgets have not increased.
   Expanded automatic repair remains deferred.
 

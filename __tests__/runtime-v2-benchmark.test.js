@@ -32,11 +32,22 @@ function records(slowPerGroup = 2) {
 }
 
 function runCli(args, options = {}) {
-  return spawnSync(process.execPath, [SCRIPT, ...args], {
+  const started = performance.now();
+  const result = spawnSync(process.execPath, [SCRIPT, ...args], {
     encoding: 'utf8',
     ...options,
     env: { ...process.env, ...options.env },
   });
+  return {
+    ...result,
+    diagnostics: JSON.stringify({
+      status: result.status,
+      signal: result.signal,
+      error: result.error && { code: result.error.code, message: result.error.message },
+      elapsed_ms: Math.round(performance.now() - started),
+      stderr: result.stderr,
+    }),
+  };
 }
 
 async function waitForFileCount(directory, suffix, count, timeoutMs) {
@@ -519,7 +530,7 @@ describe('benchmark CLI', () => {
       'record', '--host', 'claude', '--lane', 'mechanical', '--raw-ms', '120000', '--file', file,
     ], { timeout: 1_500 });
 
-    expect(result.status, result.stderr).toBe(0);
+    expect(result.status, result.diagnostics).toBe(0);
     expect(readFileSync(victim)).toEqual(victimBytes);
     const currentVictim = lstatSync(victim);
     expect({ dev: currentVictim.dev, ino: currentVictim.ino }).toEqual({
@@ -550,7 +561,7 @@ describe('benchmark CLI', () => {
     ], { timeout: recovers ? 1_500 : 400 });
 
     if (recovers) {
-      expect(result.status, result.stderr).toBe(0);
+      expect(result.status, result.diagnostics).toBe(0);
       expect(JSON.parse(readFileSync(file, 'utf8'))).toHaveLength(1);
       expect(() => lstatSync(lock)).toThrow(/ENOENT/u);
     } else {
@@ -643,7 +654,7 @@ describe('benchmark CLI', () => {
       'record', '--host', 'claude', '--lane', 'mechanical', '--raw-ms', '120000', '--file', file,
     ], { timeout: 1_500 });
 
-    expect(result.status, result.stderr).toBe(0);
+    expect(result.status, result.diagnostics).toBe(0);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toHaveLength(1);
     expect(() => lstatSync(lock)).toThrow(/ENOENT/u);
   });
@@ -705,7 +716,7 @@ describe('benchmark CLI', () => {
         'record', '--host', 'codex', '--lane', 'mechanical', '--raw-ms', '120001', '--file', file,
       ], { timeout: 1_500 });
 
-      expect(recovered.status, recovered.stderr).toBe(0);
+      expect(recovered.status, recovered.diagnostics).toBe(0);
       expect(JSON.parse(readFileSync(file, 'utf8'))).toHaveLength(1);
       expect(() => lstatSync(lock)).toThrow(/ENOENT/u);
       expect(() => lstatSync(claim)).toThrow(/ENOENT/u);
@@ -726,7 +737,7 @@ describe('benchmark CLI', () => {
       'record', '--host', 'codex', '--lane', 'mechanical', '--raw-ms', '120001', '--file', file,
     ], { timeout: 1_500 });
 
-    expect(recovered.status, recovered.stderr).toBe(0);
+    expect(recovered.status, recovered.diagnostics).toBe(0);
     expect(readFileSync(claim)).toEqual(foreignBytes);
     const currentForeignIdentity = lstatSync(claim);
     expect({ dev: currentForeignIdentity.dev, ino: currentForeignIdentity.ino }).toEqual({
@@ -1155,10 +1166,10 @@ describe('benchmark import from run history', () => {
     });
 
     const first = runImport('2026-07-02T00:00:00.000Z');
-    expect(first.status, first.stderr).toBe(0);
+    expect(first.status, first.diagnostics).toBe(0);
     const firstBytes = readFileSync(file);
     const second = runImport('2026-07-03T00:00:00.000Z');
-    expect(second.status, second.stderr).toBe(0);
+    expect(second.status, second.diagnostics).toBe(0);
     expect(readFileSync(file)).toEqual(firstBytes);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual([]);
     const emitted = `${first.stdout}\n${first.stderr}\n${second.stdout}\n${second.stderr}`;
@@ -1183,7 +1194,7 @@ describe('benchmark import from run history', () => {
     writeFileSync(file, `${JSON.stringify([priorObservation], null, 2)}\n`);
 
     const first = runCli(['import', '--project', projectDir, '--file', file]);
-    expect(first.status, first.stderr).toBe(0);
+    expect(first.status, first.diagnostics).toBe(0);
     const firstBytes = readFileSync(file);
     expect(JSON.parse(firstBytes.toString('utf8'))).toEqual([{
       host: priorObservation.host,
@@ -1196,7 +1207,7 @@ describe('benchmark import from run history', () => {
     expect(`${firstBytes}\n${first.stdout}\n${first.stderr}`).not.toContain(privateIdentifier);
 
     const second = runCli(['import', '--project', projectDir, '--file', file]);
-    expect(second.status, second.stderr).toBe(0);
+    expect(second.status, second.diagnostics).toBe(0);
     expect(readFileSync(file)).toEqual(firstBytes);
   });
 
@@ -1232,7 +1243,7 @@ describe('benchmark import from run history', () => {
     }
 
     const first = runCli(['import', '--project', projectDir, '--file', file]);
-    expect(first.status, first.stderr).toBe(0);
+    expect(first.status, first.diagnostics).toBe(0);
     const firstBytes = readFileSync(file);
     const ledger = JSON.parse(firstBytes.toString('utf8'));
     expect(ledger).toHaveLength(10);
@@ -1250,7 +1261,7 @@ describe('benchmark import from run history', () => {
     for (const privateIdentifier of privateIdentifiers) expect(emitted).not.toContain(privateIdentifier);
 
     const second = runCli(['import', '--project', projectDir, '--file', file]);
-    expect(second.status, second.stderr).toBe(0);
+    expect(second.status, second.diagnostics).toBe(0);
     expect(readFileSync(file)).toEqual(firstBytes);
     expect(`${second.stdout}\n${second.stderr}`).not.toMatch(/run-private-legacy-match/iu);
   });
@@ -1262,13 +1273,13 @@ describe('benchmark import from run history', () => {
     writeFileSync(file, `${JSON.stringify([manual], null, 2)}\n`);
 
     const first = runCli(['import', '--project', projectDir, '--file', file]);
-    expect(first.status, first.stderr).toBe(0);
+    expect(first.status, first.diagnostics).toBe(0);
     const firstBytes = readFileSync(file);
     expect(JSON.parse(firstBytes.toString('utf8'))).toEqual([manual]);
     expect(JSON.parse(firstBytes.toString('utf8'))[0]).not.toHaveProperty('recorded_at');
 
     const second = runCli(['import', '--project', projectDir, '--file', file]);
-    expect(second.status, second.stderr).toBe(0);
+    expect(second.status, second.diagnostics).toBe(0);
     expect(readFileSync(file)).toEqual(firstBytes);
   });
 

@@ -1,6 +1,6 @@
 # Prevention-first reliability status
 
-**2.24.11 is a review candidate, not a certified release.** Reproduced blockers
+**2.24.12 is a review candidate, not a certified release.** Reproduced blockers
 have fixes and regression tests. The full live acceptance requirement is still
 incomplete. This page records the latest results as of September 5, 2026; it does
 not authorize more testing, installation, or publication.
@@ -68,15 +68,15 @@ automatic recovery were not expanded. Repair-and-land remains deferred.
 
 | Check | Recorded result |
 |---|---|
-| Full source suite after the attribution/recovery follow-up | 4,307 passing tests across 260 files; 86 existing skips |
-| Previously recorded model-free operational replay, including test correction and abort-reason persistence | 624 passing tests across 23 files |
+| Full 2.24.12 source suite after merging public main and rebuilding both packages | 4,309 passing tests across 260 files; 86 existing skips |
+| 2.24.12 model-free operational replay, including test correction and abort-reason persistence | 654 passing tests across 23 files |
 | Supporting checks | Type, compatibility, prompt, public-safety, both host package/MCP smoke, and package/release reproducibility checks passed |
 | Previously recorded native Codex mechanical run on 2.24.11, before these follow-up fixes | Completed with first-pass receipt acceptance and a protected test merge; no observed APE failure or recovery |
 
-The final full-suite run includes all operational replay test files and the
+The 2.24.12 full-suite run includes all operational replay test files and the
 new admission, Git inspection, working-directory, receipt-schema, parent-attribution, recovery,
 optional-capability, compact-response, public-export, and abort regressions. It completed without
-failures in 268.58 seconds. Both plugin
+failures in 291.75 seconds. The separate operational replay passed in 104.38 seconds. Both plugin
 packages and release artifacts were rebuilt locally; type, compatibility,
 prompt, public-safety, package validation, smoke, and reproducibility checks
 passed. The installed plugin was not updated.
@@ -104,6 +104,9 @@ Offline replay uses the scheduler, hooks, MCP boundary, schemas, receipts, and
 simulated shipping. Live host certification remains a separate requirement.
 
 ## What is still unverified
+
+The 2.24.12 packages require a new candidate-bound live campaign and Claude
+worker-validator proof. Earlier version evidence cannot certify these packages.
 
 The fast, full, and protected-land live scenarios on 2.24.11 remain unverified.
 The campaign stopped at the operator's request, and its disposable setup was

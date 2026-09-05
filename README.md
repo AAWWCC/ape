@@ -9,9 +9,9 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.24.11** is a local release candidate, not a published or fully
-live-certified release. Offline checks and one live mechanical run passed.
-The other live scenarios remain unverified. See the
+Version **2.24.12** is a release candidate awaiting live certification and
+tagged publication. Offline checks passed; the earlier mechanical run used
+2.24.11 and does not certify this candidate. See the
 [current release status](docs/prevention-release-status.md) for the exact limits.
 
 Codex CLI is the primary host. The Claude Code package is included, but

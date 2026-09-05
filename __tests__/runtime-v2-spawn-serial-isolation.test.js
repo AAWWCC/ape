@@ -231,6 +231,13 @@ describe('spawn-serial vitest project isolates spawn-heavy gate-integration test
     ).toBe(true);
   });
 
+  it('runs benchmark CLI lock tests only in the serial project', async () => {
+    const files = await listTestFiles();
+    const benchmark = '__tests__/runtime-v2-benchmark.test.js';
+    expect(resolveMembership(await getProject('spawn-serial'), files)).toContain(benchmark);
+    expect(resolveMembership(await getProject('default'), files)).not.toContain(benchmark);
+  });
+
   it('(e) spawn-serial mirrors testTimeout 15000 and hookTimeout 20000 (projects do not inherit root timeouts)', async () => {
     const spawnSerial = await getProject('spawn-serial');
     expect(spawnSerial, "the 'spawn-serial' project must exist").toBeTruthy();

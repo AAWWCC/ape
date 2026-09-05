@@ -120,7 +120,7 @@ describe('canonical retained certification protection observations', () => {
     ['extra target field', () => { const value = policy(); value.target.extra = true; return JSON.stringify(value); }],
     ['wrong target', () => { const value = policy(); value.target.repository = 'example/other'; return JSON.stringify(value); }],
     ['non-GitHub origin', () => { const value = policy(); value.target.origin = 'https://elsewhere.example/example/certification'; return JSON.stringify(value); }],
-    ['credential origin', () => { const value = policy(); value.target.origin = 'https://secret@github.com/example/certification'; return JSON.stringify(value); }],
+    ['credential origin', () => { const value = policy(); value.target.origin = 'https://git@github.com/example/certification'; return JSON.stringify(value); }],
     ['non-main base', () => { const value = policy(); value.target.base = 'feature'; return JSON.stringify(value); }],
     ['array classic', () => JSON.stringify({ ...policy(), classic_protection: [] })],
     ['object rules', () => JSON.stringify({ ...policy(), branch_rules: {} })],
