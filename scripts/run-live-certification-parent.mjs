@@ -243,6 +243,14 @@ function requireDeterministicConfig(codexHome) {
     );
   }
   const features = ownConfigValue(config, 'features');
+  // Codex 0.147.0 otherwise selects its native agent API from model metadata
+  // or legacy feature defaults. APE's unchanged launch envelope requires V2's
+  // task_name and fork_turns fields, which the V1 schema cannot accept.
+  if (ownConfigValue(features, 'multi_agent_v2') !== true) {
+    throw new LiveCertificationParentError(
+      'isolated Codex config must set features.multi_agent_v2 = true (TOML boolean) before launch; APE requires the native V2 spawn_agent schema with task_name and fork_turns',
+    );
+  }
   if (ownConfigValue(features, 'plugins') !== true) {
     throw new LiveCertificationParentError(
       'isolated Codex config must enable plugins so the installed local APE plugin is loaded',

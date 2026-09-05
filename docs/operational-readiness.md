@@ -56,6 +56,10 @@ repository, and base. Never use APE's public source repository as the test targe
 3. Use an isolated host profile and supported permission/trust workflows. Project
    trust is not hook trust. Stop if permissions or trusted hooks are missing;
    do not change them implicitly or use bypass flags.
+   In that profile, set `[features] multi_agent_v2 = true`. The pinned CLI's
+   older default agent interface cannot accept APE's `task_name` and `fork_turns`
+   launch fields. Verify the effective host setting as well as hook trust;
+   `multi_agent = true` alone does not select the required interface.
 4. Set this exact identity in each test repository's local Git config:
    `APE Certification <ape-certification@users.noreply.github.com>`.
    Do not inherit another identity or supply conflicting `GIT_*` overrides.
@@ -98,6 +102,12 @@ Before launch, APE checks:
 - **Configuration:** analytics/features values must be parsed booleans. Reserved
   built-in provider definitions and profile overrides are refused; use reviewed,
   flattened isolated settings.
+- **Native agents:** `features.multi_agent_v2 = true` must be an actual TOML
+  boolean in the isolated profile. It selects the pinned host's launch format
+  with `task_name`, `fork_turns`, and model/reasoning overrides. Missing, false,
+  quoted, or misplaced values fail before the parent starts. This file check
+  does not replace verification of the host's exposed tools or the live binding
+  probe.
 - **MCP permissions:** `plugins."ape@ape".enabled = true`, with explicit policy
   under `plugins."ape@ape".mcp_servers.ape`. The tools `ape_config`, `ape_run`,
   `ape_bind`, and `ape_validate_receipt` must be enabled by allow/deny lists and
@@ -229,9 +239,10 @@ independently prove external host or GitHub events. Retain the evidence for audi
 and publish the bounded ledger, never fabricated outcomes. Without a complete
 certificate, publication remains blocked even when offline checks pass.
 
-### Separate Claude prerequisite
+### Optional Claude validation
 
-Claude packaging has a manual authenticated worker-validator reachability check:
+Operators with authorized Claude access may run this optional authenticated
+worker-validator reachability check:
 
 ```sh
 npm run --silent release:worker-validator-reachability > /secure/path/worker-validator-proof.json
@@ -244,10 +255,16 @@ call to reach APE's no-active-run sentinel. The proof binds candidate manifests,
 MCP declaration, plugin identity, canary implementation, role/tool observations,
 and transcript hashes. Missing roles, changed evidence, or stale candidates fail.
 
-Both commands must pass before release. This is a separate manual prerequisite,
-not part of `release:live-certification` or credential-free CI. It proves schema
-resolution and transport—not ticket binding, a full Claude run, or model quality.
-Claude live operation remains unverified.
+Both commands must pass to record a successful validator-reachability proof.
+This optional check is not a release prerequisite and is not part of
+`release:live-certification` or credential-free CI. Missing Claude subscription
+or API access does not block Codex certification or publication. Keep any failed
+attempt recorded; do not treat missing access as a pass.
+
+The proof establishes schema resolution and transport—not ticket binding, a full
+Claude run, or model quality. Claude live operation remains unverified, and its
+credential-free package checks remain required. Codex is the sole required live
+release-certification host.
 
 ## Block-prevention and lineage contract
 

@@ -52,7 +52,7 @@ can record it. See [receipt validation](mcp-tools.md#receipt-validation-and-reco
 
 Claude roles grant both exact validator names: `mcp__ape__ape_validate_receipt` and
 `mcp__plugin_ape_ape__ape_validate_receipt`. An external-tool wildcard alone does not
-prove the validator is available. The [Claude release prerequisite](operational-readiness.md)
+prove the validator is available. The optional [Claude diagnostic](operational-readiness.md#optional-claude-validation)
 checks actual tool reachability for every packaged role without changing its allowlist.
 
 ## Instruction files

@@ -35,7 +35,7 @@ import {
   writeLiveCertificationPrompts,
 } from '../scripts/prepare-live-certification-prompts.mjs';
 
-const VERSION = '2.24.12';
+const VERSION = '2.24.13';
 const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
@@ -100,6 +100,7 @@ function certificationParentFixture({
       '[analytics]',
       analyticsDisabled ? 'enabled = false' : 'enabled = true',
       '[features]',
+      'multi_agent_v2 = true',
       pluginsEnabled ? 'plugins = true' : 'plugins = false',
       appsDisabled ? 'apps = false' : 'apps = true',
       remotePluginEnabled ? 'remote_plugin = true' : 'remote_plugin = false',
@@ -713,7 +714,7 @@ describe('live certification Codex parent launcher', () => {
       .replace('[model_providers.openai-zero-retry]', '["model_providers"."openai-zero-retry"]')
       .replace('[analytics]', '["analytics"]')
       .replace('[features]', '["features"]')
-      .replace(/^([a-z_]+)(\s*=)/gmu, '"$1"$2')],
+      .replace(/^([a-z_][a-z0-9_]*)(\s*=)/gmu, '"$1"$2')],
     ['dotted keys and literal strings', () => [
       "model_provider = 'openai-zero-retry'",
       "model_providers.openai-zero-retry.name = 'OpenAI zero retry'",
@@ -723,6 +724,7 @@ describe('live certification Codex parent launcher', () => {
       'model_providers.openai-zero-retry.stream_max_retries = 0',
       'model_providers.openai-zero-retry.supports_websockets = false',
       'analytics.enabled = false',
+      'features.multi_agent_v2 = true',
       'features.plugins = true',
       'features.apps = false',
       'features.remote_plugin = true',
@@ -733,7 +735,7 @@ describe('live certification Codex parent launcher', () => {
       'model_provider = "openai-zero-retry"',
       'model_providers = { openai-zero-retry = { name = "OpenAI zero retry", wire_api = "responses", requires_openai_auth = true, request_max_retries = 0, stream_max_retries = 0, supports_websockets = false } }',
       'analytics = { enabled = false }',
-      'features = { plugins = true, apps = false, remote_plugin = true }',
+      'features = { multi_agent_v2 = true, plugins = true, apps = false, remote_plugin = true }',
       'plugins = { "ape@ape" = { enabled = true, mcp_servers = { ape = { default_tools_approval_mode = "approve" } } } }',
     ].join('\n')],
     ['valid trailing comments', (config) => config.split('\n').map((line) => `${line} # certification setting`).join('\n')],
@@ -870,6 +872,24 @@ describe('live certification Codex parent launcher', () => {
     expect(() => buildCodexParentInvocation(fixture)).toThrow(
       /disable analytics.*transport retries/iu,
     );
+  });
+
+  it.each([
+    ['absent', (config) => config.replace('multi_agent_v2 = true\n', '')],
+    ['disabled', (config) => config.replace('multi_agent_v2 = true', 'multi_agent_v2 = false')],
+    ['double-quoted boolean', (config) => config.replace('multi_agent_v2 = true', 'multi_agent_v2 = "true"')],
+    ['single-quoted boolean', (config) => config.replace('multi_agent_v2 = true', "multi_agent_v2 = 'true'")],
+    ['top-level setting', (config) => `multi_agent_v2 = true\n${config.replace('multi_agent_v2 = true\n', '')}`],
+    ['provider setting', (config) => config.replace('multi_agent_v2 = true\n', '').replace('[analytics]', 'multi_agent_v2 = true\n[analytics]')],
+    ['comment only', (config) => config.replace('multi_agent_v2 = true', '# multi_agent_v2 = true')],
+  ])('rejects a native V2 flag that is %s before checking or launching Codex', (_name, update) => {
+    const fixture = certificationParentWithConfig(update);
+    const configPath = path.join(fixture.codexHome, 'config.toml');
+    const before = readFileSync(configPath, 'utf8');
+    const failure = expectCertificationConfigRefusal(fixture);
+    expect(failure.message).toMatch(/features\.multi_agent_v2 = true.*TOML boolean.*before launch.*V2.*task_name.*fork_turns/iu);
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
   });
 
   it('fails closed before launch when local plugins are disabled', () => {

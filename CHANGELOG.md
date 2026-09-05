@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 2.24.13 — 2026-09-05
+
+Release candidate; Codex live certification remains required before tagged
+publication. Claude live operation remains unverified.
+
+- Check `features.multi_agent_v2 = true` before launching a certification parent.
+  The older Codex agent interface lacks APE's required `task_name` and
+  `fork_turns` fields. Reject missing, false, quoted, and misplaced settings with
+  a specific setup error before a model attempt is spent.
+- Document the required native agent setting for the pinned Codex CLI, without
+  changing user configuration automatically or changing worker launch envelopes.
+- Make the authenticated Claude validator check optional. Codex remains the sole
+  required live release host; publishing a Codex-certified release does not
+  require Claude subscription or API access. Claude packaging checks remain in CI,
+  and an unavailable or failed optional check never becomes a passing proof.
+- Preserve the failed 2.24.12 certification outcome: admission and probe
+  preparation passed, but no child or run started because the host exposed the
+  older interface. This candidate needs its own fresh certification.
+
 ## 2.24.12 — 2026-09-05
 
 Release candidate; tagged publication awaits the required live certification.

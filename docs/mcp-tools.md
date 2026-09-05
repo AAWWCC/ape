@@ -154,7 +154,7 @@ receipt checks remain. APE saves the draft/dispatch hashes and reason in the
 receipt, completed dispatch intent, and `overrides.ndjson`. An attested draft must
 use ordinary `record`.
 
-For Claude's exact validator tool names and required host reachability check, see
+For Claude's exact validator tool names and optional host reachability check, see
 [agents](agents.md#tools-and-receipts) and [operational readiness](operational-readiness.md).
 
 ### Immutable run contract
