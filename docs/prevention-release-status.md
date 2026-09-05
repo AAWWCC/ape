@@ -8,21 +8,47 @@ substitute for that evidence.
 
 ## Current state — read before the historical records
 
-The working tree is not yet a reviewed source commit. Its partially staged index
-does not represent the tested candidate and must not be committed as-is. Preserve
-the existing staging while reviewing the full final-file scope separately.
+This source snapshot includes the reviewed launcher-only permission preflight
+follow-ups. Its local source freeze is maintained in the existing separate
+checkout. The original partially staged index does not represent the tested final
+files and must not be committed as-is; preserve the original staging.
 
 Both host packages passed offline checks. A separately authorized isolated Codex
 installation now matches the candidate bytes, and its normal authentication setup
-is complete. The synthetic repository and protected-main CI were also established
-under separate authorization. Do not repeat those completed setup actions merely
-because an earlier dated section below describes them as outstanding.
+is complete. Its exact hooks were trusted through the normal host workflow. The
+synthetic repository, protected-main CI, campaign checkouts, configuration, and
+prompts were also prepared under separate authorization. The normal desktop
+plugin was not updated. Do not repeat completed setup actions merely because an
+earlier dated section below describes them as outstanding.
 
-Still required: exact reviewed source freeze; normal hook approval and loaded-byte
-conformance on pinned Codex; prepared campaign checkouts/configuration/prompts;
-and the separately authorized clean campaign. Full Claude operation remains
-unverified, with its candidate-bound validator prerequisite separate. No new live
-attempt is authorized by this status record.
+Two separately authorized campaigns stopped before an APE run existed: the first
+parent lacked the separate approval handoff; the second reached its first control
+call, which the host rejected as cancelled. Both failed attempts are retained
+outside this repository. Neither is a clean acceptance run or evidence that the
+user manually cancelled a tool. The launcher now carries the existing operator
+authorization and rejects missing headless MCP permission settings before a model
+starts. These source guards do not grant permission or prove the host refusal fixed.
+
+A model-free reproduction on pinned Codex 0.147.0 now establishes the narrow
+permission mechanism: an inert plugin tool with missing policy receives that
+exact cancellation before MCP delivery; an explicit per-tool `approve` override
+over a `prompt` server default permits one execution. Canned loopback responses,
+no credentials, and OS-enforced external-network denial keep this separate from
+live acceptance. The operator subsequently approved only `ape_config`, `ape_run`,
+`ape_bind`, and `ape_validate_receipt` in the real isolated configuration. The
+pinned host's read-only configuration and tool inventory confirm all four approved
+overrides and available tools. All other configuration bytes, the normal desktop
+configuration, installed plugin bytes, and original staging remain unchanged.
+
+Still required: verify exact loaded-byte conformance and complete a separately
+authorized clean campaign. Full Claude operation remains unverified, with its
+candidate-bound validator prerequisite separate. No new live attempt or permission
+change is authorized by this status record.
+
+The latest follow-up full suite passed 4,041 tests with 86 existing skips across
+248 suites. Operational replay passed all 537 tests across 20 suites. Compatibility,
+prompt checks, both packaged MCP smoke checks, and public-safety checks also passed.
+These offline results do not replace the remaining acceptance requirements.
 
 ## Implemented boundaries
 

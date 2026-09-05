@@ -100,6 +100,21 @@ workflow; project trust is not evidence of hook trust. Missing trust or permissi
 permission to change trust/configuration or relaunch with bypass flags. See the
 [official Codex CLI permission guidance](https://learn.chatgpt.com/docs/developer-commands?surface=cli).
 
+Headless MCP permission is a separate prerequisite. Before invoking even the host version check,
+the launcher requires `plugins."ape@ape".enabled = true` and an explicit policy under
+`plugins."ape@ape".mcp_servers.ape`. The required `ape_config`, `ape_run`, `ape_bind`, and
+`ape_validate_receipt` tools must remain enabled by the server's allow/deny lists and have an
+explicit `approval_mode = "approve"` override or approving `default_tools_approval_mode`.
+A per-tool policy overrides the server default. `auto`, `prompt`, and `writes` are insufficient
+for this no-new-prompt launcher; these tools can mutate, so they must not be mislabeled read-only.
+The launcher never grants permission, edits configuration, or injects approval bypass flags.
+If permission has not already been granted through normal supported mechanisms, stop and obtain
+the operator's explicit decision or use an interactive session. Merely writing `on-request` in
+the config does not give a noninteractive parent an approval UI. See the
+[documented plugin MCP tool policy](https://learn.chatgpt.com/docs/extend/mcp).
+This static check catches missing/contradictory file settings, not effective loaded policy, human
+authorization, or successful tool execution. Exact pinned-host conformance is still required.
+
 `SubagentStart` supplies provisional native identity evidence, not stage authority. Each assigned
 child uses its exact per-launch bootstrap arguments in `ape_bind` before stage work. If deferred,
 one bounded discovery of the literal registered name `ape_bind` is allowed, without capabilities,

@@ -16,6 +16,10 @@ const CATALOG_STUB = path.join(ROOT, 'scripts', 'live-certification-catalog-stub
 const FAIL_CLOSED_CATALOG_URL = 'http://127.0.0.1:1';
 const MAX_CODEX_CONFIG_BYTES = 256 * 1024;
 const MAX_HOST_VERSION_BYTES = 4_096;
+// Control and worker calls required by the pinned certification run protocol.
+export const CERTIFICATION_APE_TOOLS = Object.freeze([
+  'ape_config', 'ape_run', 'ape_bind', 'ape_validate_receipt',
+]);
 
 export class LiveCertificationParentError extends Error {
   constructor(message) {
@@ -147,6 +151,48 @@ function ownConfigValue(value, key) {
   return configTable(value) && Object.hasOwn(value, key) ? value[key] : undefined;
 }
 
+function requireHeadlessMcpPolicy(config) {
+  const refuse = (detail) => {
+    // Detail contains only fixed field/tool names, never configuration values.
+    throw new LiveCertificationParentError(
+      `APE MCP approval prerequisite: ${detail}. This headless launcher cannot collect fresh tool approval. ` +
+      'Use an interactive session or obtain normal, explicit APE tool permission before launch; ' +
+      'the launcher does not change permissions or treat hook trust as MCP approval',
+    );
+  };
+  const plugin = ownConfigValue(ownConfigValue(config, 'plugins'), 'ape@ape');
+  if (ownConfigValue(plugin, 'enabled') !== true) refuse('plugins."ape@ape".enabled must be true');
+  if (ownConfigValue(ownConfigValue(config, 'mcp_servers'), 'ape') !== undefined) {
+    refuse('a top-level mcp_servers.ape entry cannot establish the exact plugin server policy');
+  }
+  const server = ownConfigValue(ownConfigValue(plugin, 'mcp_servers'), 'ape');
+  if (!configTable(server)) refuse('plugins."ape@ape".mcp_servers.ape policy is missing or invalid');
+  if (server.enabled !== undefined && server.enabled !== true) refuse('the APE plugin MCP server is disabled or invalid');
+  for (const key of ['enabled_tools', 'disabled_tools']) {
+    const value = ownConfigValue(server, key);
+    if (value !== undefined && (!Array.isArray(value) || value.some((name) => typeof name !== 'string'))) {
+      refuse(`APE server ${key} must be an array of exact tool names`);
+    }
+  }
+  const modes = ['auto', 'prompt', 'writes', 'approve'];
+  const defaultMode = ownConfigValue(server, 'default_tools_approval_mode');
+  if (defaultMode !== undefined && !modes.includes(defaultMode)) refuse('APE server default_tools_approval_mode is invalid');
+  const overrides = ownConfigValue(server, 'tools');
+  if (overrides !== undefined && !configTable(overrides)) refuse('APE server tools must be a table');
+  for (const name of CERTIFICATION_APE_TOOLS) {
+    if ((server.enabled_tools !== undefined && !server.enabled_tools.includes(name)) || server.disabled_tools?.includes(name)) {
+      refuse(`required tool ${name} is filtered out`);
+    }
+    const override = ownConfigValue(overrides, name);
+    if (override !== undefined && !configTable(override)) refuse(`required tool ${name} policy must be a table`);
+    const mode = ownConfigValue(override, 'approval_mode') ?? defaultMode;
+    // These tools can mutate. auto/prompt/writes cannot promise no new prompt.
+    // Explicit per-tool approval wins over a server default; this only checks
+    // the reviewed file, not effective loaded policy or human provenance.
+    if (mode !== 'approve') refuse(`required tool ${name} needs an explicit approval_mode = "approve" or approving server default`);
+  }
+}
+
 function requireDeterministicConfig(codexHome) {
   const config = readCertificationConfig(codexHome);
   // This bounded launcher uses one isolated file, not partial profile merging.
@@ -212,6 +258,7 @@ function requireDeterministicConfig(codexHome) {
       'isolated Codex config must enable remote_plugin so Codex cannot fall back to legacy curated-plugin sync',
     );
   }
+  requireHeadlessMcpPolicy(config);
 }
 
 // Version labels alone do not identify plugin code. Compare the complete staged

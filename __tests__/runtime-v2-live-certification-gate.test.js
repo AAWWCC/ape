@@ -22,6 +22,7 @@ import {
   verifyLiveCertificationEnvironment,
 } from '../scripts/check-live-certification-environment.mjs';
 import {
+  CERTIFICATION_APE_TOOLS,
   LiveCertificationParentError,
   buildCodexParentInvocation,
   startCertificationCatalogStub,
@@ -52,6 +53,7 @@ function certificationParentFixture({
   pluginsEnabled = true,
   appsDisabled = true,
   remotePluginEnabled = true,
+  mcpPolicy = true,
   autoMergeEnabled = true,
   requiredRemoteChecks = false,
   includeRequiredRemoteChecks = true,
@@ -101,6 +103,12 @@ function certificationParentFixture({
       pluginsEnabled ? 'plugins = true' : 'plugins = false',
       appsDisabled ? 'apps = false' : 'apps = true',
       remotePluginEnabled ? 'remote_plugin = true' : 'remote_plugin = false',
+      '[plugins."ape@ape"]',
+      'enabled = true',
+      ...(mcpPolicy ? [
+        '[plugins."ape@ape".mcp_servers.ape]',
+        'default_tools_approval_mode = "approve"',
+      ] : []),
     ].join('\n'),
   );
   cpSync(fileURLToPath(new URL('../plugins/ape', import.meta.url)),
@@ -131,7 +139,7 @@ function expectCertificationConfigRefusal(fixture) {
   }
   expect(failure).toBeInstanceOf(LiveCertificationParentError);
   expect(failure.message.length).toBeLessThan(1024);
-  expect(failure.message).toMatch(/config|provider|retries|analytics|features|plugins|apps|websockets|TOML/iu);
+  expect(failure.message).toMatch(/config|provider|retries|analytics|features|plugins|apps|websockets|TOML|MCP/iu);
   return failure;
 }
 
@@ -322,6 +330,86 @@ afterEach(() => {
 });
 
 describe('live certification Codex parent launcher', () => {
+  it('MCP permission requirements name actual mutable tools from the canonical MCP catalog', async () => {
+    const { handle } = await import('../bin/ape-mcp.mjs');
+    const catalog = await handle({ jsonrpc: '2.0', id: 'approval-catalog', method: 'tools/list', params: {} });
+    for (const name of CERTIFICATION_APE_TOOLS) {
+      const tool = catalog.result.tools.find((entry) => entry.name === name);
+      expect(tool).toBeDefined();
+      expect(tool.annotations?.readOnlyHint).not.toBe(true);
+    }
+  });
+
+  it('MCP permission refuses the historical missing-policy setup before a host subprocess', () => {
+    const fixture = certificationParentFixture({ mcpPolicy: false });
+    const configPath = path.join(fixture.codexHome, 'config.toml');
+    const before = readFileSync(configPath, 'utf8');
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/MCP.*approval/iu);
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
+  });
+
+  it.each(CERTIFICATION_APE_TOOLS)(
+    'MCP permission refuses a later prompt for required tool %s', (tool) => {
+      const fixture = certificationParentWithConfig((config) => `${config}\n[plugins."ape@ape".mcp_servers.ape.tools.${tool}]\napproval_mode = "prompt"\n`);
+      expect(() => buildCodexParentInvocation(fixture)).toThrow(new RegExp(`MCP.*${tool}`, 'iu'));
+      expect(childProcess.spawnSync).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['plugin disabled', (c) => c.replace('[plugins."ape@ape"]\nenabled = true', '[plugins."ape@ape"]\nenabled = false')],
+    ['wrong plugin', (c) => c.replaceAll('"ape@ape"', '"other@other"')],
+    ['wrong server', (c) => c.replaceAll('mcp_servers.ape]', 'mcp_servers.other]')],
+    ['server disabled', (c) => `${c}\nenabled = false`],
+    ['missing server policy', (c) => c.replace('[plugins."ape@ape".mcp_servers.ape]', '[unrelated]')],
+    ['shadowing server', (c) => `${c}\n[mcp_servers.ape]\ndefault_tools_approval_mode = "approve"`],
+    ['auto approval', (c) => c.replace('= "approve"', '= "auto"')],
+    ['write approval prompts', (c) => c.replace('= "approve"', '= "writes"')],
+    ['invalid approval value', (c) => c.replace('= "approve"', '= "SYNTHETIC_SECRET"')],
+    ['missing worker from allowlist', (c) => `${c}\nenabled_tools = ["ape_config", "ape_run"]`],
+    ['disabled worker tool', (c) => `${c}\ndisabled_tools = ["ape_validate_receipt"]`],
+    ['malformed allowlist', (c) => `${c}\nenabled_tools = "SYNTHETIC_SECRET"`],
+    ['malformed denylist entry', (c) => `${c}\ndisabled_tools = [1]`],
+    ['malformed tool table', (c) => `${c}\ntools = ["SYNTHETIC_SECRET"]`],
+    ['malformed worker policy', (c) => `${c}\ntools.ape_bind = false`],
+  ])('MCP permission rejects %s without mutating config or running a host', (_name, update) => {
+    const fixture = certificationParentWithConfig(update);
+    const configPath = path.join(fixture.codexHome, 'config.toml');
+    const before = readFileSync(configPath, 'utf8');
+    const failure = expectCertificationConfigRefusal(fixture);
+    expect(failure.message).toMatch(/MCP.*approval/iu);
+    expect(failure.message).not.toContain('SYNTHETIC_SECRET');
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
+  });
+
+  it.each(['prompt', 'missing'])('MCP permission accepts exact per-tool approval over a %s server default', (mode) => {
+    const fixture = certificationParentWithConfig((c) => [
+      c.replace('default_tools_approval_mode = "approve"', mode === 'missing' ? '' : 'default_tools_approval_mode = "prompt"'),
+      ...CERTIFICATION_APE_TOOLS.map((name) => `[plugins."ape@ape".mcp_servers.ape.tools.${name}]\napproval_mode = "approve"`),
+    ].join('\n'));
+    expect(buildCodexParentInvocation(fixture).command).toBe(fixture.codexBin);
+  });
+
+  it('MCP permission accepts a complete allowlist and unrelated denied tool', () => {
+    const fixture = certificationParentWithConfig((c) => `${c}\nenabled_tools = ${JSON.stringify(CERTIFICATION_APE_TOOLS)}\ndisabled_tools = ["ape_history"]`);
+    expect(buildCodexParentInvocation(fixture).command).toBe(fixture.codexBin);
+  });
+
+  it.each([{ extraArgs: [] }, { extraArgs: ['--dry-run'] }])('MCP permission real CLI rejects missing policy before any host subprocess ($extraArgs)', ({ extraArgs }) => {
+    const fixture = certificationParentFixture({ mcpPolicy: false });
+    const checked = realSpawnSync(process.execPath, [
+      fileURLToPath(new URL('../scripts/run-live-certification-parent.mjs', import.meta.url)),
+      '--project-dir', fixture.projectDir, '--codex-home', fixture.codexHome,
+      '--prompt', fixture.promptPath, '--codex-bin', process.execPath, '--operator-authorized', ...extraArgs,
+    ], { encoding: 'utf8', timeout: 5_000, maxBuffer: 4_096 });
+    expect(checked.status).toBe(1);
+    expect(checked.stdout).toBe('');
+    expect(checked.stderr).toMatch(/MCP.*approval/iu);
+    expect(checked.stderr).not.toMatch(/version check/iu);
+  });
+
   it.each([undefined, false, 'true', 1])('operator authorization rejects %s before any host subprocess', (operatorAuthorized) => {
     const fixture = certificationParentFixture();
     expect(() => buildCodexParentInvocation({ ...fixture, operatorAuthorized }))
@@ -638,12 +726,15 @@ describe('live certification Codex parent launcher', () => {
       'features.plugins = true',
       'features.apps = false',
       'features.remote_plugin = true',
+      'plugins."ape@ape".enabled = true',
+      'plugins."ape@ape".mcp_servers.ape.default_tools_approval_mode = "approve"',
     ].join('\n')],
     ['inline tables', () => [
       'model_provider = "openai-zero-retry"',
       'model_providers = { openai-zero-retry = { name = "OpenAI zero retry", wire_api = "responses", requires_openai_auth = true, request_max_retries = 0, stream_max_retries = 0, supports_websockets = false } }',
       'analytics = { enabled = false }',
       'features = { plugins = true, apps = false, remote_plugin = true }',
+      'plugins = { "ape@ape" = { enabled = true, mcp_servers = { ape = { default_tools_approval_mode = "approve" } } } }',
     ].join('\n')],
     ['valid trailing comments', (config) => config.split('\n').map((line) => `${line} # certification setting`).join('\n')],
   ])('accepts the actual selected zero-retry provider with %s', (_name, update) => {
