@@ -1,13 +1,42 @@
 # Run and resume protocol
 
 The parent orchestrator owns every APE control call. It never performs stage work itself.
+The child-only `ape_bind` handshake is not an orchestration call or stage work: only the dispatched
+native child presents its bootstrap capability to that tool. Ticket/receipt context is expected to
+be absent before this call; its absence is not a reason to skip bootstrap. Only after `ape_bind`
+returns does the child check for complete injected authority and stop if it is missing.
+The MCP handler grants no authority; trusted host
+hooks bind the native child and inject the stage or probe context before work can begin.
+`SubagentStart` also supplies a capability-free bootstrap reminder for a valid native observation.
+That reminder neither assigns a ticket nor supplies missing launch arguments: a child executes the
+bootstrap only when its assigned task contains those arguments. It does not ask the human to restate
+the parent-assigned task. Complete trusted `ape_bind` context is still required before stage work.
+If the binding tool is deferred, the child may use the host's tool-catalog search with only the
+registered name `ape_bind`, then invoke the returned installed APE binding tool. The host-qualified
+invocation name `mcp__ape__ape_bind` is not the catalog query: some hosts index only the registered
+name. Never include the bearer in the search query. A code-mode host's metadata
+lookup and invocation wrapper are permitted solely for that call; `functions.exec_command`, shell,
+file inspection, and other MCP operations are not bootstrap substitutes. `ape_bind` is the first
+APE operation, not necessarily the first host tool-discovery operation.
 
 ## Start readiness
 
+Treat concurrency, destructive persistence, migration, schema compatibility, authentication, and
+security as independent high-risk subsystems unless they share threat model, primitive, rollback,
+and executable evidence. Otherwise offer a dependency-ordered roadmap. Check-then-rename is not atomic.
+
 Before `ape_run start`, call `ape_config doctor`, `get`, and then `ape_run preview` with the exact
 prospective run facts, exact `host`, and additive `required_capabilities`. Preview and start carry
-identical complete prospective fields except `action` and use the same
-deterministic readiness evaluator. Report readiness failures and the pipeline's deterministic
+the same confirmed `hooks_trusted: true`, `subagents_available: true`, and
+`explicit_invocation: true` attestations; do not first add these fields at start or invent
+trust/availability that has not been established. They carry
+identical complete prospective fields except `action`; start additionally requires
+`expected_admission_digest` copied unchanged from the ready preview's `admission_digest`.
+Review the full versioned admission manifest before any binding probe or stage dispatch. A
+missing/truncated manifest or `admission.ready !== true` is a stop, not dispatch permission.
+If prospective inputs change, obtain a fresh preview rather than reusing the digest. This
+commitment confirms reviewed inputs and is not independent proof of human authorization.
+Preview and start use the same deterministic readiness evaluator. Report readiness failures and the pipeline's deterministic
 dispatch bounds. For behavioral work,
 if grounded gate commands are missing, call `ape_config init` for a repository-grounded proposal.
 Pass the exact prospective `behavioral` and `test_paths` facts. In a repository containing only Git,
@@ -33,12 +62,20 @@ is never project authority. Use one native `invoke_subagent` call per returned t
 `TypeName`, `Model`, and prompt; keep `Workspace` as `inherit`. The child's supported
 `PreInvocation` hook binds its conversation before the first model turn.
 
+Start the Codex session in the governed project before preparing a binding probe. Native children
+inherit that workspace; passing `project_dir` to APE does not relocate them. Zero launch observations
+after a child returns require checking the session root and hook delivery before any new launch.
+
 1. Before a Codex `start`, complete the runtime's binding probe: call `ape_run probe` with
    `host: "codex"`, `explicit_invocation: true`, `hooks_trusted: true`, and
    `subagents_available: true` (plus the governed `project_dir` when required). These attestations
    are mandatory on the probe call itself; do not make a partial probe call and retry it. Launch the
-   returned `dispatch_probe` with its exact native agent name, model, reasoning effort, and message,
-   confirm `probe-status` is bound, then acknowledge the returned probe capability with `probe-ack`.
+   returned `dispatch_probe.dispatch.spawn_args` object unchanged,
+   The canary discovers the binding tool when deferred, calls `ape_bind` with the exact capability
+   in its bootstrap message, and returns only
+   the acknowledgment JSON injected by the trusted hook. Wait for this bootstrap through the native
+   agent primitive, confirm `probe-status` is bound, then acknowledge the returned probe capability
+   with `probe-ack`. The bootstrap and acknowledgment capabilities are different; never interchange them.
    The returned agent type is APE's logical role, not a Multi-Agent V2 native argument. Stop on any
    mismatch. `start` consumes this fresh, single-use proof. Claude does not use this probe.
 2. For each `dispatch_agent`, use the host-native tool and pass the generated name, model, optional
@@ -48,10 +85,13 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    Never substitute a model, semantic task name, SDK, nested CLI, or API call.
 3. On Codex, pass `dispatch.spawn_args` directly to native `spawn_agent` with every key and value
    unchanged. It is the versioned native launch envelope: `message` is a fixed transport-only
-   bootstrap because Codex encrypts it before APE can inspect it. It carries no stage authority.
-   `ticket_projection: "hook-injected"` means the trusted `SubagentStart` hook injects the complete
-   common prompt, complete role prompt, and immutable ticket reference after binding the native
-   child. It also injects a mechanically concrete receipt envelope and a role-specific excerpt of
+   bootstrap because Codex encrypts it before APE can inspect it. It contains a single-use bootstrap
+   capability, not stage or receipt authority. `ticket_projection: "bootstrap-hook-injected"` means
+   the native child must discover and call `ape_bind` with the exact bootstrap arguments in that message
+   before any stage work.
+   `SubagentStart` supplies provisional native identity/model evidence; the trusted `PreToolUse`
+   hook then binds one child to that exact authorized generation and injects the complete common prompt,
+   complete role prompt, and immutable ticket reference. It also injects a receipt envelope and a role-specific excerpt of
    the immutable `output_schema`. The child must load and verify the complete ticket from the
    injected sanctioned `.ape/runtime/tickets/` path before stage work.
    The exact native arguments include `fork_turns: "none"`: model/reasoning overrides are
@@ -62,7 +102,9 @@ is never project authority. Use one native `invoke_subagent` call per returned t
    compose its prompt from the complete common prompt, complete role prompt, and immutable ticket.
 4. Launch distinct tickets as returned. On Codex, after each native spawn returns, call `ape_run`
    action `status` with only `action` and `project_dir`; never send `run_id` on status. Confirm that
-   dispatch is `active-bound` before launching the next. On Antigravity, likewise finish each spawn
+   dispatch is `active-bound` before launching the next. A launched child may still be executing its
+   first `ape_bind`; wait through the native primitive for that same child rather than launching a
+   replacement or declaring failure before it reports the handshake result. On Antigravity, likewise finish each spawn
    and confirm binding before the next launch. Bound agents may then run concurrently. Never launch
    two physical agents for one ticket unless the runtime explicitly returns
    `next_action: {"kind":"redispatch_same_ticket", ...}`; only that action authorizes one fresh worker on the same
@@ -129,3 +171,9 @@ If the runtime reports an active bound dispatch, wait. If it reports
 `dispatch_retirement_pending`, wait for the original agent unless the flight is genuinely orphaned
 or wedged; only then may the user authorize `expire-dispatch` with the exact ticket ID and a
 non-empty audit reason. Never free-hand a retry, remediation stage, gate, merge, or history record.
+
+On receipt-contract-v1 `capability_recovery`, dispatch only its returned successor; never alter or
+mint it. Identical retries reuse its generation without a product attempt. Test paths are canonical
+project-relative and capped at 64 items/4096 UTF-8 JSON bytes; lineage stays at three validations
+per worker/two workers per ticket. These bounds do not authorize operator recovery or additional
+product retries.

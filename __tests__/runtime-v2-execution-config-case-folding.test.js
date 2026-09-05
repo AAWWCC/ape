@@ -750,6 +750,7 @@ async function project() {
     tickets: [
       {
         ticket_id: 'run-fold:review:r',
+        stage_id: 'review',
         role: 'reviewer',
         writable: false,
         claimed_paths: [],

@@ -1,6 +1,6 @@
 {
   "name": "ape",
-  "version": "2.24.10",
+  "version": "2.24.11",
   "type": "module",
   "private": true,
   "description": "APE — durable, evidence-gated engineering runs for AI coding agents",
@@ -84,6 +84,7 @@
     "@vitest/coverage-v8": "^4.1.10",
     "esbuild": "^0.28.1",
     "fast-check": "^4.9.0",
+    "smol-toml": "1.8.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },

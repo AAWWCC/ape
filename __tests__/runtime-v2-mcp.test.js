@@ -8,6 +8,9 @@ import { sha256 } from '../lib/runtime/canonical.js';
 import { LANES } from '../lib/runtime/constants.js';
 import { RESPONSE_BUDGET_BYTES } from '../lib/runtime/projection.js';
 import { receiptInputHash } from '../lib/runtime/receipt-input.js';
+import { ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA } from '../lib/runtime/schemas.js';
+import { codexBootstrapOrientation } from '../lib/runtime/codex-bootstrap.js';
+import { invokeCodexHook } from './codex-native-test-helper.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -55,6 +58,26 @@ function session(messages) {
   });
 }
 
+// Positive public start fixtures review the actual MCP preview, never forge a
+// digest or bypass admission. Malformed-input tests keep using session directly.
+async function reviewedSession(messages) {
+  const reviewed = [];
+  for (const message of messages) {
+    if (message.params?.name === 'ape_run' && message.params.arguments?.action === 'start') {
+      const [preview] = await session([{ ...message, params: { ...message.params,
+        arguments: { ...message.params.arguments, action: 'preview' } } }]);
+      const value = JSON.parse(preview.result.content[0].text);
+      if (typeof value.admission_digest !== 'string') {
+        throw new Error(`fixture preview has no admission digest: ${JSON.stringify({ code: value.code, reason: value.reason })}`);
+      }
+      expect(value.admission_digest).toMatch(/^[a-f0-9]{64}$/);
+      reviewed.push({ ...message, params: { ...message.params,
+        arguments: { ...message.params.arguments, expected_admission_digest: value.admission_digest } } });
+    } else reviewed.push(message);
+  }
+  return session(reviewed);
+}
+
 function invokeClaudeHook(input) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(root, 'bin', 'ape-hook.mjs')], {
@@ -89,6 +112,7 @@ describe('APE v2 MCP public surface', () => {
     expect(responses[0].result.serverInfo.version).toBe(pkg.version);
     expect(responses[1].result.tools.map((tool) => tool.name)).toEqual([
       'ape_run',
+      'ape_bind',
       'ape_validate_receipt',
       'ape_status',
       'ape_history',
@@ -114,6 +138,67 @@ describe('APE v2 MCP public surface', () => {
         draft: { type: 'object' },
       },
     });
+    const bootstrap = responses[1].result.tools.find((tool) => tool.name === 'ape_bind');
+    expect(bootstrap.description).toMatch(/child bootstrap only/i);
+    expect(bootstrap.description).toMatch(/successful tool result[\s\S]*does not authorize work/i);
+    expect(bootstrap.inputSchema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['project_dir', 'bootstrap_capability'],
+      properties: {
+        project_dir: { type: 'string', minLength: 1 },
+        bootstrap_capability: { type: 'string', minLength: 32, maxLength: 256, pattern: '^[A-Za-z0-9_-]+$' },
+      },
+    });
+    expect(Object.keys(bootstrap.inputSchema.properties).sort()).toEqual(['bootstrap_capability', 'project_dir']);
+  });
+
+  it('rejects malformed ape_bind arguments without reflecting bearer or claimed identity', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-bind-invalid-'));
+    const marker = 'private-bootstrap-marker';
+    const capability = marker.repeat(2);
+    try {
+      const inputs = [
+        { project_dir: scratch },
+        ...[null, 42, true, [], {}].map((value) => ({ project_dir: scratch, bootstrap_capability: value })),
+        { project_dir: scratch, bootstrap_capability: marker },
+        { project_dir: scratch, bootstrap_capability: `${capability}!` },
+        { project_dir: scratch, bootstrap_capability: marker.repeat(20) },
+        { project_dir: scratch, bootstrap_capability: capability, agent_id: `${marker}-agent` },
+        { project_dir: scratch, bootstrap_capability: capability, session_id: `${marker}-session` },
+      ];
+      const responses = await session(inputs.map((args, index) => ({
+        jsonrpc: '2.0', id: index + 1, method: 'tools/call',
+        params: { name: 'ape_bind', arguments: args },
+      })));
+      for (const response of responses) {
+        expect(response.result.isError).toBe(true);
+        expect(response.result.content[0].text).toContain('ape_bind requires only project_dir and a valid bootstrap_capability');
+        expect(JSON.stringify(response)).not.toContain(marker);
+      }
+      expect(await readdir(scratch)).toEqual([]);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it('cannot grant native binding authority through a direct MCP call without host hooks', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-bind-no-hook-'));
+    const capability = 'unobserved-bootstrap-capability-1234567890';
+    try {
+      const [response] = await session([{
+        jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'ape_bind', arguments: { project_dir: scratch, bootstrap_capability: capability } },
+      }]);
+      expect(response.result.isError).toBe(true);
+      expect(JSON.parse(response.result.content[0].text)).toEqual({
+        ok: false, bound: false, reason: 'native bootstrap binding is not confirmed',
+      });
+      expect(JSON.stringify(response)).not.toContain(capability);
+      expect(await readdir(scratch)).toEqual([]);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
   });
 
   it('serves ape_status as the compact channel while ape_run status remains available', async () => {
@@ -139,7 +224,7 @@ describe('APE v2 MCP public surface', () => {
         active: false,
         pending: null,
         gate: { state: 'inactive' },
-        next_safe_action: 'ape_run start',
+        next_safe_action: 'check host prerequisites, then ape_run start',
       });
       expect(legacy).toMatchObject({ active: false, run: null });
       expect(legacy).not.toHaveProperty('pending');
@@ -147,6 +232,90 @@ describe('APE v2 MCP public surface', () => {
       await rm(scratch, { recursive: true, force: true });
     }
   });
+
+  it('composes the registered MCP bootstrap contract with source hooks, acknowledgement, and single-use start proof offline', async () => {
+    // Node MCP/hook processes and synthetic native events only. This verifies
+    // the component boundary, not real host delivery or a model following it.
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-bootstrap-contract-'));
+    const call = async (name, args) => {
+      const [response] = await reviewedSession([{
+        jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name, arguments: { project_dir: scratch, ...args } },
+      }]);
+      return JSON.parse(response.result.content[0].text);
+    };
+    try {
+      await writeFile(path.join(scratch, 'README.md'), '# fixture\n');
+      execFileSync('git', ['init', '-q'], { cwd: scratch });
+      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: scratch });
+      execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
+      execFileSync('git', ['add', 'README.md'], { cwd: scratch });
+      execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
+      const [catalog] = await session([{ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }]);
+      const prepared = await call('ape_run', {
+        action: 'probe', host: 'codex', explicit_invocation: true,
+        hooks_trusted: true, subagents_available: true,
+      });
+      expect(prepared.ok).toBe(true);
+      const action = prepared.actions.find((entry) => entry.type === 'dispatch_probe');
+      const dispatch = action.dispatch;
+      const registeredName = dispatch.spawn_args.message.match(/literal registered tool name ([a-z_]+)/u)?.[1];
+      expect(registeredName).toBe('ape_bind');
+      const tool = catalog.result.tools.find((entry) => entry.name === registeredName);
+      expect(tool.description).toMatch(/expected to be absent before this call; check for it only after/);
+      expect(Object.keys(dispatch.bootstrap_args).sort()).toEqual([...tool.inputSchema.required].sort());
+      expect(dispatch.spawn_args.message).toContain(JSON.stringify(dispatch.bootstrap_args));
+      expect(dispatch.spawn_args.message).toMatch(/expected to be absent[\s\S]*Only AFTER ape_bind returns/);
+
+      const hook = (input) => invokeCodexHook(root, { project_dir: scratch, ...input });
+      expect(await hook({
+        hook_event_name: 'PreToolUse', session_id: 'contract-parent', turn_id: 'parent-turn',
+        tool_use_id: 'native-spawn', tool_name: 'collaborationspawn_agent', tool_input: dispatch.spawn_args,
+      })).toEqual({});
+      const observed = await hook({
+        hook_event_name: 'SubagentStart', session_id: 'contract-parent', turn_id: 'child-turn',
+        agent_id: 'contract-child', agent_type: 'default', model: dispatch.model.model,
+      });
+      expect(observed.hookSpecificOutput.additionalContext).toBe(codexBootstrapOrientation());
+      expect(observed.hookSpecificOutput.additionalContext).not.toContain(dispatch.bootstrap_args.bootstrap_capability);
+      expect(await call(registeredName, dispatch.bootstrap_args)).toMatchObject({ ok: false, bound: false });
+      expect(await call('ape_run', { action: 'probe-status' })).toMatchObject({
+        probe: { status: 'launched', infrastructure_status: 'awaiting_binding' },
+      });
+      await expect(readFile(path.join(scratch, '.ape/runtime/active.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const admitted = await hook({
+        hook_event_name: 'PreToolUse', session_id: 'contract-child', turn_id: 'child-turn',
+        tool_use_id: 'native-bootstrap', tool_name: 'mcp__ape__ape_bind', tool_input: dispatch.bootstrap_args,
+      });
+      const context = admitted.hookSpecificOutput.additionalContext;
+      const capability = context.match(/^APE_PROBE_CAPABILITY=([A-Za-z0-9_-]+)$/m)?.[1];
+      expect(capability).toBeTruthy();
+      expect(capability).not.toBe(dispatch.bootstrap_args.bootstrap_capability);
+      expect(await call(registeredName, dispatch.bootstrap_args)).toEqual({ ok: true, bound: true, bootstrap_protocol: 1 });
+      expect(await call('ape_run', { action: 'probe-status' })).toMatchObject({
+        probe: { status: 'bound', infrastructure_status: 'awaiting_acknowledgement' },
+      });
+      const acknowledged = await call('ape_run', {
+        action: 'probe-ack', probe_id: action.probe.probe_id, probe_capability: capability,
+      });
+      expect(acknowledged).toMatchObject({ ok: true, probe: { status: 'completed', infrastructure_status: 'ready' } });
+      expect(JSON.stringify(acknowledged)).not.toContain(capability);
+      const started = await call('ape_run', {
+        action: 'start', objective: 'Update fixture documentation', mode: 'phase', lane: 'mechanical',
+        host: 'codex', claimed_paths: ['README.md'], behavioral: false,
+        hooks_trusted: true, subagents_available: true, explicit_invocation: true,
+      });
+      expect(started.ok).toBe(true);
+      expect(started.run.run_id).toBeTruthy();
+      expect(await call('ape_run', { action: 'probe-status' })).toMatchObject({
+        probe: { status: 'consumed', infrastructure_status: 'consumed' },
+      });
+      expect(await readFile(path.join(scratch, 'README.md'), 'utf8')).toBe('# fixture\n');
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it('hard-bounds an ape_run status response backed by a >100KB active state', async () => {
     const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-large-active-'));
@@ -320,6 +489,32 @@ describe('APE v2 MCP public surface', () => {
     }
   });
 
+  it('preserves the recover-receipt audit diagnostic when recovery fields are omitted over MCP', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-recover-reason-'));
+    try {
+      await mkdir(path.join(scratch, '.ape', 'runtime'), { recursive: true });
+      const responses = await session([{
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'ape_run',
+          arguments: {
+            action: 'recover-receipt',
+            project_dir: scratch,
+            receipt: { ticket_id: 'missing-ticket' },
+          },
+        },
+      }]);
+      expect(responses[0].result.isError).toBe(true);
+      expect(responses[0].result.content[0].text)
+        .toBe('recover-receipt requires a nonblank audit reason');
+      expect(responses[0].result.content[0].text).not.toMatch(/unsupported undefined data/iu);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  });
+
   it('advertises aimed answer-preflight with a mandatory audit reason and canonical additive-only scope fields', async () => {
     const responses = await session([
       { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
@@ -331,12 +526,135 @@ describe('APE v2 MCP public surface', () => {
     ]) {
       expect(run.inputSchema.properties).toHaveProperty(field);
     }
+    expect(run.inputSchema.allOf).toContainEqual({
+      if: {
+        properties: { action: { const: 'answer-preflight' } },
+        required: ['action'],
+      },
+      then: {
+        required: ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.required,
+        properties: ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.properties,
+      },
+    });
+    expect(ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.properties.reason)
+      .toEqual({ type: 'string', minLength: 1, maxLength: 4000, pattern: '\\S' });
+    expect(ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.properties.answers).toMatchObject({
+      type: 'array', maxItems: 64,
+      items: { additionalProperties: false, required: ['id', 'answer'],
+        properties: { answer: { maxLength: 16384, pattern: '\\S' }, id: { maxLength: 160 } } },
+    });
+    expect(ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.properties.claimed_paths).toMatchObject({ maxItems: 64, items: { maxLength: 512 } });
+    expect(run.inputSchema.allOf).toContainEqual({
+      if: {
+        properties: { action: { enum: ['ship', 'expire-dispatch', 'abort', 'override'] } },
+        required: ['action'],
+      },
+      then: { required: ['reason'] },
+    });
+    expect(run.inputSchema.properties.reason.description).toMatch(
+      /recover-receipt.*answer-preflight.*ship.*expire-dispatch.*abort.*override/u,
+    );
+    expect(run.inputSchema.properties.reason.pattern).toBe('\\S');
+    expect(run.inputSchema.properties.run_id.description).toMatch(
+      /answer-preflight.*abort.*override[\s\S]*stale answer submission/u,
+    );
     for (const legacyField of ['add_claimed_paths', 'add_test_paths', 'add_risk_triggers']) {
       expect(run.inputSchema.properties).not.toHaveProperty(legacyField);
     }
     expect(run.inputSchema.properties).not.toHaveProperty('remove_claimed_paths');
     expect(run.inputSchema.properties).not.toHaveProperty('remove_test_paths');
     expect(run.inputSchema.properties).not.toHaveProperty('remove_risk_triggers');
+  });
+
+  it('preserves the answer-preflight reason diagnostic when reason is omitted over MCP', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-answer-reason-'));
+    try {
+      await mkdir(path.join(scratch, '.ape', 'runtime'), { recursive: true });
+      const responses = await session([{
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'ape_run',
+          arguments: {
+            action: 'answer-preflight',
+            project_dir: scratch,
+            preflight_hash: 'a'.repeat(64),
+            answers: [],
+          },
+        },
+      }]);
+      expect(responses[0].result.isError).toBe(true);
+      expect(responses[0].result.content[0].text)
+        .toBe('answer-preflight requires a non-empty audit reason of at most 4000 characters');
+      expect(responses[0].result.content[0].text).not.toMatch(/unsupported undefined data/iu);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it.each([{}, { tool_output: '{}' }])('rejects missing canonical record receipt before consulting runtime state: %j', async (fields) => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-missing-receipt-'));
+    try {
+      const [response] = await session([{
+        jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'ape_run', arguments: { action: 'record', project_dir: scratch, ...fields } },
+      }]);
+      expect(response.result.isError).toBe(true);
+      expect(response.result.content[0].text).toMatch(/record requires.*receipt/i);
+      expect(await readdir(scratch)).toEqual([]);
+    } finally { await rm(scratch, { recursive: true, force: true }); }
+  });
+
+  it('rejects invalid control enums, oversized run input, and invalid audit reasons without mutation', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-invalid-control-'));
+    try {
+      const inputs = [
+        { action: 'not-a-real-action' },
+        { action: 'preview', host: 'claude', objective: 'x'.repeat(65_537) },
+        { action: 'answer-preflight', reason: '', preflight_hash: 'a'.repeat(64), answers: [] },
+        { action: 'answer-preflight', reason: 42, preflight_hash: 'a'.repeat(64), answers: [] },
+        { action: 'answer-preflight', reason: 'x'.repeat(4_001), preflight_hash: 'a'.repeat(64), answers: [] },
+      ];
+      const responses = await session(inputs.map((input, index) => ({
+        jsonrpc: '2.0', id: index + 1, method: 'tools/call',
+        params: { name: 'ape_run', arguments: { project_dir: scratch, ...input } },
+      })));
+      for (const response of responses) {
+        expect(response.result.isError).toBe(true);
+        expect(Buffer.byteLength(response.result.content[0].text)).toBeLessThan(1000);
+        expect(response.result.content[0].text).not.toMatch(/unsupported undefined data|TypeError|\.trim is not/);
+      }
+      expect(responses[0].result.content[0].text).toMatch(/unknown tool or action/);
+      expect(responses[1].result.content[0].text).toMatch(/input exceeds .*UTF-8 bytes/);
+      expect(responses.slice(2).map((response) => response.result.content[0].text)).toEqual(Array(3).fill(
+        'answer-preflight requires a non-empty audit reason of at most 4000 characters',
+      ));
+      expect(await readdir(scratch)).toEqual([]);
+    } finally { await rm(scratch, { recursive: true, force: true }); }
+  });
+
+  it('rejects static preflight shapes and unknown/subtractive fields before creating runtime state', async () => {
+    const scratch = await mkdtemp(path.join(os.tmpdir(), 'ape-mcp-preflight-shape-'));
+    const base = { action: 'answer-preflight', project_dir: scratch,
+      reason: 'synthetic operator answer', preflight_hash: 'a'.repeat(64), answers: [] };
+    try {
+      const variants = [
+        { preflight_hash: null }, { answers: {} }, { run_id: null },
+        { answers: [{ id: 'question', answer: '' }] },
+        { claimed_paths: ['../outside'] }, { risk_triggers: ['NOT-A-RISK'] },
+        { remove_claimed_paths: [] }, { add_claimed_paths: ['src/hidden.js'] },
+      ];
+      const responses = await session(variants.map((fields, index) => ({
+        jsonrpc: '2.0', id: index + 1, method: 'tools/call',
+        params: { name: 'ape_run', arguments: { ...base, ...fields } },
+      })));
+      for (const response of responses) {
+        expect(response.result.isError).toBe(true);
+        expect(response.result.content[0].text).not.toMatch(/valid only while preflight|unsupported undefined/);
+      }
+      expect(await readdir(scratch)).toEqual([]);
+    } finally { await rm(scratch, { recursive: true, force: true }); }
   });
 
   it('advertises bounded audited artifact maintenance on ape_history', async () => {
@@ -445,7 +763,7 @@ describe('APE v2 MCP public surface', () => {
       child.stdin.end('{bad json}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n');
     });
     expect(responses[0].error.code).toBe(-32700);
-    expect(responses[1].result.tools).toHaveLength(5);
+    expect(responses[1].result.tools).toHaveLength(6);
   });
 
   it.each(['claude', 'codex'])('applies the correct native binding precondition for %s', async (host) => {
@@ -457,7 +775,7 @@ describe('APE v2 MCP public surface', () => {
       execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
       execFileSync('git', ['add', '.'], { cwd: scratch });
       execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
-      const responses = await session([
+      const responses = await reviewedSession([
         {
           jsonrpc: '2.0',
           id: 1,
@@ -517,7 +835,7 @@ describe('APE v2 MCP public surface', () => {
       execFileSync('git', ['add', '.'], { cwd: scratch });
       execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
 
-      const responses = await session([{
+      const responses = await reviewedSession([{
         jsonrpc: '2.0',
         id: 1,
         method: 'tools/call',
@@ -573,7 +891,7 @@ describe('APE v2 MCP public surface', () => {
       execFileSync('git', ['add', '.'], { cwd: scratch });
       execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
 
-      const responses = await session([{
+      const responses = await reviewedSession([{
         jsonrpc: '2.0',
         id: 1,
         method: 'tools/call',
@@ -635,7 +953,7 @@ describe('APE v2 MCP public surface', () => {
       execFileSync('git', ['add', '.'], { cwd: scratch });
       execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
 
-      const responses = await session([{
+      const responses = await reviewedSession([{
         jsonrpc: '2.0',
         id: 1,
         method: 'tools/call',
@@ -695,7 +1013,7 @@ describe('APE v2 MCP public surface', () => {
 
       const preflightHash = 'a'.repeat(64);
       await writeFile(path.join(scratch, '.ape', 'runtime', 'active.json'), JSON.stringify({
-        schema_version: '2.0.0', run_id: 'run-mcp-answer', status: 'input_required', stage: 'preflight',
+        version: 2, schema_version: '2.0.0', run_id: 'run-mcp-answer', status: 'input_required', stage: 'preflight',
         mode: 'phase', lane: 'fast', behavioral: true, plan_contract_version: 2,
         objective: 'Answer the material preflight questions over MCP', host: 'claude',
         branch, base_commit_sha: commit, tree_sha: tree,
@@ -745,6 +1063,11 @@ describe('APE v2 MCP public surface', () => {
       expect(result.run.status).toBe('running');
       expect(result.run.lane).toBe('fast');
       expect(result.run.stage).toBe('test');
+      expect(result.runtime_guidance).toContain('status running; stage test');
+      expect(result.runtime_guidance).toContain(
+        'Next safe action: launch the returned dispatch_agent action exactly as provided',
+      );
+      expect(result.runtime_guidance).not.toContain('active state is unavailable or invalid');
       const action = result.actions.find((entry) => entry.type === 'dispatch_agent');
       const { nonce, prompt } = action.dispatch.dispatch_intent;
       expect(nonce).toMatch(/^[A-Za-z0-9_-]{32,256}$/u);

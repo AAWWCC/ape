@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "Normalized, non-sensitive failure classes that must remain recoverable before release.",
+  "description": "Synthetic, non-sensitive prevention and bounded fallback contracts required before release; these are not historical or live-host success certificates.",
   "cases": [
     {
       "id": "codex-dispatch-envelope",
       "category": "orchestration",
       "observed_failure": "Codex encrypted the relayed launch message before APE could attest it, allowing contract or receipt-schema omissions to reach a child.",
-      "recovery_contract": "The launch message is transport-only and the trusted SubagentStart hook injects a hash-bound authoritative contract and ticket reference.",
+      "recovery_contract": "The launch message and SubagentStart establish only provisional bootstrap identity. The child discovers the exact ape_bind name, binds with unchanged launch arguments, and acknowledges trusted post-bind hook-injected authority before stage work.",
       "test_file": "__tests__/runtime-v2-adapters.test.js",
       "test_anchor": "codex-dispatch-envelope returns a static bootstrap and canonical hook context"
     },
@@ -65,6 +65,110 @@
       "recovery_contract": "New terminal records retain runtime and protocol provenance plus a stable terminal reason code.",
       "test_file": "__tests__/runtime-v2-versioned-terminal-diagnostics.test.js",
       "test_anchor": "versioned-terminal-diagnostics"
+    },
+    {
+      "id": "omitted-preflight-audit-reason",
+      "category": "observability",
+      "observed_failure": "An omitted audit reason produced a generic unsupported-undefined error before the actionable handler diagnostic.",
+      "recovery_contract": "The MCP schema declares conditional audit requirements and omitted optional fields reach the specific missing-reason diagnostic.",
+      "test_file": "__tests__/runtime-v2-mcp.test.js",
+      "test_anchor": "preserves the answer-preflight reason diagnostic when reason is omitted over MCP"
+    },
+    {
+      "id": "native-bootstrap-phase-and-catalog-contract",
+      "category": "orchestration",
+      "observed_failure": "A host-qualified catalog query returned no tool, and a child stopped for missing authority before making the binding call that supplies it.",
+      "recovery_contract": "Search the bare registered ape_bind name, call with exact launch arguments, and check trusted authority only after binding returns; offline composition does not certify real model compliance.",
+      "test_file": "__tests__/runtime-v2-mcp.test.js",
+      "test_anchor": "composes the registered MCP bootstrap contract with source hooks, acknowledgement, and single-use start proof offline"
+    },
+    {
+      "id": "native-probe-failure-reporting",
+      "category": "observability",
+      "observed_failure": "Expired launch windows and exact-token bootstrap rejections still appeared as ordinary waiting in parent diagnostics.",
+      "recovery_contract": "Report the effective launch deadline and bounded current-generation failure without replacing a live reservation or overwriting accepted proof.",
+      "test_file": "__tests__/runtime-v2-probe-diagnostics.test.js",
+      "test_anchor": "offline native probe failure reporting"
+    },
+    {
+      "id": "native-canary-identity-isolation",
+      "category": "scope-policy",
+      "observed_failure": "Candidate corruption could release an exact canary, while a merely observed unrelated child could be falsely quarantined on a new turn.",
+      "recovery_contract": "Immutable deny-only canary evidence survives candidate damage without classifying unrelated provisional children as canaries.",
+      "test_file": "__tests__/runtime-v2-bootstrap-hook-integration.test.js",
+      "test_anchor": "native bootstrap source-hook integration"
+    },
+    {
+      "id": "compiled-future-stage-contract",
+      "category": "admission",
+      "observed_failure": "Optional capability lists previously allowed unreachable future models, missing artifact producers, or schema limits to be discovered after dispatch.",
+      "recovery_contract": "One canonical pipeline compiles all reachable worker and runtime stages, consumer schemas, unchanged attempt limits, and a non-authoritative planner template before admission.",
+      "test_file": "__tests__/runtime-v2-admission-compiler.test.js",
+      "test_anchor": "prevention-first admission compiler"
+    },
+    {
+      "id": "reviewed-admission-drift",
+      "category": "admission",
+      "observed_failure": "Preview could omit repository or command facts and start could consume changed inputs without the reviewed commitment.",
+      "recovery_contract": "Read-only preview returns a complete bounded manifest and digest; public start checks exact reviewed inputs before branch, ticket, or worker mutation without treating the digest as human authorization.",
+      "test_file": "__tests__/runtime-v2-admission-manifest.test.js",
+      "test_anchor": "reviewed admission manifest through real lifecycle boundary"
+    },
+    {
+      "id": "scheduled-base-command-prerequisites",
+      "category": "admission",
+      "observed_failure": "A runner present on the preview checkout could disappear when start switched to its resolved base.",
+      "recovery_contract": "Read-only immutable Git comparisons reject changed exact command prerequisites before mutation and admit differing commits whose relevant prerequisites remain unchanged.",
+      "test_file": "__tests__/runtime-v2-admission-baseline.test.js",
+      "test_anchor": "command availability on the actual scheduled baseline"
+    },
+    {
+      "id": "admissible-receipt-rejection-guidance",
+      "category": "lifecycle",
+      "observed_failure": "A receipt rejection advised reset while the active lifecycle prohibited reset.",
+      "recovery_contract": "The bounded shared descriptor advertises only state-eligible actions with explicit operator preconditions; unexplained tree mutation never triggers automatic abort, reset, or restoration.",
+      "test_file": "__tests__/runtime-v2-receipt-recovery-guidance.test.js",
+      "test_anchor": "bounded receipt rejection recovery guidance"
+    },
+    {
+      "id": "frozen-shipping-and-tested-tree",
+      "category": "shipping",
+      "observed_failure": "Shipping could reach absent prerequisites, infer the wrong repository, or include staged content not covered by the passed gates.",
+      "recovery_contract": "Admission and explicit SHIP validate frozen target, identity, prerequisites, policy, and exact gate-tested tree; simulated effects reject drift and preserve staged content on refusal.",
+      "test_file": "__tests__/runtime-v2-shipping-prevention.test.js",
+      "test_anchor": "prevention-first shipping admission"
+    },
+    {
+      "id": "current-command-prerequisites",
+      "category": "admission",
+      "observed_failure": "Finding node or npm on PATH did not prove the configured entry script, package script, or shebang interpreter was available.",
+      "recovery_contract": "Bounded read-only inspection identifies unavailable static command prerequisites before dispatch, while allowing a present test command to fail legitimately and planned test files to be authored later.",
+      "test_file": "__tests__/runtime-v2-admission-command-prerequisites.test.js",
+      "test_anchor": "current command prerequisites before dispatch"
+    },
+    {
+      "id": "branch-exact-scheduler-review-checks",
+      "category": "pipeline-contract",
+      "observed_failure": "The projected review stage omitted targeted checks required by real fast and green-maintenance scheduler tickets.",
+      "recovery_contract": "Actual successful reducer transitions must fit exact canonical ticket schemas and whole branch-specific check variants, including preflight escalation; synthetic reducer events are not native-host or filesystem certification.",
+      "test_file": "__tests__/runtime-v2-prevention-pipeline-matrix.test.js",
+      "test_anchor": "prevention compiler against actual successful reducer transitions"
+    },
+    {
+      "id": "supersession-prelock-admission",
+      "category": "admission",
+      "observed_failure": "Malformed or unreviewed supersession inputs could create receipt-lock storage before admission and ancestor validation.",
+      "recovery_contract": "Run the same read-only schema, ancestor and admission checks before the outer lock and again inside it; rejected inputs do not create storage or follow redirected ancestors.",
+      "test_file": "__tests__/runtime-v2-start-admission-prelock.test.js",
+      "test_anchor": "supersession admission precedes receipt-lock storage"
+    },
+    {
+      "id": "codex-model-input-response-framing",
+      "category": "transport",
+      "observed_failure": "A complete saved Codex tool result could be truncated in the next model request because escaped MCP framing exceeded the host budget despite an inner JSON bound and a larger execution-wrapper setting.",
+      "recovery_contract": "Compact repeated admitted metadata and bootstrap ticket bodies, preserve exact launch authority, measure escaped MCP framing, and refuse an undeliverable complete admission before mutation; do not retry the failed live campaign.",
+      "test_file": "__tests__/runtime-v2-bounded-responses.test.js",
+      "test_anchor": "Codex bootstrap parent wire compaction"
     }
   ]
 }

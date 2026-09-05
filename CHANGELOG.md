@@ -2,6 +2,76 @@
 
 ## Unreleased
 
+## 2.24.11 — 2026-09-05
+
+Local release candidate; not published or fully live-certified.
+See [release status](docs/prevention-release-status.md) for completed checks and
+remaining limits.
+
+### Prevent failures before workers start
+
+- Preview and start now use the same admission checks. New starts require the
+  reviewed preview digest and reject changes to scope, files, staging, or config.
+- Admission checks all reachable stages for missing artifacts, incompatible
+  schemas, unavailable capabilities, commands, and scope limits.
+- Planner templates must fit the plan contract. A valid template is not approval
+  of the plan itself.
+- Generated files need approved writer scope. A command that changes files cannot
+  be treated as read-only verification.
+- APE checks command entry scripts, package scripts, and interpreters without
+  running them during preview.
+
+### Clearer inputs, receipts, and recovery
+
+- `answer-preflight` now identifies its required audit reason. Omitted optional
+  fields no longer hide that message behind a generic undefined-data error.
+- Preflight answers diagnose stale run IDs. Receipt corrections keep the
+  same-worker correction action instead of incorrectly suggesting the next stage.
+- Recovery guidance lists actions allowed in the current state and their
+  prerequisites. It no longer recommends resetting an active run.
+- Malformed calls fail before runtime storage changes. Receipt credentials are
+  not echoed in errors, corrections, or recovery responses.
+
+### Reliable native worker startup
+
+- Runtime instructions arrive through session hooks and run responses, not
+  changes to `AGENTS.md` or `CLAUDE.md`.
+- A new child discovers `ape_bind`, calls it, receives trusted task context,
+  and acknowledges it before starting work. Discovery itself grants no authority.
+- Binding probes return the exact native launch arguments and retain their
+  identity across lost responses. Diagnostics distinguish waiting, rejection,
+  and expiration.
+- Stale, replaced, or corrupt worker evidence cannot authorize another writer.
+  The restrictions stay scoped to the affected children.
+- Saved state and worker records reject symlinks, unsafe files, and invalid
+  ancestry. Status remains available for diagnosis when execution must stop.
+
+### Responses and shipping
+
+- Codex responses omit repeated metadata so valid startup results fit the host's
+  output boundary. Full records and exact worker launch arguments are preserved.
+  Response limits also account for escaped MCP framing.
+- Shipping freezes each project's explicit origin, repository, and base.
+  Other projects no longer inherit APE's upstream target.
+- Shipping checks the admitted, staged, committed, and pushed trees. A successful
+  merge command is treated as a request until GitHub confirms the merge.
+  Local cleanup failure is recorded separately from proven remote success.
+- Queued merges keep their existing watch instead of being submitted again on
+  each poll. This does not guarantee exactly-once submission across a crash.
+
+### Verification
+
+- The launcher checks the pinned executable, prompts, selected provider settings,
+  and headless MCP approvals before starting a parent. It does not add approval
+  or sandbox bypass flags.
+- Certification schema v5 accepts immediate or automatic protected squash merges.
+  Both require passing checks on the pushed head, matching trees, and unchanged
+  branch protection.
+- Synthetic tests and model-free host checks cover the fixes. Full live
+  certification remains incomplete; Claude live operation is unverified.
+- Codex stays pinned to 0.147.0. Retry budgets have not increased.
+  Expanded automatic repair remains deferred.
+
 ## 2.24.10 — 2026-09-04
 
 Windows host-edge marketplace smoke now resolves each installed Codex and Claude package entrypoint

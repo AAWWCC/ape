@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import path from 'node:path';
+import { realpath } from 'node:fs/promises';
 import {
   normalizeLifecycleEvent,
   evaluateLifecyclePolicy,
@@ -27,7 +28,7 @@ import {
 import { SEALED_STATUSES } from '../lib/runtime/constants.js';
 import { widenedTestClaims } from '../lib/runtime/path-scope.js';
 import { resolveGovernedRoot, runtimePaths } from '../lib/runtime/paths.js';
-import { readJson } from '../lib/runtime/storage.js';
+import { activeState } from '../lib/runtime/status-service.js';
 import { currentTreeSha, diffFiles } from '../lib/runtime/git.js';
 import {
   bindClaudeSubagent,
@@ -41,16 +42,27 @@ import {
   resolveSealedCodexBinding,
   resolveSealedClaudeBinding,
   readDispatchReceiptCapabilityHash,
+  recordCodexSubagentStartOutcome,
+  bootstrapCodexSubagent,
+  isCodexBootstrapReplay,
   observeClaudeSubagentStop,
   observeCodexSubagentStop,
   validateAndAttestDispatchReceiptDraftAtStop,
 } from '../lib/runtime/claude-dispatch.js';
 import {
   bindBindingProbe,
+  bootstrapBindingProbe,
   isBindingProbeTaskName,
   launchBindingProbe,
+  observeBindingProbeStop,
+  recordBindingProbeBootstrapRejection,
+  resolvesExactBindingProbeIdentity,
   resolvesBindingProbeIdentity,
 } from '../lib/runtime/binding-probe.js';
+import {
+  BOOTSTRAP_TOOL_PATTERN,
+  resolveCodexBootstrapCandidate,
+} from '../lib/runtime/codex-bootstrap.js';
 import {
   RECEIPT_CONTRACT_VERSION,
   RECEIPT_VALIDATION_TOOL,
@@ -69,12 +81,200 @@ import {
   mergeReceiptCapabilityGrowthResult,
   prospectiveReceiptCapabilityGrowthFromTree,
 } from '../lib/runtime/capability-manifest.js';
+import {
+  formatSessionGuidanceResponse,
+  loadSessionGuidance,
+} from '../lib/runtime/session-guidance.js';
 
 // Hard bound on hook input. 8 MB clears every legitimate host payload seen in
 // the field (an Edit to package-lock.json carries the whole hunk inline) while
 // still refusing an unbounded stream; an oversized body is handled by the
 // catch, which consults the active run before denying.
 const INPUT_CAP_BYTES = 8 * 1024 * 1024;
+const CANARY_ONLY = process.argv.includes('--ape-canary-only');
+const STREAMED_TOP_LEVEL_FIELDS = new Set([
+  'project_dir',
+  'projectDir',
+  'cwd',
+  'workspacePaths',
+  'session_id',
+  'sessionId',
+  'turn_id',
+  'turnId',
+  'agent_id',
+  'agentId',
+  'subagent_id',
+  'subagentId',
+]);
+
+// The wildcard canary arm must recognize an exact, already-quarantined child
+// even when an external MCP call carries more than the ordinary 8 MB hook
+// budget. Retaining the whole body would remove that memory bound, while
+// regex salvage can be redirected by identically named fields nested inside
+// tool_input. This tiny streaming scanner retains only bounded STRING values
+// from the root JSON object and ignores every nested value. It is not a second
+// general JSON parser: ordinary inputs still go through JSON.parse below; its
+// sole authority is the deny-only exact-identity lookup on oversized input.
+function createTopLevelStringScanner() {
+  const fields = {};
+  let depth = 0;
+  let rootObject = false;
+  let expectation = 'root';
+  let pendingKey = null;
+  let inString = false;
+  let escaped = false;
+  let stringKind = 'ignore';
+  let token = '';
+  let tokenOverflow = false;
+  const MAX_TOKEN_CHARS = 4096;
+
+  function decodeToken() {
+    if (tokenOverflow) return null;
+    try {
+      return JSON.parse(`"${token}"`);
+    } catch {
+      return null;
+    }
+  }
+
+  function finishString() {
+    const decoded = decodeToken();
+    if (stringKind === 'key') {
+      pendingKey = typeof decoded === 'string' && STREAMED_TOP_LEVEL_FIELDS.has(decoded)
+        ? decoded
+        : null;
+      expectation = 'colon';
+    } else if (stringKind === 'value') {
+      if (pendingKey) {
+        if (typeof decoded === 'string') fields[pendingKey] = decoded;
+        else delete fields[pendingKey];
+      }
+      expectation = 'commaOrEnd';
+    } else if (stringKind === 'workspaceValue') {
+      if (
+        !Array.isArray(fields.workspacePaths) &&
+        typeof decoded === 'string' &&
+        decoded.length > 0
+      ) fields.workspacePaths = [decoded];
+    }
+    stringKind = 'ignore';
+    token = '';
+    tokenOverflow = false;
+  }
+
+  return {
+    feed(text) {
+      for (const character of text) {
+        if (inString) {
+          if (escaped) {
+            if (!tokenOverflow) {
+              token += character;
+              if (token.length > MAX_TOKEN_CHARS) tokenOverflow = true;
+            }
+            escaped = false;
+            continue;
+          }
+          if (character === '\\') {
+            if (!tokenOverflow) token += character;
+            escaped = true;
+            continue;
+          }
+          if (character === '"') {
+            inString = false;
+            finishString();
+            continue;
+          }
+          if (!tokenOverflow) {
+            token += character;
+            if (token.length > MAX_TOKEN_CHARS) tokenOverflow = true;
+          }
+          continue;
+        }
+
+        if (depth === 0) {
+          if (!rootObject && character === '{') {
+            rootObject = true;
+            depth = 1;
+            expectation = 'keyOrEnd';
+          }
+          continue;
+        }
+
+        if (character === '"') {
+          inString = true;
+          escaped = false;
+          token = '';
+          tokenOverflow = false;
+          stringKind = depth === 1 && expectation === 'keyOrEnd'
+            ? 'key'
+            : depth === 1 && expectation === 'value' && pendingKey
+              ? 'value'
+              : depth === 2 && expectation === 'workspaceArray'
+                ? 'workspaceValue'
+              : 'ignore';
+          continue;
+        }
+
+        if (character === '{' || character === '[') {
+          const workspaceArray =
+            depth === 1 &&
+            expectation === 'value' &&
+            pendingKey === 'workspacePaths' &&
+            character === '[';
+          if (depth === 1 && expectation === 'value' && pendingKey) {
+            delete fields[pendingKey];
+          }
+          depth += 1;
+          if (depth === 2 && expectation === 'value') {
+            expectation = workspaceArray ? 'workspaceArray' : 'nestedValue';
+          }
+          continue;
+        }
+        if (character === '}' || character === ']') {
+          depth -= 1;
+          if (
+            depth === 1 &&
+            (expectation === 'nestedValue' || expectation === 'workspaceArray')
+          ) expectation = 'commaOrEnd';
+          continue;
+        }
+        if (depth !== 1 || /\s/u.test(character)) continue;
+        if (character === ':' && expectation === 'colon') {
+          expectation = 'value';
+        } else if (character === ',') {
+          expectation = 'keyOrEnd';
+          pendingKey = null;
+        } else if (expectation === 'value') {
+          // Non-string top-level values have no identity/root authority here.
+          if (pendingKey) delete fields[pendingKey];
+          expectation = 'primitiveValue';
+        }
+      }
+    },
+    fields() {
+      return { ...fields };
+    },
+  };
+}
+
+function trustedCodexHookRoot(input) {
+  const workspaceDir = Array.isArray(input.workspacePaths)
+    ? input.workspacePaths.find(
+        (candidate) => typeof candidate === 'string' && candidate.length > 0,
+      ) ?? null
+    : null;
+  const explicitDir = typeof input.project_dir === 'string'
+    ? input.project_dir
+    : typeof input.projectDir === 'string'
+      ? input.projectDir
+      : workspaceDir;
+  return resolveGovernedRoot({
+    explicitDir,
+    cwd: typeof input.cwd === 'string' ? input.cwd : workspaceDir,
+    env: process.env,
+    host: 'codex',
+  });
+}
 
 // The claims a ticket's targets resolve against — identical for the host edit
 // tool (event.path_safe) and the deletion channel (event.deletion): a test
@@ -92,18 +292,66 @@ function ticketPathClaims(ticket) {
 // a multibyte UTF-8 codepoint whose bytes straddle a pipe-read boundary mangles
 // into U+FFFD (audit finding 1.8). Buffer.concat then one toString('utf8')
 // decodes the stream intact. The cap still counts BYTE length (Buffer.byteLength
-// of each raw Buffer) and the fail-closed oversize path is unchanged: over the
-// cap, flag and stop pushing (bounded memory); the try below throws so the catch
-// consults the active run before denying.
+// of each raw Buffer): over the cap, flag and stop pushing (bounded memory).
+// The scanner above continues with bounded state for the canary-only exact
+// fence; ordinary policy input still follows the active-run failure path.
 const chunks = [];
 let bodyBytes = 0;
 let bodyTooLarge = false;
+const topLevelScanner = createTopLevelStringScanner();
+const streamDecoder = new TextDecoder();
 for await (const chunk of process.stdin) {
+  topLevelScanner.feed(streamDecoder.decode(chunk, { stream: true }));
   bodyBytes += Buffer.byteLength(chunk);
   if (bodyBytes > INPUT_CAP_BYTES) bodyTooLarge = true;
   else chunks.push(chunk);
 }
+topLevelScanner.feed(streamDecoder.decode());
+const streamedTopLevel = topLevelScanner.fields();
 const body = Buffer.concat(chunks).toString('utf8');
+
+// The wildcard hook is the last line of defense for a resumable canary. An
+// exact tombstone remains authoritative on an oversized call, but unrelated
+// oversized integrations stay neutral. The streamed fields are top-level
+// only, so a nested MCP argument cannot redirect the governed root.
+if (bodyTooLarge && CANARY_ONLY) {
+  let exactCanary = false;
+  let identity = streamedTopLevel;
+  const streamedPaths = runtimePaths(trustedCodexHookRoot(streamedTopLevel));
+  try {
+    const candidate = await resolveCodexBootstrapCandidate(streamedPaths, streamedTopLevel);
+    if (candidate) {
+      identity = {
+        ...streamedTopLevel,
+        session_id: candidate.parent_session_id,
+        agent_id: candidate.agent_id,
+        agent_type: candidate.agent_type,
+      };
+    }
+  } catch {
+    // Generic native-child evidence is not canary ownership. The independent
+    // canary alias ledger below can still recognize an exact bound/retired
+    // child or parent+child-turn when candidate storage is damaged.
+  }
+  try {
+    exactCanary = await resolvesExactBindingProbeIdentity(
+      streamedPaths,
+      identity,
+    );
+  } catch {
+    // Unreadable probe evidence has no blanket authority over unrelated tools.
+  }
+  if (exactCanary) {
+    const oversizedEvent = { host: 'codex', event: 'PreToolUse' };
+    process.stdout.write(`${JSON.stringify(formatHookResponse(oversizedEvent, {
+      decision: 'deny',
+      reason: 'APE binding canary may not call tools; return only the injected probe acknowledgement JSON',
+    }))}\n`);
+  } else {
+    process.stdout.write('{}\n');
+  }
+  process.exit(0);
+}
 
 // Corrupt-input project salvage (audit 1.13 nit 9): the fail-closed catch can
 // only consult the project the event NAMED if that name survives the parse
@@ -138,7 +386,124 @@ try {
   if (typeof input.project_dir === 'string' && input.project_dir) {
     salvagedProjectDir = input.project_dir;
   }
-  const event = normalizeLifecycleEvent(input);
+  let event = normalizeLifecycleEvent(input);
+  // Tool events may carry the child turn but omit agent_id. Recover identity
+  // only from a prior native SubagentStart observation of that exact turn,
+  // never from tool arguments, parent-turn equality, or a pending ticket.
+  if (event.host === 'codex' && event.event !== 'SubagentStart' && event.event !== 'SessionStart') {
+    try {
+      const candidate = await resolveCodexBootstrapCandidate(
+        runtimePaths(trustedCodexHookRoot(input)), input,
+      );
+      if (candidate) {
+        input = {
+          ...input,
+          session_id: candidate.parent_session_id,
+          agent_id: candidate.agent_id,
+          agent_type: candidate.agent_type,
+        };
+        event = normalizeLifecycleEvent(input);
+      }
+    } catch (error) {
+      if (!CANARY_ONLY && event.event === 'PreToolUse' && BOOTSTRAP_TOOL_PATTERN.test(event.tool_name)) {
+        // Record only a typed, exact-token rejection. Never call the binder
+        // from this failure path: candidate evidence could recover between
+        // reads, but this hook decision must remain a denial without context.
+        try {
+          const args = input.tool_input ?? input.toolInput ?? input.input ?? input.toolCall?.args ?? {};
+          const rejectionPaths = runtimePaths(event.project_dir);
+          if (typeof args.project_dir === 'string' &&
+              await realpath(args.project_dir) === await realpath(rejectionPaths.root) &&
+              await realpath(rejectionPaths.root) === await realpath(trustedCodexHookRoot(input))) {
+            await recordBindingProbeBootstrapRejection(rejectionPaths, input, 'bootstrap_candidate_invalid');
+          }
+        } catch { /* Diagnostic persistence never changes the failed-closed decision. */ }
+      }
+      // Generic native-child evidence still excludes main control-plane or
+      // stage authority, but is not evidence that an unrelated integration
+      // belongs to a canary. That wildcard scope needs exact canary proof.
+      // Candidate storage is independent of immutable canary quarantine. An
+      // explicit native parent/child pair may still identify a canary even
+      // when the candidate container itself cannot classify the caller.
+      let independentlyKnownCanary = false;
+      if (event.event === 'PreToolUse') {
+        try {
+          independentlyKnownCanary = await resolvesExactBindingProbeIdentity(
+            runtimePaths(trustedCodexHookRoot(input)), input,
+          );
+        } catch { /* No exact proof means no authority over unrelated integrations. */ }
+      }
+      const unrelatedRecovery = !independentlyKnownCanary && (
+        CANARY_ONLY || isExternalMcpTool(event.tool_name) ||
+        (error?.bootstrap_identity_known !== true &&
+          CONTROL_PLANE_TOOLS.test(event.tool_name) && !event.is_subagent && !event.ticket_id)
+      );
+      if (unrelatedRecovery) {
+        process.stdout.write('{}\n');
+        process.exit(0);
+      }
+      process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+        decision: 'deny', reason: 'APE native child identity evidence is unreadable; no bootstrap or stage authority was granted',
+      }))}\n`);
+      process.exit(0);
+    }
+  }
+
+  // A wildcard manifest arm invokes this deliberately tiny mode for every
+  // Codex PreToolUse event. It owns only exact, production-bound canary
+  // identities and otherwise returns neutral output without consulting the
+  // run, tree, ticket, or external-tool policy paths below.
+  if (CANARY_ONLY) {
+    let exactCanary = false;
+    if (event.host === 'codex' && event.event === 'PreToolUse') {
+      try {
+        exactCanary = await resolvesExactBindingProbeIdentity(
+          runtimePaths(trustedCodexHookRoot(input)),
+          input,
+        );
+      } catch {
+        // Corrupt/missing probe evidence has no authority over unrelated tools.
+      }
+    }
+    const admittedBootstrap = exactCanary && BOOTSTRAP_TOOL_PATTERN.test(event.tool_name) &&
+      await isCodexBootstrapReplay(runtimePaths(trustedCodexHookRoot(input)), input);
+    if (exactCanary && !admittedBootstrap) {
+      process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+        decision: 'deny',
+        reason: 'APE binding canary may not call tools; return only the injected probe acknowledgement JSON',
+      }))}\n`);
+    } else {
+      process.stdout.write('{}\n');
+    }
+    process.exit(0);
+  }
+
+  if (event.event === 'SessionStart') {
+    // Claude may put `agent_type` on a main session started with --agent, so an
+    // arbitrary type is not child evidence. APE's reserved `ape:*` types and a
+    // host-delivered ticket are authoritative worker signals, alongside the
+    // explicit child identity/flags. Worker ticket context still arrives at
+    // the SubagentStart boundary rather than through this orientation hook.
+    const sessionAgentType = input.agent_type ?? input.agentType;
+    const sessionIsSubagent = Boolean(
+      input.is_subagent ||
+      input.isSubagent ||
+      input.agent_id ||
+      input.agentId ||
+      input.subagent_id ||
+      input.subagentId ||
+      event.ticket_id ||
+      (typeof sessionAgentType === 'string' && sessionAgentType.startsWith('ape:'))
+    );
+    const guidance = await loadSessionGuidance(event.project_dir, {
+      host: event.host,
+      is_subagent: sessionIsSubagent,
+      source: input.source,
+      native_input: input,
+    });
+    process.stdout.write(`${JSON.stringify(formatSessionGuidanceResponse(guidance))}\n`);
+    process.exit(0);
+  }
 
   // The APE control-plane MCP tools (ape_run / ape_status / ape_config /
   // ape_history) are the
@@ -190,6 +555,24 @@ try {
   // explicit APE control-plane and receipt-validation names are excluded by
   // isExternalMcpTool and continue through their dedicated policy paths.
   if (isExternalMcpTool(event.tool_name)) {
+    // Defense in depth for direct/unfiltered hook invocation. Installed hosts
+    // enforce this through the canary-only wildcard arm above.
+    if (event.host === 'codex' && event.event === 'PreToolUse') {
+      try {
+        if (await resolvesExactBindingProbeIdentity(
+          runtimePaths(trustedCodexHookRoot(input)),
+          input,
+        )) {
+          process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+            decision: 'deny',
+            reason: 'APE binding canary may not call tools; return only the injected probe acknowledgement JSON',
+          }))}\n`);
+          process.exit(0);
+        }
+      } catch {
+        // Deliberately neutral for corrupt/nonmatching external integrations.
+      }
+    }
     // Neutral output is intentional. In particular, Claude's explicit
     // "allow" response can bypass the host's own permission prompt. APE is
     // stepping out of the decision entirely, not granting permission itself.
@@ -198,7 +581,56 @@ try {
   }
 
   const paths = runtimePaths(event.project_dir);
-  const state = await readJson(paths.active, null);
+  const state = await activeState(paths);
+  // Completed/aborted state is retained as sealed history and must not mask a
+  // newly prepared pre-run canary. Every other persisted status still owns
+  // production lifecycle authority; an old or concurrently prepared probe
+  // cannot intercept its launch, binding, or worker tool calls.
+  const productionRunActive = Boolean(state && !SEALED_STATUSES.has(state.status));
+
+  // ape_bind is the only pre-authority worker operation. The host hook owns
+  // identity validation, atomic claim, and context delivery; the MCP handler
+  // is only a capability-free confirmation read. This branch must precede
+  // ordinary canary denial and the production worker/control-plane policy.
+  if (BOOTSTRAP_TOOL_PATTERN.test(event.tool_name)) {
+    if (event.event !== 'PreToolUse') {
+      process.stdout.write('{}\n');
+      process.exit(0);
+    }
+    const args = input.tool_input ?? input.toolInput ?? input.input ?? input.toolCall?.args ?? {};
+    let sameRoot = false;
+    try {
+      sameRoot = typeof args.project_dir === 'string' &&
+        await realpath(args.project_dir) === await realpath(paths.root) &&
+        await realpath(paths.root) === await realpath(trustedCodexHookRoot(input));
+    } catch { /* The named project must exist and match native workspace authority. */ }
+    let binding = { valid: false, reason: 'APE bootstrap denied: native Codex child and exact governed project required' };
+    if (event.host === 'codex' && sameRoot) {
+      try {
+        const probeBinding = await bootstrapBindingProbe(paths, input);
+        binding = probeBinding.matched
+          ? probeBinding
+          : productionRunActive
+            ? await bootstrapCodexSubagent(paths, state, input)
+            : { valid: false, reason: 'APE bootstrap denied: no active authorized launch' };
+      } catch {
+        binding = { valid: false, reason: 'APE bootstrap denied: binding evidence validation failed' };
+      }
+    }
+    process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+      decision: binding.valid ? 'allow' : 'deny',
+      reason: binding.reason,
+      additional_context: binding.valid ? binding.additional_context : undefined,
+    }))}\n`);
+    process.exit(0);
+  }
+
+  if (event.host === 'codex' && event.event === 'SubagentStop') {
+    // A matching native stop is lifecycle evidence, not identity destruction:
+    // Codex can resume the same task later, so its one-way quarantine remains.
+    // This is bookkeeping only; production SubagentStop policy still runs.
+    await observeBindingProbeStop(paths, input).catch(() => {});
+  }
 
 
   let ticket = null;
@@ -226,7 +658,22 @@ try {
     isAgentDispatchTool(event.tool_name) &&
     isBindingProbeTaskName(requestedTaskName)
   ) {
-    const launch = await launchBindingProbe(paths, input);
+    let launch;
+    if (productionRunActive) {
+      launch = {
+        valid: false,
+        reason: 'APE binding probe launch denied: a production run is active',
+      };
+    } else {
+      try {
+        launch = await launchBindingProbe(paths, input);
+      } catch {
+        launch = {
+          valid: false,
+          reason: 'APE binding probe launch denied: probe state validation failed',
+        };
+      }
+    }
     process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
       decision: launch.valid ? 'allow' : 'deny',
       reason: launch.reason,
@@ -249,8 +696,17 @@ try {
     process.exit(0);
   }
   const lifecycleAgentType = input.agent_type ?? input.agentType ?? '';
-  if (event.host === 'codex' && event.event === 'SubagentStart') {
-    const probeBinding = await bindBindingProbe(paths, input);
+  if (event.host === 'codex' && event.event === 'SubagentStart' && !productionRunActive) {
+    let probeBinding;
+    try {
+      probeBinding = await bindBindingProbe(paths, input);
+    } catch {
+      probeBinding = {
+        matched: true,
+        valid: false,
+        reason: 'APE binding probe binding denied: probe state validation failed',
+      };
+    }
     if (probeBinding.matched) {
       process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
         decision: probeBinding.valid ? 'allow' : 'deny',
@@ -260,22 +716,63 @@ try {
       process.exit(0);
     }
   }
-  if (
-    event.host === 'codex' &&
-    event.event === 'PreToolUse' &&
-    await resolvesBindingProbeIdentity(paths, input)
-  ) {
-    process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
-      decision: 'deny',
-      reason: 'APE binding canary may not call tools; return only the injected probe acknowledgement JSON',
-    }))}\n`);
-    process.exit(0);
+  if (event.host === 'codex' && event.event === 'SubagentStart' && productionRunActive) {
+    // A probe canary is a resumable Codex task identity. Its exact pair stays
+    // quarantined after completion, expiry, replacement, and SubagentStop; it
+    // must never enter either the host-ticket compatibility seam or the
+    // production intent binder and consume a real worker's authority.
+    let exactCanary = false;
+    try {
+      exactCanary = await resolvesExactBindingProbeIdentity(paths, input);
+    } catch {
+      // A stale corrupt probe record cannot brick an unrelated active run.
+      // Runtime writes protect this evidence; only an exact readable pair has
+      // authority to deny production binding here.
+    }
+    if (exactCanary) {
+      process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+        decision: 'deny',
+        reason: 'APE binding canary may not bind a production ticket',
+      }))}\n`);
+      process.exit(0);
+    }
+  }
+  if (event.host === 'codex' && event.event === 'PreToolUse') {
+    let probeIdentity;
+    try {
+      probeIdentity = await resolvesBindingProbeIdentity(paths, input);
+    } catch {
+      if (!productionRunActive) {
+        process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+          decision: 'deny',
+          reason: 'APE binding canary tool call denied: probe identity state validation failed',
+        }))}\n`);
+        process.exit(0);
+      }
+      // A live production run resolves this identity against its own intent
+      // below. Only an exact, readable canary identity has probe authority;
+      // an unrelated corrupt stale record cannot brick the active run.
+      probeIdentity = false;
+    }
+    if (probeIdentity) {
+      process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+        decision: 'deny',
+        reason: 'APE binding canary may not call tools; return only the injected probe acknowledgement JSON',
+      }))}\n`);
+      process.exit(0);
+    }
   }
   // Backward-compatible host-delivered binding seam. New Codex launches use
   // the nonce reservation below; an explicit lifecycle ticket remains valid
   // for hosts that already attach one directly.
   if (state && event.host === 'codex' && event.event === 'SubagentStart' && event.ticket_id) {
     const binding = evaluateStartBinding(state, event);
+    await recordCodexSubagentStartOutcome(
+      paths,
+      state,
+      binding.valid ? 'accepted' : 'rejected',
+      binding.valid ? 'compatibility_ticket_accepted' : 'compatibility_ticket_rejected',
+    ).catch(() => {});
     process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
       decision: binding.valid ? 'allow' : 'deny',
       reason: binding.reason,
@@ -285,13 +782,26 @@ try {
   const codexHasLaunchedIntent =
     event.host === 'codex' && event.event === 'SubagentStart';
   if (
-    state &&
+    productionRunActive &&
     event.event === 'SubagentStart' &&
     (lifecycleAgentType.startsWith('ape:') || codexHasLaunchedIntent)
   ) {
-    const binding = event.host === 'codex'
-      ? await bindCodexSubagent(paths, state, input)
-      : await bindClaudeSubagent(paths, state, input);
+    let binding;
+    try {
+      binding = event.host === 'codex'
+        ? await bindCodexSubagent(paths, state, input)
+        : await bindClaudeSubagent(paths, state, input);
+    } catch (error) {
+      if (event.host === 'codex') {
+        await recordCodexSubagentStartOutcome(
+          paths,
+          state,
+          'error',
+          'unexpected_exception',
+        ).catch(() => {});
+      }
+      throw error;
+    }
     process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
       decision: binding.valid ? 'allow' : 'deny',
       reason: binding.reason,
@@ -424,6 +934,9 @@ try {
       ticket = state.tickets.find((entry) => entry.ticket_id === binding.ticket_id) ?? null;
       event.ticket_id = binding.ticket_id;
       event.ape_managed = true;
+      if (binding.evidence_unreadable === true) {
+        event.sealed_binding_evidence_unreadable = true;
+      }
     } else {
       event.ape_managed = lifecycleAgentType.startsWith('ape:') || event.host === 'codex';
     }
@@ -844,6 +1357,10 @@ try {
   });
   process.stdout.write(`${JSON.stringify(formatHookResponse(event, decision))}\n`);
 } catch (cause) {
+  if (CANARY_ONLY) {
+    process.stdout.write('{}\n');
+    process.exit(0);
+  }
   // The input may be unparseable (oversized or corrupt), so consult the
   // active run before deciding: failing closed is only meaningful while a
   // run can still write or resume. A project with no run in flight — or a
@@ -884,12 +1401,27 @@ try {
   // a run-holding env/cwd root, so for every input this path is at least as
   // strict as env/cwd-only resolution — stricter, never looser. The Set
   // dedupes: with nothing salvaged, event.project_dir IS the env/cwd root.
-  const candidateRoots = new Set([resolveGovernedRoot(), event.project_dir]);
+  let streamedProjectRoot = null;
+  if (Object.keys(streamedTopLevel).length > 0) {
+    try {
+      // The bounded scanner preserves the same top-level Codex root channels
+      // as the parseable path. Add this candidate monotonically; never let it
+      // replace the environment/cwd root already consulted below.
+      streamedProjectRoot = trustedCodexHookRoot(streamedTopLevel);
+    } catch {
+      // An unusable streamed root has no authority to remove another root.
+    }
+  }
+  const candidateRoots = new Set([
+    resolveGovernedRoot(),
+    event.project_dir,
+    ...(streamedProjectRoot ? [streamedProjectRoot] : []),
+  ]);
   let decision = null;
   try {
     let liveRun = false;
     for (const candidate of candidateRoots) {
-      const state = await readJson(runtimePaths(candidate).active, null);
+      const state = await activeState(runtimePaths(candidate));
       if (state && state.status !== 'completed' && state.status !== 'aborted') {
         liveRun = true;
         break;

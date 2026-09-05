@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { emptyOrchestrationTelemetry } from '../lib/runtime/orchestration-telemetry.js';
 import { readDispatchReceiptAttestation } from '../lib/runtime/claude-dispatch.js';
+import { codexBootstrapOrientation } from '../lib/runtime/codex-bootstrap.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { receiptOutputSchemaForTicket } from '../lib/runtime/receipt-validator.js';
 import { normalizeReceiptInput, receiptInputHash } from '../lib/runtime/receipt-input.js';
@@ -172,7 +173,11 @@ async function fixture(host = 'codex', options = {}) {
       },
     },
   });
-  const createdAt = new Date(Date.now() - 1_000).toISOString();
+  const createdAt = new Date(Math.min(
+    Date.now() - 1_000,
+    Date.parse(ticket.deadline_at) - 1_000,
+    options.agent_stopped_at ? Date.parse(options.agent_stopped_at) - 1_000 : Infinity,
+  )).toISOString();
   const state = {
     run_id: runId,
     status: 'running',
@@ -250,13 +255,25 @@ async function fixture(host = 'codex', options = {}) {
       ticket_id: ticketId,
       ticket_hash: ticket.ticket_hash,
       agent_type: role,
+      parent_session_id: 'session-1',
+      tool_use_id: 'spawn-worker-1',
+      requested_model: ticket.model.model,
       ...(host === 'codex'
-        ? { binding_agent_type: 'default', bound_session_id: 'session-1' }
-        : { parent_session_id: 'session-1' }),
+        ? {
+            binding_agent_type: 'default',
+            bound_session_id: 'session-1',
+            launch_name_hash: rawDigest('fixture-worker-launch'),
+          }
+        : { nonce_hash: rawDigest('fixture-worker-launch') }),
       status: 'bound',
       bound_agent_id: 'agent-1',
       capability_hash: rawDigest(capability),
       prepared_at: createdAt,
+      launched_at: createdAt,
+      launch_expires_at: new Date(Math.min(
+        Date.parse(createdAt) + 60_000,
+        Date.parse(ticket.deadline_at),
+      )).toISOString(),
       bound_at: createdAt,
       ...(options.agent_stopped_at
         ? { agent_stopped_at: options.agent_stopped_at }
@@ -1164,6 +1181,24 @@ describe('live receipt contract integration', () => {
     expect(taskTransactions.filter((name) => name.endsWith('.json'))).toHaveLength(1);
   });
 
+  it('preserves recover-receipt validation when a task operation omits recovery fields', async () => {
+    const value = await fixture('codex', { agent_stopped_at: new Date().toISOString() });
+    const result = await executeApeRunTaskOperation(value.directory, {
+      operationId: `op-${'O'.repeat(43)}`,
+      action: 'recover-receipt',
+      expectedRunId: value.state.run_id,
+      request: {
+        action: 'recover-receipt',
+        receipt: draft(value.ticket, value.capability),
+      },
+    });
+
+    expect(result).toEqual({
+      task_tool_error: 'recover-receipt requires a nonblank audit reason',
+    });
+    expect(result.task_tool_error).not.toMatch(/unsupported undefined data/iu);
+  });
+
   it('fails operator recovery closed on a wrong hash, live worker, invalid draft, or missing reason', async () => {
     const value = await fixture();
     const exactDraft = draft(value.ticket, value.capability);
@@ -1903,20 +1938,52 @@ describe('live receipt contract integration', () => {
       launch_attempts: 0,
     });
 
-    const prepared = await readJson(intentFile, null);
-    await atomicWriteJson(intentFile, {
-      ...prepared,
-      status: 'bound',
-      binding_agent_type: 'default',
-      bound_session_id: 'session-2',
-      bound_agent_id: 'agent-2',
-      capability_hash: rawDigest(value.capability),
-      bound_at: new Date().toISOString(),
-    });
+    // Advance the replacement through the production launch/bind seam. A
+    // direct status rewrite would omit the durable launch-generation ancestry.
+    const [launch] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'PreToolUse',
+      project_dir: value.directory,
+      session_id: 'recovery-parent-session',
+      turn_id: 'recovery-parent-turn',
+      tool_use_id: 'spawn-recovery-worker',
+      tool_name: 'collaborationspawn_agent',
+      tool_input: {
+        ...dispatch.dispatch.spawn_args,
+        message: 'gAAAAABencrypted-v2-message',
+      },
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    expect(launch).toEqual({});
+    const [start] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'SubagentStart',
+      project_dir: value.directory,
+      session_id: 'recovery-parent-session',
+      turn_id: 'recovery-child-turn',
+      agent_id: 'agent-2',
+      agent_type: 'default',
+      model: dispatch.dispatch.model.model,
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    expect(start.hookSpecificOutput?.additionalContext).toBe(codexBootstrapOrientation());
+    expect(await readJson(intentFile, null)).toMatchObject({ status: 'launched' });
+    const [bootstrap] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'PreToolUse',
+      project_dir: value.directory,
+      session_id: 'recovery-parent-session',
+      turn_id: 'recovery-child-turn',
+      tool_use_id: 'bootstrap-recovery-worker',
+      tool_name: 'ape_bind',
+      tool_input: dispatch.dispatch.bootstrap_args,
+      model: dispatch.dispatch.model.model,
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    const context = bootstrap.hookSpecificOutput?.additionalContext ?? '';
+    const recoveryCapability = /APE_RECEIPT_CAPABILITY=([A-Za-z0-9_-]{32,256})/.exec(context)?.[1];
+    expect(recoveryCapability).toBeTruthy();
     const secondStop = (status) => ({
       ...stop(status),
-      session_id: 'session-2',
+      session_id: 'recovery-parent-session',
+      turn_id: 'recovery-child-turn',
+      model: dispatch.dispatch.model.model,
       agent_id: 'agent-2',
+      last_assistant_message: JSON.stringify(draft(value.ticket, recoveryCapability, status)),
     });
     for (const status of ['invalid-four', 'invalid-five']) {
       const [response] = await runProcess(
@@ -1935,7 +2002,7 @@ describe('live receipt contract integration', () => {
     expect(finalStop).toEqual({});
     const terminalRecord = await recordReceipt(
       value.directory,
-      draft(value.ticket, value.capability, 'invalid-six'),
+      draft(value.ticket, recoveryCapability, 'invalid-six'),
     );
     expect(terminalRecord).toMatchObject({
       ok: false,
@@ -2036,6 +2103,7 @@ describe('live receipt contract integration', () => {
       hook_event_name: 'PreToolUse',
       project_dir: value.directory,
       session_id: 'recovery-parent-session',
+      turn_id: 'recovery-parent-turn',
       tool_use_id: 'spawn-recovery-worker',
       tool_name: 'collaborationspawn_agent',
       tool_input: {
@@ -2047,17 +2115,33 @@ describe('live receipt contract integration', () => {
     const [start] = await runProcess('bin/ape-hook.mjs', {
       hook_event_name: 'SubagentStart',
       project_dir: value.directory,
-      session_id: 'session-2',
+      session_id: 'recovery-parent-session',
+      turn_id: 'recovery-child-turn',
       agent_id: 'agent-2',
       agent_type: 'default',
+      model: recoveryDispatch.dispatch.model.model,
     }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
-    const context = start.hookSpecificOutput?.additionalContext ?? '';
+    expect(start.hookSpecificOutput?.additionalContext).toBe(codexBootstrapOrientation());
+    expect(await readJson(intentFile, null)).toMatchObject({ status: 'launched' });
+    const [bootstrap] = await runProcess('bin/ape-hook.mjs', {
+      hook_event_name: 'PreToolUse',
+      project_dir: value.directory,
+      session_id: 'recovery-parent-session',
+      turn_id: 'recovery-child-turn',
+      tool_use_id: 'bootstrap-recovery-worker',
+      tool_name: 'ape_bind',
+      tool_input: recoveryDispatch.dispatch.bootstrap_args,
+      model: recoveryDispatch.dispatch.model.model,
+    }, { APE_HOST: 'codex', CODEX_CWD: value.directory });
+    const context = bootstrap.hookSpecificOutput?.additionalContext ?? '';
     const recoveryCapability = /APE_RECEIPT_CAPABILITY=([A-Za-z0-9_-]{32,256})/.exec(context)?.[1];
     expect(recoveryCapability).toBeTruthy();
 
     const secondStop = (status) => ({
       ...firstStop(status),
-      session_id: 'session-2',
+      session_id: 'recovery-parent-session',
+      turn_id: 'recovery-child-turn',
+      model: recoveryDispatch.dispatch.model.model,
       agent_id: 'agent-2',
       last_assistant_message: JSON.stringify(
         draft(value.ticket, recoveryCapability, status),

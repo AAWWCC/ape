@@ -4,7 +4,7 @@ import { access, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bindClaudeSubagent, launchClaudeIntent } from '../lib/runtime/claude-dispatch.js';
 import { acquireRunLock, inspectRunLock } from '../lib/runtime/lock.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
@@ -30,9 +30,26 @@ import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const WRONG_RUN_ID = 'run-not-the-active-run-00000000';
+const activeReadFault = vi.hoisted(() => ({ path: null, fired: false }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    open: async (...args) => {
+      if (args[0] === activeReadFault.path) {
+        activeReadFault.fired = true;
+        throw Object.assign(new Error('injected active-state device read failure'), { code: 'EIO' });
+      }
+      return actual.open(...args);
+    },
+  };
+});
 
 const cleanups = [];
 afterEach(async () => {
+  activeReadFault.path = null;
+  activeReadFault.fired = false;
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -57,7 +74,7 @@ async function project() {
   git(dir, 'commit', '-qm', 'baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { full: 'node --test', targeted_template: 'node --test {paths}' },
   });
   return dir;
 }
@@ -383,17 +400,20 @@ describe('APE v2 aimable override reset (blocked run)', () => {
   it('C2: overrideRun still throws (never returns ok:false) on a genuine non-corrupt read fault, even when aimed', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
-    // A directory where active.json should be: readJson raises a plain
-    // EISDIR, which activeState propagates WITHOUT the APE_CORRUPT_ACTIVE_STATE
-    // tag (only a JSON.parse SyntaxError earns that tag) — a genuine I/O
-    // fault, not a diagnosable corrupt-state condition. An aim check placed
-    // ahead of this rethrow would wrongly convert it into an untruthful
-    // ok:false.
-    await mkdir(paths.active, { recursive: true });
+    // A directory or FIFO is now a diagnosed unsafe-state entry, so it does
+    // not represent a non-corrupt read failure. Inject EIO while opening an
+    // otherwise valid regular file: the aim guard must propagate the device
+    // fault without converting it into a corrupt-state recovery refusal.
+    await atomicWriteJson(paths.active, blockedState('run-io-fault'));
+    const before = readFileSync(paths.active, 'utf8');
+    activeReadFault.path = paths.active;
 
     await expect(
       overrideRun(dir, 'reset', 'aimed at a real I/O fault', 'run-aimed-at-a-fault'),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ code: 'EIO', message: 'injected active-state device read failure' });
+    expect(activeReadFault.fired).toBe(true);
+    expect(readFileSync(paths.active, 'utf8')).toBe(before);
+    expect(overrideLines(paths)).toHaveLength(0);
   });
 
   it('C1: an aimed reset against an orphaned lock (no active run) refuses and names the aimed id and the unaimed retry', async () => {

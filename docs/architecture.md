@@ -1,136 +1,114 @@
 # Architecture
 
-APE has a deterministic core and thin host adapters.
+APE separates decisions from effects. The scheduler chooses the next action; services perform
+I/O; host adapters launch native agents.
 
 ```text
 skill / MCP call
       ↓
 service (I/O and effects)
       ↓
-scheduler (pure state + event → actions)
+scheduler (state + event → actions)
       ↓
 Claude Agent tool or Codex native subagent
 ```
 
-The four long-standing runtime entry modules are compatibility facades. They contain direct
-re-exports while the domain modules own the implementations:
+Four public entry modules re-export the implementation modules:
 
-- `service.js` exports lifecycle orchestration from `lifecycle-service.js`, receipt admission and
-  finalization from `receipt-service.js`, and service-facing queries from `status-service.js`.
-  `lifecycle-service.js` consumes the receipt and status services; `history.js` remains the
-  lower-level immutable history store.
-- `hooks.js` exports evidence-command rules from `evidence-policy.js`, write and tree rules from
-  `write-policy.js`, lifecycle/binding rules from `lifecycle-policy.js`, and test-path classifiers
-  directly from `path-scope.js`.
-- `gates.js` exports pure gate decisions from `gate-evaluation.js`, detached-suite observation
-  from `gate-watch.js`, and guarded GitHub operations from `github-shipping.js`.
-  Watch and shipping code may consume gate evaluation; gate evaluation does not depend on either.
-- `scheduler.js` exports the deterministic reducer from `reducer.js` and bounded review evidence
-  from `review-evidence.js`. The reducer consumes that one review-evidence API.
+| Entry module | Implementation owners |
+| --- | --- |
+| `service.js` | `lifecycle-service.js` for orchestration; `receipt-service.js` for receipt processing; `status-service.js` for queries. |
+| `hooks.js` | `evidence-policy.js` for commands; `write-policy.js` for writes; `lifecycle-policy.js` for binding; `path-scope.js` for test paths. |
+| `gates.js` | `gate-evaluation.js` for decisions; `gate-watch.js` for detached suites; `github-shipping.js` for GitHub effects. |
+| `scheduler.js` | `reducer.js` for transitions; `review-evidence.js` for bounded review data. |
 
-Service code continues to import `gates.js` intentionally. That facade is the established test and
-host substitution seam even though the physical gate implementations live behind it. Adapters
-translate only role/model policy and dispatch shape; they do not make scheduling decisions.
+Lifecycle services use receipt and status services; `history.js` owns terminal history. Gate
+watchers and shipping may use gate evaluation, never the reverse. Service code imports `gates.js`
+so tests and hosts can replace that interface. Adapters translate dispatches, not policy.
 
 ## State
 
-Project state lives under `.ape/runtime/`:
+Project state lives under `.ape/runtime/`. Do not edit it by hand.
 
 | Path | Purpose |
 | --- | --- |
-| `active.json` / `active.lock` | The single active run and its exclusive lock. |
-| `runs/<id>.json` | Full mutable/sealed run snapshots. |
+| `active.json` / `active.lock` | One active run and its exclusive lock. |
+| `runs/<id>.json` | Mutable or sealed run snapshots. |
 | `tickets/` / `receipts/` | Immutable stage contracts and results. |
-| `receipt-transactions/` | Idempotency records for receipt effects. |
+| `receipt-transactions/` | Records that prevent receipt effects from running twice. |
 | `dispatch-intents/` | Single-use launch and receipt capabilities. |
 | `history/<id>.json` | Immutable terminal history. |
-| `artifact-archives/` | Verified gzip archives of redundant old artifacts. |
+| `artifact-archives/` | Verified gzip archives of older redundant artifacts. |
 | `requirement-index.json` | Requirement-to-run completion index. |
-| `roadmap.json` | Optional audited project roadmap; statuses are derived, not stored. |
-| `roadmap-mutation.json` | Bounded exact-once journal for the latest roadmap mutation. |
-| `suite-cache.json` | Passing suite results keyed by tree and resolved command. |
-| `status.md` | Human-readable projection of the active run. |
-| `overrides.ndjson` | Append-only audit log for override-class operations. |
+| `roadmap.json` | Optional roadmap; statuses are calculated from evidence. |
+| `roadmap-mutation.json` | Journal for the latest roadmap change. |
+| `suite-cache.json` | Passing suites keyed by tree and resolved command. |
+| `status.md` | Human-readable active-run status. |
+| `overrides.ndjson` | Append-only override audit. |
 
-Writes use same-directory temporary files, `fsync`, and rename. Lock and receipt-effect mutations
-are serialized. Roadmap mutations persist a before/after-hash journal, then the store, then a
-mutation-ID-deduplicated override audit; recovery refuses divergent durable state. Tickets and
-receipts are run-, tree-, role-, and capability-bound.
+Writes use same-directory temporary files, `fsync`, and rename. Locks serialize state and receipt
+effects. Tickets and receipts bind the run, tree, role, and capability.
 
-The roadmap remains optional. When present, registration validates the complete prospective live
-dependency graph and accepted-receipt provenance. Run start and completed archival recheck that
-every dependency of a roadmap-backed requirement is currently `satisfied`; ordinary requirement
-IDs and roadmap-less projects retain their existing path.
+Roadmap changes journal the before/after hashes before updating the store and audit. Recovery
+rejects conflicting records. Registration validates the dependency graph and receipt provenance.
+Run start and completed archival recheck that dependencies are `satisfied`. Projects without a
+roadmap do not need one.
 
 ## Terminal state and retention
 
-`completed`, `blocked`, and `aborted` are terminal for ordinary scheduling. A blocked run can still
-leave through an audited recovery action; completed and aborted runs are sealed. Every terminal
-transition is written to immutable history. Recovery that later completes a blocked run creates an
-effective superseding record rather than mutating old history.
+`completed`, `blocked`, and `aborted` stop ordinary scheduling. Completed and aborted runs are
+sealed. A blocked run may allow an audited recovery action. Its later completion adds a
+superseding record; it never rewrites the original history.
 
-After history is durable, best-effort retention keeps recent and active artifacts directly
-addressable and can archive older snapshots, tickets, receipts, and committed transactions.
-Archives are re-read and hash-verified before matching source files are removed. History, audit
-logs, prepared transactions, changed files, and active/sealed run data are retained. Use
-`ape_history maintenance-status` to inspect the last sweep and `compact-artifacts` for an audited,
-bounded catch-up.
+Once history is durable, retention may archive old snapshots, tickets, receipts, and committed
+transactions. Archives are re-read and hash-checked before matching originals are removed.
+History, audits, prepared transactions, changed files, and active/sealed state remain available.
+Use `ape_history maintenance-status` to inspect retention or `compact-artifacts` for an audited,
+bounded cleanup.
 
 ## Loaded bundles
 
-Installed hosts execute the bundles they loaded from `dist/`, not live source modules. Rebuilding
-this repository does not update an already-running MCP process or hook.
+Hosts run the bundles they loaded from `dist/`, not the current source. A rebuild alone does not
+update a running process.
 
-- With a cached install, rebuild/reinstall and start a new host task.
-- With the plugin loaded directly from the checkout, rebuild and restart the MCP server/session.
+- Cached plugin: rebuild, explicitly reinstall, then start a new host task.
+- Checkout-loaded plugin: rebuild, then restart the MCP server/session.
 
-`ape_config doctor` reports `bundle-drift` when the checkout and executing bundle differ. Its
-`loaded-module-drift` check can compare a loaded bundle stamp when the current process actually
-loaded that candidate. Source execution cannot claim that same proof, so the check reports its
-limit instead of inferring freshness.
+`ape_config doctor` reports `bundle-drift` between the checkout and executing bundle.
+`loaded-module-drift` checks an actual loaded bundle stamp when available. Running source cannot
+prove which bundle another process loaded.
 
 ## Bundle reachability
 
-The shipped artifacts are built from:
+| Entry point | Bundle |
+| --- | --- |
+| `bin/ape-mcp.mjs` | `dist/ape-mcp.bundle.mjs` |
+| `bin/ape-hook.mjs` | `dist/ape-hooks.bundle.mjs` |
+| `bin/ape-larp.mjs` | `dist/ape-larp.bundle.mjs` |
 
-- `bin/ape-mcp.mjs` → `dist/ape-mcp.bundle.mjs`
-- `bin/ape-hook.mjs` → `dist/ape-hooks.bundle.mjs`
-- `bin/ape-larp.mjs` → `dist/ape-larp.bundle.mjs`
-
-Do not infer reachability by grepping minified bundles; tree-shaking can remove names while keeping
-behavior. Use:
+Check whether a source module reaches a bundle with:
 
 ```bash
 npm run bundle:reach -- lib/runtime/runner.js
 ```
 
-The command uses esbuild metadata. For example, `lib/runtime/runner.js` now contributes to all three
-bundles: MCP execution and LARP use it directly, while the hooks bundle reaches its exact command
-renderer through the shared receipt-capability manifest kernel.
+This uses esbuild metadata. Searching minified text is unreliable because tree-shaking changes
+names. Release validation checks each required implementation module, then copies the three
+bundles into both host packages.
 
-Release validation checks every declared domain owner through this metadata, then copies the three
-root bundles into both plugin distributions. This proves that the owners required by an entry
-point are actually reachable without relying on symbol names surviving tree-shaking.
-
-The lane classifier treats the generated copies under `plugins/<host>/dist/` and staged
-`release/generated/` output as mechanical while keeping unrelated nested `dist`/`build` source
-trees behavioral. This makes release/package regeneration schedulable without broadening the
-generated-path exception across a monorepo.
+The lane classifier treats generated `plugins/<host>/dist/` and `release/generated/` files as
+mechanical. It does not give unrelated nested `dist` or `build` directories that exception.
 
 ## Trust boundary
 
-The model proposes work and returns receipt drafts. The runtime independently supplies or verifies
-identity, ticket capability, paths, tree hashes, test observations, receipt hashes, stage
-transitions, and merge gates. Agent text never grants authority. External MCP permissions remain
-with the host and operator rather than APE.
+Agents propose work and return receipt drafts. The runtime checks identity, capabilities, paths,
+tree hashes, test results, receipt hashes, transitions, and gates. Agent text grants no authority;
+external MCP permissions remain with the host and operator.
 
-Lifecycle hooks enforce this boundary at tool time for APE-owned shell, filesystem-write, agent-
-dispatch, control-plane, and receipt-validation surfaces. On those surfaces, main-session control-
-plane calls remain available while a bound child may act only within its immutable ticket, and
-unknown or ambiguous write/execute paths fail closed during an active run. External MCP calls defer
-to the host; APE still reconciles resulting repository changes at agent and receipt boundaries.
+Hooks enforce ticket rules on APE-owned shell, write, dispatch, control, and receipt tools. Bound
+children cannot use parent control operations or ambiguous write/execute paths. External MCP calls
+still use host permissions; APE checks their repository effects at worker and receipt boundaries.
 
-Shipping truth and local checkout hygiene are separate. `github-shipping.js` proves the exact
-pushed head and remote merge before completion; `receipt-service.js` then reconciles the local
-checkout and persists `returned`, `retained_dirty`, or `retained_error`. A local worktree ownership
-conflict can therefore be retried without changing immutable remote-merge provenance.
+Remote completion and local cleanup are separate. `github-shipping.js` proves the exact pushed
+head was merged. `receipt-service.js` records cleanup as `returned`, `retained_dirty`, or
+`retained_error`. A local worktree conflict does not undo a proven merge.

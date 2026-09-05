@@ -40,10 +40,12 @@ import {
   listOwnedTasks,
   requestTaskCancellation,
 } from '../lib/runtime/task-store.js';
-import { resolveGovernedRoot } from '../lib/runtime/paths.js';
+import { resolveGovernedRoot, runtimePaths } from '../lib/runtime/paths.js';
+import { codexBootstrapStatus } from '../lib/runtime/claude-dispatch.js';
 import { projectHistoryResponse, projectRunResponse } from '../lib/runtime/projection.js';
+import { attachRuntimeGuidance } from '../lib/runtime/session-guidance.js';
 import { LANES } from '../lib/runtime/constants.js';
-import { START_MODES } from '../lib/runtime/schemas.js';
+import { ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA, START_MODES } from '../lib/runtime/schemas.js';
 import { TERMINAL_REASON_CODES } from '../lib/runtime/terminal-telemetry.js';
 import { STRUCTURED_SUCCESSOR_UNAVAILABLE_ERROR } from '../lib/runtime/successor-guidance.js';
 
@@ -67,7 +69,7 @@ const resolveMcpRoot = (explicitDir = null) => resolveGovernedRoot({ explicitDir
 const TOOLS = Object.freeze([
   {
     name: 'ape_run',
-    description: 'Start and advance the deterministic APE runtime. One explicit invocation authorizes the complete scheduler-owned run through stages, corrections, replans, gates, waits, and configured automatic shipping; callers must not ask for continue or separate auto-merge consent between those transitions. Preview and start require the same complete prospective run facts, including objective and host; only action differs. For a Codex probe, the first call must include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. Codex start is fail-closed until probe, native canary launch, probe-status, and probe-ack prove live child binding; the completed proof is consumed exactly once before Git mutation.',
+    description: 'Start and advance the deterministic APE runtime. One explicit invocation authorizes the complete scheduler-owned run through stages, corrections, replans, gates, waits, and configured automatic shipping; callers must not ask for continue or separate auto-merge consent between those transitions. Preview and start require the same complete prospective run facts, including objective and host; start additionally requires expected_admission_digest copied from the ready preview. For a Codex probe, the first call must include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. Pass the returned dispatch.spawn_args to native spawn_agent unchanged; a repeated probe re-emits the same prepared envelope after a lost response. Codex start is fail-closed until probe, native canary launch, probe-status, and probe-ack prove live child binding; the completed proof is consumed exactly once before Git mutation.',
     inputSchema: {
       type: 'object',
       required: ['action'],
@@ -80,11 +82,36 @@ const TOOLS = Object.freeze([
           then: { required: ['objective', 'host'] },
         },
         {
+          if: { properties: { action: { const: 'start' } }, required: ['action'] },
+          then: { required: ['expected_admission_digest'] },
+        },
+        {
+          if: { properties: { action: { const: 'record' } }, required: ['action'] },
+          then: { required: ['receipt'] },
+        },
+        {
           if: {
             properties: { action: { const: 'recover-receipt' } },
             required: ['action'],
           },
           then: { required: ['receipt', 'receipt_input_hash', 'reason'] },
+        },
+        {
+          if: {
+            properties: { action: { const: 'answer-preflight' } },
+            required: ['action'],
+          },
+          then: {
+            required: ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.required,
+            properties: ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.properties,
+          },
+        },
+        {
+          if: {
+            properties: { action: { enum: ['ship', 'expire-dispatch', 'abort', 'override'] } },
+            required: ['action'],
+          },
+          then: { required: ['reason'] },
         },
         {
           if: {
@@ -98,7 +125,7 @@ const TOOLS = Object.freeze([
         action: {
           type: 'string',
           enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'recover-receipt', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'],
-          description: 'Preview and start require identical complete prospective facts, including objective and host; only action differs. Structured successor starts are unavailable because current host hooks do not authenticate human provenance; after explicit operator direction recover a blocked run with audited override reset, then start an ordinary fresh run. recover-receipt is the reason-audited emergency path for the exact draft of a host-observed stopped worker when normal worker attestation is unavailable. For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
+          description: 'Preview and start require identical complete prospective facts, including objective and host; start additionally requires the ready preview admission_digest as expected_admission_digest. Structured successor starts are unavailable because current host hooks do not authenticate human provenance; after explicit operator direction recover a blocked run with audited override reset, then start an ordinary fresh run. recover-receipt is the reason-audited emergency path for the exact draft of a host-observed stopped worker when normal worker attestation is unavailable. For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
         },
         project_dir: {
           type: 'string',
@@ -107,6 +134,10 @@ const TOOLS = Object.freeze([
         objective: {
           type: 'string',
           description: 'Observable outcome and acceptance criteria. Do not embed execution budgets or guessed lane durations; preview reports the runtime-owned ticket deadline separately.',
+        },
+        expected_admission_digest: {
+          type: 'string', pattern: '^[a-f0-9]{64}$',
+          description: 'For start, copy admission_digest from a ready preview of these identical inputs. Start recomputes it before mutation. It confirms reviewed inputs, not human authorization.',
         },
         mode: { type: 'string', enum: [...START_MODES] },
         lane: {
@@ -258,12 +289,26 @@ const TOOLS = Object.freeze([
         reason: {
           type: 'string',
           minLength: 1,
-          description: 'Nonblank bounded audit reason for reason-audited actions.',
+          pattern: '\\S',
+          description: 'Required nonblank bounded audit reason for recover-receipt, answer-preflight, ship, expire-dispatch, abort, and override.',
         },
         run_id: {
           type: 'string',
-          description: 'Optional CONFIRMATION for the abort/override levers only (roadmap id abort-cannot-be-aimed) — never a selector, since at most one run is ever active. Key-absent is unaimed and byte-identical to today. A value matching the active run proceeds exactly as today; one that does not, refuses fail-closed before any effect and names both ids. An explicit null is an INVALID AIM, not an omission, and is refused the same way. Corrupt/schema-invalid active.json and an aimed override reset against an orphaned lock cannot be confirmed and always refuse when aimed — retry without run_id. Sending run_id on any action other than abort/override is rejected before the action runs.',
+          description: 'Optional exact-active-run CONFIRMATION for answer-preflight, abort, and override (roadmap id abort-cannot-be-aimed) — never a selector, since at most one run is ever active. Key-absent is unaimed and byte-identical to today. A matching value proceeds; a mismatch refuses fail-closed before any effect and names both ids. answer-preflight may use it to reject a stale answer submission against a newer active run. An explicit null is an INVALID AIM, not an omission. Corrupt/schema-invalid active.json and an aimed override reset against an orphaned lock cannot be confirmed and always refuse when aimed — retry without run_id. Sending run_id on any other action is rejected before the action runs.',
         },
+      },
+    },
+  },
+  {
+    name: 'ape_bind',
+    description: 'Native Codex child bootstrap only. Before any stage work, call with the exact bootstrap_capability from the returned native launch message. Authoritative ticket/probe context is expected to be absent before this call; check for it only after the call returns. Trusted host hooks—not this MCP handler—bind the native child and inject its authoritative ticket context. This tool returns only a capability-free confirmation. A successful tool result without complete trusted hook context does not authorize work. Parents must not call this tool or supply child identities.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['project_dir', 'bootstrap_capability'],
+      properties: {
+        project_dir: { type: 'string', minLength: 1, description: 'Exact governed project root from the native bootstrap message.' },
+        bootstrap_capability: { type: 'string', minLength: 32, maxLength: 256, pattern: '^[A-Za-z0-9_-]+$', description: 'Exact one-time bootstrap capability. Never include this bearer in logs, status, or final prose.' },
       },
     },
   },
@@ -438,20 +483,6 @@ const TOOLS = Object.freeze([
           items: { type: 'string' },
           description: 'init apply only: the exact discovered package-script IDs the operator explicitly accepts as evidence commands.',
         },
-        apply_agents: {
-          type: 'boolean',
-          description: 'init only: explicitly apply the separately proposed managed APE orientation block using the proposal hash and target path.',
-        },
-        agents_path: {
-          type: 'string',
-          enum: ['AGENTS.md', 'AGENTS.override.md'],
-          description: 'init apply_agents only: exact effective instruction file from the proposal.',
-        },
-        agents_expected_hash: {
-          type: 'string',
-          pattern: '^[0-9a-fA-F]{64}$',
-          description: 'init apply_agents only: compare-and-swap source hash returned by the proposal.',
-        },
       },
     },
   },
@@ -503,7 +534,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.24.10' };
+    return { name: 'ape', version: '2.24.11' };
   }
 }
 
@@ -601,6 +632,14 @@ function taskWireProjection(task) {
 
 function assertRunCommandProfilesAction(input) {
   const action = input.action;
+  if (action === 'record' && (!input.receipt || typeof input.receipt !== 'object' || Array.isArray(input.receipt))) {
+    throw new Error('record requires a receipt object from the authenticated worker; legacy tool_output is not a receipt and the parent must not reconstruct one');
+  }
+  if (action === 'answer-preflight') {
+    const allowed = new Set(['action', 'project_dir', ...Object.keys(ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.properties)]);
+    const extras = Object.keys(input).filter((key) => !allowed.has(key));
+    if (extras.length) throw new Error(`answer-preflight has unknown or subtractive fields: ${extras.join(', ')}`);
+  }
   if (
     input.run_command_profiles !== undefined &&
     action !== 'preview' && action !== 'start'
@@ -616,18 +655,20 @@ async function dispatchApeRun(projectDir, input) {
   }
   assertRunCommandProfilesAction(input);
   if (action === 'answer-preflight') {
-    return projectRunResponse(await answerPreflight(projectDir, {
+    return answerPreflight(projectDir, {
       ...(input.run_id !== undefined ? { run_id: input.run_id } : {}),
-      reason: input.reason,
-      preflight_hash: input.preflight_hash,
-      answers: input.answers,
+      ...(input.reason !== undefined ? { reason: input.reason } : {}),
+      ...(input.preflight_hash !== undefined ? { preflight_hash: input.preflight_hash } : {}),
+      ...(input.answers !== undefined ? { answers: input.answers } : {}),
       ...(input.claimed_paths !== undefined ? { claimed_paths: input.claimed_paths } : {}),
       ...(input.test_paths !== undefined ? { test_paths: input.test_paths } : {}),
       ...(input.risk_triggers !== undefined ? { risk_triggers: input.risk_triggers } : {}),
-    }));
+    });
   }
-  // Misroute guard (C4, roadmap id abort-cannot-be-aimed): run_id confirms
-  // the abort/override levers only. Every arm below (start, next, record,
+  // Misroute guard (C4, roadmap id abort-cannot-be-aimed): answer-preflight
+  // consumes its optional exact-run confirmation in the early arm above. For
+  // the remaining arms, run_id confirms the abort/override levers only. Every
+  // arm below (start, next, record,
   // status, resume, regate, ship, expire-dispatch) RETURNS from inside its
   // own branch, all of them ahead of abort's own operation guard — so a
   // run_id guard placed where that operation guard sits would be dead code
@@ -637,7 +678,7 @@ async function dispatchApeRun(projectDir, input) {
   // `!== undefined` so an explicit `run_id: null` on start/next also throws,
   // consistent with the decided null semantics (null is never an omission).
   if (input.run_id !== undefined && action !== 'abort' && action !== 'override') {
-    throw new Error(`action '${action}' does not take a run_id; run_id is a confirmation for actions 'abort'/'override' only, sent to action '${action}'`);
+    throw new Error(`action '${action}' does not take a run_id; run_id confirmation is accepted by 'answer-preflight', 'abort', and 'override', not action '${action}'`);
   }
   if (action === 'probe') {
     return prepareNativeBindingProbe(projectDir, {
@@ -680,6 +721,7 @@ async function dispatchApeRun(projectDir, input) {
       explicit_invocation: input.explicit_invocation ?? false,
       binding_protocol: 'native-v1',
       capability_contract_required: true,
+      admission_contract_version: 1,
       required_capabilities: input.required_capabilities ?? [],
       run_command_profiles: input.run_command_profiles ?? [],
     });
@@ -712,6 +754,8 @@ async function dispatchApeRun(projectDir, input) {
       explicit_invocation: input.explicit_invocation ?? false,
       binding_protocol: 'native-v1',
       capability_contract_required: true,
+      admission_contract_version: 1,
+      ...(input.expected_admission_digest !== undefined ? { expected_admission_digest: input.expected_admission_digest } : {}),
       required_capabilities: input.required_capabilities ?? [],
       run_command_profiles: input.run_command_profiles ?? [],
       // Codex must prove the live host actually delivers APE's launch and
@@ -721,11 +765,18 @@ async function dispatchApeRun(projectDir, input) {
     });
   }
   if (action === 'next') return nextRun(projectDir, { wait_ms: input.wait_ms });
-  if (action === 'record') return recordReceipt(projectDir, input.receipt ?? {});
+  if (action === 'record') {
+    if (!input.receipt || typeof input.receipt !== 'object' || Array.isArray(input.receipt)) {
+      throw new Error('record requires a receipt object from the authenticated worker; legacy tool_output is not a receipt and the parent must not reconstruct one');
+    }
+    return recordReceipt(projectDir, input.receipt);
+  }
   if (action === 'recover-receipt') {
     return recoverReceipt(projectDir, input.receipt ?? {}, {
-      receipt_input_hash: input.receipt_input_hash,
-      reason: input.reason,
+      ...(input.receipt_input_hash !== undefined
+        ? { receipt_input_hash: input.receipt_input_hash }
+        : {}),
+      ...(input.reason !== undefined ? { reason: input.reason } : {}),
     });
   }
   if (action === 'status') return statusRun(projectDir);
@@ -755,10 +806,25 @@ async function callTool(name, input) {
   if (name === 'ape_run') {
     // Every ape_run result crosses the wire through the bounded projection
     // exactly once (friction #26); the internal service result stays full.
-    return projectRunResponse(await dispatchApeRun(projectDir, input));
+    return projectRunResponse(attachRuntimeGuidance(await dispatchApeRun(projectDir, input)));
   }
   if (name === 'ape_validate_receipt') {
     return validateReceiptForDispatch(projectDir, input.draft ?? {}, input.ticket_id);
+  }
+  if (name === 'ape_bind') {
+    if (
+      !input || typeof input !== 'object' || Array.isArray(input) ||
+      Object.keys(input).some((key) => !['project_dir', 'bootstrap_capability'].includes(key)) ||
+      typeof input.project_dir !== 'string' || input.project_dir.length === 0 ||
+      typeof input.bootstrap_capability !== 'string' ||
+      !/^[A-Za-z0-9_-]{32,256}$/.test(input.bootstrap_capability)
+    ) {
+      throw new Error('ape_bind requires only project_dir and a valid bootstrap_capability; native identities are host-owned');
+    }
+    // The server has no authenticated native child identity. It cannot bind,
+    // issue a receipt bearer, or return authoritative ticket context. Only the
+    // native PreToolUse hook may do that before this safe confirmation read.
+    return codexBootstrapStatus(runtimePaths(projectDir), input.bootstrap_capability);
   }
   if (name === 'ape_status') return compactStatus(projectDir);
   if (name === 'ape_history') {
@@ -850,7 +916,7 @@ function apeRunPayloadFromServiceValue(value) {
   return {
     resultType: 'complete',
     ...(value?.ok === false ? { isError: true } : {}),
-    content: [{ type: 'text', text: JSON.stringify(projectRunResponse(value)) }],
+    content: [{ type: 'text', text: JSON.stringify(projectRunResponse(attachRuntimeGuidance(value))) }],
   };
 }
 

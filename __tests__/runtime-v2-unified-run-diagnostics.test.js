@@ -127,8 +127,8 @@ describe('unified public run diagnostics', () => {
       [{ status: 'blocked', stage: 'review' }, 'blocked', 'ape_run abort or ape_run override reset'],
       [{ status: 'blocked', stage: 'merge', gates: { passed: true } }, 'shipping_hold', 'ape_run ship'],
       [{ status: 'shipping', stage: 'merge' }, 'shipping', 'ape_run next'],
-      [{ status: 'completed', stage: 'completed' }, 'completed', 'ape_run start'],
-      [{ status: 'aborted', stage: 'aborted' }, 'aborted', 'ape_run start'],
+      [{ status: 'completed', stage: 'completed' }, 'completed', 'check host prerequisites, then ape_run start'],
+      [{ status: 'aborted', stage: 'aborted' }, 'aborted', 'check host prerequisites, then ape_run start'],
     ];
     for (const [overrides, reason, action] of cases) {
       const { status } = await statusFor(runState(overrides));
@@ -137,7 +137,7 @@ describe('unified public run diagnostics', () => {
     }
 
     const empty = await sandbox('ape-diagnostic-inactive-');
-    expectDiagnostic((await compactStatus(empty)).diagnostic, 'inactive', 'ape_run start');
+    expectDiagnostic((await compactStatus(empty)).diagnostic, 'inactive', 'check host prerequisites, then ape_run start');
     expect(explainRun({ run_id: 'run-imported-example', status: 'completed', imported: true }))
       .toContain('Reason code: legacy_record');
     expect(explainRun({ run_id: 'run-incomplete-example', status: 'completed' }))
@@ -901,7 +901,7 @@ describe('unified public run diagnostics', () => {
     expect(explained).toMatchObject({
       ok: true,
       run: { run_id: record.run_id, status: 'completed' },
-      diagnostic: { reason_code: 'completed', next_safe_action: 'ape_run start' },
+      diagnostic: { reason_code: 'completed', next_safe_action: 'check host prerequisites, then ape_run start' },
     });
     expect(explained).not.toHaveProperty('record');
     expect(JSON.stringify(explained)).not.toContain(record.objective);
@@ -981,7 +981,7 @@ describe('unified public run diagnostics', () => {
     execFileSync('git', ['commit', '-qm', 'baseline'], { cwd: dir });
     await atomicWriteJson(runtimePaths(dir).config, {
       shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-      test_commands: { full: 'node --test' },
+      test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
     });
 
     const started = await startRun(dir, {
@@ -1014,6 +1014,7 @@ describe('unified public run diagnostics', () => {
       hook_event_name: 'SubagentStop',
       project_dir: dir,
       session_id: context.sessionId,
+      turn_id: context.turnId,
       agent_id: context.agentId,
       agent_type: 'default',
     });

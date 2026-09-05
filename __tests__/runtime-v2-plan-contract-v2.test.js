@@ -71,7 +71,7 @@ async function integrationProject() {
   execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: dir });
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'npm test' },
+    test_commands: { full: 'npm test', targeted_template: 'node --test {paths}' },
     verification: {
       profiles: [{ id: 'unit', description: 'Run unit tests', command: 'npm test', root: '.', timeout_ms: 30_000 }],
     },

@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -10,6 +10,7 @@ import { configAction, previewRun, startRun } from '../lib/runtime/service.js';
 import { evaluateRunReadiness } from '../lib/runtime/readiness.js';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { projectRunState } from '../lib/runtime/projection.js';
+import * as capabilityContract from '../lib/runtime/capability-contract.js';
 
 function runInput(overrides = {}) {
   return RunStartInputSchema.parse({
@@ -207,6 +208,29 @@ describe('run readiness and capability manifests', () => {
       .toBe(headBefore);
   });
 
+  it('skips dynamic scenario expansion only when a source collection already exceeds its bound', () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.test_commands.targeted_template = 'npm test -- {paths}';
+    config.test_commands.full = 'npm test';
+    config.policy.command_profiles = Array.from({ length: 65 }, (_, index) => ({
+      id: `command.${index}`, command: `tool verify-${index}`, roles: ['implementer'], effect: 'execute',
+    }));
+    const expand = vi.spyOn(capabilityContract, 'worstCaseCapabilityTestPathSets');
+    try {
+      const rejected = readinessFor(runInput(), config);
+      expect(rejected.ready).toBe(false);
+      expect(rejected.blocking.map((entry) => entry.code)).toContain('capability-command-profiles-over-limit');
+      expect(expand).not.toHaveBeenCalled();
+
+      config.policy.command_profiles.pop();
+      const admitted = readinessFor(runInput(), config);
+      expect(expand).toHaveBeenCalledOnce();
+      expect(admitted.ready).toBe(true);
+    } finally {
+      expand.mockRestore();
+    }
+  });
+
   it('rejects an over-limit derived command allowlist even when every source collection is within its count bound', () => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.test_commands.targeted_template = 'npm test -- {paths}';
@@ -233,7 +257,7 @@ describe('run readiness and capability manifests', () => {
       .not.toContain('capability-runners-over-limit');
   });
 
-  it('keeps oversized catalog checks informational when no capability contract is requested', () => {
+  it('enforces reachable manifest ceilings even when no capability contract is explicitly requested', () => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.test_commands.targeted_template = 'npm test -- {paths}';
     config.test_commands.full = 'npm test';
@@ -244,8 +268,9 @@ describe('run readiness and capability manifests', () => {
       effect: 'execute',
     }));
     const readiness = readinessFor(runInput(), config);
+    expect(readiness.ready).toBe(false);
     expect(readiness.blocking.map((entry) => entry.code))
-      .not.toContain('capability-command-profiles-over-limit');
+      .toContain('capability-command-profiles-over-limit');
   });
 
   it('refuses newly configured catalogs beyond the immutable manifest ceilings before persisting them', async () => {
@@ -371,128 +396,60 @@ describe('run readiness and capability manifests', () => {
     expect(Date.parse(ticket.deadline_at)).toBeGreaterThan(Date.parse(ticket.issued_at));
   });
 
-  it('proposes scripts and a managed AGENTS block, then appends only with an exact expected hash', async () => {
+  it('proposes and applies grounded config without reading or changing repository instructions', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ape-agents-init-'));
     dirs.push(dir);
     writeFileSync(join(dir, 'package.json'), JSON.stringify({
       scripts: { test: 'vitest run', lint: 'eslint .', build: 'node build.js', dev: 'node dev.js' },
       devDependencies: { vitest: '^4.0.0' },
     }));
-    writeFileSync(join(dir, 'AGENTS.md'), '# Project instructions\n\nKeep this text.\n');
+    const agents = '# Project instructions\n\nKeep this text.\n';
+    const override = '# Operator override\n';
+    writeFileSync(join(dir, 'AGENTS.md'), agents);
+    writeFileSync(join(dir, 'AGENTS.override.md'), override);
     const proposed = (await configAction(dir, 'init', {})).init.proposal;
     expect(proposed.detected_runner.family).toBe('vitest');
     expect(proposed.evidence_scripts.map((entry) => entry.value)).toEqual(['build', 'lint', 'test']);
-    expect(proposed.agents).toMatchObject({ path: 'AGENTS.md', status: 'proposed', apply_required: true });
+    expect(proposed).not.toHaveProperty('agents');
 
-    await configAction(dir, 'init', {
-      apply: true,
-      apply_agents: true,
-      agents_path: proposed.agents.path,
-      agents_expected_hash: proposed.agents.source_hash,
-    });
-    const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8');
-    expect(after).toContain('Keep this text.');
-    expect(after).toContain('BEGIN APE MANAGED MAIN-SESSION POLICY v1');
+    await configAction(dir, 'init', { apply: true });
+    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(agents);
+    expect(readFileSync(join(dir, 'AGENTS.override.md'), 'utf8')).toBe(override);
   });
 
-  it('never overwrites a human-managed APE policy during init', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ape-agents-human-managed-'));
-    dirs.push(dir);
-    const original = '# Project instructions\n\nOur APE workflow is maintained by the platform team.\n';
-    writeFileSync(join(dir, 'AGENTS.md'), original);
-    const proposed = (await configAction(dir, 'init', {})).init.proposal;
-    expect(proposed.agents.status).toBe('human-managed');
-    await expect(configAction(dir, 'init', {
-      apply: true,
-      apply_agents: true,
-      agents_path: proposed.agents.path,
-      agents_expected_hash: proposed.agents.source_hash,
-    })).rejects.toThrow(/human-managed/);
-    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(original);
-    expect(existsSync(join(dir, '.ape', 'runtime', 'config.json'))).toBe(false);
-  });
-
-  it('serializes concurrent AGENTS applies so one exact proposal hash is consumed once', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ape-agents-concurrent-'));
+  it('does not create a repository instruction file during init', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ape-no-agents-init-'));
     dirs.push(dir);
     writeFileSync(join(dir, 'package.json'), JSON.stringify({
       scripts: { test: 'vitest run' },
       devDependencies: { vitest: '^4.0.0' },
     }));
-    writeFileSync(join(dir, 'AGENTS.md'), '# Project instructions\n');
-    const agents = (await configAction(dir, 'init', {})).init.proposal.agents;
-    const apply = () => configAction(dir, 'init', {
-      apply: true,
-      apply_agents: true,
-      agents_path: agents.path,
-      agents_expected_hash: agents.source_hash,
-    });
-
-    const results = await Promise.allSettled([apply(), apply()]);
-    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
-    expect(results.find((result) => result.status === 'rejected').reason.message)
-      .toMatch(/source hash changed|target or source hash changed/u);
-    const after = readFileSync(join(dir, 'AGENTS.md'), 'utf8');
-    expect(after.match(/BEGIN APE MANAGED MAIN-SESSION POLICY v1/gu)).toHaveLength(1);
+    await configAction(dir, 'init', { apply: true });
+    expect(existsSync(join(dir, 'AGENTS.md'))).toBe(false);
+    expect(existsSync(join(dir, 'AGENTS.override.md'))).toBe(false);
+    expect(existsSync(join(dir, 'CLAUDE.md'))).toBe(false);
   });
 
-  it('applies only to AGENTS.override.md when override precedence is active', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ape-agents-override-'));
+  it('rejects retired instruction-policy apply fields before config or instruction writes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ape-retired-agents-init-'));
     dirs.push(dir);
     const ordinary = '# Ordinary instructions\n';
     const override = '# Override instructions\n';
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({
+      scripts: { test: 'vitest run' },
+      devDependencies: { vitest: '^4.0.0' },
+    }));
     writeFileSync(join(dir, 'AGENTS.md'), ordinary);
     writeFileSync(join(dir, 'AGENTS.override.md'), override);
-    const agents = (await configAction(dir, 'init', {})).init.proposal.agents;
-    expect(agents).toMatchObject({ path: 'AGENTS.override.md', source: 'existing-override' });
-
-    await configAction(dir, 'init', {
+    await expect(configAction(dir, 'init', {
       apply: true,
       apply_agents: true,
-      agents_path: agents.path,
-      agents_expected_hash: agents.source_hash,
-    });
+      agents_path: 'AGENTS.override.md',
+      agents_expected_hash: 'a'.repeat(64),
+    })).rejects.toThrow(/no longer installs APE policy/);
 
     expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(ordinary);
-    expect(readFileSync(join(dir, 'AGENTS.override.md'), 'utf8'))
-      .toContain('BEGIN APE MANAGED MAIN-SESSION POLICY v1');
+    expect(readFileSync(join(dir, 'AGENTS.override.md'), 'utf8')).toBe(override);
+    expect(existsSync(join(dir, '.ape'))).toBe(false);
   });
-
-  it.skipIf(process.platform === 'win32')(
-    'leaves config byte-for-byte unchanged when the final AGENTS replacement fails',
-    async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'ape-agents-no-partial-config-'));
-      dirs.push(dir);
-      writeFileSync(join(dir, 'package.json'), JSON.stringify({
-        scripts: { test: 'vitest run' },
-        devDependencies: { vitest: '^4.0.0' },
-      }));
-      writeFileSync(join(dir, 'AGENTS.md'), '# Project instructions\n');
-      await configAction(dir, 'set', { key: 'custom.sentinel', value: 'unchanged' });
-      const configPath = join(dir, '.ape', 'runtime', 'config.json');
-      const beforeConfig = readFileSync(configPath, 'utf8');
-      const agents = (await configAction(dir, 'init', {})).init.proposal.agents;
-
-      // The AGENTS target is in the now-read-only project root, while APE's
-      // already-created runtime directory remains writable for its CAS lock.
-      // This forces the late atomic replacement failure which used to occur
-      // only after config.json had already been changed.
-      chmodSync(dir, 0o555);
-      try {
-        await expect(configAction(dir, 'init', {
-          apply: true,
-          apply_agents: true,
-          agents_path: agents.path,
-          agents_expected_hash: agents.source_hash,
-        })).rejects.toThrow();
-      } finally {
-        chmodSync(dir, 0o755);
-      }
-
-      expect(readFileSync(configPath, 'utf8')).toBe(beforeConfig);
-      expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8'))
-        .not.toContain('BEGIN APE MANAGED MAIN-SESSION POLICY v1');
-    },
-  );
 });

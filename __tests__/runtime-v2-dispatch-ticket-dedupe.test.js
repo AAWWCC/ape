@@ -45,6 +45,7 @@ import { sha256 } from '../lib/runtime/canonical.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { finalizeTicket, validateTicket } from '../lib/runtime/schemas.js';
+import { seedLegacyRun } from './legacy-run-test-helper.js';
 import { bindCodexDispatch, bindCodexDispatchContext, completeCodexBindingProbe } from './codex-native-test-helper.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -674,6 +675,29 @@ describe('APE v2 ape_run response size cap: unit projection behavior', () => {
     expect(wireSize(projected)).toBeLessThanOrEqual(BUDGET_CHARS);
   });
 
+  it.each(['reference', 'minimal'])('preserves typed replay identity through the %s fallback and repeated projection', (tier) => {
+    const state = runState(OVER_BUDGET_OBJECTIVE);
+    const ticket = state.tickets[2];
+    for (const replay of [true, false, { unsafe_metadata: 'x'.repeat(BUDGET_CHARS) }]) {
+      const action = dispatchAction(ticket);
+      action.idempotent_replay = replay;
+      if (tier === 'minimal') action.dispatch.prompt_paths = ['x'.repeat(BUDGET_CHARS * 2)];
+      const response = { ok: true, run: state, actions: [action], unused: 'x'.repeat(BUDGET_CHARS * 2) };
+      const before = sha256(response);
+      const projected = projectRunResponse(response);
+      expect(projected.projection.kind).toBe('reference-only-v1');
+      if (typeof replay === 'boolean') expect(projected.actions[0].idempotent_replay).toBe(replay);
+      else expect(projected.actions[0]).not.toHaveProperty('idempotent_replay');
+      expect(projected.actions[0].dispatch.dispatch_intent)
+        .toEqual(tier === 'reference' ? action.dispatch.dispatch_intent
+          : launchBearingClaudeIntent(action.dispatch.dispatch_intent));
+      expect(projected.actions[0].ticket.ticket_id).toBe(ticket.ticket_id);
+      expect(wireSize(projected)).toBeLessThanOrEqual(BUDGET_CHARS);
+      expect(projectRunResponse(JSON.parse(JSON.stringify(projected)))).toEqual(projected);
+      expect(sha256(response)).toBe(before);
+    }
+  });
+
   it('A12 launch-only fallback: schema-valid metadata cannot erase either native launch envelope', () => {
     const claudeSelector = 'c'.repeat(256);
     const annotatedClaudeModel = {
@@ -892,6 +916,12 @@ function session(messages) {
 // the bytes the host receives (bin/ape-mcp.mjs writes JSON.stringify(value) into
 // the tool result), so the arms measure that text, not a re-serialization.
 async function apeRun(args) {
+  if (args.action === 'start' && args.expected_admission_digest === undefined) {
+    const preview = await apeRun({ ...args, action: 'preview' });
+    expect(preview.value.admission?.ready, JSON.stringify(preview.value.readiness?.blocking)).toBe(true);
+    expect(preview.value.admission_digest).toMatch(/^[a-f0-9]{64}$/u);
+    args = { ...args, expected_admission_digest: preview.value.admission_digest };
+  }
   const responses = await session([
     { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ape_run', arguments: args } },
   ]);
@@ -915,14 +945,11 @@ async function apeValidateReceipt(args) {
   return JSON.parse(payload.content[0].text);
 }
 
-// A 24,000-char operator objective: long, but well inside the 64 KB
-// input-guard ceiling. This is the shape that overflowed live.
+// Historical 24,000-char objective: current admission refuses planning input
+// this large, but retained runs must remain readable and resume within bounds.
 const LONG_OBJECTIVE = `Close the ape_run response size cap. ${'y'.repeat(24_000)}`;
 async function startLongRun(dir) {
-  await completeCodexBindingProbe(root, dir);
-  const started = await apeRun({
-    action: 'start',
-    project_dir: dir,
+  await seedLegacyRun(dir, {
     objective: LONG_OBJECTIVE,
     mode: 'phase',
     lane: 'full',
@@ -930,12 +957,15 @@ async function startLongRun(dir) {
     claimed_paths: ['src/value.js'],
     test_paths: ['tests/value.test.js'],
     requirements: ['R1'],
+    risk_triggers: [],
     behavioral: true,
-    hooks_trusted: true,
-    subagents_available: true,
-    explicit_invocation: true,
+    high_risk: false,
     plan_contract_version: 1,
-  });
+    binding_protocol: 'native-v1',
+  }, { nativeReceiptContract: true });
+  // This is a true wire resume of persisted legacy state, not a compiler or
+  // readiness exception allowing a new oversized run to start.
+  const started = await apeRun({ action: 'next', project_dir: dir });
   expect(started.value.ok).toBe(true);
   expect(started.value.run.lane).toBe('full');
   const dispatch = started.value.actions.find((action) => action.type === 'dispatch_agent');
@@ -979,15 +1009,14 @@ function planReceipt(ticket, receiptCapability) {
   };
 }
 
-describe('APE v2 ape_run response size cap over the live MCP wire', () => {
+describe('APE v2 ape_run response size cap over the MCP wire', () => {
   it.each([
     ['explicit behavioral fast', 'fast', ['src/value.js']],
     ['auto-classified full', 'auto', []],
   ])('new %s starts default to contract v2 and dispatch preflight first', async (_label, lane, claimedPaths) => {
     const dir = await project();
     await completeCodexBindingProbe(root, dir);
-    const started = await apeRun({
-      action: 'start',
+    const input = {
       project_dir: dir,
       objective: 'Exercise the default structured-preflight route.',
       mode: 'phase',
@@ -1000,16 +1029,42 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
       hooks_trusted: true,
       subagents_available: true,
       explicit_invocation: true,
+    };
+    const preview = await apeRun({ ...input, action: 'preview' });
+    expect(preview.value.admission.ready).toBe(true);
+    expect(sha256(preview.value.admission)).toBe(preview.value.admission_digest);
+    const started = await apeRun({
+      ...input, action: 'start', expected_admission_digest: preview.value.admission_digest,
     });
     expect(started.value.ok).toBe(true);
     expect(started.value.run.plan_contract_version).toBe(2);
     expect(started.value.actions.find((action) => action.type === 'dispatch_agent')?.ticket)
       .toMatchObject({ stage_id: 'preflight', role: 'preflight_analyst', writable: false });
+    // The native host may retain complete rollout output yet truncate the next
+    // model request. Measure the escaped MCP wrapper, not just its inner JSON.
+    expect(Buffer.byteLength(JSON.stringify({ content: [{ type: 'text', text: started.text }] }, null, 2)))
+      .toBeLessThan(BUDGET_CHARS);
+    const admission = started.value.run.admission;
+    expect(admission.digest).toBe(preview.value.admission_digest);
+    expect(admission).not.toHaveProperty('manifest');
+    const persisted = await readJson(path.join(dir, admission.manifest_ref.path));
+    expect(admission.manifest_ref.json_pointer).toBe('/admission/manifest');
+    expect(persisted.admission.manifest).toEqual(preview.value.admission);
+    const action = started.value.actions.find((entry) => entry.type === 'dispatch_agent');
+    expect(action.dispatch.spawn_args.message).toBeTruthy();
+    expect(action.ticket.output_schema).toEqual(OUTPUT_SCHEMA_REFERENCE);
+    expect(persisted.tickets[0].output_schema.properties).toHaveProperty('receipt_capability');
+    // Re-projecting a saved response preserves its exact launch object. A new
+    // resume call is not this operation: lifecycle may refresh an unlaunched
+    // bootstrap generation while keeping the same logical ticket.
+    const projectedAgain = projectRunResponse(JSON.parse(started.text));
+    expect(projectedAgain.actions.find((entry) => entry.type === 'dispatch_agent').dispatch.spawn_args)
+      .toEqual(action.dispatch.spawn_args);
   }, 30_000);
 
   it('A1 acceptance: no ape_run response exceeds the cap, including the two-member plan-review dispatch', async () => {
     const dir = await project();
-    // START issues the read-only planner ticket for a full-lane phase run.
+    // The persisted historical run resumes its read-only planner ticket.
     const started = await startLongRun(dir);
     const planTicket = started.value.actions.find(
       (action) => action.type === 'dispatch_agent',
@@ -1041,7 +1096,7 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
       .toEqual(['plan-check', 'plan-critic']);
     expect(recorded.text.length).toBeLessThanOrEqual(BUDGET_CHARS);
 
-    // The start response crosses the same cap.
+    // The initial legacy resume response crosses the same cap.
     expect(started.text.length).toBeLessThanOrEqual(BUDGET_CHARS);
 
     // A plain status read is bounded too.
@@ -1071,23 +1126,6 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
     expect(recorded.value.ok).toBe(true);
     const dispatched = recorded.value.actions.find((action) => action.type === 'dispatch_agent');
 
-    // Over the cap the wire ticket references the run objective and the shared
-    // record-input contract...
-    expect(dispatched.ticket.objective).toBe(RUN_OBJECTIVE_MARKER);
-    expect(dispatched.ticket.objective).not.toBe(LONG_OBJECTIVE);
-    expect(dispatched.ticket.output_schema).toEqual(OUTPUT_SCHEMA_REFERENCE);
-    // ...while the objective itself still crosses once, at run level, so it is
-    // recoverable from this very response.
-    expect(recorded.value.run.objective).toBe(LONG_OBJECTIVE);
-    // ...and nothing a dispatch consumes is lost.
-    for (const field of [
-      'ticket_id', 'run_id', 'stage_id', 'role', 'model', 'model_tier', 'deadline_at',
-      'claimed_paths', 'test_paths', 'required_checks', 'ticket_hash', 'base_tree_sha',
-      'parent_hash', 'attempt', 'writable', 'issued_at',
-    ]) {
-      expect(dispatched.ticket).toHaveProperty(field);
-    }
-
     // The on-disk ticket is the authoritative copy the agent reads
     // (prompts/common.md): complete objective, complete output_schema.
     const paths = runtimePaths(dir);
@@ -1100,6 +1138,38 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
     expect(persisted.objective).toBe(LONG_OBJECTIVE);
     expect(persisted.objective).not.toBe(RUN_OBJECTIVE_MARKER);
     expect(persisted.output_schema.properties.receipt_capability).toBeTruthy();
+
+    // Lossless dedupe can keep the objective once on wire. When complete
+    // bootstrap instructions need the hard fallback instead, both references
+    // must resolve to the same complete authority, not a partial ticket.
+    if (recorded.value.projection?.kind === 'reference-only-v1') {
+      expect(dispatched.ticket.ticket_ref)
+        .toBe(`.ape/runtime/tickets/${dispatched.ticket.ticket_id.replaceAll(':', '_')}.json`);
+      expect(await readJson(path.join(dir, dispatched.ticket.ticket_ref))).toEqual(persisted);
+      expect(dispatched.ticket.ticket_hash).toBe(persisted.ticket_hash);
+      expect(recorded.value.run.run_ref).toBe('.ape/runtime/active.json');
+      expect((await readJson(path.join(dir, recorded.value.run.run_ref))).objective).toBe(LONG_OBJECTIVE);
+      expect(dispatched.ticket).not.toHaveProperty('objective');
+      expect(dispatched.ticket).not.toHaveProperty('output_schema');
+    } else {
+      expect(dispatched.ticket.objective).toBe(RUN_OBJECTIVE_MARKER);
+      expect(dispatched.ticket.output_schema).toEqual(OUTPUT_SCHEMA_REFERENCE);
+      expect(recorded.value.run.objective).toBe(LONG_OBJECTIVE);
+    }
+    const consumerTicket = dispatched.ticket.ticket_ref
+      ? await readJson(path.join(dir, dispatched.ticket.ticket_ref)) : dispatched.ticket;
+    for (const field of [
+      'ticket_id', 'run_id', 'stage_id', 'role', 'model', 'model_tier', 'deadline_at',
+      'claimed_paths', 'test_paths', 'required_checks', 'ticket_hash', 'base_tree_sha',
+      'parent_hash', 'attempt', 'writable', 'issued_at',
+    ]) expect(consumerTicket).toHaveProperty(field);
+    expect(Buffer.byteLength(recorded.text, 'utf8')).toBeLessThanOrEqual(BUDGET_CHARS);
+
+    const replayed = await apeRun({ action: 'next', project_dir: dir });
+    const sameDispatch = replayed.value.actions.find((action) =>
+      action.type === 'dispatch_agent' && action.ticket.ticket_id === dispatched.ticket.ticket_id);
+    // Compare hashes so a regression cannot print launch bearer material.
+    expect(sha256(sameDispatch.dispatch.spawn_args)).toBe(sha256(dispatched.dispatch.spawn_args));
 
     // Persisted run state is complete too — the bound is the wire only.
     const activeState = await readJson(paths.active);
@@ -1190,5 +1260,11 @@ describe('APE v2 ape_run response size cap over the live MCP wire', () => {
     const replayedPair = replayedRecord.value.actions.filter((action) => action.type === 'dispatch_agent');
     expect(replayedPair).toHaveLength(2);
     expect(replayedPair.every((action) => action.idempotent_replay === true)).toBe(true);
+    for (const action of replayedPair) {
+      const original = recorded.value.actions.find((entry) =>
+        entry.type === 'dispatch_agent' && entry.ticket.ticket_id === action.ticket.ticket_id);
+      expect(sha256(action.dispatch.spawn_args)).toBe(sha256(original.dispatch.spawn_args));
+    }
+    expect(Buffer.byteLength(replayedRecord.text, 'utf8')).toBeLessThanOrEqual(BUDGET_CHARS);
   }, 30_000);
 });

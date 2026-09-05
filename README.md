@@ -1,56 +1,41 @@
 # APE
 
-APE turns AI coding from session-driven improvisation into durable, evidence-gated engineering
-runs. It keeps Plan → Build → Ship state outside the chat, resumes across sessions, and accepts
-progress only when the working tree, tests, reviews, and configured gates support it.
+APE runs coding tasks through planning, tests, implementation, review, and shipping.
+It saves progress outside the chat, so a task can continue in another session.
 
-Project status treats a hash-verified, structured-successor-attested lineage as the primary outcome
-while retaining every run as immutable audit evidence. Each promoted historical edge binds the
-successor run id and complete normalized start-request hash to the predecessor's immutable archive
-hash, exact retained tree, and reviewed runtime-configuration digest. Legacy `supersedes_run`
-markers and version-1 attestations remain audit metadata and cannot replace an active block or
-manufacture recovery. Version-2 attestations remain readable for existing history, but the current
-runtime does not mint or accept structured successor starts: lifecycle-hook stdin contains no
-authenticated proof that a human submitted it, so treating a prompt literal as authority would be
-forgeable. Eligible blocked trees expose bounded recovery guidance instead. After explicit operator
-direction, use the reason-audited `ape_run override reset` action and start an ordinary fresh run;
-recovery never starts or ships automatically. The same bounded guidance is recomputed from durable
-blocked state on later full and compact status reads. A verified terminal archive wins over a stale
-same-run active copy only when the complete admitted-start identity still matches; archive-less
-terminal state and authorization, capability, or configuration conflicts fail closed. Preview compiles the complete
-reachable capability surface and rejects over-complex work before dispatch; receipt repair and
-planning/remediation convergence are deterministic and evidence-preserving, and validator responses
-never echo receipt bearer capabilities from any response field, nested value, correction prose, or
-thrown raw-input error. The same redaction applies to hook continuations, record/recovery results,
-and task-wrapped errors. Only the canonical capability field may authenticate against the
-dispatch-owned hash; missing, non-string, or substituted fields receive fixed non-reflective
-refusals even if the true bearer was copied elsewhere in the draft.
-
-Under the hood, APE is a deterministic runtime for Claude Code and Codex that coordinates
-each host's native agents. The scheduler—not the model—owns stage order,
-retries, lane selection, receipts, recovery, and merge decisions. Agents and tooling can still be
-wrong; APE reduces the chance that an unsupported claim advances by requiring the evidence it knows
-how to verify.
+APE coordinates the host's native agents. Its runtime decides the next stage and
+checks the evidence before accepting a worker's result. This helps catch unsupported
+claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-- Codex CLI is supported end to end and is the sole host required for live release certification.
-- Claude Code integration remains shipped and structurally and marketplace validated at its pinned
-  CLI version, but Claude live operation is unverified in this release.
-- The public surface is seven skills backed by four MCP tools.
-- Runs are explicit. Installing APE does not start agents or change a repository.
-- GitHub is the only shipping provider.
-- Node.js 22.12.0 or newer is required.
-- Claude and Codex install from this repository's marketplace files. Both launch the bundled MCP server locally
-  over stdio. A hosted broker and universal cloud-directory submission are outside the current release
-  scope.
-- Codex IDE integrations and ChatGPT web, mobile, and cloud runtimes are not supported.
+Version **2.24.11** is a local release candidate, not a published or fully
+live-certified release. Offline checks and one live mechanical run passed.
+The other live scenarios remain unverified. See the
+[current release status](docs/prevention-release-status.md) for the exact limits.
+
+Codex CLI is the primary host. The Claude Code package is included, but
+Claude live operation is unverified. Codex IDE integrations and ChatGPT web,
+mobile, and cloud runtimes are not supported.
+
+Installing APE does not start a run. You choose when it can work and ship.
 
 ## Install
 
+Node.js 22.12.0 or newer is required.
+
+### Codex CLI
+
+Run in a terminal:
+
+```bash
+codex plugin marketplace add AAWWCC/ape
+codex plugin add ape@ape
+```
+
 ### Claude Code
 
-Run these commands inside Claude Code:
+Run inside Claude Code:
 
 ```text
 /plugin marketplace add AAWWCC/ape
@@ -58,56 +43,27 @@ Run these commands inside Claude Code:
 /reload-plugins
 ```
 
-### Codex CLI
-
-Run these commands in a terminal:
-
-```bash
-codex plugin marketplace add AAWWCC/ape
-codex plugin add ape@ape
-```
-
-Each host uses an allowlisted package from `plugins/`. The package starts
-`dist/ape-mcp.bundle.mjs` with local Node and communicates over stdio; it does not send APE state
-to an APE-operated service.
+Both packages run locally through Node.js. APE stores project state under
+`.ape/runtime/`; it does not send that state to an APE-operated service.
+The coding host and configured tools still use their own services and permissions.
 
 ### Compatibility
 
-[`compatibility.json`](compatibility.json) is the machine-readable source of truth for supported
-platforms and blocking host versions. The detailed [host compatibility contract](docs/compatibility.md)
-explains how pull-request, release, and informational edge checks consume it.
-
-| Host | Package | MCP transport | Agent integration | Live release status |
-| --- | --- | --- | --- | --- |
-| Codex CLI | `plugins/ape` | Local stdio | Native Codex subagents and lifecycle hooks | Required; certification is supplied by the tagged-release ledger. |
-| Claude Code | `plugins/ape-claude` | Local stdio | Claude Agent tool and supplemental hooks | Packaged and structurally validated; authenticated live operation is unverified. |
-
-Node.js 22.12.0 and the pinned Node.js 24 release runtime are exercised on Windows, Linux, and
-macOS. External MCP discovery, availability, and permissions remain entirely host/operator owned;
-APE does not intercept or attest them.
-
-For development from this checkout, rebuild the packages before using a host reinstall helper:
-
-```bash
-npm ci
-npm run bundle
-npm run package:plugins
-npm run reinstall:codex
-```
-
-The Codex wrapper validates a small allowlisted package, promotes it under a new immutable cache
-version, and leaves both the source manifest and versions used by open tasks unchanged. Start a new host
-task after reinstalling.
+[`compatibility.json`](compatibility.json) defines the supported host versions
+and platforms. See [host compatibility](docs/compatibility.md) before changing a
+CLI version. CI checks packages on Linux, macOS, and Windows.
 
 ## Use
 
-APE is useful when work must survive session boundaries, has meaningful tests or review gates, or
-needs an auditable Plan → Build → Ship record. It is usually excessive for a one-line local edit,
-throwaway exploration, or work whose cost is lower than setting up claims and evidence. Use
-`debug` or `spike` for bounded read-only investigation; do not start a stateful run merely because
-the plugin is installed.
+Start by setting up the project's test commands. Configuration changes are
+proposed for your approval:
 
-Invoke a skill explicitly:
+```text
+/ape:config init
+/ape:config doctor
+```
+
+Then start a task, check its progress, or continue it later:
 
 ```text
 /ape:run Add optimistic locking to invoice updates
@@ -115,107 +71,65 @@ Invoke a skill explicitly:
 /ape:resume
 ```
 
-Available skills:
+Use APE for work that needs tests, review, or continuity across sessions.
+For a tiny edit or a quick question, an ordinary coding session may be simpler.
 
-| Skill | Purpose |
+| Skill | What it does |
 | --- | --- |
-| `run` | Start a `phase`, `debug`, `spike`, or `land` run. |
-| `status` | Show the active run and roadmap summary. |
+| `run` | Start a build, investigation, or shipping run. |
+| `status` | Show progress, pending work, and blocks. |
 | `resume` | Continue an interrupted run. |
-| `history` | Query runs, explain one run, import history, or maintain old artifacts. |
-| `config` | Inspect, change, diagnose, or wire APE configuration. |
-| `override` | Abort, reset, or expire a dispatch with an audit reason. |
-| `roadmap` | Inspect or update the optional project roadmap. |
+| `history` | Inspect past runs and their results. |
+| `config` | Set up commands, models, and shipping. |
+| `override` | Request an audited abort, reset, or dispatch expiration. |
+| `roadmap` | Manage an optional project roadmap. |
 
-Every state-changing skill requires explicit operator invocation. `history`, `roadmap`, `run`,
-`resume`, `config`, and `override` are also explicit-only at the host-discovery layer; only the
-read-only `status` skill may be selected implicitly when relevant.
+Only read-only `status` may be selected automatically. Invoke the other skills
+explicitly. See the [skill reference](docs/skills.md) for details.
 
 ## Pipelines
 
-| Mode | Pipeline |
+| Mode | Work |
 | --- | --- |
-| `phase` | Plan, test, implement, review, gate, and ship. The selected lane controls how much of that pipeline is needed. |
-| `debug` | Run one read-only debugger. |
-| `spike` | Run one read-only researcher. |
-| `land` | Review, gate, and ship a finished non-empty diff based on the current default branch. APE does not edit it. |
+| `phase` | Plan, test, implement, review, and ship a change. |
+| `debug` | Investigate a problem without editing files. |
+| `spike` | Research a question without editing files. |
+| `land` | Review and ship existing work without editing it. |
 
-The building lanes are:
+A `phase` run uses one of three lanes:
 
-- `mechanical`: documentation, generated output, non-behavioral configuration, or tracked data.
-- `fast`: behavioral work with at most six production files and no high-risk trigger. A test-only
-  `green-maintenance` run uses its bounded `test_paths` when it has no production claims.
-- `full`: larger or sensitive work, including security, auth, migrations, dependencies, public APIs,
-  schemas, concurrency, and destructive operations.
+- **Mechanical:** documentation, generated files, and other non-behavioral changes.
+- **Fast:** small behavioral changes without high-risk triggers.
+- **Full:** larger or sensitive changes, such as authentication, migrations, or public APIs.
 
-`auto` lets the runtime classify the run. Scope may escalate during a run, but it never downgrades.
-Generated host bundles under `plugins/<host>/dist/` and release staging under
-`release/generated/` are recognized as mechanical output without treating arbitrary nested
-`dist` or `build` directories as generated code.
+Choose `auto` to let APE classify the lane. A run can move to a stricter lane,
+but not a lighter one.
 
-Behavioral `phase` work defaults to `test_intent: "red-first"`: a test writer is assigned failing
-tests in `test_paths`, then a separate implementer owns production `claimed_paths`. For a regression
-net that is green on arrival or a test-only deflake, select `test_intent: "green-maintenance"`;
-the runtime executes the exact changed test paths twice and requires pass/pass. When that run has no
-production claims it proceeds from the test writer directly to read-only review, with no empty
-implementer stage. APE verifies the artifacts and receipts available to it; it cannot guarantee that
-a test is meaningful or a review is correct. This protocol does not describe mechanical work,
-read-only `debug`/`spike`, or `land`. High-risk runs add a security review. Each failed stage can be
-retried once; distinct blocking findings receive a bounded remediation budget, while repeated
-findings stop immediately as no-progress failures. Planning may issue at most two directed replans,
-and only when each later assurance set is a strict proper subset of the preceding set.
-
-Non-behavioral fast/full phase work keeps its planning, implementation, review, and merge gates but
-does not schedule a test writer or demand fabricated red-test evidence. It runs targeted stage
-checks only when `test_paths` were explicitly supplied. Plan contract v2 is therefore accepted only
-for behavioral fast/full phase runs, where its required preflight can actually be scheduled.
-`land` accepts both dirty finishing edits and already-committed feature work when HEAD descends from
-the resolved default tip; the complete default-to-working-tree diff must remain inside the combined
-production and test claims.
-
-New code and security reviews classify each blocking finding as production-, test-, or both-owned.
-APE serializes the matching remediation writers: production goes to the implementer, test goes to
-the test writer, and mixed/both goes to the test writer then implementer before the applicable
-review group reconvenes. Versioned remediation-test tickets mark their test scope exact; authored
-tests remain test-writer-owned, while unversioned legacy tickets retain sibling widening.
+Behavioral changes normally start with failing tests, written by a separate
+test worker. Use `green-maintenance` for tests that should already pass, such as
+a regression net or deflake. Non-behavioral work does not need fabricated failing
+tests. See [pipeline rules](docs/pipeline.md) for scope limits and stage order.
 
 ## Gates and shipping
 
-APE verifies receipt integrity, path scope, tree identity, targeted tests, plugin validity when
-relevant, the configured suite, conditional security evidence, and remote checks. Local suites and
-remote checks can rest in `gating` or `shipping`; `next` advances either watch, and `wait_ms` can
-keep one call open for a bounded period.
+Before dispatching workers, APE checks the proposed scope, repository state,
+commands, required capabilities, and later pipeline stages. Missing paths need
+approval; they are not silently added.
 
-By default, a green run is held at merge until the audited `ship` action re-proves the gates. With
-`shipping.auto_merge: true`, APE instead pushes the run branch, opens or reuses a GitHub pull
-request, waits for required checks, and squash-merges. Public/native starts require explicit
-per-run authorization (`auto_merge_authorized: true`) when this setting is enabled; the stored
-setting alone cannot authorize a new run. APE also verifies the server-advertised base tip at start
-and again before shipping so stale merge-base evidence cannot be published.
+Workers must return validated results called **receipts**. APE also checks file
+scope, tree identity, tests, reviews, and the configured gates before shipping.
 
-If branch policy requires GitHub auto-merge, APE enables it and remains in `shipping` until a later
-poll proves the exact pushed head merged. APE first honors the repository's normal commit-signing
-configuration; only a signer/passphrase failure on the scheduler-owned feature commit is retried
-with signing disabled. Once the remote merge is proven, a local checkout/worktree cleanup failure
-is recorded for `ape_run resume` instead of rewriting the merged run as a shipping failure.
+GitHub is the only shipping provider. Each project needs its own explicit
+repository target. By default, green work waits for an audited `ship` action.
+With `shipping.auto_merge: true`, a run also needs explicit per-run shipping
+approval before APE may push, open a PR, and merge.
 
-## Configuration
+APE waits for required checks and proof of the remote merge. A failed local
+cleanup does not undo a proven remote success. A blocked run does not authorize
+automatic reset, abort, or restoration.
 
-Configuration is a sparse overlay at `.ape/runtime/config.json`. Start with:
-
-```text
-/ape:config init
-/ape:config doctor
-```
-
-`init` detects common test runners and proposes commands; it does not apply them without approval.
-Use `wire` to opt into the full APE statusline on Claude or Codex's closest native footer. LARP MODE
-notifications are available on both hosts and are off by default. Public packages contain no
-sound files; operators may configure their own files, and a private package overlay may provide the
-closed package-local sound manifest described in the configuration guide.
-
-See [configuration](docs/configuration.md), [pipelines](docs/pipeline.md), and the
-[documentation index](docs/README.md).
+See [configuration](docs/configuration.md) and [pipeline rules](docs/pipeline.md)
+for the exact checks and recovery options.
 
 ## Development
 
@@ -223,71 +137,32 @@ See [configuration](docs/configuration.md), [pipelines](docs/pipeline.md), and t
 npm ci
 npm run public:hooks
 npm run typecheck
-npm run test:v2
+npm run test:agent
 npm run bundle
 npm run package:plugins
 npm run package:check
-npm run package:reproducible
 npm run public:check
-npm run eval:prompts:check
-npm run operational:canary
-npm run release:live-certification -- --head <certification-commit> --tag <version-tag>
-npm run validate
 ```
 
-`npm run public:hooks` copies the repository's versioned commit-message and pre-push wrappers into
-stable Git metadata for this clone. During ordinary commits they reject unapproved author,
-committer, co-author, and sign-off identities before the object is created, then check every
-outgoing branch or tag including nested taggers. A historical checkout that lacks the checker fails
-closed; rerun the installer after moving the checkout or changing its Git metadata location.
-Required PR CI checks the exact source commit against complete history before protected `main` can
-merge. Release candidates containing this gate check their pushed tag and block release assets if
-a local hook was bypassed. Use the versioned hooks in every write-enabled clone because post-push
-CI cannot retract a remote ref that GitHub has already accepted, and a tag aimed at older code runs
-that older revision's workflow.
+`npm test` uses six workers. `npm run test:agent -- <paths...>` uses three and is
+the preferred profile when other agents may also be testing.
 
-`npm run release:artifacts` produces the two host tarballs, checksum ledger, release manifest, and
-SPDX SBOM under `release/`. `npm run release:reproducible` builds that set twice and compares every
-artifact digest. Tagged releases run the same gates, a clean full-source export, and GitHub
-provenance attestation before publication. The credential-free prompt-evaluation check validates
-the synthetic scenario matrix, prompt hashes, schema, scorer, and release thresholds. It makes no
-model calls. Live prompt evaluation has separate explicit paid-call guards, and
-`npm run eval:prompts:verify` verifies a supplied result artifact offline; see
-[the evaluation guide](evals/README.md).
+Keep runtime changes, tests, and generated packages easy to review separately.
+The Git hooks check commit identities; verify the remote before pushing.
+A rebuild does not update an installed plugin. Reinstallation, pushes, and
+publication are separate actions.
 
-`npm run operational:canary` replays normalized failure classes covering dispatch, planning,
-test-contract disputes, review remediation, scope guidance, shipping, pipeline selection, and
-terminal diagnostics. It is deterministic and credential-free. A release candidate must also pass
-live Codex dogfooding before publication. Tagged releases fail closed unless the real raw Codex
-ledger is the only change in a dedicated certification commit over the exact tested source; see
-[operational readiness](docs/operational-readiness.md). Claude remains packaged and receives pinned
-structural and marketplace validation, but those checks do not constitute live certification. The
-verifier is offline, so it does not pretend CI can manufacture host lifecycle delivery or remote
-shipping evidence.
+For the full checklists, see [Contributing](CONTRIBUTING.md),
+[release checks](docs/operational-readiness.md),
+[prompt evaluations](evals/README.md), and
+[performance baselines](docs/performance-baselines.md).
 
-`npm test` runs the standalone suite with six workers. When several agents may test concurrently,
-use `npm run test:agent -- <paths...>` for the three-worker profile. Run
-`npm run test:claude-schema` when changing Claude plugin schemas.
+## Help and license
 
-Pull-request CI exercises all three packages and local MCP startup on Node 22 and 24 across Linux,
-macOS, and Windows, performs clean isolated marketplace installs for Claude and Codex, and runs the
-complete test inventory exactly once as one smoke set plus three duration-balanced Ubuntu shards.
-The committed timing snapshot and the qualified measurement and certification procedure are documented
-in [performance baselines](docs/performance-baselines.md). Once the repository is public, a least-privilege CodeQL workflow runs on
-pushes, pull requests, and weekly analysis. Dependabot alerts and security updates cover npm and
-GitHub Actions; routine version-update pull requests stay disabled for this solo-maintained
-repository. CI and release automation do not perform live paid prompt evaluations.
+- [Documentation index](docs/README.md)
+- [Report a bug](docs/incident-reporting.md)
+- [GitHub Issues](https://github.com/AAWWCC/ape/issues) and [Discussions](https://github.com/AAWWCC/ape/discussions)
+- [Security policy](SECURITY.md) for private vulnerability reports
 
-## License
-
-APE's source code and original project materials are available under [MIT](LICENSE). Public plugin
-packages contain no audio. The private source overlay's optional third-party notification sounds
-are excluded from the MIT grant; see [third-party notices](THIRD_PARTY_NOTICES.md).
-
-Use the [incident-reporting guide](docs/incident-reporting.md) and
-[GitHub Issues](https://github.com/AAWWCC/ape/issues) for reproducible defects,
-[GitHub Discussions](https://github.com/AAWWCC/ape/discussions) for questions and ideas, and the
-[security policy](SECURITY.md) for suspected vulnerabilities.
-
-See [Contributing](CONTRIBUTING.md) for the regression-first runtime-defect workflow and repository
-development expectations.
+APE is licensed under [MIT](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md)
+for material with separate terms.

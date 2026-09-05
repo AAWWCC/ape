@@ -77,6 +77,19 @@ const expected = new Set([
   'protected-branch-shipping',
   'nonbehavioral-test-stage-omission',
   'versioned-terminal-diagnostics',
+  'omitted-preflight-audit-reason',
+  'native-bootstrap-phase-and-catalog-contract',
+  'native-probe-failure-reporting',
+  'native-canary-identity-isolation',
+  'compiled-future-stage-contract',
+  'reviewed-admission-drift',
+  'scheduled-base-command-prerequisites',
+  'admissible-receipt-rejection-guidance',
+  'frozen-shipping-and-tested-tree',
+  'current-command-prerequisites',
+  'branch-exact-scheduler-review-checks',
+  'supersession-prelock-admission',
+  'codex-model-input-response-framing',
 ]);
 for (const id of expected) {
   if (!ids.has(id)) fail(`replay corpus is missing required case: ${id}`);

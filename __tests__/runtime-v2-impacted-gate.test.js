@@ -35,6 +35,8 @@ vi.mock('../lib/runtime/gates.js', async (importOriginal) => {
 });
 import * as gates from '../lib/runtime/gates.js';
 import { recordReceipt, regateRun, nextRun, shipRun, startRun } from '../lib/runtime/service.js';
+import { seedLegacyRun } from './legacy-run-test-helper.js';
+import { loadRuntimeConfig } from '../lib/runtime/config.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { currentTreeSha } from '../lib/runtime/git.js';
@@ -250,8 +252,8 @@ async function writeConfig(dir, {
 // Start a mechanical run: its single build receipt drives run_gates on the
 // PRIMARY (recordReceipt) path, where regate_attempts is 0 and ship_requested
 // is unset — the only path on which impacted substitution is eligible.
-async function startMechanical(dir, claimed, objective = 'Update the documentation notes') {
-  const started = track(await startRun(dir, {
+async function startMechanical(dir, claimed, objective = 'Update the documentation notes', { historical = false } = {}) {
+  const input = {
     objective,
     mode: 'phase',
     lane: 'mechanical',
@@ -264,7 +266,10 @@ async function startMechanical(dir, claimed, objective = 'Update the documentati
     hooks_trusted: true,
     subagents_available: true,
     explicit_invocation: true,
-  }));
+  };
+  const started = track(historical
+    ? await seedLegacyRun(dir, input)
+    : await startRun(dir, input));
   expect(started.ok).toBe(true);
   const build = started.run.tickets[0];
   expect(build.role).toBe('implementer');
@@ -287,8 +292,8 @@ async function recordBuild(dir, build) {
   }));
 }
 
-async function buildToGate(dir, claimed, mutate) {
-  const { runId, build } = await startMechanical(dir, claimed);
+async function buildToGate(dir, claimed, mutate, options = {}) {
+  const { runId, build } = await startMechanical(dir, claimed, undefined, options);
   await mutate();
   const result = await recordBuild(dir, build);
   return { runId, result };
@@ -430,8 +435,10 @@ describe('APE v2 impacted-test selection for the local merge gate', () => {
         impactedTemplate: 'node "unterminated {paths}',
         requiredRemoteChecks: true,
       });
+      // Current admission refuses this malformed command before dispatch;
+      // retained old runs still need the full-suite fallback at their gates.
       const { result } = await buildToGate(dir, ['docs/note.md'], () =>
-        writeFile(path.join(dir, 'docs', 'note.md'), '# note\n\nUpdated.\n'));
+        writeFile(path.join(dir, 'docs', 'note.md'), '# note\n\nUpdated.\n'), { historical: true });
       const done = result.run.status === 'gating' ? await drivePolls(dir) : result;
       expect(done.run.status).toBe('completed');
       expect(done.run.gates.checks.full_suite.mode ?? null).toBeNull();
@@ -482,9 +489,8 @@ describe('APE v2 impacted-test selection for the local merge gate', () => {
     const full = makeSuite(outside, probe, 'full', { mode: 'auto' });
     await impacted.arm();
     await full.arm();
-    // Cache ON so a wrong (colliding) key would be served; auto_merge OFF so the
-    // impacted pass HOLDS at merge (its result cached), then SHIP re-runs FULL
-    // (ship_requested forbids impacted) at the SAME tree.
+    // Cache ON so a wrong (colliding) key would be served; auto_merge OFF so
+    // the impacted pass HOLDS at merge with its result cached at this tree.
     await writeConfig(dir, {
       full: full.command,
       impactedTemplate: impacted.command,
@@ -502,15 +508,29 @@ describe('APE v2 impacted-test selection for the local merge gate', () => {
     expect(await impacted.executions()).toBe(1);
     expect(await full.executions()).toBe(0);
 
+    const paths = runtimePaths(dir);
+    const heldBytes = await readFile(paths.active, 'utf8');
+    const mergeCalls = gates.autoMergeGithub.mock.calls.length;
     const shipped = track(await shipRun(dir, 'operator ships after out-of-band acceptance'));
-    expect(shipped.ok).toBe(true);
-    const done = shipped.run.status === 'gating' ? await drivePolls(dir) : shipped;
-    expect(done.run.status).toBe('completed');
-    const shipFull = done.run.gates.checks.full_suite;
+    expect(shipped).toMatchObject({ ok: false, code: 'shipping-admission-invalid', attempts_consumed: 0 });
+    expect(await readFile(paths.active, 'utf8')).toBe(heldBytes);
+    expect(await full.executions()).toBe(0);
+
+    // Legacy state cannot acquire shipping authority here. Exercise only the
+    // real gate evaluator's FULL selection/cache key with an isolated context;
+    // runtime-v2-ship.test.js covers the genuinely admitted SHIP lifecycle.
+    const evaluated = await gates.runMergeGates(dir, paths, {
+      ...held.run, ship_requested: true,
+    }, await loadRuntimeConfig(paths.config));
+    expect(evaluated.passed).toBe(true);
+    const shipFull = evaluated.checks.full_suite;
     expect(shipFull.mode ?? null).toBeNull();
     // The impacted cache entry must NOT satisfy the FULL gate: it executed fresh.
     expect(shipFull.cached).toBe(false);
     expect(await full.executions()).toBe(1);
+    expect(await impacted.executions()).toBe(1);
+    expect(await readFile(paths.active, 'utf8')).toBe(heldBytes);
+    expect(gates.autoMergeGithub.mock.calls.length).toBe(mergeCalls);
   });
 
   it('a FULL pass never satisfies an impacted gate at the same tree (T4, cache separation, reverse)', async () => {

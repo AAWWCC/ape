@@ -9,6 +9,7 @@ import {
   evaluateLifecyclePolicy,
   driftGuardApplies,
   isAgentDispatchTool,
+  isExternalMcpTool,
 } from '../lib/runtime/hooks.js';
 
 // APE invariant 2 (no main-session production writes) is only enforced for the
@@ -21,8 +22,10 @@ import {
 //   Edit|Write|MultiEdit|NotebookEdit|apply_patch|Bash|Agent|Task plus APE's
 //   exact control-plane and receipt-validator names.
 //
-// External MCP names are deliberately absent: APE neither forecasts nor
-// intercepts another server's dynamic operation surface.
+// External MCP names are deliberately absent from conventional run policy:
+// APE neither forecasts nor intercepts another server's dynamic operation
+// surface. A separate wildcard arm is canary-only and returns neutral output
+// for every identity except the exact production-bound diagnostic canary.
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -49,7 +52,15 @@ function refersToBundle(entry, bundle) {
       (typeof hook.command === 'string' && hook.command.includes(bundle)),
   );
 }
-const policyArms = (entries) => (entries ?? []).filter((entry) => refersToBundle(entry, POLICY_BUNDLE));
+const isCanaryArm = (entry) =>
+  refersToBundle(entry, POLICY_BUNDLE) &&
+  (entry.hooks ?? []).some((hook) =>
+    hook.command?.includes("process.argv.push('--ape-canary-only')") ||
+    hook.commandWindows?.includes("process.argv.push('--ape-canary-only')"));
+const canaryArms = (entries) => (entries ?? []).filter(isCanaryArm);
+const policyArms = (entries) => (entries ?? []).filter(
+  (entry) => refersToBundle(entry, POLICY_BUNDLE) && !isCanaryArm(entry),
+);
 const larpArms = (entries) => (entries ?? []).filter((entry) => refersToBundle(entry, LARP_BUNDLE));
 
 // Conservative full-match emulation of Claude's matcher semantics: a bare "*"
@@ -137,6 +148,17 @@ describe('policy-arm matcher coverage of the enforcement set (plan §2)', () => 
     expect(postPolicyMatchers).toHaveLength(1);
   });
 
+  it('runs one synchronous neutral-by-default canary fence on every PreToolUse tool', () => {
+    const arms = canaryArms(codexHooks.PreToolUse);
+    expect(arms).toHaveLength(1);
+    expect(arms[0].matcher).toBe('*');
+    expect(arms[0].hooks).toHaveLength(1);
+    expect(arms[0].hooks[0].async).toBeUndefined();
+    expect(arms[0].hooks[0].commandWindows).toBe(arms[0].hooks[0].command);
+    expect(canaryArms(codexHooks.PostToolUse)).toHaveLength(0);
+    expect(canaryArms(claudeHooks.PreToolUse)).toHaveLength(0);
+  });
+
   it('matches every write tool, Bash, the dispatch tool (Agent) and its host alias (Task) on BOTH events', () => {
     // 'Task' carries no runtime predicate of its own; it is the documented host
     // alias of the dispatch tool and is required in the matcher belt-and-braces.
@@ -191,18 +213,17 @@ describe('policy-arm matcher coverage of the enforcement set (plan §2)', () => 
     }
   });
 
-  it('matches only APE-owned receipt validation aliases', () => {
-    for (const sample of [
-      'ape_validate_receipt',
-      'mcp__ape__ape_validate_receipt',
-      'mcp__plugin_ape_ape__ape_validate_receipt',
-    ]) {
-      expect(SUBAGENT_PROTOCOL_TOOLS.test(sample)).toBe(true);
-      expect(coveredBy(prePolicyMatchers, sample)).toBe(true);
-      expect(coveredBy(postPolicyMatchers, sample)).toBe(true);
+  it.each(['ape_validate_receipt', 'ape_bind'])('matches only APE-owned %s aliases', (toolName) => {
+    for (const prefix of ['', 'mcp__ape__', 'mcp__plugin_ape_ape__']) {
+      const sample = `${prefix}${toolName}`;
+      expect(SUBAGENT_PROTOCOL_TOOLS.test(sample), sample).toBe(toolName === 'ape_validate_receipt');
+      expect(isExternalMcpTool(sample), sample).toBe(false);
+      expect(coveredBy(prePolicyMatchers, sample), sample).toBe(true);
+      expect(coveredBy(postPolicyMatchers, sample), sample).toBe(true);
     }
-    const collision = 'mcp__anyserver__ape_validate_receipt';
+    const collision = `mcp__anyserver__${toolName}`;
     expect(SUBAGENT_PROTOCOL_TOOLS.test(collision)).toBe(false);
+    expect(isExternalMcpTool(collision)).toBe(true);
     expect(coveredBy(prePolicyMatchers, collision)).toBe(false);
     expect(coveredBy(postPolicyMatchers, collision)).toBe(false);
   });
@@ -297,8 +318,21 @@ describe('Claude supplemental wiring and shared binding policy (plan §4)', () =
     expect(entries[0].hooks[0].async).toBe(true);
   };
 
-  it('SessionStart and Stop each carry exactly the async ape-larp entry', () => {
-    onlyLarpAsync(claudeHooks.SessionStart, 'SessionStart');
+  it('SessionStart keeps shared synchronous guidance conventional and explicit Claude supplemental-only', () => {
+    onlyLarpAsync(larpArms(claudeHooks.SessionStart), 'SessionStart LARP');
+    expect(policyArms(claudeHooks.SessionStart)).toHaveLength(0);
+    expect(policyArms(codexHooks.SessionStart)).toHaveLength(1);
+    expect(larpArms(codexHooks.SessionStart)).toHaveLength(1);
+    for (const guidance of policyArms(codexHooks.SessionStart)) {
+      expect(guidance.matcher).toBeUndefined();
+      expect(guidance.hooks).toHaveLength(1);
+      expect(guidance.hooks[0].async).toBeUndefined();
+    }
+    const [codexGuidance] = policyArms(codexHooks.SessionStart);
+    expect(codexGuidance.hooks[0].commandWindows).toBe(codexGuidance.hooks[0].command);
+  });
+
+  it('Stop carries exactly the async Claude LARP entry', () => {
     onlyLarpAsync(claudeHooks.Stop, 'Stop');
   });
 
@@ -351,12 +385,16 @@ describe('Claude supplemental wiring and shared binding policy (plan §4)', () =
 describe('Codex hooks parity guard (plan §5)', () => {
   it('covers shared write and dispatch surfaces while excluding external MCP', () => {
     for (const event of ['PreToolUse', 'PostToolUse']) {
-      const matchers = (codexHooks[event] ?? []).map((entry) => entry.matcher);
+      const matchers = policyArms(codexHooks[event]).map((entry) => entry.matcher);
       for (const tool of ['Bash', 'Edit', 'Write', 'apply_patch', 'Agent', 'spawn_agent', 'collaborationspawn_agent']) {
         expect(coveredBy(matchers, tool), `Codex ${event} must match ${tool}`).toBe(true);
       }
       expect(coveredBy(matchers, 'mcp__unity__save_scene')).toBe(false);
     }
+    expect(coveredBy(
+      canaryArms(codexHooks.PreToolUse).map((entry) => entry.matcher),
+      'mcp__unity__save_scene',
+    )).toBe(true);
   });
 
   it('registers Codex LARP lifecycle, question, and ape_run outcome cues without async handlers', () => {

@@ -167,6 +167,44 @@ const OWNER_MANIFEST = [
 // facade above.
 const INTERNAL_OWNER_ASSERTIONS = [
   {
+    domain: 'bounded advisory receipt rejection recovery',
+    owner: 'lib/runtime/recovery-guidance.js',
+    exports: ['receiptRejectionRecovery', 'projectReceiptRejectionRecovery'],
+    dependencies: [],
+  },
+  {
+    domain: 'bounded native Codex bootstrap identity evidence and orientation',
+    owner: 'lib/runtime/codex-bootstrap.js',
+    exports: ['BOOTSTRAP_TOOL_PATTERN', 'codexBootstrapOrientation', 'recordCodexBootstrapCandidate', 'resolveCodexBootstrapCandidate'],
+    dependencies: [
+      'lib/runtime/constants.js',
+      'lib/runtime/lock.js',
+      'lib/runtime/paths.js',
+      'lib/runtime/storage.js',
+    ],
+  },
+  {
+    domain: 'bounded active run state reads and validation',
+    owner: 'lib/runtime/active-state.js',
+    exports: ['ACTIVE_STATE_MAX_BYTES', 'activeState', 'activeStateDiagnosisMatchesEntry'],
+    dependencies: [
+      'lib/runtime/bounded-summary.js',
+      'lib/runtime/constants.js',
+      'lib/runtime/diagnostics.js',
+    ],
+  },
+  {
+    domain: 'bounded diagnostic summary text',
+    owner: 'lib/runtime/bounded-summary.js',
+    exports: [
+      'BOUNDED_SUMMARY_CONTROL_CHARS',
+      'REPLACEMENT_CHARACTER',
+      'boundedGateSummary',
+      'codePointRange',
+    ],
+    dependencies: [],
+  },
+  {
     domain: 'capability manifest growth bounds',
     owner: 'lib/runtime/capability-contract.js',
     exports: [
@@ -902,9 +940,9 @@ describe('runtime-v2 module boundaries: expected GREEN is reachable', () => {
 
 describe('runtime-v2 module boundaries: required physical owners', () => {
   const input = productionInput();
-  it('declares exactly eighteen genuine owner files', () => {
-    expect(REQUIRED_OWNER_FILES).toHaveLength(18);
-    expect(new Set(REQUIRED_OWNER_FILES).size).toBe(18);
+  it('declares exactly twenty genuine owner files', () => {
+    expect(REQUIRED_OWNER_FILES).toHaveLength(22);
+    expect(new Set(REQUIRED_OWNER_FILES).size).toBe(22);
   });
   for (const entry of OWNER_MANIFEST) {
     it(`${entry.owner} exists as the ${entry.domain} owner`, () => {

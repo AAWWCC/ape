@@ -528,6 +528,7 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { __runContractFault, readRunContractManifest } from '../lib/runtime/run-contract.js';
 import {
   bindCodexSubagent,
+  bootstrapCodexSubagent,
   launchCodexIntent,
   prepareCodexIntent,
 } from '../lib/runtime/claude-dispatch.js';
@@ -817,6 +818,7 @@ function codexLaunchInput(action, {
     tool_use_id: toolUseId,
     tool_input: {
       task_name: action.dispatch.agent_name,
+      fork_turns: 'none',
       model: action.dispatch.model.model,
       reasoning_effort: action.dispatch.model.reasoning_effort,
     },
@@ -824,15 +826,27 @@ function codexLaunchInput(action, {
 }
 
 function codexStartInput({
-  sessionId = 'native-child',
-  turnId = 'native-turn-1',
+  sessionId = 'native-parent',
+  turnId = 'native-child-turn-1',
   agentId = 'native-agent-1',
+  model,
 } = {}) {
   return {
     session_id: sessionId,
     turn_id: turnId,
     agent_id: agentId,
     agent_type: 'default',
+    model,
+  };
+}
+
+function codexBootstrapInput(action, start) {
+  return {
+    ...start,
+    session_id: start.agent_id,
+    tool_name: 'mcp__ape__ape_bind',
+    tool_use_id: `bootstrap-${start.agent_id}`,
+    tool_input: action.dispatch.bootstrap_args,
   };
 }
 
@@ -3092,11 +3106,16 @@ describe('APE v2 authenticated recovery and native launch generations', () => {
       .toHaveLength(0);
     expect(await runtimeSnapshot(paths.dispatchIntents)).toEqual(authorizedBytes);
 
-    const bound = await bindCodexSubagent(
+    const start = codexStartInput({ turnId: `${turnId}-child`, model: action.dispatch.model.model });
+    expect(await bindCodexSubagent(
       paths,
       await readJson(paths.active),
-      codexStartInput({ turnId }),
-    );
+      start,
+    )).toMatchObject({ valid: true, bootstrap_required: true });
+    expect(await dispatchGenerations(paths, ticketId)).toEqual([
+      expect.objectContaining({ generation: 1, status: 'authorized' }),
+    ]);
+    const bound = await bootstrapCodexSubagent(paths, await readJson(paths.active), codexBootstrapInput(action, start));
     expect(bound).toMatchObject({ valid: true, ticket_id: ticketId });
     expect(await dispatchGenerations(paths, ticketId)).toEqual([
       expect.objectContaining({ generation: 1, status: 'bound' }),
@@ -3123,14 +3142,17 @@ describe('APE v2 authenticated recovery and native launch generations', () => {
       .toEqual(new Set([1]));
 
     __crashControl.arm = { kind: 'dispatch-status', status: 'bound' };
-    const start = codexStartInput({ turnId });
-    const bindCrash = await bindCodexSubagent(paths, await readJson(paths.active), start).then(
+    const start = codexStartInput({ turnId: `${turnId}-child`, model: action.dispatch.model.model });
+    expect(await bindCodexSubagent(paths, await readJson(paths.active), start))
+      .toMatchObject({ valid: true, bootstrap_required: true });
+    const bootstrap = codexBootstrapInput(action, start);
+    const bindCrash = await bootstrapCodexSubagent(paths, await readJson(paths.active), bootstrap).then(
       (value) => ({ value, error: null }),
       (error) => ({ value: null, error }),
     );
     expect(__crashControl.fired).toBe(2);
     expect(bindCrash.error).toBeTruthy();
-    expect(await bindCodexSubagent(paths, await readJson(paths.active), start))
+    expect(await bootstrapCodexSubagent(paths, await readJson(paths.active), bootstrap))
       .toMatchObject({ valid: true, ticket_id: ticketId });
     expect(await dispatchGenerations(paths, ticketId)).toEqual([
       expect.objectContaining({ generation: 1, status: 'bound' }),
@@ -3138,8 +3160,6 @@ describe('APE v2 authenticated recovery and native launch generations', () => {
   });
 
   it('orphans an expired authorization, rejects its late turn, and issues only one fresh generation', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
     const dir = await project();
     const { started, action, paths } = await preparedNativeDispatch(dir);
     const ticketId = action.ticket.ticket_id;
@@ -3147,23 +3167,41 @@ describe('APE v2 authenticated recovery and native launch generations', () => {
     expect(await launchCodexIntent(paths, started.run, codexLaunchInput(action, {
       turnId: oldTurn,
     }))).toMatchObject({ valid: true });
-    vi.setSystemTime(new Date('2030-01-01T00:01:01.000Z'));
+    // Expire only the synthetic launch window. Advancing Date while native
+    // filesystem mtimes remain real can falsely age a new lock directory and
+    // confound the concurrent single-generation assertion below.
+    const [intentName] = (await readdir(paths.dispatchIntents)).filter((name) => name.endsWith('.json'));
+    const intentFile = path.join(paths.dispatchIntents, intentName);
+    const intent = await readJson(intentFile);
+    const elapsed = {
+      prepared_at: new Date(Date.now() - 62_000).toISOString(),
+      launched_at: new Date(Date.now() - 61_000).toISOString(),
+      authorized_at: new Date(Date.now() - 61_000).toISOString(),
+      launch_expires_at: new Date(Date.now() - 1).toISOString(),
+    };
+    await atomicWriteJson(intentFile, {
+      ...intent,
+      ...elapsed,
+      launch_generations: intent.launch_generations.map((entry) => (
+        entry.generation === intent.launch_generation ? { ...entry, ...elapsed } : entry
+      )),
+    });
 
+    const oldStart = codexStartInput({ turnId: `${oldTurn}-child`, model: action.dispatch.model.model });
     expect(await bindCodexSubagent(
       paths,
       await readJson(paths.active),
-      codexStartInput({ turnId: oldTurn }),
-    )).toMatchObject({ valid: false });
-    const expired = (await dispatchGenerations(paths, ticketId))
-      .find((record) => record.generation === 1);
-    expect(expired).toBeTruthy();
-    expect(
-      ['expired', 'orphaned'].includes(expired.status) || typeof expired.orphaned_at === 'string',
-    ).toBe(true);
+      oldStart,
+    )).toMatchObject({ valid: true, bootstrap_required: true });
+    const lateBootstrap = codexBootstrapInput(action, oldStart);
+    expect(await bootstrapCodexSubagent(paths, await readJson(paths.active), lateBootstrap))
+      .toMatchObject({ valid: false, binding_observation: { code: 'ticket_deadline_elapsed' } });
+    expect((await dispatchGenerations(paths, ticketId)).some((record) => record.status === 'bound')).toBe(false);
+    expect(Date.parse(action.ticket.deadline_at)).toBeGreaterThan(Date.now());
 
     const prepared = await Promise.allSettled([
-      prepareCodexIntent(paths, action.ticket, action.ticket.role),
-      prepareCodexIntent(paths, action.ticket, action.ticket.role),
+      prepareCodexIntent(paths, action.ticket, action.ticket.role, { bootstrap_protocol: 1 }),
+      prepareCodexIntent(paths, action.ticket, action.ticket.role, { bootstrap_protocol: 1 }),
     ]);
     const fulfilled = prepared
       .filter((entry) => entry.status === 'fulfilled')
@@ -3173,13 +3211,22 @@ describe('APE v2 authenticated recovery and native launch generations', () => {
       expect(new Set(fulfilled.map((entry) => entry.agent_name)).size).toBe(1);
     }
     const generations = await dispatchGenerations(paths, ticketId);
+    const expired = generations.find((record) => record.generation === 1);
+    expect(expired).toBeTruthy();
+    expect(
+      ['expired', 'orphaned'].includes(expired.status) || typeof expired.orphaned_at === 'string',
+    ).toBe(true);
     expect(new Set(generations.map((entry) => entry.generation))).toEqual(new Set([1, 2]));
     expect(generations.some((entry) => entry.generation === 2 && entry.status === 'prepared'))
       .toBe(true);
 
     const freshAction = {
       ...action,
-      dispatch: { ...action.dispatch, agent_name: fulfilled[0].agent_name },
+      dispatch: {
+        ...action.dispatch,
+        agent_name: fulfilled[0].agent_name,
+        bootstrap_args: fulfilled[0].bootstrap_args,
+      },
     };
     const freshTurn = 'fresh-authorized-turn';
     expect(await launchCodexIntent(
@@ -3191,14 +3238,20 @@ describe('APE v2 authenticated recovery and native launch generations', () => {
         turnId: freshTurn,
       }),
     )).toMatchObject({ valid: true });
+    expect(await bootstrapCodexSubagent(paths, await readJson(paths.active), lateBootstrap))
+      .toMatchObject({ valid: false });
+    const freshStart = codexStartInput({
+      sessionId: 'fresh-parent',
+      agentId: 'fresh-agent',
+      turnId: `${freshTurn}-child`,
+      model: action.dispatch.model.model,
+    });
     expect(await bindCodexSubagent(
       paths,
       await readJson(paths.active),
-      codexStartInput({
-        sessionId: 'fresh-child',
-        agentId: 'fresh-agent',
-        turnId: freshTurn,
-      }),
-    )).toMatchObject({ valid: true, ticket_id: ticketId });
+      freshStart,
+    )).toMatchObject({ valid: true, bootstrap_required: true });
+    expect(await bootstrapCodexSubagent(paths, await readJson(paths.active), codexBootstrapInput(freshAction, freshStart)))
+      .toMatchObject({ valid: true, ticket_id: ticketId });
   });
 });

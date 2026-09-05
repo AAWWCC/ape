@@ -431,6 +431,41 @@ describe('ape v2 status-doc dispatch stage', () => {
   });
 });
 
+describe('ape v2 status-doc receipt retry guidance', () => {
+  it('keeps the input-required correction action instead of advancing a milestone', () => {
+    const doc = renderStatusDoc({
+      schema_version: '2.0.0',
+      run_id: 'run-status-doc-receipt-retry',
+      mode: 'phase',
+      lane: 'fast',
+      host: 'codex',
+      status: 'input_required',
+      stage: 'test',
+      dispatch_state: 'live',
+      tickets: [{
+        ticket_id: 'run-status-doc-receipt-retry:test:1',
+        stage_id: 'test',
+        role: 'test_writer',
+      }],
+      receipts: [],
+      expired_tickets: [],
+      input_required: {
+        kind: 'receipt_retry',
+        ticket_id: 'run-status-doc-receipt-retry:test:1',
+      },
+    });
+
+    expect(doc).toContain('Reason code: receipt_retry_input_required');
+    expect(doc).toContain(
+      'Next safe action: continue the same agent and record the exact attested receipt',
+    );
+    expect(nextLine(doc)).toBe(
+      'Next: continue the same agent and record the exact attested receipt',
+    );
+    expect(nextLine(doc)).not.toContain('advance to build');
+  });
+});
+
 describe('ape v2 status-doc bounded recovery stages', () => {
   it.each([
     ['plan-replan', 'full', 'plan', 6],

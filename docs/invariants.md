@@ -1,144 +1,138 @@
 # Invariants
 
-APE 2's universal invariants are `contracts.post_compaction_rules` — the load-bearing constraints
-of the whole runtime. They are the successor to APE 1's PCRs (`pcr-01…pcr-13`).
-
-The difference is the mechanism. APE 1 re-injected the PCRs as prose into the main session on every
-`SessionStart` and trusted the model (plus a fleet of hooks) to obey them. APE 2 **enforces** the
-invariants by construction: the deterministic scheduler, the lifecycle hook, and independent receipt
-validation make a violation impossible or rejected, rather than merely discouraged. There is no
-re-injection step because the machine does not rely on an agent remembering a rule it already
-enforces.
+These are APE's core runtime rules, stored as `contracts.post_compaction_rules`. The scheduler,
+hooks, and receipt validator enforce them. Session-start guidance explains the rules to agents;
+the prose itself is not a security boundary.
 
 ## The nine
 
-1. **Runtime-owned transitions.** The scheduler, not any agent, owns stage order, retries, model
-   policy, gates, and completion.
-2. **No main-session production writes.** Production code flows through a stage ticket; the main
-   session authors only orchestration state and prose.
-3. **Behavioral test independence.** Tests assert behavior, not the implementation that produced it;
-   red-first work observes fail/fail, explicit green maintenance observes pass/pass, and
-   non-behavioral work manufactures neither.
-4. **Deterministic, tree-bound evidence.** Every receipt is validated against a recomputed tree SHA
-   and changed-file set — claims are never trusted as written.
-5. **One retry per failed stage and bounded, convergent remediation.** A new blocker set may receive
-   another configured cycle; a repeated blocker or exhausted budget blocks immediately.
-6. **Project and host agnosticism.** No host policy in an adapter, no hardcoded project tooling; the
-   runtime runs identically under Claude and Codex.
-7. **Serialized writers and atomic state.** Each runtime state domain has one lock-held writer and
-   uses atomic writes. Receipt/service effects and MCP task generations have separate locks with a
-   strict no-nesting boundary; task and capability-recovery generations are append-only and
-   hash-chained.
-8. **Truthful completion.** A stage is complete only when its evidence independently reproduces; an
-   agent returns `failed` rather than claiming unearned success. A proven remote merge is not
-   rewritten as failed merely because local checkout cleanup must be retried.
-9. **Gated and authorized auto-merge.** A run merges only after every merge gate passes and the
-   shipping sink rechecks either the run's frozen `auto_merge_authorized` bit—derived at start from
-   explicit invocation plus configured auto-merge—or its audited, one-shot `SHIP` marker;
-   protected-branch auto-merge remains pending until the exact attested head is observed merged.
-   Strict shipping resolves `origin` once into an immutable verified remote URL plus the canonical
-   `AAWWCC/ape` repository slug; every push and `gh` command receives that target explicitly, so a
-   later remote rebind cannot redirect the mutation.
+1. **Runtime-owned transitions.** The scheduler owns stages, retries, models, gates, and completion.
+2. **No main-session production writes.** Stage workers edit production files under tickets. The
+   parent handles orchestration and prose.
+3. **Independent behavioral tests.** Tests check behavior independently of implementation.
+   Red-first admission observes fail/fail; green maintenance observes pass/pass. Non-behavioral
+   work claims neither.
+4. **Tree-bound evidence.** The runtime recomputes the tree SHA and changed files before accepting
+   a receipt. A worker's claim alone is insufficient.
+5. **Bounded retries and remediation.** Each failed stage gets at most one retry. Further
+   remediation requires a strictly smaller blocker set and available budget.
+6. **Shared project and host policy.** Claude and Codex use the same core rules. Adapters do not
+   decide policy, and project tooling comes from configuration.
+7. **Serialized writes.** State changes use locks and atomic writes. Receipt effects and MCP task
+   generations use separate locks, never held together. Task and recovery generations are
+   append-only and hash-linked.
+8. **Truthful completion.** A stage needs independently checked evidence to pass. A worker must
+   report failure when it cannot prove success. A proven remote merge stays proven even if local
+   cleanup fails.
+9. **Authorized, gated shipping.** Merge requires passing gates and either frozen
+   `auto_merge_authorized` consent from start or an audited one-shot `SHIP` marker. Every
+   external operation rechecks the frozen origin, repository, and base. The canonical APE checkout
+   is restricted to `AAWWCC/ape`; other projects need their own explicit target. Protected
+   auto-merge remains pending until the exact pushed head is observed merged.
 
 ## Where each is enforced
 
 | Invariant | Enforced by |
 | --- | --- |
-| Runtime-owned transitions | `lib/runtime/scheduler.js` — a pure `RunState + Event → Action[]` reducer |
-| No main-session production writes | `lib/runtime/hooks.js` ticket / path-claim policy; `prompts/common.md` agent contract |
-| Behavioral test independence | `test_writer` role boundary + runtime-owned `required_checks` (`red-test` or `green-test`); receipt observations |
-| Deterministic, tree-bound evidence | `lib/runtime/receipt-validator.js` recomputes the tree SHA and changed files |
-| One retry + convergent remediation | `lib/runtime/constants.js` bounds plus reducer finding fingerprints |
-| Project / host agnosticism | `lib/runtime/adapters.js` (Claude / Codex); no literal tooling in the core |
-| Serialized writers + atomic state | `lib/runtime/lock.js` + `storage.js` atomic writes; `lib/runtime/task-store.js` owns the MCP-only tasks lock and immutable generation journal, never nested with the receipt-effects lock |
-| Truthful completion | receipt hash chain + independent recompute in `receipt-validator.js` |
-| Gated auto-merge | `lib/runtime/gates.js` `runMergeGates` / `autoMergeGithub` |
+| Runtime-owned transitions | `lib/runtime/scheduler.js`: state + event → actions. |
+| No main-session production writes | Ticket/path rules in `lib/runtime/hooks.js`; `prompts/common.md`. |
+| Independent behavioral tests | `test_writer` boundary; runtime-owned `red-test` / `green-test` checks; receipt observations. |
+| Tree-bound evidence | `lib/runtime/receipt-validator.js`. |
+| Bounded retry and remediation | `lib/runtime/constants.js`; reducer finding fingerprints. |
+| Shared project and host policy | `lib/runtime/adapters.js`; shared core configuration. |
+| Serialized writes | `lib/runtime/lock.js`, `storage.js`, and the separate tasks lock in `task-store.js`. |
+| Truthful completion | Receipt hash chain and independent validation. |
+| Authorized shipping | `lib/runtime/gates.js`, `github-shipping.js`, and `shipping-target.js`. |
 
 ## Capability-recovery generations
 
-A receipt-contract-v1 capability denial may request one additive successor rather than consume a
-product retry. Before any receipt, ticket, contract, state, audit, history, or shipping sink, the
-runtime recomputes and validates one exact prepared-effect binding. It covers the source
-ticket/receipt/stage/role/attempt, policy and model, lane and risks, production and test scope,
-orchestration counters, issue/deadline times, field and byte budgets, capability manifest, run
-contract, recovery lineage, and both the predecessor and successor generation identities.
+A capability successor can add missing authority once for a receipt-contract-v1 ticket. It
+cannot reset counters, broaden scope arbitrarily, or treat a worker's draft as an authenticated
+receipt. Recovery authority comes from the immutable run contract, never mutable `active.json`
+or later configuration.
 
-Those derivation inputs come from the immutable run-contract catalog and its exact ticket recovery
-authority, never from mutable `active.json` or a later live configuration. Fresh preparation and
-adoption of an already-published receipt run the same schema, binding, policy, filesystem, and
-prepared-runtime validation before any selector or compatibility projection changes.
+### Binding and limits
 
-The successor is runtime-derived exactly once. Its v4 UUID ticket id and canonical filename,
-receipt/output schemas and hashes, predecessor receipt hash, claims, policy, risk/lane, timing,
-manifest/run-contract pointers, ceilings, and runtime provenance must all agree. Missing, extra,
-stale, duplicate, replayed, caller-forged, or self-consistently rebound material is rejected before
-consumption. Every lineage monotonically retains validation usage: no physical worker may submit
-more than three validations and no ticket lineage may consume more than two physical workers.
+Codex first records a provisional child, then binds it through the trusted `ape_bind` hook.
+Provisional evidence and the MCP confirmation grant no authority. Binding checks the actual
+model, parent link, immutable ticket, deadline, and single-child ownership before injecting
+context. The parent must relay the bootstrap unchanged; APE does not infer a physical
+spawn-to-UUID proof from matching turn IDs or transcripts. See [lifecycle hooks](hooks.md).
 
-Initial admission and recovery use the same exact test-path representation. Paths must be unique,
-canonical, contained project-relative names; absolute, parent-relative, `.ape`-reserved, alias, and
-option-like values are refused. The complete additive union is computed before mutation and is
-limited to 64 items and 4096 serialized UTF-8 JSON bytes.
+Before recovery has any effect, the runtime verifies one prepared binding covering:
 
-After validation, the runtime writes a complete immutable recovery generation, including the
-successor, receipt, run-contract/schema, transaction, and adopted state, beside the generation
-store. A single same-filesystem directory rename publishes it under its hash-bound canonical name.
-Its bounded exact manifest seals every canonical regular-file name, raw byte hash, byte length, and
-filesystem identity; extra directories, hard links, missing members, and substitutions immediately
-before or after rename fail loudly. Only then does an append-only content-addressed selector edge
-make the generation the unique head. Zero valid children is the head, one advances, and multiple
-valid children are a fail-closed fork. Invalid selector source slots remain in place as retained
-semantic evidence; a collision-safe evidence record binds the pathname, device/inode identity, raw
-bytes and byte hash, and claimed lineage. A changed or rebound pathname is rescanned, and the
-validated selector/head chain remains the authoritative source of truth.
-Compatibility projections, including `active.json`, are repaired only from that head. A process
-death therefore leaves the old head or a complete new generation that retry can adopt; incomplete
-staging data is inert. The receipt-effects lock binds its token to process identity and lifecycle:
-`EPERM` and unknown probe errors mean an active owner is alive, while `ESRCH` or the locally owned
-release path's in-memory retiring token permits atomic retirement of the whole stale directory.
-Every post-selector projection replacement, active-state adoption, receipt-binding completion, and
-successor-dispatch write uses the same lease-guarded mutation primitive, which verifies token plus
-directory device/inode both before and after the sink. A failed check stops every later sink. A
-cooperating contender cannot create the apparent final check-to-sink race: a live owner process is
-not stealable, and the locally retiring token is set only after its callback returns. A process with
-the same filesystem privileges that bypasses APE and writes a destination directly is outside the
-lock's trust boundary—it could alter that destination without touching the lock at all.
+- Source ticket, receipt, stage, role, attempt, policy, and model.
+- Lane, risks, production/test scope, counters, issue time, and deadline.
+- Schemas, hashes, field/byte budgets, capability manifest, and run contract.
+- Predecessor and successor identities, receipt hash, and recovery lineage.
 
-Every member is size-checked before allocation, read through a bounded stream, and charged against
-a cumulative generation limit; directory walking uses an early entry cap. Selector publication and
-semantic-evidence recording revalidate the held lock token plus lock-directory device/inode at the
-mutation boundary. Evidence recording also revalidates the slot device/inode/bytes, publishes a
-non-clobbering record, and verifies that the retained identity is unchanged. A reachable non-head edge cannot roll the
-head or projections backward. A validated selectorless legacy generation `N` is migrated by
-publishing a new append-only `N+1` generation and selector, never by reusing or rewriting `N`.
+The successor must have the correct v4 UUID and canonical filename. Missing, extra, stale,
+duplicate, forged, or rebound fields are rejected. New preparation and replayed receipt adoption
+use the same schema, policy, filesystem, and runtime checks.
 
-Legacy receipt-v1 artifacts remain readable without default insertion or byte rewriting. Legacy
-recovery that lacks the complete binding is deliberately non-adoptable. Worker receipts, recovery
-payloads, path arrays, persisted recovery records, lock bytes, and crash timing are untrusted; only
-runtime-derived canonical material and a validated lock owner cross the adoption boundary.
+Each worker gets at most three validations; each ticket lineage gets at most two workers.
+Test paths must be unique, canonical, contained project-relative names. Absolute, parent-relative,
+`.ape`-reserved, alias, and option-like paths are rejected. The complete additive union is
+checked before mutation: at most 64 paths and 4096 serialized UTF-8 JSON bytes.
+
+### Publishing and replay
+
+1. Write the complete successor, receipt, run contract/schema, transaction, and adopted state to
+   a new immutable generation.
+2. Check a bounded manifest of exact regular-file names, hashes, byte lengths, and filesystem
+   identities. Reject extra directories, hard links, missing files, and substitutions.
+3. Publish with a same-filesystem directory rename, recheck it, then append a content-addressed
+   selector edge. The selector chain alone chooses the current generation.
+4. Update compatibility projections, including `active.json`, only from that verified head.
+
+Zero valid child edges means the current head; one advances it; multiple children are a rejected
+fork. Invalid selector slots remain in place as retained semantic evidence. A collision-safe
+record binds their path, device/inode, raw bytes/hash, and claimed lineage. Changed or rebound
+slots are rescanned.
+
+A crash leaves either the old head or a complete generation that replay can adopt; incomplete
+staging data has no authority. The selector head remains the authoritative source of truth.
+Replaying an ancestor never rolls back the head or projections.
+A validated selectorless legacy generation `N` advances by publishing `N+1`, not rewriting
+`N`. Legacy receipt-v1 bytes stay readable and unchanged; incomplete legacy recovery stays blocked.
+
+### Locks and storage bounds
+
+Every file is size-checked before allocation, read through a bounded stream, and counted against
+a total byte limit. Directory walks have an entry limit.
+
+Every selector, evidence, projection, state, receipt-binding, and dispatch write rechecks the
+lease token and lock-directory device/inode before and after mutation. Evidence recording also
+rechecks the retained slot's identity/bytes and never overwrites an existing record. A failed
+lease check prevents later effects.
+
+A live lock owner cannot be displaced by another cooperating process. `EPERM` or unknown
+process-probe errors keep it alive; `ESRCH` or the local post-callback retiring token permits
+stale-lock retirement. A same-privilege process writing files directly outside APE is outside
+this lock boundary.
+
+Worker receipts, recovery records, path arrays, lock bytes, and crash timing are untrusted.
+Only validated runtime-derived data under a valid lock can be adopted.
 
 ## The per-agent slice
 
-Each native subagent receives the compressed, enforced subset as the "native-agent contract" in
-`prompts/common.md`: work only on the ticket objective and claimed paths; do not write `.ape/`
-runtime state; never spawn another agent; do not commit, push, merge, weaken tests, or change scope;
-return `failed` rather than claim success. The runtime independently recomputes the tree SHA and
-validates role boundaries before accepting the receipt, so an agent that ignores its contract is
-caught structurally.
+`prompts/common.md` gives each worker its ticket rules: stay within the objective and claimed
+paths; do not write `.ape/` state, spawn agents, commit, push, merge, weaken tests, or expand
+scope. Return failure when success cannot be proved. The runtime checks these claims against the
+tree and role boundaries before accepting the receipt.
 
 ## Experimental task durability
 
-MCP task handles do not weaken invariant 7 or introduce a protocol session. They name a bounded,
-root-bound journal below `.ape/runtime/tasks/`. A task's generation zero is atomic and durable
-before its handle is returned; every later generation is serialized, immutable, and linked to its
-predecessor by hash. Service-side charged effects commit under the existing receipt-effects lock,
-then publish their exact result under the tasks lock only after releasing the service lock. Crash
-recovery may bridge those two durable records, but it never holds both locks and never reruns an
-effect already recorded as committed. Operation transactions are themselves private, root-bound,
-schema-validated, hashed, size-bounded, and TTL-collected into bounded audit tombstones.
+MCP task handles identify bounded, root-bound journals under `.ape/runtime/tasks/`, not protocol
+sessions. Generation zero is durable before a handle is returned; later generations are
+serialized, immutable, and linked by hash.
 
-Cancellation follows the same truthful-completion rule as receipts: a cancellation acknowledgement
-records intent, not instantaneous termination. Only verified process-local ownership may be
-signalled, attributable gate processes are reaped before the terminal generation is published, and
-foreign or stale ownership fails closed. TTL collection may remove expired task bodies only after
-preserving an auditable chain-tail hash; those audit records have bounded retention too.
+Service effects commit under the receipt-effects lock. Their exact results publish under the
+tasks lock only after that first lock is released. Crash recovery links the records without
+holding both locks or rerunning committed effects. Operation transactions are private,
+root-bound, schema-checked, hashed, size-bounded, and TTL-collected into bounded audit records.
+
+Cancellation acknowledgement records intent, not immediate termination. Only verified
+process-local owners may be signalled; attributable gate processes are reaped before publishing
+a terminal generation. Foreign or stale ownership is rejected. Expired task bodies may be
+removed only after retaining the chain-tail hash; those audit records also have bounded retention.

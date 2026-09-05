@@ -121,7 +121,7 @@ describe('APE v2 History Explain & Lifecycle Telemetry Output', () => {
       expect(explanation).not.toContain('Implement rich history explanation and lifecycle telemetry');
       expect(explanation).toContain('Status: completed; lane: fast; mode: phase.');
       expect(explanation).toContain('Reason code: completed');
-      expect(explanation).toContain('Next safe action: ape_run start');
+      expect(explanation).toContain('Next safe action: check host prerequisites, then ape_run start');
       expect(explanation).toContain('Agents: 2 passed receipts, 0 non-passing receipts.');
       expect(explanation).toContain('Merged:');
       expect(explanation).not.toContain('github.com/acme/repo');
@@ -320,7 +320,7 @@ describe('APE v2 History Explain & Lifecycle Telemetry Output', () => {
       expect(res.run).toMatchObject({ run_id: 'run-explain-e2e', status: 'completed' });
       expect(res.diagnostic).toMatchObject({
         reason_code: 'completed',
-        next_safe_action: 'ape_run start',
+        next_safe_action: 'check host prerequisites, then ape_run start',
       });
       expect(res.text).toBeTypeOf('string');
       expect(res.text).toContain('Run run-explain-e2e');
