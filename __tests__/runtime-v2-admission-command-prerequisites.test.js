@@ -37,11 +37,16 @@ async function inspect(root, command) {
 describe('current command prerequisites before dispatch', () => {
   it.each([
     ['missing interpreter entry', 'node missing-entry.js', {}, 'entry-script-missing', 'missing-entry.js'],
+    ['missing Node syntax-check entry', 'node -c missing-entry.js', {}, 'entry-script-missing', 'missing-entry.js'],
+    ['missing Node long syntax-check entry', 'node --check missing-entry.js', {}, 'entry-script-missing', 'missing-entry.js'],
     ['missing package script', 'npm run missing-script', { 'package.json': '{"scripts":{"other":"node --version"}}' }, 'package-script-missing', 'package.json'],
     ['missing package script entry', 'npm run check', { 'package.json': '{"scripts":{"check":"node missing-entry.js"}}' }, 'entry-script-missing', 'missing-entry.js'],
     ['missing shebang interpreter', './check', { check: '#!/ape-synthetic-missing-interpreter\nexit 0\n' }, 'shebang-interpreter-missing', 'check'],
     ['missing env shebang interpreter', './check', { check: '#!/usr/bin/env ape-synthetic-missing-interpreter\nexit 0\n' }, 'shebang-env-interpreter-missing', 'check'],
     ['missing env-wrapped interpreter entry', 'env NODE_ENV=test node missing-entry.js', {}, 'entry-script-missing', 'missing-entry.js'],
+    ['missing preload before inline evaluation', 'node --require ./missing-setup.js -e "process.exit(0)"', {}, 'entry-script-missing', 'missing-setup.js'],
+    ['missing preload after inline evaluation', 'node -e "process.exit(0)" --require=./missing-setup.js', {}, 'entry-script-missing', 'missing-setup.js'],
+    ['missing import before inline print', 'node --import ./missing-setup.mjs --print=1', {}, 'entry-script-missing', 'missing-setup.mjs'],
   ])('blocks %s on HEAD=base before creating a branch or worker', async (_label, command, files, cause, expectedPath) => {
     const root = await fixture(files);
     if (command === './check') { await chmod(path.join(root, 'check'), 0o755); git(root, 'add', 'check'); git(root, 'commit', '-qm', 'executable'); }
@@ -119,6 +124,59 @@ describe('current command prerequisites before dispatch', () => {
     expect(await inspect(root, 'node --test {paths}')).toEqual([]);
     expect(await inspect(root, 'node --test future-authored.test.js')).toEqual([]);
     expect(await inspect(root, 'node --require=./missing-setup.js --test {paths}')).toContainEqual(expect.objectContaining({ code: 'command-prerequisite-unavailable' }));
+    expect(await inspect(root, 'node --require=./missing-setup.js --test future-authored.test.js --help'))
+      .toContainEqual(expect.objectContaining({ code: 'command-prerequisite-unavailable' }));
+  });
+
+  it('accepts an available preload without treating inline code as a filename or running it', async () => {
+    const root = await fixture({ 'setup.js': "require('node:fs').writeFileSync('SHOULD_NOT_EXIST', 'executed');\n" });
+    expect(await inspect(root, 'node --require ./setup.js -e "process.exit(1)"')).toEqual([]);
+    expect(await inspect(root, 'node --print=1 --require=./setup.js')).toEqual([]);
+    expect(await readdir(root)).not.toContain('SHOULD_NOT_EXIST');
+  });
+
+  it.each([
+    'bash -lc "exit 1"',
+    'bash -o pipefail -c "exit 1"',
+    'node --input-type module -e "process.exit(1)"',
+    'node --stack-trace-limit 100 -e "process.exit(1)"',
+  ])('does not invent an entry file from interpreter options in %s', async (command) => {
+    const root = await fixture();
+    await configure(root, command);
+    const preview = await previewRun(root, input);
+    expect(preview.admission.ready).toBe(true);
+  });
+
+  it('retains required script and preload checks after interpreter option values', async () => {
+    const root = await fixture();
+    for (const command of ['bash -o pipefail missing.sh', 'bash -e missing.sh',
+      'node --stack-trace-limit 100 missing.js',
+      'node --input-type module --require ./missing.js -e "process.exit(1)"']) {
+      expect(await inspect(root, command)).toContainEqual(expect.objectContaining({ cause: 'entry-script-missing' }));
+    }
+  });
+
+  it.each([
+    'node --help missing.js',
+    'node --version --require ./missing.js',
+    'node --require ./missing.js --help',
+    'npm run missing --help',
+    'npm --version run missing',
+    'npm run check -- --prefix ../outside',
+  ])('does not invent execution prerequisites for informational or forwarded arguments in %s', async (command) => {
+    const root = await fixture({ 'package.json': JSON.stringify({ scripts: { check: 'node --version' } }) });
+    await configure(root, command);
+    const preview = await previewRun(root, input);
+    expect(preview.admission.ready).toBe(true);
+    expect(preview.admission.baseline.execution).toBe('not-run-by-read-only-preview');
+  });
+
+  it('retains real entry and package prerequisites when help is a script argument', async () => {
+    const root = await fixture({ 'package.json': JSON.stringify({ scripts: { check: 'node missing.js' } }) });
+    for (const command of ['node missing.js --help', 'node -- --help', 'npm run check -- --help']) {
+      expect(await inspect(root, command)).toContainEqual(expect.objectContaining({ cause: 'entry-script-missing' }));
+    }
+    expect(await inspect(root, 'npm run missing -- --help')).toContainEqual(expect.objectContaining({ cause: 'package-script-missing' }));
   });
 
   it('allows an internal script symlink but rejects an escaping script link', async () => {

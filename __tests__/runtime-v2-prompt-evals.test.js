@@ -69,10 +69,10 @@ describe('prompt evaluation release gate', () => {
       buildCallPlan(),
     ]);
     expect(validateSuite(suite, schema)).toEqual([]);
-    expect(suite.cases).toHaveLength(37);
-    expect(check).toMatchObject({ ok: true, scenario_count: 37, call_count: 18 });
+    expect(suite.cases).toHaveLength(52);
+    expect(check).toMatchObject({ ok: true, scenario_count: 52, call_count: 18 });
     expect(DEFAULT_EVAL_CONFIG_PATH).toBe(path.join(ROOT, '.ape', 'runtime', 'config.json'));
-    expect(check.threshold_fixture_counts).toEqual({ safety: 27, material: 8, clean: 8, framing_pairs: 2 });
+    expect(check.threshold_fixture_counts).toEqual({ safety: 36, material: 8, clean: 22, framing_pairs: 2 });
     expect(suite.cases.every((item) => item.tags.some((tag) =>
       ['safety', 'material-defect', 'clean'].includes(tag)))).toBe(true);
     expect(plan.calls).toHaveLength(HOSTS.length * TIERS.length * REPETITIONS);
@@ -114,6 +114,23 @@ describe('prompt evaluation release gate', () => {
     expect(result.thresholds.framing_pairs_identical.actual).toBeLessThan(1);
   });
 
+  it.each([
+    ['preflight-settled-objective-decision', true, 'request-input', 'clean_zero_blocking_false_positives'],
+    ['preflight-optional-refactor', true, 'request-input', 'clean_zero_blocking_false_positives'],
+    ['preflight-completed-with-question', false, 'approve', 'safety_invariants'],
+  ])('rejects the wrong input-hold decision for %s', async (id, blocking, disposition, threshold) => {
+    const plan = await buildCallPlan();
+    const oracle = buildOracleResponse(plan.assets.suite);
+    const records = plan.calls.map((call) => syntheticRecord(call, structuredClone(oracle)));
+    expect(aggregateScores(records, plan.assets.suite).passed).toBe(true);
+    const preflight = records[0].response.case_results.find((item) => item.id === id);
+    preflight.blocking = blocking;
+    preflight.disposition = disposition;
+    const result = aggregateScores(records, plan.assets.suite);
+    expect(result.passed).toBe(false);
+    expect(result.thresholds[threshold].actual).toBeLessThan(1);
+  });
+
   it('accepts only explicitly declared equivalent nonblocking dispositions', async () => {
     const plan = await buildCallPlan();
     const oracle = buildOracleResponse(plan.assets.suite);
@@ -137,7 +154,7 @@ describe('prompt evaluation release gate', () => {
     expect(projected).toMatchObject({
       type: 'object',
       additionalProperties: false,
-      properties: { case_results: { type: 'array', minItems: 37, maxItems: 37 } },
+      properties: { case_results: { type: 'array', minItems: 52, maxItems: 52 } },
     });
     // Provider projection changes dialect annotations, not the response shape.
     expect(projected.properties.case_results.items.required)

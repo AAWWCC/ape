@@ -159,7 +159,7 @@ Recognized command families include:
   wrappers, `tox`, `go test`, and `cargo test`.
 - Read-only Git: `status`, `diff`, `log`, `show`, `rev-parse`, listing-only
   `branch`, `describe`, `ls-files`, and `ls-tree`. Output-writing flags are refused.
-- `ls`, `pwd`, `cat`, `echo`, `true`, `which`, bare `env`, and exact-head
+- `rg`, `grep`, `head`, `tail`, `ls`, `pwd`, `cat`, `echo`, `true`, `which`, bare `env`, and exact-head
   `sha256sum` / `shasum` checks.
 - Check-only Ruff, Flake8, Mypy, Pylint, Black, Isort, ESLint, and Prettier.
 - At most one leading `cd <dir> &&`.
@@ -169,12 +169,34 @@ start. A missing, shadowed, newly appeared, or replaced executable is refused.
 `echo`, `pwd`, and `true` are explicit builtins; Windows resolution uses PATHEXT
 and case-insensitive names.
 
+Search is ordinary inspection. Ripgrep's subprocess modes (`--pre`,
+`--hostname-bin`, and `-z` / `--search-zip`) need separate command authority;
+they are not part of the read-only inspection channel.
+
+Git branch inspection accepts commit filters (`--contains`, `--merged`, and
+`--points-at`), list patterns, and spaced formatting/sorting values. It consumes
+option values and tracks listing-mode changes, so `--list --no-list newbranch`
+cannot create a branch through the inspection channel. Unknown or abbreviated
+branch options still require a supported exact spelling.
+A proven `--` path separator preserves a filename such as `--output=result.txt`
+as a file argument. Unknown or potentially consuming options before it retain
+the full output-flag check: Git can consume `--` as an option value in forms
+such as `log -L -- --output=result.txt`, which writes before reporting an error.
+`ls-files` accepts combined read flags such as `-oi` and `-oz`; actual
+output-writing flags remain refused.
+
 ### Exact command profiles
 
 `policy.command_profiles` can allow one exact operator-approved command for
 named roles, with a `read`, `write`, or `execute` effect. Prefixes and globs do
 not match. A write profile needs a writable ticket. Write and execute profiles
 trigger checks for unexpected tree changes.
+
+For profiles in a validated immutable ticket, ordinary whitespace and literal
+quoting may spell the same arguments. Authorization and tree reconciliation use
+the same matcher. Shell-sensitive commands retain exact matching; extra arguments
+do not gain authority. Optional writer profiles whose outputs exceed a role's
+claims remain in the project catalog but are unavailable to that ticket.
 
 For one `debug` or `spike` run, preview/start may instead supply
 `run_command_profiles`. Each entry must:
@@ -190,8 +212,10 @@ Execute profiles can run arbitrary code; later tree checks do not replace approv
 ### Token and character rules
 
 APE tokenizes the command, matches a command family, then checks paths and
-executable identity. Chaining, substitutions, redirects, inline interpreters,
-controls, and ambiguous tokens are refused.
+executable identity. Shell chaining, substitutions, redirects, inline
+interpreters, controls, and ambiguous tokens are refused. Complete quoted
+inspection arguments are literal data, so a regex pipe inside single quotes is
+not treated as a shell pipeline.
 
 An unknown command such as `cp` is reported as outside the evidence allowlist,
 not as a missing executable. Only obvious file-inspection or read-only Git
@@ -204,22 +228,32 @@ It refuses `~`, `=`, and `^` at token start, and `~` / `=` immediately after
 `=` or `:`. This blocks zsh equals expansion such as `=node` under the stated
 shell assumptions and narrows `MAGIC_EQUAL_SUBST` exposure.
 
-A `cd` target also refuses `~` and `^` anywhere, or a leading `-` / `+`.
-Use `./-build` or `./+build` to name those directories.
+An unquoted `cd` target refuses `~` and `^` anywhere. All targets refuse a leading
+`-` / `+`; use `./-build` or `./+build` to name those directories.
+
+A complete single- or double-quoted literal target supports spaces and bracketed directory names,
+such as `cd 'packages/my app' && npm test`. Quoting also preserves literal `~`
+and `^`. The same command, executable, and contained-directory checks apply after
+relocation. Expansion inside double quotes, empty targets, partial quoting, extra
+directory operands, and additional command chains remain refused.
 
 Quoting rules:
 
-- Static `cat` and `ls` operands may use a complete single- or double-quoted
-  token, such as `cat 'eslint.config.mjs'`. Its content must use the ordinary
-  alphabet without spaces.
+- `cat`, `ls`, `rg`, `grep`, `head`, `tail`, and read-only Git accept complete
+  single- or double-quoted words, mixed with ordinary unquoted words. Examples:
+  `cat 'src/file with spaces.js'`, `rg -n 'foo|bar' src`, and
+  `git diff -- "src/file with spaces.js"`. Command effects, paths, and executable
+  identity are checked on the decoded arguments. Single-quoted regex backslashes
+  stay literal. Double-quoted interpolation or escapes, unquoted escapes, and
+  concatenated quote fragments remain refused.
 - A complete argv may use uniformly single- or double-quoted, escape-free tokens.
   Each unquoted token must pass ordinary policy. For example,
   `'cat' 'tests/unit/graph.test.ts'` has the same verdict as plain argv.
-- Next.js paths may use single-quoted segments shaped as `[name]`, `[...name]`,
-  or `[[...name]]`: `cat 'app/trace/[traceId]/page.tsx'`.
-  Unquoted brackets, double-quoted routes, partial brackets, and spaces are refused.
-- Mixed or partial quoting, embedded quotes, quoted package-script names, shell
-  operators, and quoted whitespace do not gain an exception.
+- Quote bracketed paths for literal inspection, such as
+  `cat 'app/trace/[traceId]/page.tsx'`. Other evidence families retain their
+  existing narrow Next.js route spelling.
+- Quoted package-script names, partial quoting, and shell operators outside
+  complete inspection words do not gain an exception.
 
 Deletion refuses `~`, `=`, and `^` anywhere. The retired
 `DELETION_UNSAFE_CHARS` check did not cover substitution: `rm =node` could target
@@ -229,7 +263,8 @@ tokenizer now refuses that form.
 
 Accepted over-blocks:
 
-- `git log ^main master` is refused because `^` starts a token.
+- `git log ^main master` is refused because `^` starts an unquoted token; use
+  `git log '^main' master` for a literal Git revision exclusion.
 - `cd +build` and `cd -build` are refused; use `cd ./+build` or `cd ./-build`.
 - Shell syntax can be refused even when one command would treat it as harmless data.
 
@@ -247,6 +282,8 @@ Path-shaped operands must resolve inside the governed project, including
 `--flag=path`, short attached operands, and relocation flags. Errors name the
 operand. A leading `cd` is resolved first; the command is checked from that
 directory. The session's working directory must already be inside the project.
+Long option values use the same containment rule as spaced values:
+`--rootdir=./tests` and `--rootdir ./tests` both stay inside the project.
 
 ## External MCP pass-through
 
@@ -269,6 +306,31 @@ During a run, the parent handles APE controls and native dispatch, not stage wor
 A blocklist rejects obvious writes/deletes, redirects, inline interpreters,
 patch/install/truncate commands, and mutating Git forms. This is not a sandbox:
 PostToolUse tree checks remain the backstop.
+
+Parent-tool refusals retain run-scoped observations outside active run state.
+Matching host call identities associate pre/post trees and retain the completed
+outcome for duplicate events. Known inspection results and matched unchanged
+commands do not relabel existing worker edits. Without a matched pre-event,
+the hook conservatively compares against the run baseline; this identifies
+unresolved changes, not proof of their author.
+
+Git calls use paired tree observations even for inspection: configured diff,
+text-conversion, filesystem-monitor, or pager helpers can execute other code.
+Ordinary Git reads remain available when their matched before/after trees agree.
+
+An unresolved observation prevents acceptance at worker-result hooks and fresh
+or prepared receipt admission. Reads and ticket-authorized repairs remain
+available. The refusal names affected paths and their reference trees. Preserve
+the current work, restore the affected entries through an authorized repair,
+and let a subsequent hook or receipt check observe that restoration before
+creating fresh worker output. Other paths keep their existing changes. A new
+arbitrary value does not prove the refused change was removed. APE never
+restores files automatically or resets the run to clear an observation.
+
+Observation storage is bounded. If the path record overflows, it retains a
+whole-tree reference requirement rather than dropping the refusal. Corrupt
+evidence prevents result acceptance; committed receipt retries remain
+idempotent, and old run observations do not govern a new run.
 
 ## Receipt capabilities
 

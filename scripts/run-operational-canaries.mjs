@@ -90,6 +90,8 @@ const expected = new Set([
   'branch-exact-scheduler-review-checks',
   'supersession-prelock-admission',
   'codex-model-input-response-framing',
+  'post-build-test-correction',
+  'override-abort-terminal-reason',
 ]);
 for (const id of expected) {
   if (!ids.has(id)) fail(`replay corpus is missing required case: ${id}`);

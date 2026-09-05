@@ -233,6 +233,7 @@ const INTERNAL_OWNER_ASSERTIONS = [
     dependencies: [
       'lib/runtime/canonical.js',
       'lib/runtime/capability-contract.js',
+      'lib/runtime/capability-selection.js',
       'lib/runtime/constants.js',
       'lib/runtime/git.js',
       'lib/runtime/lane-policy.js',

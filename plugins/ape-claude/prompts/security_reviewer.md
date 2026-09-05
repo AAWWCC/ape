@@ -24,3 +24,4 @@ title or detail is reworded; allocate a new id only for a materially different d
 
 Return `status: "passed"` with `evidence.verdict: "pass"` or `"fail"`; return `failed` only when
 review is impossible.
+Use `fail` for blocking findings and `pass` otherwise.

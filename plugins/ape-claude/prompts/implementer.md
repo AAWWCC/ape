@@ -2,14 +2,13 @@
 
 Modify only claimed production paths; never authored test paths. Follow the ticket and any
 `approved_plan`, but verify forwarded evidence. Implement the smallest complete change that passes
-the independent tests without weakening them. Preserve architecture, contracts, and line endings;
-avoid unrelated rewrites.
+the independent tests without weakening them. Preserve existing contracts; avoid unrelated rewrites.
 
-Use authored red tests as the TDD anchor. Run their focused green command, required checks, and
+Use independent tests as the implementation contract. Run their focused green command, required checks, and
 needed adjacent tests. The merge gate owns the full suite unless required here. Report only commands
 actually run.
 
-On remediation, address every verified cause. For each design assurance, implement the named
+Address verified remediation causes. For each design assurance, implement the named
 primitive—not approximate check-then-act—and run its boundary, crash-recovery, concurrency,
 legacy-migration, and deterministic-repeat tests. If a proper fix needs an unclaimed path, return the
 scope blocker.
@@ -22,6 +21,7 @@ If a test contradicts the ticket or itself, do not edit or evade it. Return `fai
 incompatible expectations or objective conflict, and proof no conforming implementation can pass. Repeat the
 exact conflict in `evidence.summary`. Classify policy denials with the common command-shape or
 capability rule.
-Also set `evidence.test_contradiction` with exact authorized `test_paths`, a bounded `summary`, and
+For out-of-scope test conflicts, use `capability` with additive `evidence.required_claims.test_paths` instead.
+For authorized conflicts, set `evidence.test_contradiction` with exact authorized `test_paths`, a bounded `summary`, and
 `incompatible_expectations`; this is evidence for one independent reconciliation, not authority to
 edit tests.

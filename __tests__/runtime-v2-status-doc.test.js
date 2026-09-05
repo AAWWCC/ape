@@ -432,7 +432,7 @@ describe('ape v2 status-doc dispatch stage', () => {
 });
 
 describe('ape v2 status-doc receipt retry guidance', () => {
-  it('keeps the input-required correction action instead of advancing a milestone', () => {
+  it('keeps the exact receipt recording action instead of advancing a milestone', () => {
     const doc = renderStatusDoc({
       schema_version: '2.0.0',
       run_id: 'run-status-doc-receipt-retry',
@@ -457,10 +457,10 @@ describe('ape v2 status-doc receipt retry guidance', () => {
 
     expect(doc).toContain('Reason code: receipt_retry_input_required');
     expect(doc).toContain(
-      'Next safe action: continue the same agent and record the exact attested receipt',
+      'Next safe action: ape_run record with the identical attested receipt',
     );
     expect(nextLine(doc)).toBe(
-      'Next: continue the same agent and record the exact attested receipt',
+      'Next: ape_run record with the identical attested receipt',
     );
     expect(nextLine(doc)).not.toContain('advance to build');
   });

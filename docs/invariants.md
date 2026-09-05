@@ -4,6 +4,24 @@ These are APE's core runtime rules, stored as `contracts.post_compaction_rules`.
 hooks, and receipt validator enforce them. Session-start guidance explains the rules to agents;
 the prose itself is not a security boundary.
 
+## Purpose of the rules
+
+APE gives authorized work an ordered sequence of roles, handoffs, evidence, and
+completion checks. Routine inspection and recoverable mistakes should keep moving
+within that sequence. A block should identify a concrete unmet requirement for the
+current work, missing authority, or an effect that violates the ticket.
+
+Available configuration is not automatically required work. An unused generator
+must not add output paths to a documentation task, and a debug-only run must not
+require a test runner used by another mode. Required checks and selected commands
+remain prerequisites. Optional profiles remain discoverable without granting
+execution outside the ticket's scope.
+
+Reuse settled user decisions. Ask only when an unresolved decision materially
+prevents safe completion; keep optional refactors and preferences advisory.
+Correct harmless command syntax in the current stage. When an attested receipt
+only needs recording, the parent retries that record without restarting the worker.
+
 ## The nine
 
 1. **Runtime-owned transitions.** The scheduler owns stages, retries, models, gates, and completion.
@@ -36,7 +54,7 @@ the prose itself is not a security boundary.
 | --- | --- |
 | Runtime-owned transitions | `lib/runtime/scheduler.js`: state + event → actions. |
 | No main-session production writes | Ticket/path rules in `lib/runtime/hooks.js`; `prompts/common.md`. |
-| Independent behavioral tests | `test_writer` boundary; runtime-owned `red-test` / `green-test` checks; receipt observations. |
+| Independent behavioral tests | `test_writer` boundary; runtime-owned `red-test` / `green-test` initial checks and independently authorized `test-correction`; receipt observations. |
 | Tree-bound evidence | `lib/runtime/receipt-validator.js`. |
 | Bounded retry and remediation | `lib/runtime/constants.js`; reducer finding fingerprints. |
 | Shared project and host policy | `lib/runtime/adapters.js`; shared core configuration. |

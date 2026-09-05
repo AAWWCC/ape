@@ -264,5 +264,8 @@ current default to drop it. Neither `version` nor `explicit_keys` can be set dir
 `verification.profiles` contains unique profile IDs, descriptions, exact shell-free command
 argv, optional contained project-relative roots, and timeouts. A snapshot freezes the bounded
 list at start; later live config changes cannot remove a run's verification obligations.
+Preview discloses missing or invalid roots. An optional profile with an unavailable
+root remains in the catalog but is excluded from the usable snapshot; an explicitly
+required profile blocks admission. Preview and start compare available root identities.
 A v2 plan must assign every required profile. Each is a fail-closed merge gate:
 the run cannot pass until the assigned profile succeeds.

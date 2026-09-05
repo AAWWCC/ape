@@ -77,6 +77,25 @@ async function isolatedSurface(files, fingerprints = []) {
 }
 
 describe('public-surface privacy and licensing gate', () => {
+  it.each(["'", '’'])('allows the approved project name with %s as its apostrophe', async (apostrophe) => {
+    const projectName = `${['Ai', 'dan'].join('')}${apostrophe}s Phase Engine`;
+    const result = await surface({ 'README.md': `# APE — ${projectName}\n` });
+    expect(result.exitCode, result.stderr).toBe(0);
+  });
+
+  it('retains the author-identity check outside the approved project name', async () => {
+    const personalName = ['Ai', 'dan'].join('');
+    for (const content of [
+      `Author: ${personalName}`,
+      `${personalName}’s Phase Engine\nAuthor: ${personalName}`,
+      `${personalName} Phase Engine`,
+    ]) {
+      const result = await surface({ 'README.md': content });
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain('old personal author identity');
+    }
+  });
+
   it('allows synthetic fixture identities and references', async () => {
     const result = await surface({
       'fixture.txt': [

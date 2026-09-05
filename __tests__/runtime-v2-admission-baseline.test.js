@@ -40,6 +40,99 @@ describe('command availability on the actual scheduled baseline', () => {
     expect(entryScripts(['node', '--require=./setup.js', '--test', '{paths}'])).toEqual(['./setup.js']);
     expect(entryScripts(['node', '--import', './setup.js', '--test', 'future.test.js'])).toEqual(['./setup.js']);
     expect(entryScripts(['node', '-e', 'process.exit(0)'])).toEqual([]);
+    expect(entryScripts(['node', '--require', './setup.js', '-e', 'process.exit(0)'])).toEqual(['./setup.js']);
+    expect(entryScripts(['node', '--eval=process.exit(0)', '--import=./setup.js'])).toEqual(['./setup.js']);
+    expect(entryScripts(['node', 'check.js', '-e', 'script argument'])).toEqual(['check.js']);
+    expect(entryScripts(['node', '-c', 'check.js'])).toEqual(['check.js']);
+    expect(entryScripts(['python', '-c', 'print(1)'])).toEqual([]);
+    expect(entryScripts(['python3', '-m', 'unittest', 'future_test.py'])).toEqual([]);
+    expect(entryScripts(['python3', '--check-hash-based-pycs', 'always', '-m', 'unittest'])).toEqual([]);
+    expect(entryScripts(['ruby', '-I', 'lib', '-e', 'exit 1'])).toEqual([]);
+    expect(entryScripts(['ruby', '-I', 'lib', '-c', 'check.rb'])).toEqual(['check.rb']);
+    expect(entryScripts(['perl', '-c', 'check.pl'])).toEqual(['check.pl']);
+    expect(entryScripts(['bash', '-o', 'pipefail', '-c', 'exit 1'])).toEqual([]);
+    expect(entryScripts(['bash', '-lc', 'exit 1'])).toEqual([]);
+  });
+
+  it.each([
+    ['literal shell environment', { check: 'NODE_ENV=test node scripts/check.js' }, 'npm run check', 'scripts/check.js'],
+    ['nested package script', { check: 'npm run leaf', leaf: 'node scripts/check.js' }, 'npm run check', 'scripts/check.js'],
+    ['npm start default', {}, 'npm start', 'server.js'],
+    ['explicit preload with inline code', {}, 'node --require ./scripts/check.js -e "process.exit(0)"', 'scripts/check.js'],
+  ])('blocks a feature-only %s entry in preview and start before mutation', async (_label, scripts, command, file) => {
+    const f = await fixture({ 'package.json': JSON.stringify({ scripts }) });
+    await put(f.root, file, "require('node:fs').writeFileSync('SHOULD_NOT_EXIST', 'executed'); process.exit(1);\n");
+    commit(f.root);
+    await put(f.root, '.ape/runtime/config.json', JSON.stringify({ test_commands: { full: command } }));
+    const index = await readFile(path.join(f.root, '.git/index'));
+    const input = {
+      objective: 'Clarify the synthetic readme', mode: 'phase', lane: 'mechanical', host: 'claude',
+      behavioral: false, claimed_paths: ['README.md'], test_paths: [], hooks_trusted: true,
+      subagents_available: true, explicit_invocation: true, admission_contract_version: 1,
+    };
+    const preview = await previewRun(f.root, input);
+    expect(preview.admission.ready).toBe(false);
+    expect(preview.admission.blocking).toContainEqual(expect.objectContaining({
+      code: 'baseline-command-prerequisite-drift', paths: [file],
+    }));
+    const started = await startRun(f.root, { ...input, expected_admission_digest: preview.admission_digest });
+    expect(started).toMatchObject({ ok: false, code: 'admission-not-ready', attempts_consumed: 0 });
+    expect(git(f.root, 'branch', '--show-current')).toBe('feature');
+    expect(git(f.root, 'for-each-ref', '--format=%(refname)', 'refs/heads')).toBe('refs/heads/feature\nrefs/heads/main');
+    expect(await readFile(path.join(f.root, '.git/index'))).toEqual(index);
+    expect(await access(path.join(f.root, '.ape/runtime/active.json')).then(() => true, () => false)).toBe(false);
+    expect(await access(path.join(f.root, 'SHOULD_NOT_EXIST')).then(() => true, () => false)).toBe(false);
+  });
+
+  it('follows a nested package script to its own manifest without comparing unrelated scripts', async () => {
+    const f = await fixture({
+      'package.json': pkg('npm --prefix packages/ui run check'),
+      'packages/ui/package.json': pkg('NODE_ENV=test node check.js', { scripts: { check: 'NODE_ENV=test node check.js', unrelated: 'node unused.js' } }),
+      'packages/ui/check.js': 'process.exit(0);\n',
+      'packages/ui/unused.js': 'process.exit(0);\n',
+    });
+    await put(f.root, 'packages/ui/unused.js', 'process.exit(1);\n'); commit(f.root);
+    expect(await inspect(f, 'npm run check')).toEqual([]);
+    await put(f.root, 'packages/ui/check.js', 'process.exit(1);\n'); commit(f.root);
+    expect(await inspect(f, 'npm run check')).toContainEqual(expect.objectContaining({
+      code: 'baseline-command-prerequisite-drift', paths: ['packages/ui/check.js'],
+    }));
+  });
+
+  it('admits unchanged nested shell entries and npm start fallback without executing them', async () => {
+    const f = await fixture({
+      'package.json': JSON.stringify({ scripts: { check: 'NODE_ENV=test npm run leaf', leaf: 'env NODE_ENV=test node scripts/check.js', fail: 'exit 1' } }),
+      'scripts/check.js': "require('node:fs').writeFileSync('SHOULD_NOT_EXIST', 'executed'); process.exit(1);\n",
+      'server.js': 'process.exit(1);\n',
+    });
+    await put(f.root, 'README.md', 'feature\n'); commit(f.root);
+    for (const command of ['npm run check', 'npm run fail', 'npm start', 'node --require ./scripts/check.js --eval=1']) {
+      expect(await inspect(f, command), command).toEqual([]);
+    }
+    expect(await access(path.join(f.root, 'SHOULD_NOT_EXIST')).then(() => true, () => false)).toBe(false);
+  });
+
+  it('compares executed prerequisites without treating informational options or forwarded package flags as authority', async () => {
+    const f = await fixture({ 'package.json': pkg('node scripts/check.js'), 'scripts/check.js': 'process.exit(0);\n' });
+    await put(f.root, 'scripts/check.js', 'process.exit(1);\n'); commit(f.root);
+    for (const command of ['node --help scripts/check.js', 'node --require ./scripts/check.js --version',
+      'npm run check --help', 'npm --version run check']) {
+      expect(await inspect(f, command), command).toEqual([]);
+    }
+    for (const command of ['node scripts/check.js --help', 'node scripts/check.js --test',
+      'npm run check -- --help', 'npm run check -- --prefix ../outside']) {
+      expect(await inspect(f, command), command).toContainEqual(expect.objectContaining({
+        code: 'baseline-command-prerequisite-drift', paths: ['scripts/check.js'],
+      }));
+    }
+  });
+
+  it('bounds deeply nested package traversal', async () => {
+    const scripts = Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`layer${index}`, index === 10 ? 'node --version' : `npm run layer${index + 1}`]));
+    const f = await fixture({ 'package.json': JSON.stringify({ scripts }) });
+    await put(f.root, 'README.md', 'feature\n'); commit(f.root);
+    const result = await inspect(f, 'npm run layer0');
+    expect(result).toContainEqual(expect.objectContaining({ code: 'baseline-prerequisites-unavailable' }));
   });
 
   it('rejects a clean feature-only local executable before branch or ticket mutation', async () => {

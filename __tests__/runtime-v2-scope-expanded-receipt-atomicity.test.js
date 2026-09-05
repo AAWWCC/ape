@@ -512,6 +512,30 @@ vi.mock('../lib/runtime/run-contract.js', async (importOriginal) => {
     },
   };
 });
+vi.mock('../lib/runtime/receipt-validator.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  const control = { legacy: false, tamper: false };
+  return {
+    ...actual,
+    __receiptSchemaVersion: control,
+    receiptOutputSchemaForTicket: (ticket) => {
+      if (!control.legacy) return actual.receiptOutputSchemaForTicket(ticket);
+      // Model the exact previous runtime's input to schema generation while
+      // every hash, manifest, transaction and crash boundary remains real.
+      const schema = actual.receiptOutputSchemaForTicket({
+        ticket_id: ticket.ticket_id,
+        stage_id: ticket.stage_id,
+        role: ticket.role,
+        receipt_contract_version: ticket.receipt_contract_version,
+        plan_contract_version: ticket.plan_contract_version,
+        capability_manifest: ticket.capability_manifest,
+        ...(ticket.review_contract_version ? { review_contract_version: ticket.review_contract_version } : {}),
+      });
+      if (control.tamper) schema.description = 'Unexpected alteration to historical schema';
+      return schema;
+    },
+  };
+});
 import {
   __crashControl,
   __publicationFault,
@@ -533,6 +557,7 @@ import {
   prepareCodexIntent,
 } from '../lib/runtime/claude-dispatch.js';
 import { validateTicket } from '../lib/runtime/schemas.js';
+import { __receiptSchemaVersion, receiptOutputSchemaForTicket } from '../lib/runtime/receipt-validator.js';
 import { bindCodexDispatch } from './codex-native-test-helper.js';
 import { projectRunResponse } from '../lib/runtime/projection.js';
 import {
@@ -567,6 +592,8 @@ afterEach(async () => {
   __publicationFault.fired = 0;
   __runContractFault.arm = null;
   __runContractFault.calls = 0;
+  __receiptSchemaVersion.legacy = false;
+  __receiptSchemaVersion.tamper = false;
   __receiptLeaseFault.arm = null;
   __receiptLeaseFault.fired = 0;
   __receiptLeaseFault.mutationCalls = 0;
@@ -1536,6 +1563,7 @@ describe('APE v2 bounded capability-recovery publication', () => {
     const successors = active.tickets.filter((entry) => entry.ticket_id !== ticket.ticket_id);
     expect(sourceReceipts).toHaveLength(1);
     expect(successors).toHaveLength(1);
+    expect(successors[0].output_schema).toEqual(receiptOutputSchemaForTicket(successors[0]));
     const successorDispatches = results.flatMap((result) =>
       result.actions.filter((action) => action.type === 'dispatch_agent'));
     expect(successorDispatches.length).toBeGreaterThan(0);
@@ -1752,6 +1780,7 @@ describe('APE v2 bounded capability-recovery publication', () => {
       prepared_effect_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     const preparedSuccessor = prepared.prepared_effect.successor_contract;
+    expect(preparedSuccessor.output_schema).toEqual(receiptOutputSchemaForTicket(preparedSuccessor));
     expect(prepared.prepared_effect.capability_manifest)
       .toEqual(preparedSuccessor.capability_manifest);
     expect(prepared.prepared_effect.run_contract)
@@ -1783,6 +1812,47 @@ describe('APE v2 bounded capability-recovery publication', () => {
     expect(converged.tickets).toEqual(active.tickets);
     expect(converged.receipts).toEqual(active.receipts);
     expect(converged.recovery_generation).toEqual(active.recovery_generation);
+  });
+
+  it.each([
+    { shape: 'exact historical', tamper: false },
+    { shape: 'modified historical', tamper: true },
+  ])('validates the $shape schema when replaying a prior-runtime crash', async ({ tamper }) => {
+    const dir = await project();
+    const { ticket, capability } = await nativeCapabilityTicket(dir);
+    const payload = capabilityReceipt(ticket, capability, { claimed_paths: ['src/generated.js'] });
+    expect(await validateReceiptForDispatch(dir, payload, ticket.ticket_id))
+      .toMatchObject({ ok: true, valid: true });
+    const paths = runtimePaths(dir);
+
+    __receiptSchemaVersion.legacy = true;
+    __receiptSchemaVersion.tamper = tamper;
+    __crashControl.arm = { kind: 'prepared-transaction' };
+    const crashed = await capturedRecord(dir, payload);
+    expect(crashed.error?.message).toMatch(/simulated crash/);
+    expect(__crashControl.fired).toBe(1);
+    __receiptSchemaVersion.legacy = false;
+    __receiptSchemaVersion.tamper = false;
+
+    const [transactionName] = await readdir(paths.receiptTransactions);
+    const transaction = await readJson(path.join(paths.receiptTransactions, transactionName));
+    const successor = transaction.prepared_effect.successor_contract;
+    expect(successor.output_schema).not.toEqual(receiptOutputSchemaForTicket(successor));
+    const beforeReplay = await runtimeSnapshot(paths.runtime);
+    const replay = await recordReceipt(dir, payload);
+    if (tamper) {
+      expect(replay).toMatchObject({ ok: false, rejected: true });
+      expect(replay.errors.join(' ')).toMatch(/runtime-derived policy/);
+      expect(await runtimeSnapshot(paths.runtime)).toEqual(beforeReplay);
+      return;
+    }
+    expect(replay.ok).toBe(true);
+    expect(replay.actions.find((action) => action.type === 'dispatch_agent')?.ticket).toEqual(successor);
+    expect((await readJson(paths.active)).tickets.at(-1)).toEqual(successor);
+    // The already-adopted path must preserve the same historical schema and
+    // run-contract pointer on a second replay, not silently reissue a ticket.
+    expect(await recordReceipt(dir, payload)).toMatchObject({ ok: true, idempotent: true });
+    expect((await readJson(paths.active)).tickets.at(-1)).toEqual(successor);
   });
 
   it('adopts the one published capability generation after response-loss instead of minting again', async () => {

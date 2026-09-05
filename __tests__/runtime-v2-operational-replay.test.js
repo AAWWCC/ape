@@ -27,6 +27,8 @@ const requiredCases = [
   'branch-exact-scheduler-review-checks',
   'supersession-prelock-admission',
   'codex-model-input-response-framing',
+  'post-build-test-correction',
+  'override-abort-terminal-reason',
 ];
 
 describe('operational replay corpus', () => {

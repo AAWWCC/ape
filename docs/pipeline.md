@@ -70,6 +70,14 @@ are rejected before branch creation. `green-maintenance` is also phase-only.
 
 A failed stage gets at most one retry. A blocking code review instead enters remediation:
 
+An implementer's test-contradiction report first receives independent read-only reconciliation.
+If confirmed, one `test-recheck` ticket narrows writes to the confirmed test paths. Its
+`test-correction` check executes changed tests twice and accepts either stable passing or stable
+failing results; a corrected test can still expose production work for the implementer's remaining
+retry. Initial `red-test` admission still requires failure. Recheck rejects absent tests, missing
+execution verdicts, flaky outcomes, and execution-side tree changes, and seals the actual results
+as `evidence.test_correction`.
+
 | Finding owner | Writer sequence before another review |
 | --- | --- |
 | `production` | Remediation build |

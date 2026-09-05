@@ -169,6 +169,22 @@
       "recovery_contract": "Compact repeated admitted metadata and bootstrap ticket bodies, preserve exact launch authority, measure escaped MCP framing, and refuse an undeliverable complete admission before mutation; do not retry the failed live campaign.",
       "test_file": "__tests__/runtime-v2-bounded-responses.test.js",
       "test_anchor": "Codex bootstrap parent wire compaction"
+    },
+    {
+      "id": "post-build-test-correction",
+      "category": "test-contract",
+      "observed_failure": "A confirmed faulty test was corrected after implementation, but its passing result was rejected by inherited initial red-first admission.",
+      "recovery_contract": "Independently confirmed exact-path corrections receive runtime-owned test-correction admission. Each participating runner must produce a stable passing or failing verdict before the original implementer retries; initial RED and scope remain unchanged.",
+      "test_file": "__tests__/runtime-v2-post-build-test-recheck.test.js",
+      "test_anchor": "post-build test correction uses runtime-observed evidence"
+    },
+    {
+      "id": "override-abort-terminal-reason",
+      "category": "diagnostics",
+      "observed_failure": "Override-abort wrote its explanation only to the audit log, leaving aborted run state and new history without the terminal reason.",
+      "recovery_contract": "Persist the bounded override reason before new history is archived; repeated aborts preserve the original reason and existing immutable history.",
+      "test_file": "__tests__/runtime-v2-core-terminal-history.test.js",
+      "test_anchor": "override abort archives a running run to history"
     }
   ]
 }

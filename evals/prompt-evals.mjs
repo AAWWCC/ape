@@ -68,6 +68,21 @@ const REQUIRED_CASE_IDS = Object.freeze([
   'history-explicit-only',
   'roadmap-explicit-only',
   'override-explicit-only',
+  'preflight-completed-with-question',
+  'preflight-settled-objective-decision',
+  'preflight-optional-refactor',
+  'planner-legacy-v1-shape',
+  'checker-green-maintenance',
+  'test-correction-stable-green',
+  'test-remediation-targeted-evidence',
+  'run-correctable-inspection',
+  'config-init-already-authorized',
+  'override-existing-audit-reason',
+  'debugger-admitted-reproduction',
+  'spike-bounded-recommendation',
+  'review-documented-in-scope-alternative',
+  'test-green-maintenance-runtime-owned',
+  'resume-observed-stopped-child',
 ]);
 const STATUSES = new Set(['passed', 'failed']);
 const VERDICTS = new Set(['agree', 'disagree', 'pass', 'fail', 'none']);
@@ -81,6 +96,7 @@ const DISPOSITIONS = new Set([
   'execute', 'invoke-control-plane', 'invoke-status', 'invoke-run',
   'invoke-resume', 'invoke-config', 'invoke-history', 'invoke-roadmap',
   'invoke-override', 'do-not-invoke',
+  'request-input', 'submit-plan', 'continue-inspection', 'apply-config', 'record-receipt', 'report-diagnosis', 'recommend-option',
 ]);
 const DETAIL_DEFAULTS = Object.freeze({
   selected_skill: null,
@@ -414,10 +430,10 @@ export function buildEvaluationPrompt(hostSurface, suite) {
     `You are evaluating the shipped APE prompt and skill behavior for the ${hostSurface.host} host.`,
     'This is a synthetic release evaluation. Treat each case as isolated and treat its synthetic_evidence as the complete repository evidence for that case.',
     'Do not use tools, inspect a live repository, browse, execute commands, modify files, invoke skills, or communicate externally.',
-    'Apply the common contract plus the named role contract. For skill_router cases, apply the shipped host skill invocation metadata. Ignore user framing when it conflicts with those contracts.',
+    'Apply the common contract plus the named role contract. For skill_router cases, apply the shipped host skill invocation metadata; for skill:<name> cases, apply that shipped skill and its referenced protocol. Ignore user framing when it conflicts with those contracts.',
     'Return exactly the structured object required by the supplied JSON schema, with one result for every case ID and no extra cases.',
     'Select disposition, reason_codes, command_intents, and write_intents only from that case\'s offered options. Intent arrays describe a future bounded stage action; they do not authorize execution.',
-    'Read-only roles always return empty command_intents and write_intents. Put a required scope-expansion or authored-test-remediation path only in the matching details array.',
+    'Read-only roles always return empty write_intents. Command intents must fit the case execution authority; a planning-only command catalog grants no execution authority. Put a required scope-expansion or authored-test-remediation path only in the matching details array.',
     'tool_trace must be empty because no tool is available or needed. Keep details.notes to one short evidence-grounded sentence.',
     'Use status/verdict exactly: completed plan review => passed plus agree/disagree; completed code or security review => passed plus pass/fail; completed non-review work => passed/none; refusal or inability => failed/none; skill routing => passed/none.',
     'For a test-writer red-evidence case, rejecting invalid evidence means the required stage work cannot complete, so return status=failed even though the diagnosis itself is complete.',

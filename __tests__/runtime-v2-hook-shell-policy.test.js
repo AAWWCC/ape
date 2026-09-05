@@ -78,7 +78,9 @@ describe('APE v2 lifecycle shell policy', () => {
         agent_id: 'reviewer-1',
         tool_input: { command: wireCommand },
       }, {});
-      expect(event.command, wireCommand).toBe(canonicalCommand);
+      expect(event.command, wireCommand).toBe(wireCommand);
+      expect(hooks.parseEvidenceCommand(event.command)?.tokens)
+        .toEqual(hooks.parseEvidenceCommand(canonicalCommand)?.tokens);
       const result = evaluateLifecyclePolicy(
         { ...event, ape_managed: true },
         { state, ticket: buildTicket },
@@ -87,24 +89,13 @@ describe('APE v2 lifecycle shell policy', () => {
     }
   });
 
-  it('fails closed for quoted argv that is mixed, malformed, escaped, or unsafe', () => {
+  it('fails closed for quoted argv with shell expansion, escapes, or non-inspection heads', () => {
     for (const command of [
-      '"git" "diff" -- src/value.js',
-      '"git" "diff" "--" "src/value file.js"',
-      '"git" "diff" ";" "src/value.js"',
       '"cat" "$(node evil.js)"',
       '"\\u0067it" "status" "--short"',
       '"git" "status" "--\\u0073hort"',
-      '"git" "status" "--short" trailing',
       '"cd" "src" "&&" "cat" "index.js"',
-      '"cat" "\'package.json\'"',
-      "'git' \"diff\" '--stat'",
-      "'cat' 'src/value file.js'",
-      "'cat' ';'",
-      "'cat' '$(node evil.js)'",
-      "'cat' 'src/value.js' trailing",
       "'cd' 'src' '&&' 'cat' 'index.js'",
-      "'cat' '\"package.json\"'",
       "'cp' 'src/value.js' 'src/copy.js'",
     ]) {
       const event = hooks.normalizeLifecycleEvent({
@@ -312,6 +303,7 @@ describe('APE v2 lifecycle shell policy', () => {
       'cd ./nested/pkg && pytest -q',
       'cd services/web && ruff check src/',
       'cd sub   &&   mypy src/',
+      'cd "sub dir" && pytest',
     ]) {
       const result = evaluateLifecyclePolicy(boundSubagent(command), { state, ticket: testTicket });
       expect(result.decision, command).toBe('allow');
@@ -319,7 +311,7 @@ describe('APE v2 lifecycle shell policy', () => {
   });
 
   it('keeps failing closed on a `cd` prefix that hides injection or a writing tail', () => {
-    // The cd relaxation must not become a launcher: a metacharacter in the path,
+    // The cd relaxation must not become a launcher: an unquoted metacharacter,
     // a second operator, a writing/inline-interpreter tail, or a newline-hidden
     // second line all still fail closed. `cd` alone carries no write power, so a
     // bare `cd` (no recognized tail) is denied too.
@@ -332,7 +324,6 @@ describe('APE v2 lifecycle shell policy', () => {
       "cd sub && python -c \"open('src/v.js','w').write('x')\"",
       'cd sub && uv run pytest > out.txt',
       'cd sub && uv run python scripts/mutate.py',
-      'cd "sub dir" && pytest',
       'cd sub && pytest\nrm -rf .',
       'cd sub',
       'cd ..',
@@ -684,9 +675,8 @@ describe('APE v2 lifecycle shell policy', () => {
     it('still DENIES when a real write co-occurs with the /dev/null sink (fail-safe survives the strip)', () => {
       // Holds pre- AND post-fix: after the sole /dev/null redirect is stripped a
       // genuine write verb / redirect / interpreter still matches SHELL_WRITE, so
-      // the fail-closed deny is correct. `grep 'a>b'` is the quoted-`>` false
-      // positive — a SHELL_WRITE match that is not a /dev/null redirect at all, so
-      // the carve-out never applies and it stays denied.
+      // the fail-closed deny is correct. Literal inspection data has its own
+      // parser and does not turn a quoted greater-than sign into a redirect.
       for (const command of [
         'echo x > realfile',
         'rm -rf build 2>/dev/null',
@@ -697,10 +687,10 @@ describe('APE v2 lifecycle shell policy', () => {
         "node -e 'x' 2>/dev/null",
         'dd if=a of=b 2>/dev/null',
         'echo x >/dev/null; rm y',
-        "grep 'a>b'",
       ]) {
         expect(mainSession(command).decision, command).toBe('deny');
       }
+      expect(mainSession("grep 'a>b'").decision).toBe('allow');
     });
 
     it('DENIES a redirect whose target only PREFIXES /dev/null or is quoted (complete-target canary)', () => {
@@ -874,15 +864,16 @@ describe('APE v2 lifecycle shell policy', () => {
         .toEqual(['ls', 'docs/hooks.md']);
     });
 
-    it('admits only complete static quoted operands without whitespace for cat and ls', () => {
+    it('admits complete literal inspection words while rejecting quote concatenation and runner expansion', () => {
       expectAllow("cat 'eslint.config.mjs'");
       expectAllow('ls "docs/hooks.md"');
+      expectAllow("'cat' eslint.config.mjs");
+      expectAllow('ls "docs/My Guide"');
+      expectAllow("cat '$HOME'");
       for (const command of [
-        "'cat' eslint.config.mjs",
         "cat eslint'.config'.mjs",
         "cat 'eslint.config.mjs'x",
-        'ls "docs/My Guide"',
-        "cat '$HOME'",
+        'cat "$HOME"',
         "npm 'test'",
         "npm run 'typecheck'",
       ]) {
@@ -896,6 +887,7 @@ describe('APE v2 lifecycle shell policy', () => {
       ).toEqual({
         cdTarget: null,
         tokens: ['cat', 'app/trace/[traceId]/page.tsx'],
+        literal_inspection: true,
       });
       expect(
         hooks.parseEvidenceCommand(
@@ -903,6 +895,7 @@ describe('APE v2 lifecycle shell policy', () => {
         ),
       ).toEqual({
         cdTarget: null,
+        literal_inspection: true,
         tokens: [
           'git',
           'diff',
@@ -993,19 +986,24 @@ describe('APE v2 lifecycle shell policy', () => {
       }
     });
 
-    it('DENIES globbing, partial segments, and every broader quoting shape', () => {
+    it('accepts complete quoted filenames without requiring a Next.js route shape', () => {
       for (const command of [
-        'cat app/trace/[traceId]/page.tsx',
-        'cat app/blog/[...slug]/page.tsx',
-        'cat app/docs/[[...parts]]/page.tsx',
         'cat "app/trace/[traceId]/page.tsx"',
         "cat 'app/trace/[traceId]x/page.tsx'",
         "cat 'app/trace/x[traceId]/page.tsx'",
         "cat 'app/trace/[]/page.tsx'",
         "cat 'app/trace/[...]/page.tsx'",
+        "cat 'app/trace/[trace Id]/page.tsx'",
+      ]) expectAllow(command);
+    });
+
+    it('DENIES unquoted globbing and quote concatenation', () => {
+      for (const command of [
+        'cat app/trace/[traceId]/page.tsx',
+        'cat app/blog/[...slug]/page.tsx',
+        'cat app/docs/[[...parts]]/page.tsx',
         "cat 'app/trace/[traceId]/page.tsx'tail",
         "cat prefix'app/trace/[traceId]/page.tsx'",
-        "cat 'app/trace/[trace Id]/page.tsx'",
       ]) {
         expectDeny(command);
       }

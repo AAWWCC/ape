@@ -103,12 +103,13 @@ describe('reviewed admission manifest through real lifecycle boundary', () => {
     const root = await fixture();
     const profile = { id: 'generate-docs', command: 'node --version', roles: ['implementer'], effect: 'write', output_paths: ['docs/generated.md'] };
     await configuration(root, { policy: { command_profiles: [profile] } });
-    const missing = await previewRun(root, request());
+    const required_capabilities = [{ kind: 'command_profile', id: profile.id, role: 'implementer' }];
+    const missing = await previewRun(root, request({ required_capabilities }));
     expect(missing.admission.ready).toBe(false);
     expect(missing.admission.scope.missing_approval).toEqual(['docs/generated.md']);
-    const approved = await previewRun(root, request({ claimed_paths: ['README.md', 'docs/generated.md'] }));
+    const approved = await previewRun(root, request({ claimed_paths: ['README.md', 'docs/generated.md'], required_capabilities }));
     expect(approved.admission.ready).toBe(true);
-    const started = await startRun(root, request({ claimed_paths: ['README.md', 'docs/generated.md'], expected_admission_digest: approved.admission_digest }));
+    const started = await startRun(root, request({ claimed_paths: ['README.md', 'docs/generated.md'], required_capabilities, expected_admission_digest: approved.admission_digest }));
     expect(started.ok).toBe(true);
     expect(started.run.tickets[0].claimed_paths).toContain('docs/generated.md');
   });

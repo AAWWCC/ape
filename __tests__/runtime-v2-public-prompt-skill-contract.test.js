@@ -315,7 +315,7 @@ describe('canonical skill sources', () => {
     expect(run).toContain(
       "`rg --files -g 'AGENTS.md' -g '!**/.git/**' || true`",
     );
-    expect(run).toMatch(/Stop instead of[\s\S]*(?:retrying|self-correcting)[\s\S]*inspection[\s\S]*call/iu);
+    expect(run).toMatch(/Correct a harmless read's syntax[\s\S]*once[\s\S]*stop on repeated denial or missing authority/iu);
     expect(run).toMatch(/ape_config[\s\S]*doctor[\s\S]*gate-command and visual-evidence readiness/iu);
   });
 

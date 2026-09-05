@@ -23,6 +23,7 @@ const SYNTHETIC_REFERENCE = /\b(?:acme|example|fixture|synthetic)\b/iu;
 const ABSOLUTE_USER_PATH = /(?:\/Users\/[^/\s]+|[A-Z]:\\Users\\[^\\\s]+)/u;
 const SECRET = /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|\bghp_[A-Za-z0-9]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b|\bsk-[A-Za-z0-9]{20,}\b)/u;
 const OLD_PERSONAL_AUTHOR = new RegExp(`\\b${['Ai', 'dan'].join('')}\\b`, 'iu');
+const PUBLIC_PROJECT_NAME = new RegExp(`\\b${['Ai', 'dan'].join('')}['’]s Phase Engine\\b`, 'gu');
 
 class SurfaceError extends Error {}
 
@@ -154,7 +155,9 @@ function contentFindings(text, forbiddenHashes, forbiddenFingerprints) {
   }
   if (ABSOLUTE_USER_PATH.test(text)) findings.push('absolute user path');
   if (/\bape-private\b/u.test(text)) findings.push('private repository name');
-  if (OLD_PERSONAL_AUTHOR.test(text)) findings.push('old personal author identity');
+  // The operator-approved product name is public branding. Keep checking any
+  // author identity outside that exact phrase, including on the same line.
+  if (OLD_PERSONAL_AUTHOR.test(text.replace(PUBLIC_PROJECT_NAME, ''))) findings.push('old personal author identity');
   if (SECRET.test(text)) findings.push('secret/private-key pattern');
   const lower = text.toLowerCase();
   if ([...forbiddenHashes].some((hash) => lower.includes(hash))) {

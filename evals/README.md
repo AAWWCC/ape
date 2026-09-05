@@ -1,6 +1,6 @@
 # Prompt evaluation
 
-These checks test Claude and Codex instructions against 37 synthetic cases.
+These checks test Claude and Codex instructions against 52 synthetic cases.
 They are separate from live pipeline certification.
 
 ## Offline checks
@@ -17,7 +17,7 @@ calls or needs provider credentials.
 ## Live prompt evaluation
 
 The matrix is two hosts × three model tiers × three repetitions: **18 paid
-calls**. Each call contains all 37 cases. Obtain explicit cost approval first.
+calls**. Each call contains all 52 cases. Obtain explicit cost approval first.
 
 ```sh
 npm run eval:prompts:run -- --live --confirm-paid-eval --results evals/results/release-candidate

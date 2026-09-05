@@ -38,17 +38,10 @@ import { readJson } from '../lib/runtime/storage.js';
 // unenveloped), abortRun screens only `!reason?.trim()`, and the ABORT
 // reducer emits NO audit_override action at all -- so none of the three
 // boundedGateSummary binds this task's earlier rounds added touches it.
-// CORRECTED CLAIM (re-verified against merged main at 69430ccd, per this
-// run's own admonition not to trust an earlier receipt's framing): the raw
-// operator string reaches active.json AND the persisted per-run record
-// (`.ape/runtime/runs/<run_id>.json`, written by the SAME persist_state
-// action from the SAME state object) -- NOT the hash-chained immutable
-// history record archiveRun/immutableRunRecord writes under
-// `.ape/runtime/history/` (history.js), which never reads state.abort_reason
-// at all (verified directly: an aborted run's `.ape/runtime/history/
-// <run_id>.json` carries no abort_reason key, today or after this fix).
-// abort_reason is bound with the SAME boundedGateSummary helper and 400-char
-// cap the audit sinks above use.
+// Both abort paths now preserve their bounded reason in active.json, the
+// persisted per-run record, and the immutable terminal history projection.
+// Override abort has an independent audit-log copy; it must use the same
+// boundedGateSummary helper and 400-character cap before reaching any sink.
 //
 // AUTHORING HAZARD (hit by three prior rounds of this task): this file's own
 // bytes must never carry a literal control, DEL, or bidi/format code point.
@@ -197,8 +190,8 @@ describe('APE v2 override-reset audit reason is bounded at every shorthand-shape
   });
 });
 
-describe('APE v2 ABORT bounds abort_reason before it reaches persisted state (roadmap sink-guard-coverage-and-detection-completeness, ITEM 1)', () => {
-  it('a long, bidi-carrying abort reason is bounded (<=400 chars, bidi-free) in active.json and the persisted per-run record', async () => {
+describe('APE v2 abort reasons remain bounded across state and history', () => {
+  it.each(['abort', 'override-abort'])('%s bounds a long, bidi-carrying reason in state, history, and its response', async (operation) => {
     const dir = await project();
     const started = await startRun(dir, startInput());
     expect(started.ok).toBe(true);
@@ -206,17 +199,17 @@ describe('APE v2 ABORT bounds abort_reason before it reaches persisted state (ro
     const reason = longReasonCarryingBidi();
     expect(reason.length).toBeGreaterThan(1000);
 
-    const result = await abortRun(dir, reason);
+    const result = operation === 'abort'
+      ? await abortRun(dir, reason)
+      : await overrideRun(dir, 'abort', reason);
     expect(result.ok).toBe(true);
 
     const paths = runtimePaths(dir);
     const active = await readJson(paths.active, null);
     expect(active.run_id).toBe(runId);
     expect(active.status).toBe('aborted');
-    // The live defect: scheduler.js's ABORT case (~:1133) threads the raw
-    // `event.reason` straight onto `abort_reason` with no bound at all -- so
-    // on the unfixed tree this reads back at its full ~1200-char length and
-    // still carries the raw bidi-override byte.
+    // Ordinary abort and override abort must both retain the reason without
+    // restoring the original unbounded/control-character persistence bug.
     expect(typeof active.abort_reason).toBe('string');
     expect(active.abort_reason.length).toBeLessThanOrEqual(400);
     expect(active.abort_reason).not.toContain(BIDI_RIGHT_TO_LEFT_OVERRIDE);
@@ -227,11 +220,20 @@ describe('APE v2 ABORT bounds abort_reason before it reaches persisted state (ro
     // sealed (aborted) run's record -- so this is the durable copy of the
     // run's own history, independent of active.json's later lifecycle (e.g.
     // an eventual override reset clears active.json but never this file).
-    // It carries the identical unbounded byte today.
+    // The immutable history projection must carry that same bounded value.
     const runsRecord = await readJson(path.join(paths.runs, `${runId}.json`), null);
     expect(typeof runsRecord.abort_reason).toBe('string');
     expect(runsRecord.abort_reason.length).toBeLessThanOrEqual(400);
     expect(runsRecord.abort_reason).not.toContain(BIDI_RIGHT_TO_LEFT_OVERRIDE);
+    expect(runsRecord.abort_reason).toBe(active.abort_reason);
+    const historyRecord = await readJson(path.join(paths.history, `${runId}.json`), null);
+    expect(historyRecord.abort_reason).toBe(active.abort_reason);
+    expect(result.run.abort_reason).toBe(active.abort_reason);
+    expect(JSON.stringify(result)).not.toContain(reason);
+    expect(JSON.stringify(result)).not.toContain(BIDI_RIGHT_TO_LEFT_OVERRIDE);
+    if (operation === 'override-abort') {
+      expect(overrideLines(paths).find((entry) => entry.operation === 'abort').reason).toBe(active.abort_reason);
+    }
   });
 
   // Guard, not a red arm: a SHORT, control/bidi-free reason must reach both
@@ -239,13 +241,15 @@ describe('APE v2 ABORT bounds abort_reason before it reaches persisted state (ro
   // sibling reset guard above; runtime-v2-abort-aiming.test.js's own arms
   // already pin ordinary abort reasons verbatim in active.json, so this
   // fixes-forward without disturbing that pinned behavior).
-  it('a short, plain-ASCII abort reason still reaches active.json and the per-run record unchanged', async () => {
+  it.each(['abort', 'override-abort'])('%s preserves a short reason in active state, the per-run record, and history', async (operation) => {
     const dir = await project();
     const started = await startRun(dir, startInput());
     const runId = started.run.run_id;
     const reason = 'operator cleanup, no aim supplied';
 
-    const result = await abortRun(dir, reason);
+    const result = operation === 'abort'
+      ? await abortRun(dir, reason)
+      : await overrideRun(dir, 'abort', reason);
     expect(result.ok).toBe(true);
 
     const paths = runtimePaths(dir);
@@ -254,6 +258,8 @@ describe('APE v2 ABORT bounds abort_reason before it reaches persisted state (ro
 
     const runsRecord = await readJson(path.join(paths.runs, `${runId}.json`), null);
     expect(runsRecord.abort_reason).toBe(reason);
+    const historyRecord = await readJson(path.join(paths.history, `${runId}.json`), null);
+    expect(historyRecord.abort_reason).toBe(reason);
   });
 });
 

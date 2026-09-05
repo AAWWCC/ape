@@ -178,6 +178,25 @@ describe('Codex bootstrap parent wire compaction', () => {
     expect(projectRunResponse(JSON.parse(JSON.stringify(projected)))).toEqual(projected);
   });
 
+  it.each([1, 2])('preserves plan contract %s in bounded run and dispatch references', (version) => {
+    for (const minimal of [false, true]) {
+      const response = { ...bootstrapParentResponse(), retained_note: 'x'.repeat(RESPONSE_BUDGET_BYTES) };
+      response.run.plan_contract_version = version;
+      response.actions[0].ticket.plan_contract_version = version;
+      if (minimal) response.actions[0].ticket.model = { model: 'model-standard', notes: 'x'.repeat(RESPONSE_BUDGET_BYTES) };
+      const projected = projectRunResponse(response);
+      expect(projected.projection?.kind).toBe('reference-only-v1');
+      expect(projected.actions[0].ticket.plan_contract_version).toBe(version);
+      if (!minimal) {
+        expect(projected.run.plan_contract_version).toBe(version);
+        expect(projected.run.pending_tickets[0].plan_contract_version).toBe(version);
+      }
+      expect(Buffer.byteLength(framedMcpText(projected))).toBeLessThan(RESPONSE_BUDGET_BYTES);
+      expect(response.run.plan_contract_version).toBe(version);
+      expect(response.actions[0].ticket.plan_contract_version).toBe(version);
+    }
+  });
+
   it('refuses an oversized complete preview before issuing a usable admission digest', () => {
     const admission = { version: 1, ready: true, contract: { detail: '\n'.repeat(18_000) } };
     const response = {
@@ -750,7 +769,7 @@ describe('APE v2 bounded MCP responses: projection unit behavior', () => {
 
     expect(projected).toMatchObject({
       run: { status: 'running', stage: 'build' },
-      next_action: { kind: 'wait', state: 'continuation_pending' },
+      next_action: { kind: 'wait', state: 'continuation_pending', required_control_action: 'ape_run_next' },
     });
     expect(projected.run).not.toHaveProperty('input_required');
     expect(projected.run).not.toHaveProperty('execution_budget');

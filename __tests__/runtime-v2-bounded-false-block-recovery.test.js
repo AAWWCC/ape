@@ -408,7 +408,7 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
     expect(recheck).toMatchObject({
       stage_id: 'test-recheck',
       role: 'test_writer',
-      required_checks: ['red-test'],
+      required_checks: ['test-correction'],
       test_reconciliation: { test_paths: ['tests/value.test.js'] },
     });
     expect(recheck.review_finding_evidence).toEqual([

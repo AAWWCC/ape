@@ -1,6 +1,7 @@
 # Run and resume protocol
 
 The parent orchestrator owns every APE control call. It never performs stage work itself.
+Use the governed project root as `project_dir`; supported hosts are `codex` and `claude`.
 The child-only `ape_bind` handshake is not an orchestration call or stage work: only the dispatched
 native child presents its bootstrap capability to that tool. Ticket/receipt context is expected to
 be absent before this call; its absence is not a reason to skip bootstrap. Only after `ape_bind`
@@ -45,8 +46,10 @@ extension family grounds dependency-free blank-repository commands. Apply a comp
 repeat preview automatically; mixed or unsupported extensions require an outcome-changing ecosystem
 choice rather than a guessed toolchain.
 An explicit run invocation authorizes applying a complete proposal that only fills missing required
-slots. Ask only before overwriting an existing, conflicting project policy; otherwise continue to
-dispatch without a separate configuration approval.
+slots. Compare with `get` and preserve existing commands and runners. If `init apply` would overwrite
+them, use scoped `set` calls for missing slots instead. Discovered `evidence_scripts` require explicit
+acceptance of their exact IDs. Ask only for a conflicting policy change outside existing approval;
+otherwise continue without a separate configuration approval.
 
 Behavioral readiness requires a grounded `test_commands.full` command.
 When acceptance requires browser or visual inspection, require either a configured
@@ -56,12 +59,6 @@ availability. External MCP discovery and permissions remain host-owned; APE does
 forecast tool names. If neither evidence path exists, stop before start and report the concrete
 configuration requirement.
 
-On Google Antigravity / Gemini, pass the exact open project root as `project_dir` on every APE MCP
-call. The plugin process runs from its installed package directory, so its process working directory
-is never project authority. Use one native `invoke_subagent` call per returned ticket with the exact
-`TypeName`, `Model`, and prompt; keep `Workspace` as `inherit`. The child's supported
-`PreInvocation` hook binds its conversation before the first model turn.
-
 Start the Codex session in the governed project before preparing a binding probe. Native children
 inherit that workspace; passing `project_dir` to APE does not relocate them. Zero launch observations
 after a child returns require checking the session root and hook delivery before any new launch.
@@ -70,7 +67,7 @@ after a child returns require checking the session root and hook delivery before
    `host: "codex"`, `explicit_invocation: true`, `hooks_trusted: true`, and
    `subagents_available: true` (plus the governed `project_dir` when required). These attestations
    are mandatory on the probe call itself; do not make a partial probe call and retry it. Launch the
-   returned `dispatch_probe.dispatch.spawn_args` object unchanged,
+   returned `dispatch_probe.dispatch.spawn_args` object unchanged.
    The canary discovers the binding tool when deferred, calls `ape_bind` with the exact capability
    in its bootstrap message, and returns only
    the acknowledgment JSON injected by the trusted hook. Wait for this bootstrap through the native
@@ -80,8 +77,7 @@ after a child returns require checking the session root and hook delivery before
    mismatch. `start` consumes this fresh, single-use proof. Claude does not use this probe.
 2. For each `dispatch_agent`, use the host-native tool and pass the generated name, model, optional
    reasoning effort, and dispatch intent exactly. On Claude, also pass the action's agent type; on
-   Codex Multi-Agent V2, that field is APE's logical policy role and is not a native tool argument;
-   on Antigravity, pass it as `TypeName` and pass the ticket model as `Model`.
+   Codex Multi-Agent V2, that field is APE's logical policy role and is not a native tool argument.
    Never substitute a model, semantic task name, SDK, nested CLI, or API call.
 3. On Codex, pass `dispatch.spawn_args` directly to native `spawn_agent` with every key and value
    unchanged. It is the versioned native launch envelope: `message` is a fixed transport-only
@@ -98,40 +94,46 @@ after a child returns require checking the session root and hook delivery before
    incompatible with the host's inherited-history default, and the worker needs no parent history.
    Never reread `prompt_paths`, assemble a replacement message, or copy the compatibility
    `dispatch.model` object into the native `model` string argument. On Claude, use the returned
-   plugin agent wrapper, which loads the same prompt files, and append the ticket. On Antigravity,
-   compose its prompt from the complete common prompt, complete role prompt, and immutable ticket.
+   plugin agent wrapper, which loads the same prompt files, and append the immutable ticket.
 4. Launch distinct tickets as returned. On Codex, after each native spawn returns, call `ape_run`
-   action `status` with only `action` and `project_dir`; never send `run_id` on status. Confirm that
-   dispatch is `active-bound` before launching the next. A launched child may still be executing its
+   action `status` with only `action` and `project_dir`; never send `run_id` on status. This full
+   status view exposes individual binding evidence. Confirm that the exact dispatch has `status: "bound"`
+   and is `active-bound` or already `observed-stopped` before launching the next. Record a completed
+   child's receipt normally; a fast completion is not a binding failure. A launched child may still be executing its
    first `ape_bind`; wait through the native primitive for that same child rather than launching a
-   replacement or declaring failure before it reports the handshake result. On Antigravity, likewise finish each spawn
-   and confirm binding before the next launch. Bound agents may then run concurrently. Never launch
+   replacement or declaring failure before it reports the handshake result. Bound agents may then run concurrently. Never launch
    two physical agents for one ticket unless the runtime explicitly returns
    `next_action: {"kind":"redispatch_same_ticket", ...}`; only that action authorizes one fresh worker on the same
    immutable ticket. Wait through the host's native primitive; do not poll unchanged status.
 5. Require exactly one receipt JSON matching the ticket's `output_schema`, including the exact
-   injected `receipt_capability`. Before returning it, the worker must call `ape_validate_receipt`
+   injected `receipt_capability`. For `receipt_contract_version: 1`, the worker must call `ape_validate_receipt`
    with `ticket_id` set to the immutable ticket ID and `draft` set to the exact complete receipt. A
-   valid result attests the normalized draft hash; the worker must
-   return that draft unchanged. `SubagentStop` refuses termination when the final draft is absent or
-   malformed and returns exact bounded corrections to the same physical worker. Invalid validator
+   `valid: true` result is terminal: return that draft unchanged and never validate it again.
+   `SubagentStop` returns bounded corrections for an absent or malformed draft while allowance remains.
+   Invalid validator
    results carry bounded field corrections, plan byte usage,
-   and remaining attempts. Each physical worker gets an initial validation plus at most two
-   corrections. Call `ape_run` with `action: "record"` and place that complete
+   and `corrections_remaining`. Each physical worker gets an initial validation plus at most two
+   corrections across the whole dispatch, never a new budget per record rejection. On exhaustion,
+   return the runtime result to the parent. Legacy tickets retain their issued historical record path;
+   do not require the v1 validator when the ticket has no v1 contract.
+   Call `ape_run` with `action: "record"` and place that complete
    receipt inside `receipt`. At the control-call top level send only `action`, `project_dir`, and
    `receipt`; never send `run_id` on a record call. Never repair,
    fabricate, or omit agent evidence. A ticket with
    `review_contract_version` uses bounded structured findings: advisory entries omit remediation;
    blocking entries declare `production`, `test`, or `both` ownership and exact authorized
    `test_paths` when test-owned. Do not translate these into legacy `evidence.test_remediation`.
-   If `record` rejects because exact validation or attestation is absent, do not repair in the
-   parent: continue the same physical agent with the exact errors. It has at most two correction
-   submissions after its initial validation and must return a complete replacement. If that exact
+   If `record` rejects, follow its returned `next_action`, `required_control_action`, and remaining
+   budget. `required_control_action: "record_exact_attested_receipt"` means the parent records the
+   identical attested draft, without editing it or asking the worker to validate again. A returned
+   `continue_same_agent` for missing validation means continue the same physical agent with the exact
+   errors only while corrections remain; never repair the draft in the parent. It has at most two
+   correction submissions after its initial validation and must return a complete replacement. If that exact
    worker is already host-observed as stopped and its finished draft could not be attested because
    the validator schema was unavailable, report the unchanged draft hash and stop for explicit
    operator direction. Only when the operator approves the emergency waiver with a nonblank reason,
-   call `ape_run` action `recover-receipt` with the unchanged `receipt`, the refused `record`
-   response's exact `receipt_input_hash`, and that reason. The runtime revalidates every ordinary
+   call `ape_run` action `recover-receipt` with the unchanged `receipt`, `receipt_input_hash` copied
+   from the refused `record` response's exact `input_hash`, and that reason. The runtime revalidates every ordinary
    receipt and binding contract and seals the worker/session/dispatch identity; only the worker's
    exact-draft attestation is waived. Never infer this authorization, use recovery while the worker
    is live, change the draft, or recover a draft that already has a valid attestation.
@@ -140,7 +142,9 @@ after a child returns require checking the session root and hook delivery before
    this does not consume a logical stage attempt. If that worker exhausts its
    correction allowance, the runtime blocks as `worker_protocol_failure`. Never translate a receipt
    contract or infrastructure failure into a reviewer vote, product remediation, directed replan,
-   abort, or successor. Call `next` only after the returned dispatch group is fully recorded.
+   abort, or successor run. For ordinary advancement, call `next` after the returned dispatch group
+   is fully recorded. A returned recovery or retirement action takes precedence: let `next`/`resume`
+   settle a stopped worker instead of fabricating a receipt to satisfy that ordering.
 6. If recording preflight returns `input_required`, obtain complete exact answers for all question
    ids and submit one aimed `answer-preflight` action with the exact hash, a bounded audit `reason`,
    and additive-only `claimed_paths`, `test_paths`, and canonical `risk_triggers`. Do not dispatch a
@@ -148,7 +152,7 @@ after a child returns require checking the session root and hook delivery before
 7. After all receipts in the returned group are recorded, call `ape_run next` and repeat until the
 runtime reports `completed` or `blocked`. The explicit run or resume invocation is continuous
 authority for every scheduler-owned transition; never pause between stages or ask the user to say
-`continue`. Never start a successor automatically.
+`continue`. Never start a successor run automatically.
 When it reports `gating_pending` or `shipping_pending`,
 make the next call with `wait_ms: 300000` so APE performs bounded server-side polling with progress
 heartbeats. On Codex, do not sleep inside a `functions.exec` wrapper before the APE call: starting an
@@ -163,7 +167,8 @@ the user explicitly directs recovery, call `ape_run override` with `operation: "
 active `run_id` as confirmation when available, and a non-empty reason that records the user's
 direction. The reset is audited. Then re-inspect the repository, preserve or reconcile retained work
 without destructive cleanup, and use preview/start for an ordinary fresh run with complete facts.
-Do not infer reset authority from the original invocation, guidance, prior approval, or config.
+Do not infer reset authority from the original run invocation, guidance, unrelated approval, or config.
+An existing explicit direction for this reset remains valid; do not request it again.
 Never reset automatically, recreate a retained diff from memory, or ship merely because recovery was
 authorized.
 

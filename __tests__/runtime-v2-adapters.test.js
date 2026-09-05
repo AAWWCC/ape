@@ -130,7 +130,7 @@ describe('APE v2 adapter conformance', () => {
     expect(role).toBeLessThan(ticket);
     expect(protocol).toMatch(/On Codex,[\s\S]*transport-only\s+bootstrap/);
     expect(protocol).toContain('`ticket_projection: "bootstrap-hook-injected"`');
-    expect(protocol).toMatch(/return that draft unchanged[\s\S]*Call `next`/);
+    expect(protocol).toMatch(/return that draft unchanged[\s\S]*call `next` after the returned dispatch group[\s\S]*fully recorded/iu);
 
     for (const role of roles) {
       const rolePrompt = await readFile(path.join(root, 'prompts', `${role}.md`), 'utf8');

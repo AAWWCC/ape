@@ -91,6 +91,13 @@ available host capabilities. The main input rules are:
 | Pure data/baseline phase work | `behavioral: false`; no test writer. |
 | `land` | Non-empty default-tip-to-working-tree diff, entirely in `claimed_paths` and `test_paths`. HEAD must equal or descend from the resolved default tip. |
 
+During independently confirmed post-build test recovery, the runtime issues
+`test-recheck` with `required_checks: ["test-correction"]`. It observes exact
+changed test paths twice and accepts either stable pass/pass or stable fail/fail
+before the implementer retries. This is a scheduler-owned recovery check, not a
+new `test_intent` input. Worker-reported observations cannot replace the sealed
+`evidence.test_correction` result.
+
 `debug` / `spike` can freeze exact `run_command_profiles` for their matching
 read-only role, with `effect: "execute"`, an audit reason, and operator approval.
 Set `operator_authorized: true` only after approval of the literal command.
@@ -100,6 +107,11 @@ Generators that modify tracked files need `effect: "write"`, a writable role, an
 exact `output_paths` already approved in that role's claims. They cannot double as
 verification/test commands. Declaring outputs does not bypass tree checks or make
 a read-only worker writable.
+
+An unused global generator does not add required output paths to the run. Profiles
+outside a role's scope stay cataloged without entering its usable capabilities.
+Debug and spike require only prerequisites reached by their own workflow; they do
+not inherit test-authoring paths or automatic shipping from a phase run.
 
 `ape_config init` normally detects test commands from manifests. For a blank
 metadata-only repository, prospective `behavioral` and `test_paths` values can

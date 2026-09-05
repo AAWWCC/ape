@@ -421,34 +421,19 @@ describe('Codex hooks parity guard (plan §5)', () => {
 });
 
 describe('main-session shell-deny message precision (roadmap hook-denial-message-precision)', () => {
-  // The main-session fail-closed shell deny (lib/runtime/hooks.js:477) must name
-  // what it actually CLASSIFIED. SHELL_WRITE matches a large class of commands
-  // that are NOT writes — a quoted `>` (`grep 'a>b'`), a compound command, an
-  // inline interpreter — which are denied only because the guard
-  // cannot PROVE they are read-only (fail-closed, invariant 2), not because they
-  // are writes. This is a MESSAGE-ONLY change: the DECISION stays `deny` for
-  // every currently-denied input and `allow` for every currently-allowed one, so
-  // the denial SET is unchanged. Derived from the objective's public contract:
-  // the reason names the fail-closed classification (never "shell writes"), and
-  // — mirroring the deletion-channel gating message (hooks.js:439-441) — appends
-  // an `ape_run next` poll hint only while the run is 'gating', never 'running'.
+  // Inline code can be harmless without being provably read-only to this
+  // classifier. Its denial should describe that limitation accurately and
+  // include a gate-poll hint only while gating. Literal inspection is recognized
+  // separately, so a quoted regex operator no longer belongs in this deny set.
   const denyMain = (command, status) =>
     evaluateLifecyclePolicy(
       { event: 'PreToolUse', tool_name: 'Bash', host: 'claude', is_subagent: false, command },
       { state: { status }, ticket: null },
     );
 
-  // `grep 'a>b'` matches SHELL_WRITE via the bare-`>` arm (the quoted `>` reads
-  // as a redirect-shaped token to the pattern) yet is a pure read: the archetypal
-  // denied-but-not-a-write case whose old "shell writes are forbidden" message was
-  // simply false. Unlike a sole redirect to exactly /dev/null — now ALLOWED by the
-  // main-session fail-safe carve-out (see runtime-v2-hook-shell-policy.test.js) —
-  // this quoted-`>` false positive is NOT a /dev/null redirect, so the carve-out
-  // does not exempt it and it stays DENIED with the fail-closed message both pre-
-  // and post-fix, keeping these message-precision assertions valid throughout.
-  const NOT_A_WRITE = "grep 'a>b'";
+  const NOT_A_WRITE = "node -e 'console.log(1)'";
 
-  it('names the fail-closed classification (not "shell writes") for a non-write redirect under running, with no poll hint', () => {
+  it('names the fail-closed classification for inline code under running, with no poll hint', () => {
     const decision = denyMain(NOT_A_WRITE, 'running');
     expect(decision.decision).toBe('deny');
     expect(decision.reason).toMatch(/not provably read-only|cannot verify|fail-closed/i);
@@ -467,10 +452,12 @@ describe('main-session shell-deny message precision (roadmap hook-denial-message
     expect(decision.reason).not.toMatch(/shell writes are forbidden/);
   });
 
-  it('leaves the denial SET unchanged: real writes still deny, read-only commands still allow', () => {
-    // A genuine mutation stays denied (holds pre- and post-fix — message only).
+  it.each(['running', 'gating'])('allows a literal search operator while %s', (status) => {
+    expect(denyMain("grep 'a>b'", status).decision).toBe('allow');
+  });
+
+  it('denies real writes and allows read-only commands', () => {
     expect(denyMain('rm -rf build', 'running').decision).toBe('deny');
-    // Commands that never matched SHELL_WRITE stay allowed (pre- and post-fix).
     expect(denyMain('ls', 'running').decision).toBe('allow');
     expect(denyMain('git status', 'running').decision).toBe('allow');
   });

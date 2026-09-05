@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import {
   normalizeLifecycleEvent,
@@ -30,6 +31,16 @@ import { widenedTestClaims } from '../lib/runtime/path-scope.js';
 import { resolveGovernedRoot, runtimePaths } from '../lib/runtime/paths.js';
 import { activeState } from '../lib/runtime/status-service.js';
 import { currentTreeSha, diffFiles } from '../lib/runtime/git.js';
+import { WRITE_TOOLS } from '../lib/runtime/write-policy.js';
+import {
+  INSPECTION_BUILTIN,
+  inspectionEvidenceArgsSafe,
+} from '../lib/runtime/evidence-policy.js';
+import {
+  rememberParentToolStart, takeParentToolStart,
+  recordRejectedParentChange, checkTreeAttribution, treeAttributionRefusal,
+  readParentToolResult, completeParentToolResult,
+} from '../lib/runtime/tree-attribution.js';
 import {
   bindClaudeSubagent,
   bindCodexSubagent,
@@ -91,6 +102,32 @@ import {
 // still refusing an unbounded stream; an oversized body is handled by the
 // catch, which consults the active run before denying.
 const INPUT_CAP_BYTES = 8 * 1024 * 1024;
+
+function parentInspection(event) {
+  if (!['Bash', 'run_command'].includes(event.tool_name)) return false;
+  const parsed = parseEvidenceCommand(event.command);
+  if (!parsed) return false;
+  // Git inspection can run external diff/textconv/fsmonitor/pager helpers.
+  // Its ordinary reads therefore use paired tree observations below instead
+  // of bypassing observation based only on the command's name.
+  const [head] = parsed.tokens;
+  return (INSPECTION_BUILTIN.has(head) ||
+    (head === 'env' && parsed.tokens.length === 1)) &&
+    inspectionEvidenceArgsSafe(parsed.tokens);
+}
+
+function parentToolCallKey(event) {
+  const raw = event.raw;
+  const id = raw.tool_use_id ?? raw.toolUseId ?? raw.tool_call_id ?? raw.toolCall?.id;
+  const session = raw.session_id ?? raw.sessionId;
+  if (typeof id !== 'string' || id.length === 0 || id.length > 4096 ||
+      typeof session !== 'string' || session.length === 0 || session.length > 4096) return null;
+  return createHash('sha256').update(JSON.stringify([
+    event.host, session, id, event.tool_name, event.command,
+    event.targets.map((target) => target.raw),
+  ])).digest('hex');
+}
+
 const CANARY_ONLY = process.argv.includes('--ape-canary-only');
 const STREAMED_TOP_LEVEL_FIELDS = new Set([
   'project_dir',
@@ -1189,9 +1226,8 @@ try {
               continue;
             }
             if (!evidenceOperandNeedsRoot(candidate)) continue;
-            // Relative operands resolve against the session cwd, exactly as the
-            // shell resolves them — same reasoning as the deletion targets.
-            const absolute = path.resolve(sessionCwd, candidate);
+            // The admitted leading cd relocates every remaining operand.
+            const absolute = path.resolve(executionCwd, candidate);
             if (await pathResolvesOutsideProject(paths.root, absolute)) {
               safe = false;
               reason = reason ?? `evidence operand ${candidate} resolves outside the governed project`;
@@ -1202,6 +1238,7 @@ try {
       }
       event.evidence = {
         tokens: parsedEvidence?.tokens ?? null,
+        session_cwd: sessionCwd,
         safe,
         cwd_safe: cwdSafe,
         executable_safe: executableVerdict?.safe ?? null,
@@ -1263,6 +1300,61 @@ try {
     }
   }
   let decision;
+  const postTool = ['PostToolUse', 'PostToolUseFailure'].includes(event.event);
+  const parent = !ticket && !event.is_subagent;
+  const parentRead = parent && parentInspection(event);
+  const parentMutation = parent && !parentRead &&
+    (WRITE_TOOLS.has(event.tool_name) || ['Bash', 'run_command'].includes(event.tool_name));
+  const resultBoundary = event.event === 'SubagentStop' ||
+    (postTool && isAgentDispatchTool(event.tool_name));
+  let parentResultUnchanged = false;
+  if (state?.status === 'running' && parentMutation) {
+    const callKey = parentToolCallKey(event);
+    if (event.event === 'PreToolUse' && callKey) {
+      // Keep the observed pre-tree even when the tool is refused: a host may
+      // still deliver its failed post event. Hashed host call identity binds
+      // the pair without retaining the command or session identity.
+      await rememberParentToolStart(paths, state.run_id, callKey, await currentTreeSha(paths.root));
+    } else if (postTool) {
+      let observation = await readParentToolResult(paths, state.run_id, callKey);
+      if (!observation) {
+        const tree = await currentTreeSha(paths.root);
+        const baseline = await takeParentToolStart(paths, state.run_id, callKey) ??
+          state.tree_sha ?? state.tickets?.map((entry) => entry.base_tree_sha).find(Boolean);
+        const changed = baseline && baseline !== tree ? await diffFiles(paths.root, baseline, tree) : [];
+        // Missing pre-events cannot identify authorship. Retain unresolved
+        // observations conservatively, and atomically remember the completed
+        // host-call outcome so a replay cannot relabel later worker changes.
+        observation = changed.length > 0
+          ? await recordRejectedParentChange(paths, state.run_id, baseline, tree, changed, callKey)
+          : await completeParentToolResult(paths, state.run_id, callKey, false);
+      }
+      parentResultUnchanged = !observation.changed;
+      if (observation.changed) {
+        const attribution = await checkTreeAttribution(paths, state.run_id, await currentTreeSha(paths.root));
+        decision = {
+          decision: 'deny',
+          reason: 'APE result denied: tree change has no exact active ticket attribution. ' +
+            (attribution.blocked ? treeAttributionRefusal(attribution) :
+              'This parent-tool result was previously refused; replaying it does not change that outcome.'),
+        };
+      }
+    }
+  }
+  if (state?.status === 'running' &&
+      (resultBoundary || (ticket && ['PreToolUse', 'PostToolUse', 'PostToolUseFailure'].includes(event.event)) ||
+        ((parentRead || parentResultUnchanged) && postTool))) {
+    try {
+      const attribution = await checkTreeAttribution(paths, state.run_id, await currentTreeSha(paths.root));
+      if (attribution.blocked && resultBoundary) {
+        decision = { decision: 'deny', reason: treeAttributionRefusal(attribution) };
+      }
+    } catch (error) {
+      // Diagnosis and authorized repair remain possible if observation storage
+      // is damaged. Result adoption still fails closed at this exact boundary.
+      if (resultBoundary) throw error;
+    }
+  }
   const reconcileEvents = new Set([
     'PreToolUse',
     'PostToolUse',
@@ -1273,17 +1365,16 @@ try {
   // terminal run left behind in active.json must not police the repo. And it
   // binds only where the drift could be extended or laundered into a result
   // (driftGuardApplies) — read-only tools stay available for the diagnosis
-  // and recovery an unattributed change demands. One deliberate widening
-  // (audit finding 1.7): every MAIN-SESSION Bash post event reconciles, so a
-  // shell write verb the SHELL_WRITE blocklist does not enumerate is DENIED as
-  // unattributed drift at its own post event (a loud, operator-visible
-  // refusal). NOTE: the deny does not REVERT the write, so if the persisted
-  // drift falls within a pending ticket's claims it can still be re-attributed
-  // to that ticket at its later Agent post-event below — a known, tracked gap
-  // (docs/research/2026-07-22-main-session-write-laundering.md), not a closed
-  // one.
+  // and recovery an unattributed change demands. Parent mutations retain a
+  // separate run-scoped observation above. Known inspection commands and
+  // matched unchanged parent calls must not relabel existing worker changes
+  // as parent drift. Unresolved observations fence result adoption, while
+  // ordinary ticket scope continues to govern repair writes.
   if (
+    !decision &&
     state?.status === 'running' &&
+    !parentResultUnchanged &&
+    !(parentRead && postTool) &&
     reconcileEvents.has(event.event) &&
     driftGuardApplies(event, { state, ticket })
   ) {
@@ -1325,7 +1416,7 @@ try {
         candidates.length === 1 &&
         !ticket &&
         !event.is_subagent &&
-        event.tool_name === 'Agent' &&
+        isAgentDispatchTool(event.tool_name) &&
         (event.event === 'PostToolUse' || event.event === 'PostToolUseFailure')
       ) {
         decision = {

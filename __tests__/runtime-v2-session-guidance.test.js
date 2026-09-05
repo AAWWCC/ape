@@ -366,12 +366,12 @@ describe('runtime-owned session guidance', () => {
       status: 'input_required',
       stage: 'test',
       input_required: { kind: 'receipt_retry', ticket_id: 'ticket-1' },
-    }))).toContain('Next safe action: continue the same agent and record the exact attested receipt');
+    }))).toContain('Next safe action: ape_run record with the identical attested receipt');
     expect(runtimeGuidanceForState(activeState({
       status: 'input_required',
       stage: 'execution-budget',
       input_required: { kind: 'execution_budget' },
-    }))).toContain('Next safe action: wait for the retained continuation');
+    }))).toContain('Next safe action: ape_run next');
     const remediation = runtimeGuidanceForState(activeState({
       status: 'blocked',
       stage: 'remediation',

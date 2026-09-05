@@ -6,12 +6,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { emptyOrchestrationTelemetry } from '../lib/runtime/orchestration-telemetry.js';
-import { readDispatchReceiptAttestation } from '../lib/runtime/claude-dispatch.js';
+import { observeCodexSubagentStop, readDispatchReceiptAttestation } from '../lib/runtime/claude-dispatch.js';
 import { codexBootstrapOrientation } from '../lib/runtime/codex-bootstrap.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { receiptOutputSchemaForTicket } from '../lib/runtime/receipt-validator.js';
 import { normalizeReceiptInput, receiptInputHash } from '../lib/runtime/receipt-input.js';
 import {
+  abortRun,
   executeApeRunTaskOperation,
   nextRun,
   recordReceipt,
@@ -19,6 +20,7 @@ import {
   resumeRun,
   validateReceiptForDispatch,
 } from '../lib/runtime/service.js';
+import { settleReceiptValidationSubagentStop } from '../lib/runtime/receipt-service.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { canonicalJson, sha256 } from '../lib/runtime/canonical.js';
 import { finalizeTicket } from '../lib/runtime/schemas.js';
@@ -1858,6 +1860,77 @@ describe('live receipt contract integration', () => {
     );
     expect(recorded.input_hash).not.toBe(recorded.attested_input_hash);
   });
+
+  it.each([
+    { action: 'next', advance: nextRun, exhaustion: 1 },
+    { action: 'resume', advance: resumeRun, exhaustion: 1 },
+    { action: 'next', advance: nextRun, exhaustion: 2 },
+    { action: 'resume', advance: resumeRun, exhaustion: 2 },
+  ])('preserves an aborted run when $action encounters stopped worker exhaustion $exhaustion', async ({ advance, exhaustion }) => {
+    const value = await fixture();
+    const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
+    if (exhaustion === 2) {
+      const intent = await readJson(intentFile);
+      await atomicWriteJson(intentFile, {
+        ...intent,
+        physical_worker_dispatches: 2,
+        receipt_validation_exhaustions: 1,
+      });
+      value.state.receipt_contract_exhaustions = { [value.ticket.ticket_id]: 1 };
+      await atomicWriteJson(value.paths.active, value.state);
+    }
+    const invalid = draft(value.ticket, value.capability, 'invalid-status');
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await validateReceiptForDispatch(value.directory, invalid);
+    }
+    const observation = await observeCodexSubagentStop(value.paths, await readJson(value.paths.active), {
+      session_id: 'session-1', agent_id: 'agent-1', agent_type: 'default',
+    });
+    expect(observation.observed).toBe(true);
+    expect(await abortRun(value.directory, 'Synthetic operator abort before exhaustion settlement'))
+      .toMatchObject({ ok: true, run: { status: 'aborted' } });
+
+    const files = [value.paths.active, path.join(value.paths.runs, `${value.state.run_id}.json`), intentFile];
+    const before = await Promise.all(files.map((file) => readFile(file, 'utf8')));
+    expect(await advance(value.directory)).toMatchObject({ ok: false, reason: 'run is aborted' });
+    expect(await Promise.all(files.map((file) => readFile(file, 'utf8')))).toEqual(before);
+  });
+
+  it.each(['receipt_retry', 'preflight', 'execution_budget'])(
+    'settles stopped receipt evidence only when the %s hold can resume execution',
+    async (hold) => {
+      const value = await fixture();
+      const invalid = draft(value.ticket, value.capability, 'invalid-status');
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await validateReceiptForDispatch(value.directory, invalid);
+      }
+      const state = await readJson(value.paths.active);
+      expect((await observeCodexSubagentStop(value.paths, state, {
+        session_id: 'session-1', agent_id: 'agent-1', agent_type: 'default',
+      })).observed).toBe(true);
+      state.status = 'input_required';
+      state.stage = hold === 'preflight' ? 'preflight' : 'input_required';
+      state.input_required = hold === 'preflight'
+        ? { questions: [] }
+        : { kind: hold, ticket_id: value.ticket.ticket_id, resume_status: 'running', resume_stage: value.ticket.stage_id };
+      await atomicWriteJson(value.paths.active, state);
+      const before = await readFile(value.paths.active, 'utf8');
+      const settlement = await settleReceiptValidationSubagentStop(value.directory);
+      if (hold === 'execution_budget') {
+        expect(settlement).toMatchObject({
+          ok: true, settled: true,
+          next_action: { kind: 'redispatch_same_ticket', ticket_id: value.ticket.ticket_id },
+        });
+        expect(await readJson(value.paths.active)).toMatchObject({
+          status: 'running',
+          receipt_contract_pending_redispatches: [value.ticket.ticket_id],
+        });
+      } else {
+        expect(settlement).toEqual({ ok: true, settled: false });
+        expect(await readFile(value.paths.active, 'utf8')).toBe(before);
+      }
+    },
+  );
 
   it('blocks an identical malformed final draft twice, then retires and redispatches the same ticket once', async () => {
     const value = await fixture();

@@ -42,7 +42,7 @@ the former), `planning_command_profiles`, and `planning_required_capabilities`. 
 - Single-quote each Next.js bracketed route operand (`[name]`, `[...name]`, `[[...name]]`), e.g.
   `cat 'app/[id]/page.tsx'`; use one non-mutating command.
 
-Block only for an unmet objective, material plan deviation, wrong behavior, security/authorization,
+Block only for an unmet objective, material plan violation, wrong behavior, security/authorization,
 data-loss/destructive risk, unauthorized scope, or missing required evidence. Style preferences,
 optional refactors/speculation, and equally valid alternatives are advisory only.
 
