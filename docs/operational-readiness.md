@@ -54,7 +54,13 @@ protection from turning a clean APE run into a shipping failure.
 
 Launch every non-interactive Codex certification parent through `npm run release:live-parent --
 --project-dir <disposable-repository> --codex-home <isolated-home>
---codex-bin <absolute-reviewed-codex-executable> --prompt <attempt-prompt>`. The
+--codex-bin <absolute-reviewed-codex-executable> --prompt <attempt-prompt>
+--operator-authorized`. Supply this flag only after the user explicitly approves
+this exact attempt and its requested shipping actions. Without it the launcher
+refuses before any host subprocess. With it the parent receives a separate,
+caller-attested approval handoff followed by the unchanged generated prompt.
+The flag is not independent proof of human provenance, hook trust, repository
+permission, or a gate waiver. A generated prompt alone never supplies approval. The
 launcher fails closed unless the isolated home contains the candidate's complete regular-file
 inventory and exact packaged bytes, including its version, and declares zero request retries, zero
 stream retries, and WebSockets disabled. Its bounded package digest proves staged byte parity only,

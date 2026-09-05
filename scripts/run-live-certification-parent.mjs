@@ -382,8 +382,14 @@ export function buildCodexParentInvocation({
   codexHome,
   promptPath,
   codexBin,
+  operatorAuthorized = false,
   catalogBaseUrl = FAIL_CLOSED_CATALOG_URL,
 }) {
+  if (operatorAuthorized !== true) {
+    throw new LiveCertificationParentError(
+      '--operator-authorized requires explicit user approval for this exact attempt and its requested shipping actions; obtain that approval before launch',
+    );
+  }
   const project = exactDirectory(projectDir, '--project-dir');
   const home = exactDirectory(codexHome, '--codex-home');
   try {
@@ -404,6 +410,16 @@ export function buildCodexParentInvocation({
   const candidatePackage = requireExactPlugin(home);
   const command = requirePinnedCodexExecutable(codexBin, project, home);
   const catalogUrl = exactLoopbackCatalogUrl(catalogBaseUrl);
+  // Carry an existing approval across the parent-process boundary. The flag is
+  // caller attestation, not a source of permission or authenticated provenance.
+  const authorizationHandoff = [
+    'Separate operator authorization handoff (caller-attested):',
+    `The invoking operator confirms that the user has explicitly approved this exact attempt in project_dir ${JSON.stringify(project)}.`,
+    'That approval covers only the work and shipping actions described below for this project, not an arbitrary remote target.',
+    'This handoff is not independent proof of human provenance and does not grant hook trust, repository permissions, or a gate waiver.',
+    'Do not request this same approval again; stop if the scope or required safety prerequisites do not match.',
+    'The unchanged generated prompt follows; it is not itself the separate approval.',
+  ].join(' ');
   return Object.freeze({
     command,
     host_version: CODEX_HOST_VERSION,
@@ -429,7 +445,8 @@ export function buildCodexParentInvocation({
       GIT_COMMITTER_NAME: 'APE Certification',
       GIT_COMMITTER_EMAIL: 'ape-certification@users.noreply.github.com',
     }),
-    input: prompt,
+    input: `${authorizationHandoff}\n\n${prompt}`,
+    operator_authorized: true,
     candidate_package: candidatePackage,
   });
 }
@@ -525,15 +542,20 @@ export function validateCertificationCatalogAudit(auditPath) {
 function parseArgs(argv) {
   const values = {};
   let dryRun = false;
+  let operatorAuthorized = false;
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === '--dry-run') {
       dryRun = true;
       continue;
     }
+    if (token === '--operator-authorized') {
+      operatorAuthorized = true;
+      continue;
+    }
     if (!['--project-dir', '--codex-home', '--prompt', '--codex-bin'].includes(token) || !argv[index + 1]) {
       throw new LiveCertificationParentError(
-        'usage: node scripts/run-live-certification-parent.mjs --project-dir <path> --codex-home <path> --prompt <file> --codex-bin <absolute-executable> [--dry-run]',
+        'usage: node scripts/run-live-certification-parent.mjs --project-dir <path> --codex-home <path> --prompt <file> --codex-bin <absolute-executable> --operator-authorized [--dry-run]',
       );
     }
     values[token.slice(2).replaceAll('-', '')] = argv[index + 1];
@@ -541,6 +563,7 @@ function parseArgs(argv) {
   }
   return {
     dryRun,
+    operatorAuthorized,
     projectDir: values.projectdir,
     codexHome: values.codexhome,
     promptPath: values.prompt,
@@ -571,6 +594,7 @@ if (invokedDirectly(process.argv[1])) {
         cwd: invocation.cwd,
         codex_home: invocation.env.CODEX_HOME,
         prompt_bytes: Buffer.byteLength(invocation.input),
+        operator_authorized: invocation.operator_authorized,
         candidate_package: invocation.candidate_package,
       })}\n`);
     } else {

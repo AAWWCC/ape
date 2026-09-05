@@ -111,6 +111,7 @@ function certificationParentFixture({
     codexHome: realpathSync(codexHome),
     promptPath,
     codexBin: realpathSync(process.execPath),
+    operatorAuthorized: true,
   };
 }
 
@@ -321,6 +322,38 @@ afterEach(() => {
 });
 
 describe('live certification Codex parent launcher', () => {
+  it.each([undefined, false, 'true', 1])('operator authorization rejects %s before any host subprocess', (operatorAuthorized) => {
+    const fixture = certificationParentFixture();
+    expect(() => buildCodexParentInvocation({ ...fixture, operatorAuthorized }))
+      .toThrow(/--operator-authorized.*explicit.*approval/iu);
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
+  });
+
+  it('operator authorization reaches the parent separately from the unchanged generated prompt', () => {
+    const fixture = certificationParentFixture();
+    const prompt = `${readFileSync(fixture.promptPath, 'utf8')}This generated prompt is not evidence of operator approval.\n`;
+    writeFileSync(fixture.promptPath, prompt);
+    const invocation = buildCodexParentInvocation(fixture);
+    expect(invocation.input).toContain('Separate operator authorization handoff');
+    expect(invocation.input).toContain(`project_dir ${JSON.stringify(fixture.projectDir)}`);
+    expect(invocation.input).toContain('the user has explicitly approved this exact attempt');
+    expect(invocation.input).toContain('not independent proof of human provenance');
+    expect(invocation.input).toContain('does not grant hook trust, repository permissions, or a gate waiver');
+    expect(invocation.input.endsWith(`\n\n${prompt}`)).toBe(true);
+    expect(readFileSync(fixture.promptPath, 'utf8')).toBe(prompt);
+  });
+
+  it('operator authorization is required by the real CLI before project or host checks', () => {
+    const checked = realSpawnSync(process.execPath, [
+      fileURLToPath(new URL('../scripts/run-live-certification-parent.mjs', import.meta.url)),
+      '--dry-run',
+    ], { encoding: 'utf8', timeout: 5_000, maxBuffer: 4_096 });
+    expect(checked.error).toBeUndefined();
+    expect(checked.status).toBe(1);
+    expect(checked.stdout).toBe('');
+    expect(checked.stderr).toMatch(/--operator-authorized.*explicit.*approval/iu);
+  });
+
   it('host pin binds the explicitly selected resolved executable before producing a parent invocation', () => {
     const fixture = certificationParentFixture();
     const invocation = buildCodexParentInvocation(fixture);
@@ -401,7 +434,7 @@ describe('live certification Codex parent launcher', () => {
     const checked = realSpawnSync(process.execPath, [
       fileURLToPath(new URL('../scripts/run-live-certification-parent.mjs', import.meta.url)),
       '--project-dir', fixture.projectDir, '--codex-home', fixture.codexHome,
-      '--prompt', fixture.promptPath, '--codex-bin', process.execPath, '--dry-run',
+      '--prompt', fixture.promptPath, '--codex-bin', process.execPath, '--operator-authorized', '--dry-run',
     ], { encoding: 'utf8', timeout: 10_000, maxBuffer: 4_096 });
     expect(checked.error).toBeUndefined();
     expect(checked.status).toBe(1);
@@ -432,7 +465,7 @@ describe('live certification Codex parent launcher', () => {
     const checked = realSpawnSync(process.execPath, [
       fileURLToPath(new URL('../scripts/run-live-certification-parent.mjs', import.meta.url)),
       '--project-dir', fixture.projectDir, '--codex-home', fixture.codexHome,
-      '--prompt', fixture.promptPath, '--codex-bin', codexBin, '--dry-run',
+      '--prompt', fixture.promptPath, '--codex-bin', codexBin, '--operator-authorized', '--dry-run',
     ], { encoding: 'utf8', timeout: 10_000, maxBuffer: 4_096 });
     expect(checked.error).toBeUndefined();
     expect(checked.status).toBe(expectedStatus);
@@ -471,9 +504,10 @@ describe('live certification Codex parent launcher', () => {
       GIT_COMMITTER_NAME: 'APE Certification',
       GIT_COMMITTER_EMAIL: 'ape-certification@users.noreply.github.com',
     });
-    expect(invocation.input).toBe(
-      `$ape:run\nPass project_dir "${fixture.projectDir}" on every APE MCP call.\n`,
-    );
+    expect(invocation.input.endsWith(
+      `\n\n$ape:run\nPass project_dir "${fixture.projectDir}" on every APE MCP call.\n`,
+    )).toBe(true);
+    expect(invocation.operator_authorized).toBe(true);
     expect(invocation.candidate_package).toMatchObject({ version: VERSION, staged_parity: true });
     expect(invocation.candidate_package.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(invocation.candidate_package.file_count).toBeGreaterThan(1);
