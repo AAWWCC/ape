@@ -1,12 +1,17 @@
 # Prevention-first reliability status
 
-**2.24.12 is a review candidate, not a certified release.** Reproduced blockers
+**2.24.13 is a review candidate, not a certified release.** Reproduced blockers
 have fixes and regression tests. The full live acceptance requirement is still
 incomplete. This page records the latest results as of September 5, 2026; it does
 not authorize more testing, installation, or publication.
 
 ## What changed
 
+- Certification preflight now requires the pinned Codex CLI's native V2 agent
+  interface explicitly. The 2.24.12 live attempt exposed a setup gap: ordinary
+  multi-agent availability did not establish support for APE's launch fields.
+  Missing or invalid `features.multi_agent_v2` settings now fail before a parent
+  starts; worker envelopes and ordinary runtime gates are unchanged.
 - One pipeline contract now drives preview, admission, worker tickets, schemas,
   and instructions. It checks reachable stages before workers start.
 - Preview checks scope, commands, capabilities, repository state, and shipping
@@ -66,6 +71,20 @@ automatic recovery were not expanded. Repair-and-land remains deferred.
 
 ## What passed
 
+The 2.24.13 full source run passed 4,315 tests with 86 existing skips. Its one
+failure was a documentation assertion: a required phrase had been split across
+two lines. Restoring the phrase resolved that failure, and all 21 compatibility
+tests passed the focused recheck. No runtime code changed after the full run.
+The seven new native-agent preflight regressions passed. The full run took
+396.43 seconds and the focused recheck took 1.23 seconds.
+
+The 2.24.13 operational replay passed all 654 tests across 23 files in 79.02
+seconds. Type, compatibility, all 52 prompt scenarios, public-safety, both host
+package validation/MCP smoke, package/release reproducibility, and verified
+public export checks passed. These are offline checks, not live certification.
+
+The earlier candidate's complete baseline remains recorded below:
+
 | Check | Recorded result |
 |---|---|
 | Full 2.24.12 source suite after merging public main and rebuilding both packages | 4,309 passing tests across 260 files; 86 existing skips |
@@ -105,8 +124,17 @@ simulated shipping. Live host certification remains a separate requirement.
 
 ## What is still unverified
 
-The 2.24.12 packages require a new candidate-bound live campaign and Claude
-worker-validator proof. Earlier version evidence cannot certify these packages.
+The 2.24.12 mechanical certification parent passed doctor, configuration, preview,
+and probe preparation, then stopped because the host exposed the older native
+agent interface. No child, binding, run, receipt, or shipping action occurred;
+the fast, full, and protected-land attempts were not launched. This is a failed
+certification attempt, not a passing run. Its original evidence remains external.
+
+The separate Claude worker-validator prerequisite could not authenticate on two
+authorized attempts. No validator call or passing proof was produced.
+
+The corrected 2.24.13 packages require a fresh candidate-bound live campaign and
+Claude worker-validator proof. Earlier version evidence cannot certify them.
 
 The fast, full, and protected-land live scenarios on 2.24.11 remain unverified.
 The campaign stopped at the operator's request, and its disposable setup was

@@ -9,9 +9,10 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.24.12** is a release candidate awaiting live certification and
-tagged publication. Offline checks passed; the earlier mechanical run used
-2.24.11 and does not certify this candidate. See the
+Version **2.24.13** is a release candidate awaiting a new live certification
+campaign and tagged publication. The 2.24.12 campaign stopped
+before an APE run started because Codex exposed an incompatible native agent
+schema. The earlier 2.24.11 mechanical run does not certify this candidate. See the
 [current release status](docs/prevention-release-status.md) for the exact limits.
 
 Codex CLI is the primary host. The Claude Code package is included, but
@@ -26,12 +27,20 @@ Node.js 22.12.0 or newer is required.
 
 ### Codex CLI
 
-Run in a terminal:
+Use the pinned Codex CLI **0.147.0**. Install the plugin and enable the native V2
+worker tools in the Codex home you use for APE:
 
 ```bash
 codex plugin marketplace add AAWWCC/ape
 codex plugin add ape@ape
+codex features enable multi_agent_v2
 ```
+
+The feature command updates that Codex home's `config.toml`. Restart Codex, then
+use `codex features list` in the same launch environment to verify that
+`multi_agent_v2` is `true`. The older `multi_agent` setting alone does not ensure
+the worker interface APE requires. See [host compatibility](docs/compatibility.md)
+for the equivalent configuration and launch option.
 
 ### Claude Code
 
