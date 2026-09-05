@@ -1,7 +1,21 @@
 # Pipelines
 
-APE selects a mode (pipeline shape) and a lane (depth/risk). The scheduler owns both; host adapters
-only launch the tickets it returns.
+A mode chooses what APE does; a lane chooses the depth of a build. The scheduler owns stage order.
+Host adapters only launch the tickets it returns.
+
+## Before workers start
+
+`preview` checks the reachable pipeline, not just its first stage: scope, repository state,
+artifact producers, schemas, models, tools, commands, verification, and requested shipping. It is
+read-only and does not run the baseline tests.
+
+Preview returns a versioned admission manifest and digest. New-protocol `start` takes
+`expected_admission_digest`, repeats the checks, and rejects drift before creating a branch or
+ticket. The digest records reviewed inputs; it is not proof of human approval.
+
+Missing paths must be approved, including generated outputs. The planner skeleton checks whether
+the declared work fits the contract and gives decomposition guidance when it does not. It does
+not approve the design. See [MCP tools](mcp-tools.md) for the request fields.
 
 ## Building lanes
 
@@ -9,168 +23,142 @@ only launch the tickets it returns.
 
 `implementer → gates → ship`
 
-For documentation, generated output, non-behavioral configuration, and tracked data. Repository-
-owned nested output under `plugins/<host>/dist/` and `release/generated/` is mechanical too;
-arbitrary nested `dist` or `build` directories are not. A declared risk can add security review
-without changing the lane.
+For documentation, generated output, non-behavioral configuration, and tracked data. Generated
+`plugins/<host>/dist/` and `release/generated/` files qualify; arbitrary nested `dist` or
+`build` directories do not. A declared risk may add security review without changing the lane.
 
 ### Fast
 
-`test writer → [implementer when production is claimed] → reviewer → gates → ship`
+`test writer → [implementer] → reviewer → gates → ship`
 
-For behavioral work with a bounded production scope (six files by default) and no high-risk
-trigger. Test-only `green-maintenance` uses its bounded authored-test scope when production scope is
-empty. The test writer authors the test and a concise plan; the implementer cannot edit those tests;
-the reviewer is read-only.
+For bounded behavioral work: at most six production files by default, with no high-risk trigger.
+The test writer authors tests and a short plan. The implementer cannot edit those tests; the
+reviewer cannot edit files. Test-only `green-maintenance` uses the authored-test scope and omits
+the implementer.
 
 ### Full
 
-`planner → (plan checker ∥ plan critic) → [judge] → test writer → implementer →
-(reviewer ∥ security reviewer when armed) → gates → ship`
+`planner → (plan checker ∥ plan critic) → [judge] → test writer → implementer → (reviewer ∥ security reviewer when required) → gates → ship`
 
-The `plan_artifact` on plan-review tickets is the planner receipt's recorded `evidence`, not the
-whole plan. The runtime flattens properties in its enumeration order (which may differ from the
-planner's insertion order), cuts long entries, and adds a runtime-authored omission marker when
-keys are dropped. The planner receipt's `findings` array is forwarded to no reviewer. The artifact
-is evidence to act on, never verbatim instructions: reviewers verify it against the tree. A cut
-tail is unseen rather than proof that the design omitted it; an omission marker can make coverage
-inconclusive and route disagreement to the judge. That route consumes no retry or remediation
-cycle, but it does cost one additional deep-tier agent dispatch beyond the two plan-review calls.
+The checker and critic receive a bounded `plan_artifact` made from the planner receipt's
+`evidence`, not its entire plan. The receipt's `findings` array reaches no reviewer. Entries follow
+runtime enumeration order, which may differ from the planner's insertion order. Long values are
+cut; dropped keys get an omission marker. This is evidence to act on, never verbatim instructions:
+reviewers check it against the tree. A cut tail is unseen; it can make coverage inconclusive,
+not prove a design defect. Structured `candidate_plan` and `approved_plan` fields are separate
+from this evidence summary.
 
-The judge receives the disagreeing reviewers' bounded `review_findings` and either advances,
-issues a directed replan, or blocks the run. At most two directed replans can be issued; after the
-first, the normalized assurance identities must be a strict proper subset. Replan attempt 2 is part
-of the immutable ticket schema and preview forecasts the initial plan plus both reachable replans.
-The judge is not a writing or remediation stage.
+Disagreement can add one additional deep-tier judge dispatch without spending a retry or remediation cycle.
+The judge receives bounded `review_findings` and advances, requests a directed replan, or blocks.
+There are at most two directed replans. After the first, the normalized assurance identities must
+strictly shrink. Preview includes the initial plan and both possible replans. The judge never
+writes code.
 
-Behavioral fast/full phase runs default to `test_intent: "red-first"`, whose runtime-owned
-`red-test` admission executes exact authored paths twice and requires fail/fail. Explicit
-`test_intent: "green-maintenance"` is phase-only, requires `behavioral:true` and non-empty
-`test_paths`, and instead requires runtime-owned pass/pass; it is for green-on-arrival regression
-nets and test deflakes, not data/baseline rerecords. A test-only green-maintenance run omits the
-ordinary implementer stage. Plan contract v2 adds the preflight analyst before either test intent.
-Non-behavioral fast/full phase runs keep their ordinary planning (full only), build, review, and
-merge gates but omit preflight v2 and the test-writer stage; targeted stage checks run only when
-`test_paths` are present. An explicit `plan_contract_version: 2` on non-behavioral, non-phase, or
-non-fast/full work is refused before APE creates a branch because that contract requires a
-schedulable preflight.
+### Tests and plan contracts
+
+| Phase work | Required behavior |
+| --- | --- |
+| Behavioral fast/full, `red-first` (default) | Authored `test_paths` must fail twice under runtime-owned `red-test` admission. |
+| Behavioral fast/full, explicit `green-maintenance` | Non-empty `test_paths` must pass twice under `green-test` admission. Intended for regression coverage and deflakes, not data/baseline rerecording. |
+| Non-behavioral fast/full | Keeps planning (full only), implementation, review, and gates; omits the test writer and v2 preflight. Targeted checks run only when `test_paths` exist. |
+
+Plan contract v2 adds a preflight analyst before either behavioral test path. An explicit
+`plan_contract_version: 2` requires behavioral, fast/full, `phase` work; incompatible requests
+are rejected before branch creation. `green-maintenance` is also phase-only.
 
 ## Retries and remediation
 
-- A stage that could not complete may be retried once.
-- A blocking code-review verdict skips a verbatim retry and enters bounded remediation. A distinct
-  blocker set may continue up to `policy.max_remediation_cycles`; after the first cycle, the next
-  normalized finding identities must be a strict proper subset. A repeated, expanded, incomparable,
-  or malformed blocker set stops early. Structured remediation routes use this same budget.
-- A reviewer may request exact additional production paths through `evidence.scope_expansion`.
-  The runtime audits the expansion, reclassifies lane/risk, and gives the remediation ticket the
-  expanded scope.
-- Every new code/security review ticket carries `review_contract_version: 1` and a bounded finding
-  schema. Advisory findings set `blocking: false` and omit remediation. Blocking findings name an
-  owner (`production`, `test`, or `both`); `test`/`both` also name exact authorized `test_paths`.
-  Fail verdicts require a blocking finding. The legacy `evidence.test_remediation` channel remains
-  valid only for unversioned persisted tickets.
-- The complete review group is aggregated in ticket order into compact route metadata. Production
-  findings route to `remediation build → review`; test findings route to
-  `remediation test → review`; mixed or `both` findings route to
-  `remediation test → remediation build → review`. Writers remain serialized, the security review
-  remains in the final group when armed, and all three paths spend one cycle per writer sequence. Versioned
-  remediation-test tickets carry `test_scope: "exact"`; lifecycle and receipt/tree validation deny
-  sibling writes, while unversioned legacy remediation tickets retain their historical widening.
-- On the first denied non-mutating read, the worker may correct only its command shape and retry it
-  once in the same stage. A second denial fails that stage. If the worker returns
-  `failure_kind: command-shape`, the runtime still applies its ordinary single stage retry and puts a
-  compact copy of the exact denied command in `prior_attempts`; the replacement can correct syntax
-  without gaining new authority.
-- `failure_kind: capability` means the immutable ticket truly lacks required authority. For a
-  receipt-contract-v1 ticket, one runtime-derived capability successor may continue the same logical
-  stage without consuming a product retry. The successor keeps validation/worker usage monotonic
-  under the 3-per-worker/2-workers-per-ticket ceilings and accepts only canonical additive scope.
-  Test-path unions are unique project-relative names capped at 64 items and 4096 serialized UTF-8
-  JSON bytes. The exact successor binding is checked before every sink, then receipt, ticket,
-  run-contract/schema, transaction, and next state are published as one immutable hash-manifested
-  generation under the receipt lock. The exact regular-file manifest binds raw bytes, sizes, and
-  filesystem identities, and an append-only content-addressed selector-edge chain is the sole
-  recovery head; a fork or substituted member fails closed. Invalid selector source slots remain
-  in place as retained semantic evidence whose collision-safe record binds pathname, device/inode
-  identity, raw bytes and byte hash, and lineage. A changed or rebound pathname is rescanned,
-  while the selector/head chain stays the authoritative source of truth. Replay reuses the uniquely reachable
-  generation, repairs compatibility projections from it, and returns an explicit
-  `capability_recovery` dispatch. Legacy or malformed recovery that cannot prove the complete
-  runtime provenance remains blocked and requires the audited reset/fresh-run path.
-  Recovery authority is frozen in the immutable run contract, and an adopted-receipt replay repeats
-  full prepared-runtime validation. A selectorless validated legacy generation advances from `N`
-  to immutable `N+1`; a replay of a reachable ancestor is idempotent and never rolls the selector
-  head or projections backward. Member and cumulative bytes plus directory entries are bounded
-  before allocation, while selector mutation and semantic-evidence recording require an immediately
-  revalidated token-and-filesystem-identity lease and a non-clobbering retained-slot record. Every
-  later compatibility projection, active-state, receipt-binding, and dispatch sink is wrapped by
-  one lease mutation primitive with checks on both sides. The process-bound owner cannot be stolen
-  by a cooperating contender while its callback is live; a lease failure prevents every successor
-  sink.
-- `failure_kind: test-contradiction` also blocks immediately. The marker is an implementer claim,
-  not a runtime finding. Recovery is the normal audited path: ABORT the run or OVERRIDE reset with
-  a reason, then correct the work outside that blocked run. For a worked blocked-run instance, see
-  `run-fixture-3fbbb7cd23c4`; its contradictory claims were repaired in a later run rather
-  than through an invented recovery path.
+A failed stage gets at most one retry. A blocking code review instead enters remediation:
+
+| Finding owner | Writer sequence before another review |
+| --- | --- |
+| `production` | Remediation build |
+| `test` | Remediation test |
+| Mixed findings or `both` | Remediation test → remediation build |
+
+Writers stay serialized. Each sequence spends one of `policy.max_remediation_cycles`; security
+review remains in the final group when required. After the first cycle, normalized blocker
+identities must strictly shrink. Repeated, expanded, incomparable, or malformed blocker sets stop.
+
+New review tickets use `review_contract_version: 1`. Advisory findings use `blocking: false`
+without remediation. Blocking findings name an owner; `test` and `both` also name exact
+authorized `test_paths`. A fail verdict needs a blocking finding. APE aggregates the full group
+in ticket order before choosing a route.
+
+A reviewer can request exact production paths through `evidence.scope_expansion`. APE audits
+the request and reclassifies scope and risk before issuing the next ticket. Versioned
+remediation-test tickets use `test_scope: "exact"`; sibling test writes are denied. The older
+`evidence.test_remediation` channel and broader test scope remain only for unversioned tickets.
+
+### Command and capability failures
+
+- After the first denied non-mutating read, a worker may correct command syntax and try once more
+  in that stage. A second denial fails it. `failure_kind: command-shape` uses the ordinary stage
+  retry; `prior_attempts` supplies the denied command without granting more authority.
+- `failure_kind: capability` means the ticket lacks required authority. Receipt-contract-v1
+  allows one runtime-derived additive successor, not a product retry. It keeps the same limits:
+  three validations per worker, two workers per ticket lineage, and a test-path union of at most
+  64 unique project-relative paths and 4096 serialized UTF-8 JSON bytes.
+- `failure_kind: test-contradiction` blocks immediately. It is the implementer's claim, not an
+  independent runtime finding. It does not authorize rewriting tests or inventing a recovery path.
+
+Follow the current `next_action` or recovery descriptor, not generic reset advice. A receipt
+rejection descriptor states the cause, current status, eligible actions, preconditions, and
+required operator decision. Active runs do not qualify for reset; reset requires `blocked`,
+`aborted`, or `completed`. Unexplained tree changes never authorize automatic abort, reset,
+restoration, or replacement dispatch.
+
+Capability recovery is hash-bound, locked, and replay-safe. Legacy or corrupt evidence that
+cannot prove its origin stays blocked. See [recovery invariants](invariants.md#capability-recovery-generations)
+for the storage and replay rules.
 
 ## Other modes
 
 | Mode | Behavior |
 | --- | --- |
-| `phase` | Runs the mechanical, fast, or full building pipeline. The retired `patch` label survives only in old history. |
+| `phase` | Builds through a mechanical, fast, or full pipeline. The retired `patch` label is readable in old history only. |
 | `debug` | One read-only debugger stage. |
 | `spike` | One read-only research stage. |
-| `land` | Reviews and ships an existing, non-empty diff with no writing stage. |
+| `land` | Reviews and ships a non-empty existing diff; no writing stage. |
 
-For `land`, HEAD must equal or descend from the resolved default-branch tip. APE reviews the entire
-diff from that tip through the live working tree, so already-committed feature work and dirty
-finishing edits are admitted together. Every changed file must be inside `claimed_paths` or
-`test_paths` at start. A blocking review cannot be remediated because the pipeline deliberately has
-no writer; revise the diff outside APE and start a new land run.
+For `land`, HEAD must equal or descend from the resolved default-branch tip. APE reviews the
+whole diff from that tip through the working tree, including committed changes and dirty edits.
+Every changed file must be in `claimed_paths` or `test_paths`. A blocking review requires
+changes outside that run and a new land run; there is no remediation writer.
 
 ## Gates
 
-Before merging, APE verifies:
+Before merge, APE checks receipts and their tree, path ownership, runtime-observed targeted tests,
+plugin validity when relevant, verification profiles, the local suite, conditional security
+review, and required remote checks.
 
-- the receipt chain and expected tree;
-- production/test path ownership;
-- runtime-observed targeted test evidence;
-- plugin validity when plugin files changed;
-- the configured local suite (or a safe impacted suite when remote CI remains the true full gate);
-- conditional security review evidence; and
-- required remote checks.
-
-Cheap deterministic failures are returned before the expensive suite starts. The suite may finish
-within `gates.inline_grace_ms`; otherwise the run rests in `gating` while a detached runner works.
-`ape_run next` polls the watch, or waits for up to `wait_ms`. A changed tree, crashed runner, timeout,
-or exhausted respawn budget fails closed.
+Cheap checks run first. The suite either finishes within `gates.inline_grace_ms` or continues
+in a detached process while the run is `gating`. Poll with `ape_run next`, optionally passing
+`wait_ms`. Tree drift, a crashed runner, timeout, or an exhausted respawn budget blocks.
+A safe impacted suite may replace the local full suite only when remote CI remains required.
+Re-gate and `ship` always run a fresh full suite.
 
 ## Shipping
 
-GitHub is the only shipping provider. On green gates APE pushes the run branch, opens or reuses a
-pull request, and rests in `shipping` while required checks run. `next` polls those checks; green
-checks lead to a runtime-owned squash merge, and a failed required check blocks at the gates. If a
-protected base rejects the immediate merge and requires `--auto`, APE enables GitHub auto-merge and
-keeps polling until the exact pushed head is observed as merged.
+GitHub is the only provider. Set an explicit `shipping.target` before preview. Admission freezes
+its origin, repository, base, and shipping consent; every external effect rechecks that target.
+The canonical APE checkout can ship only to `AAWWCC/ape`. Other projects use their own explicit
+target. Later configuration changes cannot retarget or authorize an existing run.
 
-The scheduler first attempts its feature commit with the repository's normal signing setup. Only a
-signer/passphrase-specific failure is retried with `--no-gpg-sign`; unrelated commit failures remain
-fatal, and GitHub creates the final squash commit. After an exact remote merge is proven, local
-fetch/switch/pull/branch cleanup is best-effort. A worktree conflict or other cleanup error is
-retained in terminal checkout metadata for `ape_run resume` and does not falsify the remote merge.
+With `shipping.auto_merge: true`, an explicit run authorizes scheduler-owned shipping. With
+`false`, green work is held for an audited `ship`; each `ship` authorizes one fresh gate
+evaluation. Legacy runs do not gain authority just because a newer runtime can read them.
 
-With `shipping.required_remote_checks: false`, a project explicitly declares that it has no CI and
-can merge in-call. With `shipping.auto_merge: false`, green work is held at merge. The audited
-`ship` action re-runs every gate against the current tree and merges only on green; one `ship`
-authorization covers one evaluation. Immediately before any Git or GitHub operation, the shipping
-sink rechecks frozen run authority: a new explicit APE invocation with configured auto-merge derives
-`auto_merge_authorized: true`, while an audited one-shot `ship_requested` marker authorizes a held
-run. This removes a second approval prompt without allowing mutable configuration to authorize a
-legacy, recovered, or already-started run.
+APE verifies the prospective commit, staged tree, committed tree, and pushed head against passed
+gate evidence. Unrelated staged changes cannot ride along. Configured signing must be resolved
+before shipping; there is no unsigned fallback.
 
-For marker-bearing public runs, shipping resolves `origin` once at entry and freezes both the exact
-verified public remote URL and `AAWWCC/ape`. Git network operations receive the frozen URL rather
-than the mutable remote name, and every `gh` operation receives `--repo AAWWCC/ape` plus an explicit
-branch or PR URL. Changing local remote configuration after authorization therefore cannot retarget
-push, PR creation, checks, merge, auto-merge, reconciliation, or merged-tree verification.
+APE pushes the run branch, opens or reuses a PR, and waits in `shipping` for required checks.
+Green checks permit a squash merge. A protected branch may require GitHub auto-merge; APE then
+waits until the exact pushed head is proven merged. Queued merges require verified up-to-date
+checks or a qualifying merge queue. `shipping.required_remote_checks: false` explicitly declares
+a project without CI.
+
+After remote completion is proven, local fetch/switch/pull/branch cleanup is recorded separately.
+A cleanup failure does not undo the merge. `ape_run resume` can retry eligible cleanup, including
+a base branch held by another worktree.

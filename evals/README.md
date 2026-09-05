@@ -1,45 +1,52 @@
-# Prompt release evaluation
+# Prompt evaluation
 
-This suite evaluates the shipped Claude and Codex prompt/skill surfaces against synthetic evidence.
-One provider call contains all 37 independent cases. The release matrix is two hosts by three
-configured model tiers by three repetitions: 18 paid calls total.
+These checks test Claude and Codex instructions against 37 synthetic cases.
+They are separate from live pipeline certification.
 
-No live call is the default:
+## Offline checks
 
 ```sh
 npm run eval:prompts:check
 npm run eval:prompts:plan
 ```
 
-`check` validates fixture coverage, response schema, prompt/source hashes, the exact call matrix,
-and the scorer against its hidden oracle. It needs no provider credentials. `plan` prints the live
-matrix without starting it.
+`check` validates case coverage, schemas, prompt hashes, the call matrix, and the
+scorer against expected results. `plan` prints the matrix. Neither makes model
+calls or needs provider credentials.
 
-After explicit cost approval, start or resume the matrix with both guards:
+## Live prompt evaluation
+
+The matrix is two hosts × three model tiers × three repetitions: **18 paid
+calls**. Each call contains all 37 cases. Obtain explicit cost approval first.
 
 ```sh
 npm run eval:prompts:run -- --live --confirm-paid-eval --results evals/results/release-candidate
 ```
 
-Completed current-hash calls are skipped. Errors are recorded and retried on the next invocation.
-Use repeatable `--call <host>-<tier>-r<n>` arguments for a bounded retry. Claude runs with tools
-disabled; Codex runs ephemerally in an empty read-only sandbox with user configuration and rules
-disabled. The prompt itself forbids tools and uses only the included synthetic evidence.
+Both flags are required. Completed calls with current hashes are skipped; recorded
+errors are retried on the next invocation. Limit a retry with repeatable
+`--call <host>-<tier>-r<n>` arguments.
 
-Verify an existing artifact offline, including all hashes and 100% release thresholds:
+Claude runs with tools disabled. Codex runs in an empty, read-only, ephemeral
+sandbox with user configuration and rules disabled. Both receive only synthetic
+evidence and instructions not to use tools.
+
+Verify saved results offline:
 
 ```sh
 npm run eval:prompts:verify -- --results evals/results/release-candidate
 ```
 
-Generated result directories are ignored. Preserve an approved release artifact in external CI or
-release storage rather than committing model output to the source tree.
+Verification checks the hashes and 100% release thresholds. Keep approved result
+artifacts in CI or release storage, not in source control.
 
-## Live operational certification
+## Live pipeline certification
 
-The separate live-host release ledger is defined by `live-certification.schema.json` and documented
-in [operational readiness](../docs/operational-readiness.md). The schema deliberately permits only
-privacy-safe structured outcomes. The real `live-certification.json` must not exist until its raw
-Codex attempts have actually run; the release verifier also requires it to be the sole change in a
-dedicated tagged certification commit over the exact tested source commit. Claude remains packaged
-but is explicitly listed as unverified and cannot appear as certified attempt evidence.
+This is a different check: real Codex workers must complete the required pipeline
+runs. See [operational readiness](../docs/operational-readiness.md) and
+`live-certification.schema.json`.
+
+Create `live-certification.json` only from actual attempts. It must be the sole
+change in a dedicated tagged certification commit over the tested source.
+Do not fabricate attempts or replace failed evidence. Claude remains unverified
+and cannot appear as certified attempt evidence.

@@ -1,22 +1,21 @@
 # Agents
 
-Canonical role instructions live in `prompts/`. Claude wrappers are in `agents/`; Codex project
-definitions are in `.codex/agents/`. The ticket and inlined common/role prompts remain complete
-even when Codex falls back to its built-in `worker` or `explorer` agent types.
+APE assigns each stage to a worker with a specific role and limited write access.
+Workers do not schedule other workers or edit APE's runtime state.
 
-| Role | Writes | Default tier |
+| Role | May edit | Default tier |
 | --- | --- | --- |
-| preflight analyst | no | balanced |
-| planner | no | deep |
-| plan checker | no | fast |
-| plan critic / judge | no | deep |
-| test writer | authored tests only | balanced |
-| implementer | production claims only | balanced |
-| reviewer / security reviewer | no | deep |
-| debugger | no | deep |
-| spike researcher | no | balanced |
+| preflight analyst | Nothing | balanced |
+| planner | Nothing | deep |
+| plan checker | Nothing | fast |
+| plan critic / judge | Nothing | deep |
+| test writer | Authored tests only | balanced |
+| implementer | Approved production paths only | balanced |
+| reviewer / security reviewer | Nothing | deep |
+| debugger | Nothing | deep |
+| spike researcher | Nothing | balanced |
 
-Default model mappings:
+## Models
 
 | Tier | Claude | Codex |
 | --- | --- | --- |
@@ -24,32 +23,40 @@ Default model mappings:
 | balanced | `sonnet` | `gpt-5.5`, medium reasoning |
 | deep | `opus` | `gpt-5.5`, high reasoning |
 
-Project configuration can override tier and per-role mappings. The Claude security reviewer is
-pinned to `opus` by default and that role override outranks the deep-tier mapping.
+Project configuration can override tiers or individual roles. Claude's security
+reviewer defaults to `opus`; its role override takes priority over the deep tier.
 
-The preflight analyst runs only for behavioral fast/full phase work using plan contract v2. Its
-baseline commands must be receipt-backed. Output hashes are included when the host exposes enough
-raw output to compute them and omitted—not fabricated—otherwise.
+## Tests and evidence
 
-The test writer follows the immutable ticket intent. `red-first` is the default and receives
-runtime-owned fail/fail admission. Explicit phase-only `green-maintenance` receives runtime-owned
-pass/pass admission for green-on-arrival coverage or deflaking; when no production path is claimed,
-review follows directly and no implementer is dispatched.
+The preflight analyst runs only for behavioral fast/full phase work using plan
+contract v2. Each reported baseline command needs a matching receipt entry.
+Output hashes are included only when the host exposes enough output to compute them.
 
-Agents never schedule other agents or write runtime state. External MCP tools exposed by the host
-remain available without APE-specific names, claims, adapters, or provider allowlists. The host and
-operator own discovery and permission decisions. APE still verifies repository changes at stage
-and receipt boundaries, so ordinary filesystem changes must fit `claimed_paths` or `test_paths`.
+The test writer follows the ticket's test intent:
 
-Every bound worker receives a hook-injected receipt envelope and a role-specific excerpt of the
-immutable ticket `output_schema`. The final response is the receipt object itself. `SubagentStop`
-refuses termination when that draft is absent or malformed and returns bounded field corrections to
-the same worker before the parent can record it; `ape_validate_receipt` independently attests the
-exact corrected draft.
+- `red-first` (default): the runtime must observe fail/fail evidence.
+- `green-maintenance` (phase mode only): the runtime must observe pass/pass evidence
+  for green-on-arrival coverage or deflaking. If there are no production claims,
+  review follows testing without an implementer.
 
-Every canonical and packaged Claude role explicitly grants the receipt validator under both known
-host-qualified names: `mcp__ape__ape_validate_receipt` and
-`mcp__plugin_ape_ape__ape_validate_receipt`. The broad external-MCP wildcard is not treated as proof
-that a deferred per-role schema was provisioned. The manual authenticated prerequisite in
-`docs/operational-readiness.md` launches every role through Claude, verifies that an actual linked
-validator call reaches the APE service, and emits a candidate-bound proof for external retention.
+## Tools and receipts
+
+The host controls external MCP tools and their permissions. APE still checks that
+project edits fit `claimed_paths` or `test_paths`.
+
+Trusted hooks give each bound worker its receipt envelope and role-specific
+`output_schema`. The worker's final response must be the receipt object itself.
+`SubagentStop` returns field corrections if it is missing or malformed. The worker
+must also call `ape_validate_receipt` to attest the exact draft before the parent
+can record it. See [receipt validation](mcp-tools.md#receipt-validation-and-recovery).
+
+Claude roles grant both exact validator names: `mcp__ape__ape_validate_receipt` and
+`mcp__plugin_ape_ape__ape_validate_receipt`. An external-tool wildcard alone does not
+prove the validator is available. The [Claude release prerequisite](operational-readiness.md)
+checks actual tool reachability for every packaged role without changing its allowlist.
+
+## Instruction files
+
+Shared role instructions live in `prompts/`, Claude wrappers in `agents/`, and
+Codex definitions in `.codex/agents/`. Tickets include the full common and role
+instructions even when Codex uses its built-in `worker` or `explorer` types.

@@ -1,80 +1,84 @@
 # Lifecycle hooks
 
-`bin/ape-hook.mjs` normalizes Claude and Codex events and applies the same runtime policy on both
-hosts. The host is pinned by the launcher; stale variables from the other host are ignored. A
-project hint seeds an upward walk to the nearest `.ape/`, so governance survives cwd drift.
+Hooks enforce APE's rules at host events. `bin/ape-hook.mjs` translates Claude
+and Codex events into the same runtime policy. The launcher selects the host;
+stale variables from another host are ignored.
+
+APE finds the governed project by walking up from a project hint to the nearest
+`.ape/` directory. A changed working directory does not remove that protection.
 
 ## Codex native bootstrap
 
-For new Codex dispatches, `SubagentStart` stores bounded provisional evidence: the native parent
-session, child turn, child agent ID/type, and actual model. It does not bind a ticket. A valid
-native observation also delivers a capability-free reminder to execute the parent-assigned
-bootstrap, if that task contains bootstrap arguments, without requesting a new human task. The
-reminder does not associate that child with a pending ticket or supply a bearer; unrelated assigned
-tasks remain unrelated. Known native children do not receive parent-only SessionStart orientation,
-even when later startup input omits the explicit child flag.
-The child's first APE operation is `ape_bind` with the separate bootstrap bearer delivered in
-`spawn_args.message`.
-Bootstrap discovery and binding are not stage work and require no pre-existing ticket context.
-That context is expected to be absent initially; the child checks for complete injected authority
-only after `ape_bind` returns, never as a reason to skip the handshake.
-If it is a deferred tool, search the host catalog for its bare registered name `ape_bind`, then
-invoke the returned installed APE tool. Do not search by the host-qualified invocation alias:
-the live catalog returned no results for that alias but found the registered name. The bearer is
-never a search term. Only the required catalog/invocation wrapper is allowed, never
-shell execution, project inspection, or another MCP operation as a substitute for binding.
-Its trusted `PreToolUse` hook validates the exact authorized generation, parent linkage, actual
-model, live immutable ticket and deadline, and atomically admits one child. Only this hook emits
-the ticket context through `hookSpecificOutput.additionalContext`; it does not bypass host
-permissions. A tool result without that complete trusted context grants no stage authority.
-The two context-bearing binding handlers set Codex's `additionalContextLimit` to `0`: APE already
-caps its injected contract at 160 KiB, and a host-spilled preview is not a complete contract. This
-also avoids placing the receipt bearer in Codex's hook-output spill files.
+New Codex workers receive authority in this order:
 
-The host can omit `agent_id` on later tool events. Identity is then recovered only from the
-native observation keyed by that exact child turn and native session (or child-ID alias). Parent
-and child turn IDs need not match. Conflicting, malformed, or unsafe evidence fails closed.
-Bootstrap bearers, launch-name capabilities, and receipt capabilities use distinct derivations.
+1. `SubagentStart` records provisional native identity and actual model. It does
+   not bind a ticket. A reminder tells an assigned APE child to run its bootstrap,
+   without supplying a credential or assigning unrelated children to APE.
+2. The child discovers the bare registered name `ape_bind`, if needed, then calls
+   the installed tool with the bootstrap arguments from `spawn_args.message`.
+   Do not search for a host-qualified alias or put the credential in the query.
+3. The trusted `PreToolUse` hook checks generation, parent, model, ticket, and
+   deadline, then binds exactly one child. It injects the task context through
+   `hookSpecificOutput.additionalContext`.
+4. Only after that injection may the worker begin. Missing ticket context before
+   binding is expected; a tool result without trusted context is not authority.
 
-This is a bearer-delivery boundary: the trusted orchestrator must relay the returned native
-message unchanged. The current native spawn result exposes a task name, not a verified link to
-the child's UUID, so APE does not claim independent cryptographic proof of the physical spawn-to-UUID
-relationship. Before the bearer is claimed, a provisional observation alone cannot label an
-otherwise unrelated child as an APE probe. After binding, the exact canary identity remains
-tool-denied, including external tools and later resumes. The wildcard hook permits only the exact
-already-admitted bootstrap invocation to account for concurrent hook execution.
-Canary-only denial evidence has separate immutable keys for its native child UUID and exact
-parent-session/child-turn pair. These survive damaged candidate storage; a parent session alone
-and an unrelated provisional child do not match. The keys grant no binding or stage authority.
-Main-session startup reads failed or unreadable probe evidence without repairing it and directs
-diagnosis rather than automatic relaunch, replacement, or run start.
+Discovery allows only the required tool-catalog wrapper, not shell commands,
+project inspection, or substitute MCP calls. The parent must forward the returned
+native message unchanged. Hooks do not bypass host permissions.
 
-During an active run, a project write requires one bound native subagent, one active ticket, a
-writable role, and a path inside that ticket's claims. Test writers may edit authored tests only;
-implementers may edit production claims only. Unknown or ambiguous paths fail closed. Outside-
-project scratch writes remain available except for the execution-redirecting configuration listed
-below.
+APE caps injected context at 160 KiB. Its two binding handlers set Codex's
+`additionalContextLimit` to `0` so the host does not replace the contract with a
+preview or spill its receipt credential to hook-output files.
+
+### Identity and failed probes
+
+Later events may omit `agent_id`. APE resolves it only from the matching native
+session and child turn, or child-ID alias. Parent and child turns may differ.
+Conflicting or unsafe evidence stops binding. Bootstrap, launch-name, and receipt
+credentials are derived separately.
+
+The native spawn result gives a task name, not an independently verified link to
+the child's UUID. The trusted parent's unchanged message delivery remains part
+of this trust boundary.
+
+Provisional observations alone do not make unrelated children APE probes.
+Once bound, a probe remains denied ordinary tools, including external tools and
+later resumes. Immutable denial records identify the exact child UUID and
+parent-session/child-turn pair, never the parent alone. They survive damaged
+candidate storage and grant no work authority.
+
+The wildcard hook permits the exact admitted bootstrap call for concurrent hook
+delivery. Main-session startup reports failed or unreadable probes without
+repairing, replacing, or relaunching them. Known children do not receive
+parent-only session instructions.
+
+### Project writes
+
+An active-run write requires a bound worker, an active writable ticket, and an
+approved path. Test writers own authored tests; implementers own production
+claims. Unknown or ambiguous paths are refused. Outside-project scratch writes
+are allowed except for the execution configuration listed below.
 
 ## Write-content byte gate
 
-The path checks answer where a write goes; this gate checks what the host edit tool writes. It runs
-after path/role authorization and refuses C0 controls, DEL/C1, bidi/format characters, U+2028/U+2029,
-U+FEFF, and the astral TAGS block. ZWNJ/ZWJ remain allowed. This is an enumerated tracked-source
-policy, not all of Unicode `Cf`; see the authored-byte tests for the precise set.
+After checking the path and role, APE checks content sent through host edit tools.
+It refuses C0 controls, DEL/C1, bidi/format characters, U+2028/U+2029, U+FEFF, and
+the astral TAGS block. ZWNJ/ZWJ remain allowed. This is a specific list, not every
+Unicode `Cf` character.
 
-**Routed tools.** `Write.content`, `Edit.new_string`, each `MultiEdit.edits[].new_string`,
-`NotebookEdit.new_source`, and content-bearing `apply_patch` fields. The `apply_patch` route is live:
-the hook checks every bound event, accepts compatibility path fields including top-level
-`input.file_path`, and derives Codex native targets from column-zero Add/Update/Delete/Move headers.
-Every source and destination in a multi-file patch is authorized atomically.
+**Routed tools.** `Write.content`, `Edit.new_string`, each
+`MultiEdit.edits[].new_string`, `NotebookEdit.new_source`, and content-bearing
+`apply_patch` fields. The `apply_patch` route is live. It accepts compatibility
+path fields such as `input.file_path` and reads Codex paths from column-zero
+Add/Update/Delete/Move headers. It authorizes every source and destination in a
+multi-file patch together.
 
-**Residual: Bash heredoc content is not covered.** Bash arrives as a command string, not as a host
-edit-tool content field. The shell policy below governs the command, but this byte scan cannot
-inspect a separate heredoc payload.
+**Residual: Bash heredoc content is not covered.** The shell policy checks the
+command string, but this scan does not inspect a separate heredoc payload.
 
-The gate is intentionally content-blind: a source edit whose purpose is to contain one of the
-refused bytes must construct it (for example with `String.fromCodePoint`) rather than transmit the
-literal byte through a host edit tool.
+A source edit that needs a refused character must construct it, for example with
+`String.fromCodePoint`, rather than include the literal character.
 
 ## Out-of-project execution configuration
 
@@ -143,169 +147,161 @@ Residuals this narrowing does NOT close.
 
 ## Bound-subagent shell policy
 
-A bound Claude or Codex subagent gets an allowlisted evidence shell, not an open shell. Production
-edits go through host write tools.
+Bound workers get an allowlisted evidence shell, not an unrestricted shell.
+Use host edit tools for production changes.
 
-Recognized command families:
+Recognized command families include:
 
-- package-manager `test`/`t`; `run <script>` is unrestricted for writable roles and restricted to
-  declared/configured evidence scripts for read-only roles;
-- Vitest, Jest, Mocha, Ava, Playwright, Tap, TypeScript, and Pytest test/check forms;
-- `node --test|--check|--version`, Python test modules, supported Python environment-manager test
-  wrappers, `tox`, `go test`, and `cargo test`;
-- read-only git (`status`, `diff`, `log`, `show`, `rev-parse`, listing-only `branch`, `describe`,
-  `ls-files`, `ls-tree`), with output-writing flags denied;
-- `ls`, `pwd`, `cat`, `echo`, `true`, `which`, exact-head `sha256sum`/`shasum` checksum evidence,
-  and bare `env`;
-- check-only Ruff, Flake8, Mypy, Pylint, Black, Isort, ESLint, and Prettier forms; and
-- at most one leading `cd <dir> &&`.
+- Package-manager `test` / `t`. Writable roles may use `run <script>`;
+  read-only roles are limited to configured or declared evidence scripts.
+- Vitest, Jest, Mocha, Ava, Playwright, Tap, TypeScript, and Pytest checks.
+- `node --test|--check|--version`, Python test modules and supported environment
+  wrappers, `tox`, `go test`, and `cargo test`.
+- Read-only Git: `status`, `diff`, `log`, `show`, `rev-parse`, listing-only
+  `branch`, `describe`, `ls-files`, and `ls-tree`. Output-writing flags are refused.
+- `ls`, `pwd`, `cat`, `echo`, `true`, `which`, bare `env`, and exact-head
+  `sha256sum` / `shasum` checks.
+- Check-only Ruff, Flake8, Mypy, Pylint, Black, Isort, ESLint, and Prettier.
+- At most one leading `cd <dir> &&`.
 
-Fresh runs also pin each external command head to its trusted-start realpath and bounded fingerprint.
-Missing-to-present, PATH-shadowed, or replaced executables are refused. `echo`, `pwd`, and `true`
-are explicit shell builtins; Windows resolution honors PATHEXT and case-insensitive names.
+New runs pin each external executable to its resolved path and fingerprint at
+start. A missing, shadowed, newly appeared, or replaced executable is refused.
+`echo`, `pwd`, and `true` are explicit builtins; Windows resolution uses PATHEXT
+and case-insensitive names.
 
 ### Exact command profiles
 
-`policy.command_profiles` admits one exact operator-attested command for named roles and a declared
-`read`, `write`, or `execute` effect. There is no prefix/glob matching. Write profiles require a
-writable ticket, and write/execute effects trigger tree reconciliation.
+`policy.command_profiles` can allow one exact operator-approved command for
+named roles, with a `read`, `write`, or `execute` effect. Prefixes and globs do
+not match. A write profile needs a writable ticket. Write and execute profiles
+trigger checks for unexpected tree changes.
 
-For one investigation, `ape_run preview`/`start` may instead carry `run_command_profiles`. This
-surface is restricted to `debugger` or `spike_researcher`, the profile must name only the mode's
-role, and its effect must be `execute`. Each entry also requires a nonblank audit `reason` and
-`operator_authorized: true`, which may be set only after the operator approves that exact literal
-command. The exact command becomes a required capability in that run's immutable snapshot; it never
-changes repository-wide configuration and cannot be added after start. This is the supported path
-for measurements such as an exact interpreter invocation that is intentionally outside the generic
-non-mutating command grammar. Because execute profiles can run arbitrary code, their normal
-post-command tree reconciliation is defense in depth, not a substitute for that explicit approval.
+For one `debug` or `spike` run, preview/start may instead supply
+`run_command_profiles`. Each entry must:
+
+- Name only that mode's `debugger` or `spike_researcher` role.
+- Use `effect: "execute"`.
+- Include a nonblank audit `reason` and `operator_authorized: true`, set only
+  after approval of the exact command.
+
+These profiles are frozen at start and do not alter project-wide config.
+Execute profiles can run arbitrary code; later tree checks do not replace approval.
 
 ### Token and character rules
 
-Admission is tokenize-then-allowlist. The command is parsed into tokens, checked against one
-recognized family, and then checked for containment and executable identity. Chaining,
-substitution, redirects, inline interpreters, control characters, and ambiguous tokenization fail
-closed.
+APE tokenizes the command, matches a command family, then checks paths and
+executable identity. Chaining, substitutions, redirects, inline interpreters,
+controls, and ambiguous tokens are refused.
 
-Command-family recognition precedes executable-pinning diagnostics. An unrecognized mutation such
-as `cp` is therefore refused as outside the non-mutating evidence allowlist, rather than being
-misreported as a missing trusted-start executable. Recognized evidence heads still fail closed when
-their pinned executable is missing, replaced, or PATH-shadowed. Only an obvious file-inspection or
-read-only Git intent receives the correctable `command-shape` diagnostic; arbitrary or potentially
-mutating heads retain the shell denial and host-edit-tool remedy.
+An unknown command such as `cp` is reported as outside the evidence allowlist,
+not as a missing executable. Only obvious file-inspection or read-only Git
+commands receive a correctable `command-shape` error; potentially mutating
+commands must use the permitted edit path.
 
-The character allowlist admits ASCII letters/digits, non-ASCII code points by range, plain spaces
-as separators, and the punctuation `- _ . / : = @ ~ , % ^ +`. Positional rules refuse `~`, `=`,
-or `^` at token start; `~` and `=` are also refused immediately after `=` or `:`. This closes zsh
-equals expansion such as `=node` under the named assumptions and narrows `MAGIC_EQUAL_SUBST`
-exposure. A `cd` target additionally refuses `~` and `^` anywhere and a leading `-` or `+`; a name
-can still be reached as `./-build` or `./+build`.
+The character allowlist accepts ASCII letters/digits, non-ASCII code points by
+range, plain spaces as separators, and `- _ . / : = @ ~ , % ^ +`.
+It refuses `~`, `=`, and `^` at token start, and `~` / `=` immediately after
+`=` or `:`. This blocks zsh equals expansion such as `=node` under the stated
+shell assumptions and narrows `MAGIC_EQUAL_SUBST` exposure.
 
-Static `cat` and `ls` operands may use one complete pair of single or double quotes. The de-quoted
-content must use the ordinary token alphabet and may not contain spaces; partial quote concatenation,
-quoted package-script names, and embedded quotes remain refused. This admits harmless shell spellings
-such as `cat 'eslint.config.mjs'` without expanding the executable or script surface.
+A `cd` target also refuses `~` and `^` anywhere, or a leading `-` / `+`.
+Use `./-build` or `./+build` to name those directories.
 
-A complete argv vector serialized as uniformly single- or double-quoted, escape-free tokens is
-canonicalized before policy checks only when every de-quoted token uses the ordinary positive
-alphabet, so `'cat' 'tests/unit/graph.test.ts'` has the same verdict as its plain argv. Mixed or
-partial quoting, quoted whitespace, shell operators, opposite nested quotes, escapes, and
-unrecognized de-quoted heads remain refused. Single-quoted bracketed route operands retain their
-quote provenance for the route validation below.
+Quoting rules:
 
-Next.js dynamic-route paths are a separate bracket-aware quote exception. A complete single-quoted
-operand whose bracket-bearing segments are `[name]`, `[...name]`, or `[[...name]]` is de-quoted before
-the same containment checks; for example, `cat 'app/trace/[traceId]/page.tsx'`. Unquoted brackets
-remain refused because zsh treats them as glob syntax. Double-quoted dynamic routes, partial bracket
-segments, embedded quotes, and spaces inside the quoted token remain refused.
+- Static `cat` and `ls` operands may use a complete single- or double-quoted
+  token, such as `cat 'eslint.config.mjs'`. Its content must use the ordinary
+  alphabet without spaces.
+- A complete argv may use uniformly single- or double-quoted, escape-free tokens.
+  Each unquoted token must pass ordinary policy. For example,
+  `'cat' 'tests/unit/graph.test.ts'` has the same verdict as plain argv.
+- Next.js paths may use single-quoted segments shaped as `[name]`, `[...name]`,
+  or `[[...name]]`: `cat 'app/trace/[traceId]/page.tsx'`.
+  Unquoted brackets, double-quoted routes, partial brackets, and spaces are refused.
+- Mixed or partial quoting, embedded quotes, quoted package-script names, shell
+  operators, and quoted whitespace do not gain an exception.
 
-Deletion is stricter: every target refuses `~`, `=`, and `^` in every position. The retired
-`DELETION_UNSAFE_CHARS` argument was monotone only for truncation; it did not cover substitution,
-and `rm =node` could resolve to an absolute executable path. The separate deletion tokenizer now
-closes that instance.
+Deletion refuses `~`, `=`, and `^` anywhere. The retired
+`DELETION_UNSAFE_CHARS` check did not cover substitution: `rm =node` could target
+an absolute executable path. Its old safety argument was monotone under truncation
+(cutting input short), not substitution (replacing input). A separate deletion
+tokenizer now refuses that form.
 
 Accepted over-blocks:
 
-- `git log ^main master` is refused because `^` begins a token.
-- A bare `cd +build` or `cd -build` is refused; `cd ./+build` and `cd ./-build` work.
-- Shell syntax that a specific command might safely treat as data is still refused globally.
+- `git log ^main master` is refused because `^` starts a token.
+- `cd +build` and `cd -build` are refused; use `cd ./+build` or `cd ./-build`.
+- Shell syntax can be refused even when one command would treat it as harmless data.
 
 ### Shell assumption
 
-The character argument is scoped to the host shell and shell options it names. Claude commonly
-executes through a persistent zsh/eval path; zsh `EXTENDED_GLOB`, `MAGIC_EQUAL_SUBST`, aliases,
-functions, `ZDOTDIR`, startup injection, and other operator configuration can change parsing before
-the target program runs. The policy narrows those risks but does not claim a character rule closes
-them all. Executable pinning closes fresh-run PATH shadowing, while environment/startup channels
-remain explicit residuals.
+Shell options can change parsing before the target program runs. Claude commonly
+uses persistent zsh/eval; `EXTENDED_GLOB`, `MAGIC_EQUAL_SUBST`, aliases, functions,
+`ZDOTDIR`, and startup files matter. The character rules narrow these risks;
+they do not eliminate every environment or startup channel. Executable pinning
+addresses fresh-run PATH shadowing, not those remaining channels.
 
 ### Operand containment
 
-Every path-shaped operand must resolve within the governed project. This includes `--flag=path`,
-short attached operands, and relocation flags. The refusal names the operand, not merely the flag.
-The optional leading `cd` is resolved first; the remaining command is checked relative to that
-directory. The session cwd itself must already be inside the governed project.
+Path-shaped operands must resolve inside the governed project, including
+`--flag=path`, short attached operands, and relocation flags. Errors name the
+operand. A leading `cd` is resolved first; the command is checked from that
+directory. The session's working directory must already be inside the project.
 
 ## External MCP pass-through
 
-APE does not match, classify, authorize, deny, or audit tools owned by other MCP servers. Server
-names, operation names, schemas, discovery, and permissions remain host- and operator-owned. This
-keeps an installed APE plugin from interfering with unrelated integrations or requiring future tool
-names to be predicted before a run starts.
+The host and operator control other MCP servers' discovery and permissions.
+APE's ordinary policy hooks do not classify or authorize their operations. If a
+host sends a non-APE MCP event anyway, the runtime defers it before reading run
+state or resolving a ticket. Bound probe denial is the exception described above.
 
-The shared policy hooks match only APE's own control-plane operations and receipt validator, plus
-the host write, shell, and agent-dispatch surfaces APE actually governs. A defensive runtime branch
-also immediately defers any non-APE `mcp__<server>__<operation>` event without returning a permission
-decision if a host delivers it despite the narrowed matcher, before APE reads run state or resolves
-a ticket binding.
+Claude manifests retain `ToolSearch` and `mcp__*` so external providers remain
+visible. They deny workers APE's parent-only controls; receipt validation remains
+available. APE checks repository changes at worker and receipt boundaries, even
+when an external service made them.
 
-Claude's supplemental asynchronous LARP hook still sees failed tool events for user-facing error
-cues. It has no permission or receipt authority; the synchronous policy bundle does not receive
-generic MCP events.
-
-Claude agent manifests retain `ToolSearch` and `mcp__*` so parent-session providers remain visible
-to bound workers. Their `disallowedTools` entries cover only APE's own orchestrator-controlled
-operations; `ape_validate_receipt` remains the one worker protocol tool. Repository integrity is
-still checked at agent/receipt boundaries against `claimed_paths` and `test_paths`, independently of
-which external service a worker used.
+Claude's asynchronous LARP error hook can observe generic tool failures for a
+notification. It grants no permission or receipt authority.
 
 ## Main-session shell policy
 
-The main session uses a blocklist as defense in depth, not as a sandbox. It blocks obvious file
-writes/deletes, redirects (including no-space forms), inline interpreters, patch/install/truncate
-commands, and known mutating git forms while a run is active. PostToolUse tree reconciliation is
-the authoritative backstop. The main session remains responsible for MCP control-plane calls and
-normal host orchestration.
+During a run, the parent handles APE controls and native dispatch, not stage work.
+A blocklist rejects obvious writes/deletes, redirects, inline interpreters,
+patch/install/truncate commands, and mutating Git forms. This is not a sandbox:
+PostToolUse tree checks remain the backstop.
 
 ## Receipt capabilities
 
-Each dispatch uses a single-use launch nonce and a separate receipt capability. PreToolUse binds a
-host-issued child identity to exactly one ticket; the child receives only its receipt capability.
-Receipt admission verifies that binding and consumes the capability. `SubagentStop` is an observed
-lifecycle event, not proof that a valid receipt was recorded.
+A dispatch has separate single-use launch and receipt credentials. Trusted hooks
+bind one native child to one ticket. Receipt admission checks that binding and
+consumes the receipt credential. `SubagentStop` reports termination, not a
+successfully recorded result.
 
-The conventional `hooks/hooks.json` registers shared policy events for both hosts. Its shell-free
-Node launcher selects Codex `PLUGIN_ROOT` or Claude `CLAUDE_PLUGIN_ROOT` and pins the host. Claude's
-explicit `hooks/claude-hooks.json` contains only supplemental LARP handlers and its
-`PostToolUseFailure` event.
+`hooks/hooks.json` registers shared policy for both hosts. The shell-free Node
+launcher uses Codex `PLUGIN_ROOT` or Claude `CLAUDE_PLUGIN_ROOT` and pins the
+host. Claude's explicit `hooks/claude-hooks.json` adds only LARP notifications,
+including `PostToolUseFailure`.
 
 ## LARP MODE
 
-LARP MODE is advisory and fail-open. It is disabled by default.
+LARP MODE provides optional notifications. It is off by default; a notification
+failure does not block a run.
 
 | Cue | Trigger |
 | --- | --- |
 | BOOT | Session start |
 | ASK | Claude `AskUserQuestion` or Codex `request_user_input` |
 | STOP | Main-session stop |
-| SUBAGENT | Subagent stop (off by default) |
-| ERROR | Positively reported APE failure; also generic Claude tool failure |
-| PLAN | Passed planning outcome |
-| BUILD | Passed implementer/green-phase outcome |
+| SUBAGENT | Subagent stop; off by default |
+| ERROR | Reported APE failure, or a generic Claude tool failure |
+| PLAN | Passed planning |
+| BUILD | Passed implementation or green phase |
 | SHIP | Completed run |
 
-Codex command hooks detach playback and return neutral JSON. Claude keeps asynchronous supplemental
-handlers. Codex has no `PostToolUseFailure`, so generic non-APE failures are silent there. Configure
-`notifications.larp`, or override with `LARP_MODE`, `LARP_<EVENT>`, and `LARP_FILE_<EVENT>`. Public
-packages include no recordings. An optional private overlay can provide the closed package-local
-`assets/sounds/manifest.json`; invalid, escaping, or missing entries are silent.
+Codex detaches playback and returns neutral hook JSON. Claude uses asynchronous
+handlers. Codex has no `PostToolUseFailure`, so unrelated tool failures are silent.
+
+Configure `notifications.larp`, or use `LARP_MODE`, `LARP_<EVENT>`, and
+`LARP_FILE_<EVENT>`. Public packages contain no recordings. An optional private
+overlay may supply `assets/sounds/manifest.json`; invalid, escaping, or missing
+entries remain silent.

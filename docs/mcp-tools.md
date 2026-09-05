@@ -1,367 +1,352 @@
 # MCP tools
 
-APE exposes six tools. Skills are the normal user interface; these actions are the
-machine contract behind them.
+Use [skills](skills.md) for ordinary work. This reference is for integrations and
+debugging: four orchestration tools, plus two tools used by native workers.
 
 | Tool | Actions |
 | --- | --- |
 | `ape_run` | `probe`, `probe-status`, `probe-ack`, `preview`, `start`, `next`, `record`, `recover-receipt`, `answer-preflight`, `status`, `resume`, `regate`, `ship`, `expire-dispatch`, `abort`, `override` |
-| `ape_bind` | Native Codex child bootstrap confirmation; trusted hooks bind the exact launch and inject authority. Not a parent orchestration operation. |
-| `ape_status` | Dedicated read-only current-run, pending-ticket, lane, and gate snapshot. |
+| `ape_bind` | Bind a native Codex child to its authorized launch through trusted hooks. Children only. |
+| `ape_status` | Read the current run, pending tickets, lane, and gates. |
 | `ape_history` | `query`, `explain`, `metrics`, `import`, `maintenance-status`, `compact-artifacts`, `roadmap-status`, `roadmap-register`, `roadmap-supersede`, `roadmap-attest` |
 | `ape_config` | `get`, `set`, `doctor`, `wire`, `unwire`, `init` |
-| `ape_validate_receipt` | Validate and attest one bound worker's exact final receipt draft without advancing the run. |
+| `ape_validate_receipt` | Validate and attest a bound worker's exact receipt draft. Does not advance the run. |
 
-Inputs are bounded at 64 KiB UTF-8. Responses use bounded summaries; full tickets, receipts, and
-run records remain under `.ape/runtime/`.
+Inputs have a 64 KiB UTF-8 limit. Responses summarize larger records; full tickets
+(worker assignments), receipts (worker results), and run records live in `.ape/runtime/`.
 
 ## History observability and metrics
 
-`ape_history explain` returns the effective immutable record plus a deterministic lifecycle
-summary. Dispatch totals, retry counts, remediation routing, and recovery are derived from durable
-tickets, receipts, supersession, and the minimal terminal provenance archived by the runtime.
-Preflight input holds retain question IDs/counts only; operator answer text is not copied into the
-summary provenance.
+`ape_history explain` shows the saved run record and its lifecycle: dispatches,
+retries, remediation, and recovery. The summary keeps preflight question IDs and
+counts, not the operator's answer text.
 
-`ape_history metrics` aggregates effective terminal records with optional inclusive `since` and
-`until` ISO timestamps and exact `lane`, `mode`, `host`, `status`, `ape_version`, `runtime_version`,
-`host_plugin_version`, Codex `protocol_version` / `envelope_version`,
-`terminal_reason_taxonomy_version`, and `terminal_reason_code` filters. Invalid timestamps, versions,
-unknown enum values, and reversed ranges are refused. These exact cohort filters let operators compare
-failure reasons and rates across releases without exposing receipt prose. Each call processes the newest
-256 runs and returns `coverage.available_runs`, `processed_runs`, `limit`, and `truncated` so a bounded
-sample is never presented as complete project history. Outcomes, rates, terminal-reason counts,
-version cohorts, p50/p90/p95/p99 duration values, and legacy-unknown counts are computed only over the
-processed records matching the filters. Codex protocol/envelope fields are reported as `not_applicable`
-for Claude runs rather than as missing legacy telemetry. Each version-cohort map returns at most the
-16 most populous cohorts and preserves exact coverage with `omitted_cohorts` and `omitted_runs`; use
-an exact cohort filter to inspect an omitted version.
+`ape_history metrics` summarizes the newest 256 runs. It accepts inclusive ISO
+`since` / `until` timestamps and exact filters for:
 
-The `orchestration` metrics block reports first-pass receipt acceptance and first-pass-perfect run
-rates, validation/correction/redispatch counts, time to first writer, and repair
-time. Token totals are included only for host-attested exact counters. Coverage always separates
-`token_dispatches`, `token_attested_dispatches`, and unobserved dispatches; APE never estimates a
-missing token count.
+- `lane`, `mode`, `host`, `status`;
+- `ape_version`, `runtime_version`, `host_plugin_version`;
+- Codex `protocol_version` and `envelope_version`;
+- `terminal_reason_taxonomy_version` and `terminal_reason_code`.
 
-`lineage_outcomes` collapses recovery history at every unsuperseded effective leaf: a predecessor with
-multiple durable successors contributes each successor leaf, rather than causing the entire component
-to disappear. Cohort filters apply to those leaves. Coverage separately discloses missing, invalid,
-self-referential, branching, and cyclic supersession structure. A leaf whose ancestry enters a cycle
-is cycle-tainted rather than trustworthy; cycle-core, tainted, and total omitted record counts are
-explicit. `superseded_runs` counts distinct predecessor records, while `valid_supersession_links`
-counts edges (so branching does not distort the run count). `terminal_reason_counts` classifies aborts by runtime-owned
-terminal stage (dispatch, preflight, planning, test, implementation, review, gating, shipping, or investigation)
-without inspecting operator prose. Terminal-reason taxonomy version 2 distinguishes a zero-cycle
-`land_review_disagreement` from genuine `review_remediation_exhausted`; persisted version-1 codes
-remain authoritative and version cohorts expose both generations without rewriting history.
+Invalid values and reversed date ranges are refused. Results report outcomes,
+failure reasons, p50/p90/p95/p99 durations, version groups, and legacy-unknown counts
+for the processed records matching those filters.
 
-The statusline already uses recent immutable receipt timings to calibrate its stage-duration bar.
-It reads at most the newest 20 history files and caches validated samples under `.ape/runtime/`;
-metrics calls do not mutate that cache or send telemetry anywhere.
+Read the coverage fields before treating a result as complete:
+
+| Field | Meaning |
+| --- | --- |
+| `coverage.available_runs`, `processed_runs`, `limit`, `truncated` | How much history was examined. |
+| `omitted_cohorts`, `omitted_runs` | Version groups omitted beyond the 16 largest. Use an exact version filter to inspect them. |
+| `token_dispatches`, `token_attested_dispatches` | Token-count coverage. Missing counts are never estimated. |
+
+Claude's Codex-only protocol fields are `not_applicable`, not unknown.
+The `orchestration` block reports first-pass receipt and run rates, corrections,
+redispatches, time to first writer, and repair time. Token totals require exact
+host-attested counters.
+
+`lineage_outcomes` follows replacement runs and counts their final, unsuperseded
+leaves. Branching recovery contributes each leaf; filters apply to those leaves.
+Coverage names missing, invalid, self-referential, branching, and cyclic links.
+Records in or descended from a cycle are reported separately and omitted from
+trusted outcomes. `superseded_runs` counts predecessor records;
+`valid_supersession_links` counts links.
+
+`terminal_reason_counts` uses the runtime's terminal stage, not operator prose:
+dispatch, preflight, planning, test, implementation, review, gating, shipping, or
+investigation. Taxonomy v2 separates `land_review_disagreement` with zero repair
+cycles from `review_remediation_exhausted`. Stored v1 codes are not rewritten.
+
+Metrics send no telemetry and change no caches. Separately, the statusline caches
+timings from at most the newest 20 history files under `.ape/runtime/`.
 
 ## `ape_run`
 
 ### Start and advance
 
-- `start` validates objective, host, mode, lane, path claims, test paths, requirements, risk, host
-  capabilities, and explicit invocation before creating a branch or run. Behavioral fast/full runs
-  require `test_paths` and default to `test_intent: "red-first"`. Explicit phase-only
-  `"green-maintenance"` instead requires runtime-observed pass/pass and skips the ordinary
-  implementer when `claimed_paths` is empty. Non-behavioral phase runs omit the test-writer stage;
-  keep `behavioral:false` for pure data/baseline work. Explicit plan contract v2 is limited to
-  behavioral fast/full phase runs. `land` additionally requires a
-  non-empty default-tip-to-working-tree diff entirely inside `claimed_paths` and `test_paths`, with
-  HEAD equal to or descended from the resolved default tip.
-- `preview` uses the same readiness resolver and reports derived capability requirements and the
-  pipeline's deterministic dispatch bounds plus the resolved ticket deadline before any run state
-  is written. `debug`/`spike` may supply exact `run_command_profiles`; each is restricted to the
-  matching read-only role with `effect: execute`, requires an operator-approved audit reason, and is
-  frozen as a required capability. Do not set `operator_authorized: true` until the operator has
-  approved the exact literal command; repository tree reconciliation does not make arbitrary code
-  execution intrinsically safe.
-- New-protocol `preview` also returns `admission` (version 1) and `admission_digest`. Review a ready
-  complete manifest, then add only `expected_admission_digest` to the otherwise identical start
-  inputs. Start recomputes repository/index/content, configuration, scope, command, and pipeline
-  facts before mutation and rejects drift. The digest is an input commitment, not proof of human
-  authorization. Preview neither runs tests nor creates state; baseline failure is not confused
-  with an unavailable runner. A response too large to expose its whole manifest is refused without
-  a usable digest. Legacy records retain their admitted contracts; they are not silently upgraded.
-- Command profiles that modify tracked files must use `effect: "write"`, writable roles, and exact
-  `output_paths`. Those outputs must already be approved in that role's claimed scope. Such a
-  generator cannot also be a runtime verification/test command. Declarations never exempt files
-  from the existing runtime tree checks or permit a read-only worker to write.
-- `ape_config init` normally grounds commands in existing manifests. For a metadata-only blank
-  repository, pass the prospective `behavioral` and `test_paths` values; an unambiguous JS/TS or
-  Python family yields dependency-free targeted and full commands. The parent auto-applies a
-  complete missing-slot proposal during an explicit run. A clean unborn Git repository is given an
-  empty root commit under the run lock before its isolated APE branch is created.
-- `record` accepts an agent receipt draft. The runtime adds and verifies identity, tree/test
-  evidence, hashes, and the next transition. New-contract tickets
-  also require a matching `ape_validate_receipt` attestation for the normalized exact draft.
-- `recover-receipt` is an emergency operator-only admission for a native-bound receipt-contract
-  ticket whose exact physical worker is host-observed as stopped without an attestation. Supply the
-  unchanged `receipt`, the exact `receipt_input_hash` returned by the refused ordinary `record`, and
-  a nonblank audit `reason`. The runtime still validates the one-time ticket/session/dispatch binding
-  and every ordinary receipt contract; only the worker attestation is waived. It seals the exact
-  draft and dispatch hashes plus the reason into the immutable receipt, completed dispatch intent,
-  and `overrides.ndjson`. An already attested draft must use ordinary `record`.
-- `next` advances one pending transition or polls a `gating`/`shipping` watch.
-- `ape_status` is the canonical read-only status tool. The `ape_run` `status` action remains a
-  deprecated compatibility alias. `resume` returns the action needed to continue an interrupted
-  run.
+1. Call `preview` with the intended run inputs. It checks readiness without running
+   tests or creating state, and reports capabilities, dispatch bounds, and deadlines.
+2. For the new protocol, review the complete, ready `admission` manifest (version 1).
+   Call `start` with the same inputs plus `expected_admission_digest` set to the
+   returned `admission_digest`.
+3. `start` rechecks repository content and index, configuration, scope, commands,
+   pipeline, and authorization before creating a branch or run. Changed inputs are
+   refused. The digest confirms reviewed inputs; it is not proof of human consent.
+4. Use `record` for worker results and `next` to advance a transition or poll gates
+   and shipping. Use `ape_status` to read state, or `resume` to find the next action
+   after interruption. `ape_run status` is a deprecated alias.
 
-`ok: false` is a runtime refusal and means the action changed nothing. A refused lever never hides
-the error inside a successful `actions` array.
+Preview distinguishes a failing baseline from an unavailable runner. If the whole
+manifest cannot fit in the response, it refuses without issuing a usable digest.
+Existing legacy runs keep their original contracts.
+
+Start also validates objective, host, mode, lane, paths, requirements, risk, and
+available host capabilities. The main input rules are:
+
+| Work | Required contract |
+| --- | --- |
+| Behavioral fast/full phase | `test_paths`; default `test_intent: "red-first"`. May use plan contract v2. |
+| Phase-only `green-maintenance` | Runtime-observed pass/pass. No implementer when `claimed_paths` is empty. |
+| Pure data/baseline phase work | `behavioral: false`; no test writer. |
+| `land` | Non-empty default-tip-to-working-tree diff, entirely in `claimed_paths` and `test_paths`. HEAD must equal or descend from the resolved default tip. |
+
+`debug` / `spike` can freeze exact `run_command_profiles` for their matching
+read-only role, with `effect: "execute"`, an audit reason, and operator approval.
+Set `operator_authorized: true` only after approval of the literal command.
+See [command profiles](hooks.md#exact-command-profiles).
+
+Generators that modify tracked files need `effect: "write"`, a writable role, and
+exact `output_paths` already approved in that role's claims. They cannot double as
+verification/test commands. Declaring outputs does not bypass tree checks or make
+a read-only worker writable.
+
+`ape_config init` normally detects test commands from manifests. For a blank
+metadata-only repository, prospective `behavioral` and `test_paths` values can
+identify dependency-free JS/TS or Python commands. During an explicit run, the
+parent applies a complete proposal for missing command slots. For a clean Git
+repository with no commits, APE creates an empty root commit under the run lock
+before creating its branch.
+
+Refused control actions return `ok: false`, not an error hidden inside a successful
+`actions` array.
 
 ### Receipt validation and recovery
 
-`ape_validate_receipt` is the only APE tool callable by a bound worker. It applies the same complete
-role-specific mechanical contract used by `record`, including structured planning, profile IDs,
-recognized evidence commands, and the 16,384-byte canonical candidate-plan ceiling. It returns
-field-specific corrections plus used/maximum/remaining plan bytes. Call it with
-`{ ticket_id, draft }`, where `ticket_id` exactly matches `draft.ticket_id` and `draft` is the complete
-object that will later be placed in `ape_run record`'s `receipt` field. The 16,384-byte ceiling bounds
-the immutable ticket/receipt artifact, MCP response projection, and worker model-context use; it is
-not a content-quality judgment. A valid call binds the normalized
-draft hash to that physical dispatch; changing the draft invalidates the attestation.
-Candidate-plan usage is returned at
+A bound worker calls `ape_validate_receipt` with `{ ticket_id, draft }`.
+`ticket_id` must equal `draft.ticket_id`; `draft` must be the complete object the
+parent will submit as `ape_run record`'s `receipt`. Apart from the child bootstrap,
+this is the worker's only APE tool.
+
+The validator checks the same role contract as `record`: plan structure, profile
+IDs, evidence commands, and the 16,384-byte canonical candidate-plan limit. It
+returns field corrections and
 `budgets.candidate_plan_utf8_bytes.{used_bytes,max_bytes,remaining_bytes}`.
+This byte limit bounds storage and model context, not plan quality.
 
-Every canonical and packaged Claude role names both supported exact host-qualified validators,
-`mcp__ape__ape_validate_receipt` and
-`mcp__plugin_ape_ape__ape_validate_receipt`, in addition to the external-MCP wildcard. The manual
-release prerequisite in `docs/operational-readiness.md` launches each packaged role through the real
-Claude host without overriding its tool allowlist, requires a linked validator tool call with an
-exact role sentinel, and accepts only the APE service's expected no-active-run response. A prose
-mention or a similarly named tool cannot pass.
+A successful validation attests the normalized draft hash for that physical
+dispatch. Changing the draft invalidates it. `record` requires this matching
+attestation for new-contract tickets, then verifies identity, tree/test evidence,
+hashes, and the next transition. The parent must not reconstruct a worker receipt.
 
-Each physical worker receives an initial validation and two corrections. One fresh worker may then
-be authorized on the same immutable ticket without consuming a stage attempt. A second exhaustion
-blocks as `worker_protocol_failure`; it cannot vote in review or trigger product remediation,
-directed replan, abort, or successor creation.
+Each worker gets an initial validation and two corrections. One fresh worker may
+then be authorized on the same ticket without using a stage attempt. Exhausting
+that worker's corrections blocks as `worker_protocol_failure`; it does not count
+as reviewer dissent or trigger product remediation, replan, abort, or a new run.
+
+Emergency `recover-receipt` requires operator approval and a native-bound worker
+that the host observed stopping without an attestation. Supply the unchanged
+`receipt`, the exact `receipt_input_hash` from the refused ordinary `record`, and
+a nonblank audit `reason`. Only attestation is waived; all other binding and
+receipt checks remain. APE saves the draft/dispatch hashes and reason in the
+receipt, completed dispatch intent, and `overrides.ndjson`. An attested draft must
+use ordinary `record`.
+
+For Claude's exact validator tool names and required host reachability check, see
+[agents](agents.md#tools-and-receipts) and [operational readiness](operational-readiness.md).
 
 ### Immutable run contract
 
-Every newly created native receipt-contract run stores a compact `run_contract` pointer with
-`{version, revision, ref, hash}`. The content-addressed manifest under `.ape/runtime/contracts/`
-binds the run configuration/objective/preflight hashes, requested and available capability
-catalogs, command and verification allowlists, recognized commands, field bounds, byte budgets,
-and each ticket's role-filtered receipt contract. Role-specific JSON Schemas are retained as
-content-addressed schema artifacts referenced by the manifest, so ticket compaction does not erase
-the contract. Tickets carry the matching pointer; wire projections refer to it instead of repeating
-the full catalog. Existing runs and historical ticket hashes are unchanged.
+New native receipt-contract runs and their tickets carry a `run_contract` pointer:
+`{version, revision, ref, hash}`. Its manifest in `.ape/runtime/contracts/` freezes
+configuration, objective and preflight hashes, requested/available capabilities,
+allowed commands, verification profiles, field/byte limits, and role receipt schemas.
+
+Schemas are stored by content hash, so ticket compaction does not erase them.
+Tool responses reference the pointer instead of repeating the full contract.
+Existing runs and historical ticket hashes remain unchanged.
 
 ### Typed recovery status
 
-Control responses use `next_action.kind` from this closed vocabulary:
+Control responses use only these `next_action.kind` values:
 `continue_same_agent`, `redispatch_same_ticket`, `stage_retry`, `directed_replan`,
 `remediate_product_finding`, `wait`, `answer_preflight`, or `blocked`.
-Failures use `failure_domain`: `product`, `orchestration`, `configuration`, `infrastructure`,
-`operator`, or `unknown`. Protocol and infrastructure failures do not become reviewer dissent or
-product remediation. A blocked response states `automatic_successor:false`; starting another run
-always requires explicit operator authorization.
+`failure_domain` is `product`, `orchestration`, `configuration`, `infrastructure`,
+`operator`, or `unknown`. Protocol/infrastructure failures are not product findings.
+A blocked response sets `automatic_successor: false`; a new run needs explicit
+operator authorization.
 
 ### Long-running calls
 
-Final-stage `record`, `regate`, and `ship` run cheap gate checks first, then launch the configured
-suite in a detached process. The call waits for `gates.inline_grace_ms`; if the suite is still live,
-it returns with the run in `gating` instead of holding the tool call indefinitely.
+Final-stage `record`, `regate`, and `ship` run quick gates, then start the configured
+suite in a detached process. After `gates.inline_grace_ms`, a still-running suite
+returns state `gating`.
 
-`next` accepts optional `wait_ms` while a run rests in `gating` or `shipping`. It repeats the same
-bounded poll with the receipt lock released between polls. The requested wait duration is clamped by
-`GATE_NEXT_MAX_WAIT_MS` (300000 ms) and sleeps are floored by `GATE_NEXT_POLL_FLOOR_MS` (250 ms).
-A gating watch that enters required-check `shipping` stops there; call `next` again to drive the
-second watch.
+While `gating` or `shipping`, call `next` with optional `wait_ms`. Polling releases
+the receipt lock between checks. Limits are `GATE_NEXT_MAX_WAIT_MS` (300000 ms)
+and `GATE_NEXT_POLL_FLOOR_MS` (250 ms). If gating enters required-check shipping,
+call `next` again to advance that watch.
 
-Hosts that send `_meta.progressToken` receive a progress notification every ten seconds for a
-long synchronous call. Native-agent flights use the host's agent wait primitive instead of status
-polling. `SubagentStop` records observed termination; an elapsed deadline alone does not authorize a
-duplicate physical agent.
+Long synchronous calls send progress every ten seconds when `_meta.progressToken`
+is present. Wait for native workers using the host's agent-wait tool.
+`SubagentStop` records termination; an elapsed deadline alone does not authorize
+a duplicate worker.
 
 `ship` and `regate` reject a run in the non-blocking watch states `gating` or `shipping` and point
 to `ape_run next`, which is the action that advances those states. A gate-blocked run points to
 `regate`; a green auto-merge hold points to `ship`.
 
-A public/native `start` treats the explicit APE invocation as authority for the complete
-scheduler-owned run. When `shipping.auto_merge` is true, the runtime derives and freezes
-`auto_merge_authorized: true`; callers normally omit that backward-compatible field and do not ask
-for separate merge consent. Between start and a terminal result, callers advance stages, reviews,
-remediation, gates, waits, and configured shipping without asking the operator to say continue.
-Authorized starts compare the local remote-tracking base with the server-advertised branch tip
-before creating a run branch, and shipping repeats that check before its first Git mutation.
+An explicit public/native run invocation authorizes its configured pipeline. When
+`shipping.auto_merge` is true, APE freezes `auto_merge_authorized: true`; callers
+normally omit that compatibility field. Continue the admitted stages and shipping
+without repeatedly asking the operator to say continue.
+
+Before branch creation, start compares the local remote-tracking base with the
+server's branch tip. Shipping repeats the check before its first Git mutation.
 
 ### Recovery actions
 
-- `regate` re-runs a failed merge gate. The attempt budget is bounded.
-- `ship` requires an audit reason and applies only to a green run held because
-  `shipping.auto_merge` is false. It re-proves all gates against the current tree.
-- `expire-dispatch` requires a pending `ticket_id` and audit reason. It voids a genuinely orphaned
-  or wedged dispatch, consumes the attempt, and issues a fresh ticket when the retry budget permits.
-- `abort` seals the current run. `override` supports reason-audited `abort` and `reset` operations;
-  an unaimed reset can recover an orphaned lock.
+- `regate`: rerun a failed merge gate within the attempt budget.
+- `ship`: release a green run held by `shipping.auto_merge: false`. Requires an audit
+  reason and rechecks all gates against the current tree.
+- `expire-dispatch`: void an orphaned or wedged dispatch. Requires a pending
+  `ticket_id` and audit reason; consumes the attempt and issues a new ticket only
+  if the retry budget permits.
+- `abort`: seal the current run.
+- `override`: reason-audited `abort` or `reset`. An unaimed reset can recover an
+  orphaned lock; unexplained tree changes are not a reason to reset automatically.
 
-Terminal `resume` also retries checkout reconciliation. Once an exact remote merge is proven, a
-local worktree conflict is stored as retained cleanup guidance rather than changing the run back to
-a shipping failure.
+Terminal `resume` retries local checkout cleanup. A proven remote merge remains
+successful even if local conflicts require manual cleanup.
 
-`answer-preflight`, `abort`, and `override` may include `run_id` as a confirmation, never as a
-selector. For `answer-preflight`, it rejects a stale answer submission aimed at a newer active run.
-A mismatched or explicitly null aim refuses before any effect; other actions reject `run_id`. If
-`active.json` is unreadable, use an unaimed `override reset`; the runtime cannot safely confirm an
-aimed recovery.
+Only `answer-preflight`, `abort`, and `override` accept `run_id`. It confirms the
+active run; it does not select another run. A mismatch or explicit `null` is
+refused before any effect. If `active.json` is unreadable, an authorized reset
+must omit `run_id` because APE cannot confirm it.
 
 ### Codex binding preflight
 
-Codex `start` requires a fresh live capability proof:
+Codex `start` requires a fresh live bootstrap proof:
 
-1. `probe` returns `dispatch_probe` after ordinary doctor checks.
-2. Pass the returned `dispatch.spawn_args` object to native `spawn_agent` unchanged. It includes
-   the exact task name, `fork_turns: "none"`, model, optional reasoning effort, and message. The
-   returned type is APE's logical probe role, not a Multi-Agent V2 native argument. If the tool
-   response is lost before launch, repeat `probe`; APE re-emits the same durable envelope.
-3. Launch PreToolUse consumes the visible task-name capability. `SubagentStart` records provisional
-   native child identity and actual model, but grants no authority. The child calls `ape_bind` with
-   the exact `{project_dir, bootstrap_capability}` in its launch message before doing any work. That
-   call's trusted PreToolUse hook validates and binds the child, then injects a distinct probe
-   acknowledgement capability. The MCP result itself contains no ticket or acknowledgement authority.
-   Ticket context is expected to be absent before bootstrap. The child checks for complete trusted
-   injection only after `ape_bind` returns, not before deciding whether to call it.
-   On deferred-tool hosts, the child may first search the host's tool catalog for the bare registered
-   name `ape_bind`, then invoke the returned installed APE tool. The host-qualified invocation alias
-   is not the search query; catalog lookup must never include the bootstrap bearer.
-4. `probe-status` must show a bound canary awaiting acknowledgement.
-5. Send its `probe_id` and `probe_capability` to `probe-ack`; `start` atomically consumes the
-completed, single-use proof before its first Git mutation.
+1. Call `probe`; after doctor checks it returns `dispatch_probe`.
+2. Pass `dispatch.spawn_args` unchanged to native `spawn_agent`: exact task name,
+   `fork_turns: "none"`, model, optional reasoning effort, and message. APE's logical
+   role type is not a Multi-Agent V2 spawn argument. If the response is lost before
+   launch, repeating `probe` returns the same saved envelope.
+3. The child calls `ape_bind` with the launch message's exact
+   `{project_dir, bootstrap_capability}`. Its trusted hook binds the child and
+   injects acknowledgement authority. `SubagentStart` alone and the MCP result
+   grant no authority. Missing ticket context before this call is expected.
+4. On deferred-tool hosts, first search for the bare name `ape_bind`, then call
+   the installed tool returned by discovery. Never search for a host-qualified
+   alias or include the bootstrap bearer in the search.
+5. `probe-status` must show the bound canary awaiting acknowledgement. Send its
+   `probe_id` and `probe_capability` to `probe-ack`. `start` consumes this single-use
+   proof before its first Git mutation.
 
-`probe-status` distinguishes a successful diagnostic read (`ok: true`) from successful binding.
-The effective `launch_expires_at` deadline or a typed current-generation bootstrap rejection makes
-`infrastructure_status` failed and returns a blocked orchestration `next_action` with no automatic
-successor. The launched reservation remains protected until its own expiry; a failed launch window
-does not authorize an overlapping replacement. Rejection observations contain only bounded codes,
-outcome, and time, not bearer material, native identities, or raw exceptions.
+Run the parent in the governed project: `project_dir` does not relocate native
+children. Hooks derive child identity from the host, not caller-supplied IDs.
+Tokens apply to one launch generation; stale tokens cannot select a replacement.
 
-The parent session must run in the governed project: a tool's `project_dir` does not relocate native
-children. Parent and child turns are distinct. The bootstrap capability identifies exactly one
-authorized launch generation; the hook obtains child identity from the native observation of that
-child turn, not from caller-supplied IDs. A stale token cannot select a replacement probe or ticket.
+`probe-status` returning `ok: true` means the read succeeded, not that binding did.
+An expired `launch_expires_at` or current-generation bootstrap rejection sets
+`infrastructure_status` to failed with a blocked `next_action`. The reservation
+stays protected until its own expiry; failure does not authorize another child.
+Diagnostics contain bounded codes, outcome, and time, not bearers, identities,
+or raw exceptions.
 
-Manifest wiring is only a static package check; it does not prove that the current Codex session
-delivers lifecycle events. Missing, expired, replayed, or observed-but-unbound probes fail as
-infrastructure without creating a run or consuming a stage attempt. Claude uses its existing native
-binding path and does not run this preflight.
+Static package wiring does not prove live hooks work. Missing, expired, replayed,
+or unbound probes fail before run creation and consume no stage attempt. Claude
+uses its own native binding path and does not run this probe.
 
-`probe` and `start` are also audited no-live-run recovery boundaries for stale malformed dispatch
-evidence. APE moves damaged files, special entries, or a wrong-shaped intent container to inert
-`.corrupt-*` names without discarding their bytes before preparing new authority. It refuses
-symlinked `.ape` or runtime ancestors before creating a lock or intent outside the governed project.
-Status reports unreadable evidence as an orchestration error; an active run must use reason-audited
-`abort`, which performs the same forensic quarantine before sealing.
+With no active run, `probe` and `start` can quarantine malformed dispatch evidence
+under `.corrupt-*` names, preserving its bytes. Symlinked `.ape` or runtime ancestors
+are refused before creating state outside the project. Status reports corrupt
+evidence without repairing it. For an active run, reason-audited `abort` performs
+the quarantine before sealing.
 
-For ordinary stage workers, binding injects the immutable ticket reference, exact receipt envelope,
-and a role-specific excerpt of its `output_schema`. `SubagentStop` refuses an absent or malformed
-final receipt and returns field-level corrections to the same worker. The worker must still attest
-the exact draft with `ape_validate_receipt`; the hook scaffold prevents avoidable shape mistakes but
-does not weaken independent validation.
-
-New production Codex dispatches use `ticket_projection: "bootstrap-hook-injected"` and the same
-child-only `ape_bind` path. Wait for the existing launched child to bootstrap; do not mistake the
-interval between spawn and binding for permission to launch another worker. Resume of that same
-worker rechecks its native child/model observation before reinjecting context. Older unmarked
-dispatch records retain their legacy protocol; a pending legacy probe must expire before a fresh
-bootstrap-protocol probe can replace it.
+New Codex stage dispatches use `ticket_projection: "bootstrap-hook-injected"`
+and the same child-only binding path. Binding supplies the ticket reference,
+receipt envelope, and role schema. Wait for the existing child; do not launch a
+duplicate while binding is pending. Resume rechecks child/model identity before
+reinjection. Unmarked legacy dispatches keep their old protocol; a pending legacy
+probe must expire before replacement. See [hook details](hooks.md#codex-native-bootstrap).
 
 ### Behavioral plan preflight evidence
 
-Plan contract v2 starts with a read-only preflight analyst on behavioral fast/full phase runs. Every
-baseline entry in `evidence.preflight_artifact` must be backed by a receipt test entry with the same
-command. `output_hash` may be omitted from both entries when the host does not expose enough raw
-output to compute it; agents must never invent a digest. When a baseline hash is supplied, the
-matching receipt hash is required and must be byte-for-byte identical.
+Plan contract v2 starts behavioral fast/full phase runs with a read-only analyst.
+Each `evidence.preflight_artifact` baseline needs a receipt test entry with the same
+command. Omit `output_hash` from both if raw output is unavailable; never invent it.
+If supplied, the two hashes must match exactly.
 
-If preflight evidence leaves operator questions, continue with `answer-preflight` using the exact
-returned `preflight_hash`, the complete `{id, answer}` list, and a nonblank audit `reason`. The MCP
-schema marks all three fields as conditionally required for that action; omitting the reason returns
-the action-specific diagnostic without consuming or changing the run.
+To answer operator questions, `answer-preflight` requires the returned
+`preflight_hash`, the complete `{id, answer}` list, and a nonblank audit `reason`
+(at most 4000 characters). Missing fields return action-specific errors without
+changing the run.
 
 ### External MCP tools
 
-New run starts do not advertise, require, persist, or enforce external-tool claims. Non-APE MCP
-servers and operations pass through to the host's discovery, connection, permission, and approval
-mechanisms without APE classification or interception. This includes providers added after the
-installed APE version and operations whose names cannot be known when a run starts. Legacy claim
-fields remain parseable only inside immutable historical tickets and manifests; they grant no
-authority and are not part of the new run input contract.
+APE does not require or enforce claims for other MCP servers. The host controls
+their discovery, connection, permissions, and approval, including newly added
+providers. Legacy external-tool fields remain readable in historical records but
+grant no authority and are not accepted in new run inputs.
 
-APE still owns its own `ape_run`, `ape_status`, `ape_config`, `ape_history`, and
-`ape_validate_receipt` boundaries. It also verifies the repository tree at agent and receipt
-boundaries, so an external tool cannot make an out-of-scope project change valid merely because the
-tool call itself passed through.
+APE still enforces its own tool boundaries and checks repository changes. An
+external tool cannot make an out-of-scope edit valid. See
+[external MCP pass-through](hooks.md#external-mcp-pass-through).
 
 ## Artifact maintenance
 
-Terminal transitions keep recent run artifacts and perform bounded best-effort compaction of older
-redundant snapshots. `maintenance-status` reads the last result without changing anything.
+Run completion may compact older redundant snapshots while retaining recent ones.
+`maintenance-status` reads the last result without changes.
 
-`compact-artifacts` requires an audit `reason`; `keep_recent_runs` defaults to 32 and `max_runs` to
-64 (hard maximum 256). It writes and re-reads a byte-exact gzip archive before deleting only source
-files whose bytes still match. Immutable history, audit logs, prepared transactions, changed data,
-and the active/sealed run are never removed. A bad candidate is retained and reported without
-stopping later candidates.
+Manual `compact-artifacts` requires an audit `reason`. Defaults:
+`keep_recent_runs: 32`, `max_runs: 64` (maximum 256). APE verifies a byte-exact gzip
+archive before deleting source files, and only deletes files that still match.
+It never removes immutable history, audit logs, prepared transactions, changed
+data, or the active/sealed run. A bad candidate is retained and reported; later
+candidates can still be processed.
 
 ## Roadmap verbs
 
-The optional roadmap is stored at `.ape/runtime/roadmap.json`. Its statuses are derived from the
-store, requirements/history, and the active run. It does not schedule runs, but a live roadmap
-target may start or complete only while every transitive dependency is `satisfied`; stale targets
-and stale, pending, ready, in-progress, or unknown dependencies fail closed with their IDs.
+The optional roadmap lives in `.ape/runtime/roadmap.json`. It tracks dependencies,
+not scheduling. A roadmap-backed run may start or complete only when every direct
+and indirect dependency is `satisfied`. Refusals identify stale targets and
+unsatisfied or unknown dependencies.
 
-- `roadmap-status` is read-only and returns `roadmap: null` when no roadmap exists.
-- `roadmap-register` atomically adds up to 64 entries with `id`, `title`, `description`,
-  `acceptance`, optional `depends_on`/`discovered_by`, and a required audit reason. The complete
-  prospective live graph is validated before mutation: same-batch forward references work, while
-  unknown/stale dependencies, duplicate edges, self-reference, and cycles reject the whole batch.
-  Do not send
-  `status`. Each entry must name a behavioral consequence if it is never done. This bar applies to
-  entries, not findings: reviewers still report all findings in durable receipts. A prose-only nit
-  is folded into `doc-and-comment-accuracy-sweep` or dropped with reasoning rather than promoted to
-  its own roadmap item.
-- `roadmap-supersede` marks known live entries stale with a reason and optional `replaced_by`; it
-  does not delete them. Targets and replacements must be unique, known, live, and disjoint, and the
-  remaining live dependency graph must still be valid.
-- `roadmap-attest` closes live requirements against an archived completed run, or against the exact
-  verified produce-and-hold shape (`blocked` at `merge`, `gates.passed: true`, and the canonical
-  auto-merge-disabled reason), without modifying the run's immutable record. Pass `requirement_ids`,
-  `run_id`, and a non-empty audit `reason`. No other blocked shape is eligible, and a shipping hold's
-  `completes` declaration does not satisfy a requirement without this explicit attestation. Each
-  requirement must be known and live (not superseded).
-  Attestations are idempotent and stored in a separate overlay (`roadmap-attestations.json`) that
-  the derivation reads alongside `completes`. The requirement-index is updated so `query` can find
-  the relationship.
+| Action | Rules |
+| --- | --- |
+| `roadmap-status` | Read-only; returns `roadmap: null` if absent. |
+| `roadmap-register` | Add up to 64 entries atomically. Each needs `id`, `title`, `description`, `acceptance`; `depends_on` and `discovered_by` are optional. An audit reason is required. Do not send `status`. |
+| `roadmap-supersede` | Mark live entries stale without deleting them. Requires a reason; `replaced_by` is optional. Targets and replacements must be unique, known, live, and disjoint. |
+| `roadmap-attest` | Satisfy known live requirements using an eligible run. Requires `requirement_ids`, `run_id`, and a non-empty audit `reason`. |
 
-Register and supersede mutations use a bounded single-operation journal. The roadmap store lands before the override
-audit line, and the same mutation ID appears in the entry audit, journal, and override record.
-Retries recover unapplied, applied-but-unaudited, and committed operations exactly once; a store
-matching neither recorded hash is divergent and is never overwritten.
+Registration validates the whole proposed dependency graph before changes.
+Same-batch forward references work; unknown/stale dependencies, duplicate edges,
+self-reference, or cycles reject the batch. Superseding entries must also leave a
+valid live graph. Each new entry must explain the behavioral consequence of not
+doing it. Reviewers still report all findings; prose-only nits belong in
+`doc-and-comment-accuracy-sweep` or are dropped with a reason.
 
-`receipt.evidence.roadmap_followups` is the enforceable proposal channel: at most 64 normalized
-entry declarations, with no `status` or `discovered_by`. A non-operator `discovered_by` on
-registration must name an active or archived run containing an accepted receipt with an exact
-declaration match. Receipt acceptance never auto-registers an entry; explicit approval and a
-separate `roadmap-register` call remain required.
+`roadmap-attest` accepts an archived completed run or the exact verified shipping
+hold: `blocked` at `merge`, `gates.passed: true`, and the canonical
+auto-merge-disabled reason. No other blocked state qualifies. A hold's `completes`
+field alone does not satisfy requirements. Attestations are idempotent, update the
+requirement index for `query`, and live in `roadmap-attestations.json` without
+rewriting the run.
 
-Derived entries are `satisfied`, `in_progress`, `ready`, `pending`, or `stale`. `status_filter`
-limits returned entries without changing whole-roadmap counts.
+Register/supersede use a single-operation journal with one mutation ID shared by
+the entry, journal, and override audit. Retries recover
+unapplied, applied-but-unaudited, and committed operations exactly once. A store matching
+neither recorded hash is divergent and is never overwritten.
+
+Receipts may propose up to 64 `receipt.evidence.roadmap_followups`, without `status`
+or `discovered_by`. A later non-operator `discovered_by` must identify an active or
+archived run with an accepted receipt containing the exact declaration. Approval
+and a separate `roadmap-register` call are still required.
+
+Derived statuses are `satisfied`, `in_progress`, `ready`, `pending`, and `stale`.
+`status_filter` changes returned entries, not whole-roadmap counts.
 
 ## `ape_config`
 
-- `get` returns effective defaults plus overrides; `set` validates known dotted keys and keeps the
-  persisted overlay sparse.
-- `init` detects common project test runners and proposes commands. `apply: true` persists an
-  operator-approved proposal.
-- `doctor` checks state/lock health, git, configuration, bundles, host preconditions, and recognized
-  project types. It does not forecast or validate external MCP providers.
-- `wire` / `unwire` configure Claude's command-backed APE statusline or Codex's closest native TUI
-  footer. Pass `host` explicitly.
+- `get`: read defaults plus overrides.
+- `set`: validate known dotted keys and save only overrides.
+- `init`: detect test runners and propose commands. `apply: true` saves an approved proposal.
+- `doctor`: check state/locks, Git, configuration, bundles, host prerequisites, and
+  recognized project types. Does not validate external MCP providers.
+- `wire` / `unwire`: configure Claude's APE statusline or Codex's native TUI footer.
+  Pass `host` explicitly.
 
 See [configuration](configuration.md) for every key.
 
@@ -386,16 +371,16 @@ and waiting/cross-gate `next` calls may return a durable task. APE implements `t
 `tasks/update`, and `tasks/cancel`, not `tasks/list`; every task method independently requires the
 request-scoped capability.
 
-The tasks extension is deliberately opt-in; a blanket migration of all long calls was not
-attempted. A client that never negotiated tasks could not poll or cancel a server-minted handle,
-leaving abandoned work, so ordinary calls preserve the synchronous/watch contract.
+Without negotiation, calls keep the synchronous/watch behavior: the client would
+otherwise have no way to poll or cancel the task.
 
-Task generations are private, root-bound, immutable, hash-chained records under
-`.ape/runtime/tasks/`. Cancellation is cooperative: acknowledgement means the request is durable,
-not that termination is instantaneous. Operation journals prevent committed effects from running
-twice after recovery. Reissuing a task-creating call whose task id was lost is deliberately not
-treated as the same intent because MCP supplies no client idempotency key; once the task id is
-known, repeated `tasks/get` is safe.
+Private, project-root-bound task records live in `.ape/runtime/tasks/`; generations
+are immutable and hash-chained. Cancellation acknowledgement means the request was
+saved, not that execution has stopped. Journals prevent committed effects from
+running twice after recovery.
+
+Do not recreate a task whose ID was lost: MCP provides no client idempotency key,
+so that creates a distinct intent. Once the ID is known, repeated `tasks/get` is safe.
 
 ## Developing this repository
 
@@ -408,5 +393,6 @@ disable the checkout registration in `.claude/settings.local.json` when using th
 ```
 
 Regenerate the host packages with `npm run package:plugins`. Codex development updates can then use
-`npm run reinstall:codex`; see the README for the immutable-cache development flow. Both generated
-MCP declarations launch the local bundle over stdio. A hosted APE broker is outside this release.
+`npm run reinstall:codex` after explicit installation approval. Start a new host task to load
+the new snapshot; see [loaded bundles](architecture.md#loaded-bundles). Both generated MCP
+declarations launch the local bundle over stdio. A hosted APE broker is outside this release.
