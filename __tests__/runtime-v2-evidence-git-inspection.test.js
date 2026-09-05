@@ -37,6 +37,8 @@ function repository() {
     ['config', 'user.name', 'Synthetic Fixture'],
     ['config', 'user.email', 'synthetic@example.invalid'],
     ['config', 'commit.gpgsign', 'false'],
+    // Fixture commits must not leave detached maintenance racing metadata snapshots.
+    ['config', 'maintenance.auto', 'false'],
   ]) expect(git(directory, args).status).toBe(0);
   writeFileSync(path.join(directory, 'fixture.txt'), 'first\n');
   expect(git(directory, ['add', 'fixture.txt']).status).toBe(0);
