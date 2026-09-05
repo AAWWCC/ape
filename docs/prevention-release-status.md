@@ -12,6 +12,10 @@ not authorize more testing, installation, or publication.
   multi-agent availability did not establish support for APE's launch fields.
   Missing or invalid `features.multi_agent_v2` settings now fail before a parent
   starts; worker envelopes and ordinary runtime gates are unchanged.
+- Claude's authenticated validator check is now optional. Codex remains the sole
+  required live host, while Claude packaging checks remain in CI and live Claude
+  operation remains explicitly unverified. Missing Claude access does not block
+  a Codex-certified release.
 - One pipeline contract now drives preview, admission, worker tickets, schemas,
   and instructions. It checks reachable stages before workers start.
 - Preview checks scope, commands, capabilities, repository state, and shipping
@@ -71,12 +75,11 @@ automatic recovery were not expanded. Repair-and-land remains deferred.
 
 ## What passed
 
-The 2.24.13 full source run passed 4,315 tests with 86 existing skips. Its one
-failure was a documentation assertion: a required phrase had been split across
-two lines. Restoring the phrase resolved that failure, and all 21 compatibility
-tests passed the focused recheck. No runtime code changed after the full run.
-The seven new native-agent preflight regressions passed. The full run took
-396.43 seconds and the focused recheck took 1.23 seconds.
+The final 2.24.13 full source run passed all 4,316 tests across 260 files with 86
+existing skips in 383.26 seconds, including the seven new native-agent preflight
+regressions. An earlier run found a documentation assertion caused by a required
+phrase split across two lines. The phrase was restored, its focused recheck
+passed, and the complete suite then passed without failures.
 
 The 2.24.13 operational replay passed all 654 tests across 23 files in 79.02
 seconds. Type, compatibility, all 52 prompt scenarios, public-safety, both host
@@ -130,11 +133,12 @@ agent interface. No child, binding, run, receipt, or shipping action occurred;
 the fast, full, and protected-land attempts were not launched. This is a failed
 certification attempt, not a passing run. Its original evidence remains external.
 
-The separate Claude worker-validator prerequisite could not authenticate on two
-authorized attempts. No validator call or passing proof was produced.
+The 2.24.12 Claude worker-validator check could not authenticate on two authorized
+attempts. No validator call or passing proof was produced. That check is optional
+under the 2.24.13 release policy; the retained failures remain failures.
 
-The corrected 2.24.13 packages require a fresh candidate-bound live campaign and
-Claude worker-validator proof. Earlier version evidence cannot certify them.
+The corrected 2.24.13 packages require a fresh candidate-bound Codex live campaign.
+Earlier version evidence cannot certify them.
 
 The fast, full, and protected-land live scenarios on 2.24.11 remain unverified.
 The campaign stopped at the operator's request, and its disposable setup was
@@ -142,8 +146,9 @@ removed. A project-trust entry appeared in the isolated profile during launch,
 raising a setup
 authorization concern; it is not a confirmed APE runtime defect.
 
-Full Claude operation also remains unverified. Its candidate-bound worker-validator
-reachability check is a separate release prerequisite.
+Full Claude operation also remains unverified. Its optional candidate-bound
+worker-validator reachability check can be run when authorized Claude access is
+available; it is not required for publication.
 
 No complete release certificate exists. The release workflow still requires the
 clean Codex campaign described in [operational readiness](operational-readiness.md).

@@ -239,9 +239,10 @@ independently prove external host or GitHub events. Retain the evidence for audi
 and publish the bounded ledger, never fabricated outcomes. Without a complete
 certificate, publication remains blocked even when offline checks pass.
 
-### Separate Claude prerequisite
+### Optional Claude validation
 
-Claude packaging has a manual authenticated worker-validator reachability check:
+Operators with authorized Claude access may run this optional authenticated
+worker-validator reachability check:
 
 ```sh
 npm run --silent release:worker-validator-reachability > /secure/path/worker-validator-proof.json
@@ -254,10 +255,16 @@ call to reach APE's no-active-run sentinel. The proof binds candidate manifests,
 MCP declaration, plugin identity, canary implementation, role/tool observations,
 and transcript hashes. Missing roles, changed evidence, or stale candidates fail.
 
-Both commands must pass before release. This is a separate manual prerequisite,
-not part of `release:live-certification` or credential-free CI. It proves schema
-resolution and transport—not ticket binding, a full Claude run, or model quality.
-Claude live operation remains unverified.
+Both commands must pass to record a successful validator-reachability proof.
+This optional check is not a release prerequisite and is not part of
+`release:live-certification` or credential-free CI. Missing Claude subscription
+or API access does not block Codex certification or publication. Keep any failed
+attempt recorded; do not treat missing access as a pass.
+
+The proof establishes schema resolution and transport—not ticket binding, a full
+Claude run, or model quality. Claude live operation remains unverified, and its
+credential-free package checks remain required. Codex is the sole required live
+release-certification host.
 
 ## Block-prevention and lineage contract
 

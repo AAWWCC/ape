@@ -41,9 +41,11 @@ and [native tool definitions](https://github.com/openai/codex/blob/rust-v0.147.0
 
 Codex is the sole required live release-certification host.
 Claude live operation is unverified. Credential-free CI checks its package, manifest, pinned CLI, and
-marketplace installation structurally; release also requires the separate manual
-[authenticated worker-validator proof](operational-readiness.md#separate-claude-prerequisite).
-That proof checks validator reachability, not a complete Claude run.
+marketplace installation structurally. Operators with authorized Claude access may
+also run the optional [authenticated worker-validator check](operational-readiness.md#optional-claude-validation).
+That proof checks validator reachability, not a complete Claude run. Claude
+subscription or API access is not required for Codex release certification or
+publication.
 
 [`compatibility.json`](../compatibility.json) owns these values.
 `npm run compatibility:check` checks its consumers for drift. Update the manifest

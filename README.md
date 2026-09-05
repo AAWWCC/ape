@@ -18,6 +18,8 @@ schema. The earlier 2.24.11 mechanical run does not certify this candidate. See 
 Codex CLI is the primary host. The Claude Code package is included, but
 Claude live operation is unverified. Codex IDE integrations and ChatGPT web,
 mobile, and cloud runtimes are not supported.
+Codex is the sole required live release-certification host; a Claude subscription
+or API account is not required to use APE with Codex or publish its release.
 
 Installing APE does not start a run. You choose when it can work and ship.
 
