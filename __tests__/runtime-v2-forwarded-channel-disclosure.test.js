@@ -182,7 +182,7 @@ async function project() {
   git(dir, 'commit', '-qm', 'test: baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
   });
   return dir;
 }
@@ -226,7 +226,7 @@ describe('planner findings array stays severed on every plan-review stage', () =
   it('forwards no planner finding and keeps the immutable objective byte-identical', async () => {
     const dir = await project();
     const started = await startRun(dir, startInput());
-    expect(started.ok).toBe(true);
+    expect(started.ok, JSON.stringify({ reason: started.reason, blocking: started.readiness?.blocking })).toBe(true);
     const planTicket = started.run.tickets[0];
     const recorded = await recordReceipt(dir, receipt(planTicket, {
       evidence: { verdict: 'pass', summary: 'clean plan' },

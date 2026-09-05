@@ -19,8 +19,9 @@ import { evaluateStartBinding } from '../lib/runtime/hooks.js';
 //    Date.parse(ticket.deadline_at ?? '') with deadline <= at (INCLUSIVE,
 //    matching the scheduler's deadline-timeout predicate) denies with a
 //    reason naming the elapsed deadline;
-//  - an absent or unparseable deadline_at still ALLOWS (Number.isFinite
-//    guard — deliberately NOT expired()'s unparseable-means-elapsed);
+//  - the stateless validator allows an absent or unparseable deadline_at
+//    (Number.isFinite guard), while persisted malformed timestamps fail at
+//    the active-state reader before the hook can reach this validator;
 //  - the sole caller in bin/ape-hook.mjs stays unedited on the default
 //    clock, so the e2e arms exercise the seam end-to-end.
 //
@@ -189,7 +190,7 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-async function codexProject() {
+async function codexProject({ includeMalformedDeadline = false } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-start-binding-deadline-'));
   cleanups.push(dir);
   await mkdir(path.join(dir, 'src'), { recursive: true });
@@ -205,6 +206,7 @@ async function codexProject() {
   }).trim();
   const ticket = (ticketId, deadlineAt) => ({
     ticket_id: ticketId,
+    stage_id: 'build',
     role: 'implementer',
     writable: true,
     claimed_paths: ['src'],
@@ -221,7 +223,7 @@ async function codexProject() {
       ticket('run-1:build:ticket-past', PAST_DEADLINE),
       ticket('run-1:build:ticket-future', FUTURE_DEADLINE),
       ticket('run-1:build:ticket-bare'),
-      ticket('run-1:build:ticket-odd', 'not-a-date'),
+      ...(includeMalformedDeadline ? [ticket('run-1:build:ticket-odd', 'not-a-date')] : []),
       ticket('run-1:build:ticket-expired', FUTURE_DEADLINE),
       ticket('run-1:build:ticket-receipted', FUTURE_DEADLINE),
     ],
@@ -296,18 +298,21 @@ describe('APE v2 codex start-binding deadline (source hook binary)', () => {
     expect(startDenied(response)).toBe(false);
   });
 
-  // GREEN guardrail G2 (e2e seam protector): no deadline_at and an
-  // unparseable deadline_at both still allow end-to-end.
+  // A missing legacy deadline remains compatible; malformed persisted
+  // timestamps are corrupt active state and never enter the binding seam.
   it('keeps allowing a SubagentStart binding a pending ticket with no deadline_at (G2)', async () => {
     const dir = await codexProject();
     const response = await invokeHook(subagentStart(dir, 'run-1:build:ticket-bare'));
     expect(startDenied(response)).toBe(false);
   });
 
-  it('keeps allowing a SubagentStart binding a pending ticket with an unparseable deadline_at (G2)', async () => {
-    const dir = await codexProject();
+  it('fails closed before binding when persisted deadline_at is unparseable', async () => {
+    const dir = await codexProject({ includeMalformedDeadline: true });
     const response = await invokeHook(subagentStart(dir, 'run-1:build:ticket-odd'));
-    expect(startDenied(response)).toBe(false);
+    expect(response).toMatchObject({
+      decision: 'block',
+      reason: expect.stringMatching(/schema-invalid/u),
+    });
   });
 
   // GREEN guardrail G3 (e2e): the existing pending-pool denies survive

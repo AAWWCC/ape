@@ -4,8 +4,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import {
+  observeClaudeSubagentStop,
+} from '../lib/runtime/claude-dispatch.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
-import { startRun } from '../lib/runtime/service.js';
+import { nextRun, startRun, statusRun } from '../lib/runtime/service.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
 
 // dispatch-binding-resume-gap (chosen disposition: outcome (a)).
@@ -79,7 +82,7 @@ async function project() {
   git(dir, 'commit', '-qm', 'test: baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
   });
   return dir;
 }
@@ -99,7 +102,7 @@ async function startClaude(dir) {
     subagents_available: true,
     explicit_invocation: true,
   });
-  expect(result.ok).toBe(true);
+  expect(result.ok, JSON.stringify({ reason: result.reason, blocking: result.readiness?.blocking })).toBe(true);
   const action = result.actions.find((entry) => entry.type === 'dispatch_agent');
   expect(action).toBeDefined();
   return { result, action, ticket: action.ticket };
@@ -214,9 +217,30 @@ async function launchAndBind(dir, { sessionId, agentId }) {
 async function closeLaunchWindow(dir) {
   const { file, intent } = await readOnlyIntent(dir);
   expect(intent.status).toBe('bound');
-  await atomicWriteJson(file, {
+  const closedAt = new Date(Date.now() - 1_000).toISOString();
+  const deltaMs = Date.parse(closedAt) - Date.parse(intent.launch_expires_at);
+  const shift = (value) => new Date(Date.parse(value) + deltaMs).toISOString();
+  const shifted = {
     ...intent,
-    launch_expires_at: new Date(Date.now() - 60_000).toISOString(),
+    prepared_at: shift(intent.prepared_at),
+    launched_at: shift(intent.launched_at),
+    authorized_at: shift(intent.authorized_at),
+    launch_expires_at: closedAt,
+    bound_at: shift(intent.bound_at),
+    launch_generations: intent.launch_generations.map((entry) => (
+      entry.generation === intent.launch_generation
+        ? {
+            ...entry,
+            prepared_at: shift(entry.prepared_at),
+            authorized_at: shift(entry.authorized_at),
+            launch_expires_at: closedAt,
+            bound_at: shift(entry.bound_at),
+          }
+        : entry
+    )),
+  };
+  await atomicWriteJson(file, {
+    ...shifted,
   });
 }
 
@@ -225,7 +249,7 @@ async function closeLaunchWindow(dir) {
 // __tests__/runtime-v2-claude-dispatch.test.js's "denies a prepared intent
 // once its ticket deadline has elapsed" case does it.
 async function expireTicketDeadline(dir, ticketId) {
-  const deadline = new Date(Date.now() - 60_000).toISOString();
+  const deadline = new Date(Date.now() - 1).toISOString();
   const paths = runtimePaths(dir);
   const state = JSON.parse(await readFile(paths.active, 'utf8'));
   state.tickets = state.tickets.map((entry) => (
@@ -233,7 +257,15 @@ async function expireTicketDeadline(dir, ticketId) {
   ));
   await atomicWriteJson(paths.active, state);
   const { file, intent } = await readOnlyIntent(dir);
-  await atomicWriteJson(file, { ...intent, expires_at: deadline });
+  await atomicWriteJson(file, {
+    ...intent,
+    expires_at: deadline,
+    launch_generations: intent.launch_generations.map((entry) => (
+      entry.generation === intent.launch_generation
+        ? { ...entry, expires_at: deadline }
+        : entry
+    )),
+  });
 }
 
 // The OTHER pendingTicket-false path (lib/runtime/claude-dispatch.js
@@ -296,6 +328,66 @@ describe('APE v2 dispatch binding resume across the launch_expires_at boundary',
     });
     expect(preToolDecision(write)).toBe('allow');
     void ticket;
+  });
+
+  it('clears an observed stop when the exact bound identity resumes so NEXT cannot overlap it', async () => {
+    const dir = await project();
+    const sessionId = 'stopped-resume-parent';
+    const agentId = 'stopped-resume-agent';
+    const { action, ticket } = await launchAndBind(dir, { sessionId, agentId });
+    await closeLaunchWindow(dir);
+
+    const paths = runtimePaths(dir);
+    const state = JSON.parse(await readFile(paths.active, 'utf8'));
+    const stopped = await observeClaudeSubagentStop(paths, state, {
+      session_id: sessionId,
+      agent_id: agentId,
+      agent_type: action.dispatch.agent_type,
+    });
+    expect(stopped.observed).toBe(true);
+    expect((await statusRun(dir)).dispatches).toEqual([
+      expect.objectContaining({
+        ticket_id: ticket.ticket_id,
+        status: 'bound',
+        agent_state: 'observed-stopped',
+        agent_stopped_at: expect.any(String),
+      }),
+    ]);
+
+    const resumed = await invokeClaudeHook({
+      hook_event_name: 'SubagentStart',
+      project_dir: dir,
+      session_id: sessionId,
+      agent_id: agentId,
+      agent_type: action.dispatch.agent_type,
+    });
+    expect(subagentStartOutcome(resumed)).toBe('allow');
+    expect((await statusRun(dir)).dispatches).toEqual([
+      expect.objectContaining({
+        ticket_id: ticket.ticket_id,
+        status: 'bound',
+        agent_state: 'active-bound',
+        agent_stopped_at: null,
+      }),
+    ]);
+    expect((await readOnlyIntent(dir)).intent).not.toHaveProperty('agent_stopped_at');
+
+    // Move only the ticket authorization horizon into the past after the
+    // accepted resume. NEXT must wait for a new SubagentStop rather than use
+    // the stale pre-resume observation to dispatch an overlapping worker.
+    await expireTicketDeadline(dir, ticket.ticket_id);
+    const next = await nextRun(dir);
+    expect(next.ok).toBe(true);
+    expect(next.actions).toEqual([
+      expect.objectContaining({
+        type: 'dispatch_retirement_pending',
+        ticket_id: ticket.ticket_id,
+        agent_state: 'active-bound',
+      }),
+    ]);
+    expect(next.actions.some((entry) => entry.type === 'dispatch_agent')).toBe(false);
+    expect(next.run.tickets).toHaveLength(1);
+    expect(next.run.expired_tickets ?? []).not.toContain(ticket.ticket_id);
   });
 
   it('still denies a different agent id claiming the same resumed session after the launch window closes', async () => {

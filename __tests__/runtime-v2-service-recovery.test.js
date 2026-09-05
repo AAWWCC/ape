@@ -61,7 +61,7 @@ async function project() {
   await mkdir(paths.runtime, { recursive: true });
   await writeFile(paths.config, `${JSON.stringify({
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { full: 'node --test', targeted_template: 'node --test {paths}' },
   })}\n`);
   return dir;
 }

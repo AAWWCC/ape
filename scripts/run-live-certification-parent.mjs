@@ -1,16 +1,21 @@
 #!/usr/bin/env node
 
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import childProcess, { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { accessSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdtempSync, openSync, opendirSync, readFileSync, readSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseToml } from 'smol-toml';
 import { verifyLiveCertificationEnvironment } from './check-live-certification-environment.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const RELEASE_VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+const CODEX_HOST_VERSION = JSON.parse(readFileSync(path.join(ROOT, 'compatibility.json'), 'utf8')).hosts?.codex?.version;
 const CATALOG_STUB = path.join(ROOT, 'scripts', 'live-certification-catalog-stub.mjs');
 const FAIL_CLOSED_CATALOG_URL = 'http://127.0.0.1:1';
+const MAX_CODEX_CONFIG_BYTES = 256 * 1024;
+const MAX_HOST_VERSION_BYTES = 4_096;
 
 export class LiveCertificationParentError extends Error {
   constructor(message) {
@@ -30,86 +35,267 @@ function exactDirectory(value, label) {
   }
 }
 
-function configTableBody(lines, table) {
-  const start = lines.findIndex((line) => line.trim() === `[${table}]`);
-  if (start === -1) {
-    return [];
+function requirePinnedCodexExecutable(codexBin, project, home) {
+  if (typeof codexBin !== 'string' || !path.isAbsolute(codexBin)) {
+    throw new LiveCertificationParentError('an explicit absolute --codex-bin path is required; PATH lookup is not accepted');
   }
-  const nextTable = lines.findIndex(
-    (line, index) => index > start && /^\s*\[\[?/u.test(line),
-  );
-  return lines.slice(start + 1, nextTable === -1 ? lines.length : nextTable);
+  let command;
+  let before;
+  try {
+    command = realpathSync(codexBin);
+    before = statSync(command);
+    if (!before.isFile()) throw new Error('not a regular executable');
+    accessSync(command, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
+  } catch {
+    throw new LiveCertificationParentError('--codex-bin must resolve to an accessible regular executable file');
+  }
+  if (typeof CODEX_HOST_VERSION !== 'string' || !/^\d+\.\d+\.\d+$/u.test(CODEX_HOST_VERSION)) {
+    throw new LiveCertificationParentError('the source compatibility.json Codex version pin is invalid; correct it before launch');
+  }
+  const refusal = `Codex version check must report exactly codex-cli ${CODEX_HOST_VERSION} within 5 seconds and 4096 output bytes; select the pinned executable without upgrading the host`;
+  try {
+    const result = childProcess.spawnSync(command, ['--version'], {
+      cwd: project,
+      env: { ...process.env, CODEX_HOME: home },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 5_000,
+      killSignal: 'SIGKILL',
+      maxBuffer: MAX_HOST_VERSION_BYTES,
+      windowsHide: true,
+      shell: false,
+    });
+    if (!result || result.error || result.status !== 0 || result.signal
+      || !Buffer.isBuffer(result.stdout) || !Buffer.isBuffer(result.stderr)
+      || result.stdout.length + result.stderr.length > MAX_HOST_VERSION_BYTES) throw new Error('invalid version result');
+    const version = new TextDecoder('utf-8', { fatal: true }).decode(result.stdout);
+    const expected = `codex-cli ${CODEX_HOST_VERSION}`;
+    if (![expected, `${expected}\n`, `${expected}\r\n`].includes(version)) throw new Error('wrong version');
+    const after = statSync(command);
+    if (!after.isFile() || ['dev', 'ino', 'size', 'mode', 'mtimeMs', 'ctimeMs'].some((key) => before[key] !== after[key])) {
+      throw new Error('executable changed during version check');
+    }
+  } catch {
+    // Never include executable output, an OS error, or a user-controlled path.
+    throw new LiveCertificationParentError(refusal);
+  }
+  // A resolved path and self-reported version are not host-loaded byte attestation.
+  // In-place replacement after this check remains a race; no atomic exec-by-digest is claimed.
+  return command;
+}
+
+function readCertificationConfig(codexHome) {
+  const configPath = path.join(codexHome, 'config.toml');
+  let fd;
+  let contents;
+  try {
+    const before = lstatSync(configPath);
+    if (!before.isFile() || before.size > MAX_CODEX_CONFIG_BYTES) throw new Error();
+    fd = openSync(configPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
+      throw new Error();
+    }
+    // One extra byte detects growth without an unbounded read or a FIFO wait.
+    const bytes = Buffer.alloc(before.size + 1);
+    let count = 0;
+    while (count < bytes.length) {
+      const read = readSync(fd, bytes, count, bytes.length - count, null);
+      if (read === 0) break;
+      count += read;
+    }
+    const after = fstatSync(fd);
+    if (count !== before.size || after.size !== before.size ||
+        after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw new Error();
+    contents = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, count));
+  } catch {
+    throw new LiveCertificationParentError(
+      'isolated Codex config.toml must be a readable, stable UTF-8 regular file of at most 262144 bytes; symlinks are not accepted',
+    );
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+  try {
+    // Keep TOML integer types: 0.0 and 0e0 are not u64 retry counts in Codex.
+    const parsed = parseToml(contents, { maxDepth: 32, integersAsBigInt: true });
+    // The parser's recursion bound covers values; also bound dotted/header
+    // table nesting and the complete graph before selecting authority fields.
+    /** @type {Array<{ value: unknown, depth: number }>} */
+    const pending = [{ value: parsed, depth: 0 }];
+    let nodes = 0;
+    while (pending.length > 0) {
+      const { value, depth } = pending.pop();
+      if (++nodes > 10_000 || depth > 32) throw new Error();
+      if (value !== null && typeof value === 'object') {
+        for (const child of Object.values(value)) pending.push({ value: child, depth: depth + 1 });
+      }
+    }
+    return parsed;
+  } catch {
+    // Parser messages can contain configuration lines (including credentials).
+    throw new LiveCertificationParentError(
+      'isolated Codex config.toml must be valid TOML without duplicate keys or excessive nesting; correct the file before launch',
+    );
+  }
+}
+
+function configTable(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)
+    ? value : null;
+}
+
+function ownConfigValue(value, key) {
+  return configTable(value) && Object.hasOwn(value, key) ? value[key] : undefined;
 }
 
 function requireDeterministicConfig(codexHome) {
-  const configPath = path.join(codexHome, 'config.toml');
-  let config;
-  try {
-    config = readFileSync(configPath, 'utf8');
-  } catch {
-    throw new LiveCertificationParentError('isolated Codex home has no readable config.toml');
+  const config = readCertificationConfig(codexHome);
+  // This bounded launcher uses one isolated file, not partial profile merging.
+  if (Object.hasOwn(config, 'profile') || Object.hasOwn(config, 'profiles')) {
+    throw new LiveCertificationParentError(
+      'isolated Codex certification does not accept profile overrides; flatten the reviewed settings into config.toml before launch',
+    );
+  }
+  const providerId = ownConfigValue(config, 'model_provider');
+  if (typeof providerId !== 'string' || providerId.trim().length === 0) {
+    throw new LiveCertificationParentError('isolated Codex config must declare an explicit top-level model_provider');
+  }
+  if (['openai', 'ollama', 'lmstudio', 'amazon-bedrock'].includes(providerId)) {
+    throw new LiveCertificationParentError(
+      'isolated Codex certification requires a custom model_provider with explicit zero retries; built-in provider definitions cannot establish this contract',
+    );
+  }
+  const providers = ownConfigValue(config, 'model_providers');
+  if (['openai', 'ollama', 'lmstudio'].some((id) => ownConfigValue(providers, id) !== undefined)) {
+    throw new LiveCertificationParentError(
+      'isolated Codex model_providers must not redefine reserved built-in providers, even when inactive; use a custom provider name',
+    );
+  }
+  const provider = configTable(ownConfigValue(providers, providerId));
+  if (!provider) {
+    throw new LiveCertificationParentError(
+      'isolated Codex model_provider must select its own declared model_providers table with explicit transport settings',
+    );
+  }
+  if (typeof ownConfigValue(provider, 'name') !== 'string' || provider.name.trim().length === 0) {
+    throw new LiveCertificationParentError('the selected Codex model_providers table must declare a non-empty name');
   }
   const requirements = [
-    { pattern: /^model_provider\s*=\s*"[^"]+"\s*$/mu, description: 'an explicit model_provider' },
-    { pattern: /^request_max_retries\s*=\s*0\s*$/mu, description: 'request_max_retries = 0' },
-    { pattern: /^stream_max_retries\s*=\s*0\s*$/mu, description: 'stream_max_retries = 0' },
-    { pattern: /^supports_websockets\s*=\s*false\s*$/mu, description: 'supports_websockets = false' },
+    { key: 'request_max_retries', value: 0n, description: 'request_max_retries = 0 (TOML integer)' },
+    { key: 'stream_max_retries', value: 0n, description: 'stream_max_retries = 0 (TOML integer)' },
+    { key: 'supports_websockets', value: false, description: 'supports_websockets = false (TOML boolean)' },
   ];
-  for (const { pattern, description } of requirements) {
-    if (!pattern.test(config)) {
+  for (const { key, value, description } of requirements) {
+    if (ownConfigValue(provider, key) !== value) {
       throw new LiveCertificationParentError(
-        `isolated Codex config must declare ${description} for first-pass-perfect certification`,
+        `the selected Codex model_providers table must declare ${description} for first-pass-perfect certification`,
       );
     }
   }
-  const lines = config.split(/\r?\n/u);
-  const analyticsBody = configTableBody(lines, 'analytics');
-  if (!analyticsBody.some((line) => /^\s*enabled\s*=\s*false\s*$/u.test(line))) {
+  if (ownConfigValue(ownConfigValue(config, 'analytics'), 'enabled') !== false) {
     throw new LiveCertificationParentError(
       'isolated Codex config must disable analytics to prevent optional event transport retries',
     );
   }
-  const featuresBody = configTableBody(lines, 'features');
-  if (!featuresBody.some((line) => /^\s*plugins\s*=\s*true\s*$/u.test(line))) {
+  const features = ownConfigValue(config, 'features');
+  if (ownConfigValue(features, 'plugins') !== true) {
     throw new LiveCertificationParentError(
       'isolated Codex config must enable plugins so the installed local APE plugin is loaded',
     );
   }
-  if (!featuresBody.some((line) => /^\s*apps\s*=\s*false\s*$/u.test(line))) {
+  if (ownConfigValue(features, 'apps') !== false) {
     throw new LiveCertificationParentError(
       'isolated Codex config must disable apps so the catalog loopback cannot intercept the unrelated Apps MCP transport',
     );
   }
-  if (!featuresBody.some((line) => /^\s*remote_plugin\s*=\s*true\s*$/u.test(line))) {
+  if (ownConfigValue(features, 'remote_plugin') !== true) {
     throw new LiveCertificationParentError(
       'isolated Codex config must enable remote_plugin so Codex cannot fall back to legacy curated-plugin sync',
     );
   }
 }
 
+// Version labels alone do not identify plugin code. Compare the complete staged
+// tree to this source checkout's packaged candidate, without following links or
+// opening a FIFO. Bounds apply before reads; the digest contains no source text.
+function candidatePackageInventory(base, relativeRoot) {
+  const refuse = () => {
+    throw new LiveCertificationParentError('candidate package parity requires a bounded regular-file tree without symlinks');
+  };
+  let root = base;
+  for (const segment of relativeRoot.split('/')) {
+    root = path.join(root, segment);
+    if (!lstatSync(root).isDirectory()) refuse();
+  }
+  const entries = [];
+  let bytes = 0;
+  let fileCount = 0;
+  /** @type {{version?: unknown} | null} */
+  let packageJson = null;
+  function visit(directory, prefix = '', depth = 0) {
+    if (depth > 32 || !lstatSync(directory).isDirectory()) refuse();
+    const handle = opendirSync(directory);
+    try {
+      for (let entry; (entry = handle.readSync()) !== null;) {
+        if (entries.length >= 10_000) refuse();
+        const name = `${prefix}${entry.name}`;
+        const target = path.join(directory, entry.name);
+        const before = lstatSync(target);
+        if (before.isDirectory()) {
+          entries.push([name, 'directory']);
+          visit(target, `${name}/`, depth + 1);
+        } else if (before.isFile()) {
+          if (before.size > 64 * 1024 * 1024 || bytes + before.size > 256 * 1024 * 1024) refuse();
+          const fd = openSync(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+          let contents;
+          try {
+            const opened = fstatSync(fd);
+            if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) refuse();
+            contents = Buffer.alloc(before.size + 1);
+            let count = 0;
+            while (count < contents.length) {
+              const read = readSync(fd, contents, count, contents.length - count, null);
+              if (read === 0) break;
+              count += read;
+            }
+            const after = fstatSync(fd);
+            if (count !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) refuse();
+            contents = contents.subarray(0, count);
+          } finally {
+            closeSync(fd);
+          }
+          bytes += contents.length;
+          fileCount += 1;
+          entries.push([name, 'file', before.mode & 0o111, contents.length,
+            createHash('sha256').update(contents).digest('hex')]);
+          if (name === 'package.json') packageJson = JSON.parse(contents.toString('utf8'));
+        } else refuse();
+      }
+    } finally {
+      handle.closeSync();
+    }
+  }
+  visit(root);
+  entries.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  return { sha256: createHash('sha256').update(JSON.stringify(entries)).digest('hex'),
+    file_count: fileCount, version: packageJson?.version };
+}
+
 function requireExactPlugin(codexHome) {
-  const packagePath = path.join(
-    codexHome,
-    'plugins',
-    'cache',
-    'ape',
-    'ape',
-    RELEASE_VERSION,
-    'package.json',
-  );
+  let candidate;
   let installed;
   try {
-    installed = JSON.parse(readFileSync(packagePath, 'utf8'));
-  } catch {
-    throw new LiveCertificationParentError(
-      `isolated Codex home does not contain cached ape@ape ${RELEASE_VERSION}`,
-    );
+    candidate = candidatePackageInventory(ROOT, 'plugins/ape');
+    installed = candidatePackageInventory(codexHome, `plugins/cache/ape/ape/${RELEASE_VERSION}`);
+  } catch (error) {
+    if (error instanceof LiveCertificationParentError) throw error;
+    throw new LiveCertificationParentError('candidate package parity could not be verified from bounded regular files');
   }
-  if (installed.version !== RELEASE_VERSION) {
-    throw new LiveCertificationParentError(
-      `cached ape@ape version ${installed.version ?? '<missing>'} does not equal ${RELEASE_VERSION}`,
-    );
+  if (candidate.version !== RELEASE_VERSION || installed.version !== RELEASE_VERSION ||
+      candidate.sha256 !== installed.sha256) {
+    throw new LiveCertificationParentError(`candidate package byte parity failed for cached ape@ape ${RELEASE_VERSION}`);
   }
+  // This is staged parity, not a claim that a persistent host loaded this tree.
+  return Object.freeze({ ...candidate, staged_parity: true });
 }
 
 function requireReleaseShippingPolicy(project) {
@@ -195,6 +381,7 @@ export function buildCodexParentInvocation({
   projectDir,
   codexHome,
   promptPath,
+  codexBin,
   catalogBaseUrl = FAIL_CLOSED_CATALOG_URL,
 }) {
   const project = exactDirectory(projectDir, '--project-dir');
@@ -214,18 +401,20 @@ export function buildCodexParentInvocation({
   requireExactPromptProject(prompt, project);
   requireReleaseShippingPolicy(project);
   requireDeterministicConfig(home);
-  requireExactPlugin(home);
+  const candidatePackage = requireExactPlugin(home);
+  const command = requirePinnedCodexExecutable(codexBin, project, home);
   const catalogUrl = exactLoopbackCatalogUrl(catalogBaseUrl);
   return Object.freeze({
-    command: 'codex',
+    command,
+    host_version: CODEX_HOST_VERSION,
     args: Object.freeze([
       'exec',
       '-c',
       `chatgpt_base_url=${JSON.stringify(catalogUrl)}`,
       '-c',
       'features.apps=false',
-      '--dangerously-bypass-approvals-and-sandbox',
-      '--dangerously-bypass-hook-trust',
+      '--sandbox',
+      'workspace-write',
       '--color',
       'never',
       '-C',
@@ -241,6 +430,7 @@ export function buildCodexParentInvocation({
       GIT_COMMITTER_EMAIL: 'ape-certification@users.noreply.github.com',
     }),
     input: prompt,
+    candidate_package: candidatePackage,
   });
 }
 
@@ -341,9 +531,9 @@ function parseArgs(argv) {
       dryRun = true;
       continue;
     }
-    if (!['--project-dir', '--codex-home', '--prompt'].includes(token) || !argv[index + 1]) {
+    if (!['--project-dir', '--codex-home', '--prompt', '--codex-bin'].includes(token) || !argv[index + 1]) {
       throw new LiveCertificationParentError(
-        'usage: node scripts/run-live-certification-parent.mjs --project-dir <path> --codex-home <path> --prompt <file> [--dry-run]',
+        'usage: node scripts/run-live-certification-parent.mjs --project-dir <path> --codex-home <path> --prompt <file> --codex-bin <absolute-executable> [--dry-run]',
       );
     }
     values[token.slice(2).replaceAll('-', '')] = argv[index + 1];
@@ -354,6 +544,7 @@ function parseArgs(argv) {
     projectDir: values.projectdir,
     codexHome: values.codexhome,
     promptPath: values.prompt,
+    codexBin: values.codexbin,
   };
 }
 
@@ -375,10 +566,12 @@ if (invokedDirectly(process.argv[1])) {
     if (parsed.dryRun) {
       process.stdout.write(`${JSON.stringify({
         command: invocation.command,
+        host_version: invocation.host_version,
         args: invocation.args,
         cwd: invocation.cwd,
         codex_home: invocation.env.CODEX_HOME,
         prompt_bytes: Buffer.byteLength(invocation.input),
+        candidate_package: invocation.candidate_package,
       })}\n`);
     } else {
       catalogRoot = mkdtempSync(path.join(tmpdir(), 'ape-live-catalog-'));

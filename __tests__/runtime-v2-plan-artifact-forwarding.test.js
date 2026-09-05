@@ -98,6 +98,7 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { finalizeTicket, validateTicket } from '../lib/runtime/schemas.js';
 import { RESPONSE_BUDGET_CHARS, projectRunResponse } from '../lib/runtime/projection.js';
+import { seedLegacyRun } from './legacy-run-test-helper.js';
 
 const PLAN_ARTIFACT_MAX_ENTRIES = 12;
 const PLAN_ARTIFACT_MAX_CHARS = 200;
@@ -124,7 +125,7 @@ async function project() {
   git(dir, 'commit', '-qm', 'test: baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },
   });
   return dir;
 }
@@ -223,9 +224,11 @@ const EXPECTED_PLAN_ARTIFACT = [
   'residuals: 3',
 ];
 
-async function startFullLane(dir, overrides = {}) {
-  const started = await startRun(dir, startInput(overrides));
-  expect(started.ok).toBe(true);
+async function startFullLane(dir, overrides = {}, { historical = false } = {}) {
+  const started = historical
+    ? await seedLegacyRun(dir, startInput(overrides))
+    : await startRun(dir, startInput(overrides));
+  expect(started.ok, JSON.stringify({ reason: started.reason, blocking: started.readiness?.blocking })).toBe(true);
   expect(started.run.lane).toBe('full');
   const planTicket = started.run.tickets[0];
   expect(planTicket.stage_id).toBe('plan');
@@ -240,8 +243,8 @@ async function startFullLane(dir, overrides = {}) {
 // it lets a caller override the run's own `startInput` fields — e.g. a
 // realistic-size `objective` — to exercise the wire-budget arms below without
 // duplicating this whole walk.
-async function walkToPlanReview(dir, evidence = PLAN_EVIDENCE, runOverrides = {}) {
-  const { planTicket } = await startFullLane(dir, runOverrides);
+async function walkToPlanReview(dir, evidence = PLAN_EVIDENCE, runOverrides = {}, options = {}) {
+  const { planTicket } = await startFullLane(dir, runOverrides, options);
   const recorded = await recordReceipt(dir, receipt(planTicket, { evidence }));
   expect(recorded.ok).toBe(true);
   const planCheck = recorded.run.tickets.find((ticket) => ticket.stage_id === 'plan-check');
@@ -468,9 +471,11 @@ describe('APE v2 review_findings forwarding to the plan-judge (roadmap entry for
     // on must be realistic-size too, not the suite's bare 54-character
     // stand-in, or the headroom this arm proves is answered by an objective
     // that could never occur on a real run.
+    // This retained objective exceeds today's new-run planning bound. The
+    // historical record must still traverse and render its plan-review group.
     const { planCheck, planCritic } = await walkToPlanReview(dir, PLAN_EVIDENCE, {
       objective: realisticRunObjective(REALISTIC_RUN_OBJECTIVE_CHARS),
-    });
+    }, { historical: true });
     const checked = await recordReceipt(dir, receipt(planCheck, { evidence: { verdict: 'agree' } }));
     expect(checked.ok).toBe(true);
     const criticed = await recordReceipt(dir, receipt(planCritic, {

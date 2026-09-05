@@ -9,7 +9,7 @@ Common actions:
 - `set`: validate and store one dotted key.
 - `init`: inspect project manifests and propose grounded test commands/evidence scripts. On a blank
   repository, exact prospective JavaScript/TypeScript or Python `test_paths` ground dependency-free
-  bootstrap commands. It may separately propose a managed APE orientation block.
+  bootstrap commands. It never creates or updates repository instruction files.
 - `doctor`: check git, state, locks, configuration, bundles, host preconditions, and recognized
   project types. MCP discovery and permissions remain host-owned.
 - `wire` / `unwire`: opt a host statusline in or out.
@@ -26,6 +26,7 @@ checked byte-for-byte by `npm run docs:check`.
 | `shipping.auto_merge` | boolean | `false` | Hold green work for an explicit audited `ship`; opt in to automatic merging. |
 | `shipping.provider` | string | `"github"` | Shipping provider; GitHub is the only implementation. |
 | `shipping.required_remote_checks` | boolean | `true` | Require remote CI; set `false` only for repositories intentionally without CI. |
+| `shipping.target` | object or null | `null` | Explicit `{origin, repository, base}` target frozen at admission. No repository is inferred; the canonical APE checkout remains restricted to AAWWCC/ape. |
 | `policy.fast_max_files` | number | `6` | Maximum production-file scope for the fast lane. |
 | `policy.high_risk_security_review` | boolean | `true` | Add security review when a risk trigger is armed. |
 | `policy.design_assurance_required` | boolean | `true` | Require one feasibility and executable-evidence assurance per declared risk trigger. |
@@ -96,14 +97,15 @@ or Python extension family produces standard-library bootstrap commands (`node -
 incomplete because selecting that toolchain would change the requested outcome. A clean unborn Git
 repository receives an empty root commit under the run lock before APE creates its isolated branch.
 
-`init` may also propose a small managed orientation block so future model sessions know to use APE
-through its skills and immutable ticket contracts. APE resolves `AGENTS.override.md` before
-`AGENTS.md`; it never writes the shadowed file. Apply this proposal separately with
-`apply_agents:true`, the exact proposed `agents_path`, and the matching `agents_expected_hash`.
-The runtime rechecks path precedence and the file hash under its config lock immediately before an
-atomic replacement. A stale or concurrent edit rejects without partially applying config. Dynamic
-receipt schemas, profile allowlists, and byte bounds remain in tickets/manifests rather than
-Markdown.
+APE supplies its own bounded, versioned orientation through a synchronous `SessionStart` hook on
+startup, resume, clear, and compaction. When an active run exists, that context identifies the run,
+contract status, and current next-safe action; every `ape_run` result carrying run state also returns
+fresh runtime guidance. Machine enforcement remains in hooks and the scheduler, while complete
+worker contracts remain in immutable tickets.
+
+`AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, and equivalent files remain repository-owned. APE
+does not create, append, merge, or update its operational policy in those files. Repository-specific
+rules still belong there and remain independent of APE plugin updates.
 
 Important rules:
 
@@ -140,11 +142,18 @@ The runtime derives and freezes the run's shipping bit at start, so callers do n
 merge approval or send the legacy `auto_merge_authorized` field. Changing configuration after start
 cannot grant shipping authority to that run.
 
+Set `shipping.target` to an explicit object such as
+`{"origin":"https://github.com/OWNER/PROJECT.git","repository":"OWNER/PROJECT","base":"main"}`
+before preview. Admission freezes that target; changing the remote or configuration requires a new
+reviewed admission, never an in-run retarget. The canonical public APE package may target only
+`AAWWCC/ape`; other projects require their own explicit target. Existing legacy runs do not acquire
+shipping authority merely because a newer runtime can read them.
+
 A protected base that rejects an immediate squash merge can require
 GitHub's `--auto` path. APE enables it and keeps the run in `shipping` until `next` observes the
-exact pushed head merged. The runtime first honors repository commit signing, then retries only a
-signer/passphrase-specific feature-commit failure with `--no-gpg-sign`; unrelated Git failures still
-block. After the remote merge is proven, local checkout cleanup is independently recorded and can
+exact pushed head merged. Configured signing is a prerequisite, not permission to retry unsigned.
+Protected queued merges require proven up-to-date required checks or a qualifying merge queue.
+After the remote merge is proven, local checkout cleanup is independently recorded and can
 be retried with `ape_run resume` when another worktree owns the base branch.
 
 <!-- BEGIN GENERATED LANE REFERENCE -->

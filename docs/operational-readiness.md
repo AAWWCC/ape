@@ -53,20 +53,82 @@ candidate and require it to pass before launching the host. This prevents GitHub
 protection from turning a clean APE run into a shipping failure.
 
 Launch every non-interactive Codex certification parent through `npm run release:live-parent --
---project-dir <disposable-repository> --codex-home <isolated-home> --prompt <attempt-prompt>`. The
-launcher fails closed unless the isolated home contains the exact candidate plugin and declares
-zero request retries, zero stream retries, and WebSockets disabled. It also supplies Codex's
-automation-only `--dangerously-bypass-hook-trust` flag after the candidate hook source has been
-vetted. Project trust alone does not authorize lifecycle-hook delivery for this non-interactive
-path: omitting the flag leaves `SubagentStart` unable to inject the binding capability and rejects
-the infrastructure probe before a run can start.
+--project-dir <disposable-repository> --codex-home <isolated-home>
+--codex-bin <absolute-reviewed-codex-executable> --prompt <attempt-prompt>`. The
+launcher fails closed unless the isolated home contains the candidate's complete regular-file
+inventory and exact packaged bytes, including its version, and declares zero request retries, zero
+stream retries, and WebSockets disabled. Its bounded package digest proves staged byte parity only,
+not that a persistent desktop host loaded that snapshot. Verify the actual loaded candidate and
+trusted-hook conformance on the exact `compatibility.json` Codex pin before acceptance; a different
+desktop diagnostic version is not a substitute. If the pinned host cannot deliver the required
+hooks under supported normal permissions, stop readiness for an explicit compatibility decision.
+
+The required `--codex-bin` selects a reviewed absolute executable, not an ambient `PATH` entry.
+Before catalog startup or parent execution, its bounded read-only `--version` result must match
+the unchanged Codex pin in `compatibility.json`; a mismatch stops preparation without an upgrade.
+The checked canonical path is also the launched command. This check follows the
+[documented CLI version command](https://learn.chatgpt.com/docs/reference/troubleshooting).
+Self-reported version and a resolved path are not binary attestation or protection against an
+in-place executable replacement; exact loaded-byte and host-conformance checks remain required.
+
+The launcher parses the isolated `config.toml` and resolves the top-level `model_provider` to its
+own custom `model_providers` table. Both retry counts must be TOML integer zero (not a quoted zero
+or `0.0`), and `supports_websockets` must be boolean false in that selected table. Unrelated
+providers, comments, multiline strings, and misplaced root fields cannot satisfy those checks.
+Top-level analytics/features tables are checked as parsed booleans too. Equivalent quoted keys,
+dotted keys and inline tables are accepted. Reserved built-in definitions and profile overrides
+are refused with explicit correction guidance; flatten reviewed certification settings into the
+isolated file instead of relying on unvalidated profile layers.
+
+Configuration input is a stable regular UTF-8 file, at most 256 KiB, with at most 32 nesting levels
+and 10,000 parsed value nodes. Symlinks and special files are refused before reading. Parser
+failures do not echo configuration content or nearby credentials. This is a bounded
+selected-provider/transport guard, not proof that every unrelated setting or effective host
+configuration layer is valid; pinned-host loaded configuration and conformance remain separate.
+The TOML parser is an exactly pinned development dependency used by this launcher only, not a
+new dependency in either distributed plugin runtime.
+
+The launcher uses `--sandbox workspace-write` and does not bypass approvals, sandboxing, or hook
+trust. The operator must review and trust the exact candidate hooks through the supported host
+workflow; project trust is not evidence of hook trust. Missing trust or permissions is a stop, not
+permission to change trust/configuration or relaunch with bypass flags. See the
+[official Codex CLI permission guidance](https://learn.chatgpt.com/docs/developer-commands?surface=cli).
+
+`SubagentStart` supplies provisional native identity evidence, not stage authority. Each assigned
+child uses its exact per-launch bootstrap arguments in `ape_bind` before stage work. If deferred,
+one bounded discovery of the literal registered name `ape_bind` is allowed, without capabilities,
+project paths, or task data. Only the authenticated bind hook injects ticket/receipt context. A
+probe follows its injected acknowledgement-only exception, with no synthetic-ticket reads or
+receipt validation. Missing post-bind context or a child that finishes without binding fails the
+attempt; do not replace the child or reconstruct its context from transcripts.
+
+Repository creation, hook trust, installation, push, PR creation, and merge each require their
+separate operator authorization. Generated attempt prompts do not establish that authorization.
+Use a dedicated synthetic certification repository with explicitly frozen origin/repository/base
+identity, not the public APE source repository as a disposable target; protected land targets
+`main`. Complete offline regressions, the full source suite, package parity, and public/package
+gates before requesting live acceptance. Run at most the four approved Codex attempts below,
+sequentially, stopping on the first failure. No replacement attempts or new campaign are authorized
+by the launcher or this document.
+
+Prompt preparation validates all four canonical project directories and renders the complete
+set before creating its output directory. Invalid inputs leave no partial prompt output; existing
+output remains protected from reuse. This is validation-before-write, not filesystem crash
+atomicity. The evidence verifier independently requires the sequence below even if every
+individual recorded attempt succeeded; renumbering an out-of-order campaign cannot certify it.
 
 1. A non-behavioral mechanical phase.
 2. A bounded behavioral fast phase.
 3. A behavioral full phase with plan review.
-4. A land run whose protected base requires the authorized auto-merge path.
+4. A land run targeting protected `main`, with required up-to-date checks enforced for administrators.
+   The observed squash path may be immediate or automatic; do not manufacture a policy refusal or
+   delay CI to force the automatic path. `shipping.auto_merge = true` is APE's shipping authorization
+   setting, not evidence that GitHub's `--auto` path was used.
 
-Record every attempt in a candidate ledger using `evals/live-certification.schema.json`. The ledger
+Retain every attempt, including pre-run probe failures with no run archive, in an external bounded
+attempt journal. Never invent a run id, receipt, or archive for such a failure. A failed campaign
+cannot produce a release certificate. Record qualifying run evidence in a candidate ledger using
+`evals/live-certification.schema.json`. The ledger
 is intentionally limited to bounded identifiers, versions, counters, stable terminal reason codes,
 booleans, and commit hashes. It has no fields for objectives, ticket text, receipt prose, command
 output, provider responses, or repository paths. Do not copy those values into identifiers. Each
@@ -83,9 +145,40 @@ worker tool, failed control call, host transport retry, receipt repair, duplicat
 remediation, self-correction, or abort/successor workaround. Any such event rejects the candidate:
 fix the cause, bump the version, and restart from a fresh clone of the new exact source commit. Never
 discard the failed attempt and substitute a later success under the same version. A successful
-protected-branch attempt additionally records a
-GitHub auto-squash with `MERGED` PR state, an observed PR head equal to the exact pushed head, and an
-observed remote head equal to the reported squash merge commit.
+protected-branch attempt additionally records a schema-v5 proof of GitHub squash with `MERGED` PR
+state, the actual `merge_path` (`immediate` or `auto`), required checks passed for the exact pushed
+head, an observed PR head equal to that pushed head, a merged tree equal to the passed-gate tree,
+and an observed remote head equal to the reported squash merge commit. An accepted queue request,
+command exit zero, skipped check, or enabled auto-merge is not completion. Retain the actual command,
+PR/check observations and Git trees outside the public ledger; never relabel an immediate merge as
+automatic. Old schema-v4 JSON remains readable historical evidence but is not accepted or silently
+upgraded by the schema-v5 release gate.
+
+This certification cohort deliberately uses strict required checks, required PRs, administrator
+enforcement, and disabled force-pushes/deletion, without bypass. It does not certify every optional
+GitHub policy topology; runtime support for ALLGREEN merge queues remains distinct from this
+strict-check cohort. Before and after protected shipping, retain the full effective classic
+protection and branch-rule observations, including their timestamps and frozen target, outside the
+public repository. Use the documented canonical policy digest for `branch_protection.before_sha256`
+and `after_sha256`; they must match. A digest commits to retained observations, not independent
+proof of continuous enforcement between them. Retain provider audit evidence for that interval and
+refuse certification if any bypass, temporary weakening, missing observation or unexplained policy
+change occurred. The existing zero-recovery rule remains unchanged.
+
+The pure `certificationProtectionPolicyDigest(rawJson)` export in
+`scripts/certification-protection-policy.mjs` defines the policy normalization. Its input is raw
+JSON with exactly `{version: 1, target: {origin, repository, base}, classic_protection, branch_rules}`.
+The target must be the coherent frozen GitHub origin/repository and `main`; retain the complete
+classic protection object (or `null` if genuinely absent) and complete effective branch-rule array.
+Never replace an unreadable policy response with `null` or an empty array. Observation timestamps
+and raw provider responses are retained alongside this envelope, not discarded from the audit.
+
+The helper sorts object keys and known unordered policy collections; it preserves unknown array
+order, duplicates and every provider field. It hashes the UTF-8 domain
+`APE certification protection policy v1\n` followed by compact normalized JSON with no trailing
+newline. It rejects duplicate decoded keys, invalid or oversized JSON, incoherent targets and
+excessive nesting/node counts. This is a deterministic commitment to retained policy content,
+not a policy evaluator, GitHub signature or substitute for verifying the proof's explicit guards.
 
 The tagged-release gate is mechanically separate from the live work:
 
@@ -169,6 +262,13 @@ generators, formatters, or other tracked-file writers there: a command that muta
 tree cannot be attributed to a read-only ticket and must fail closed. Run such maintenance
 deliberately before ticket issuance, then review the resulting stable tree.
 
+Receipt tree-divergence and role-boundary rejections do not attribute the writer or automatically
+change run state. Their bounded `recovery` descriptor names the cause, current state, eligible
+actions, and operator preconditions. Preserve the current tree and inspect diagnosis first. An
+active run cannot be reset; an operator may explicitly choose audited abort, then reassess the
+terminal state. Reset is offered only for blocked, aborted, or completed state. No descriptor
+authorizes automatic abort/reset, cleanup, receipt repair, or a replacement dispatch.
+
 Receipt contract v1 canonicalizes only object-key order and JSON negative zero for hashing. It does
 not trim strings, insert defaults, wrap values, remove nulls, reorder arrays, or reinterpret tests,
 findings, paths, commands, verdicts, or evidence. Invalid drafts receive bounded exact correction
@@ -218,9 +318,19 @@ selectorless `N` to `N+1` migration, non-head replay monotonicity, pre-allocatio
 and directory-entry bounds, lease-token plus lock-directory identity checks at selector mutations,
 and non-clobbering semantic-evidence publication with retained-slot identity verification.
 
-Shipping readiness also exercises immutable target binding: strict runs freeze the verified remote
-URL and canonical `AAWWCC/ape` slug once, use that URL instead of the mutable `origin` name for Git
-network mutations, and pass `--repo AAWWCC/ape` plus an explicit selector to every GitHub command.
+Shipping readiness exercises explicit per-project target binding: admission freezes
+`shipping.target.origin`, `repository`, `base`, and the required-check policy. Shipping refuses
+missing or drifted targets, uses the frozen URL and repository explicitly, pushes only the verified
+commit OID, and merges with an exact head match. Prospective, staged, and committed trees must match
+the passed-gate tree. The canonical public APE package retains its separate `AAWWCC/ape` guard;
+other projects use their own approved targets. Legacy unbound runs cannot silently acquire shipping
+authority from current configuration. Auto-shipping admission verifies non-interactive Git identity,
+signing policy, GitHub access, squash availability, and required-check protection with bounded
+read-only inspections before dispatch; produce-and-hold explicitly defers remote shipping proof.
+Signing failures never retry unsigned. The remote base is rechecked before shipping mutations and
+merge requests, with no automatic rebase. Queued auto-merge additionally requires server-enforced
+up-to-date checks or an ALLGREEN merge queue with required checks: a local base observation cannot
+prove a future merged tree.
 
 ## Recovery development rule
 

@@ -216,6 +216,27 @@ describe('ape v2 config init onboarding', () => {
     expect(config.test_commands.full).toBe('node --test');
   });
 
+  it('treats repository-owned CLAUDE.md as blank-repository metadata without changing it', async () => {
+    const dir = emptyProject();
+    const instructions = '# Project instructions\n\nKeep this text.\n';
+    writeFileSync(join(dir, 'CLAUDE.md'), instructions);
+    const input = {
+      behavioral: true,
+      test_paths: ['test/value.test.js'],
+    };
+
+    const r = initResult(await configAction(dir, 'init', input));
+    expect(r.proposal.proposal_complete).toBe(true);
+    expect(r.proposal.detected_runner).toEqual({
+      family: 'node-test-bootstrap',
+      rationale: 'prospective-blank-repository-test-paths',
+    });
+    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toBe(instructions);
+
+    await configAction(dir, 'init', { ...input, apply: true });
+    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toBe(instructions);
+  });
+
   it('blank Python repository: derives stdlib unittest commands without inventing a dependency', async () => {
     const dir = emptyProject();
     const input = {
@@ -334,5 +355,8 @@ describe('ape v2 config init onboarding', () => {
     });
     expect(configTool.inputSchema.properties.test_paths.description)
       .toMatch(/blank repository[\s\S]*JS\/TS or Python/iu);
+    expect(configTool.inputSchema.properties).not.toHaveProperty('apply_agents');
+    expect(configTool.inputSchema.properties).not.toHaveProperty('agents_path');
+    expect(configTool.inputSchema.properties).not.toHaveProperty('agents_expected_hash');
   });
 });

@@ -6,9 +6,9 @@ of the whole runtime. They are the successor to APE 1's PCRs (`pcr-01…pcr-13`)
 The difference is the mechanism. APE 1 re-injected the PCRs as prose into the main session on every
 `SessionStart` and trusted the model (plus a fleet of hooks) to obey them. APE 2 **enforces** the
 invariants by construction: the deterministic scheduler, the lifecycle hook, and independent receipt
-validation make a violation impossible or rejected, rather than merely discouraged. There is no
-re-injection step because the machine does not rely on an agent remembering a rule it already
-enforces.
+validation make a violation impossible or rejected, rather than merely discouraged. APE does inject
+small, versioned runtime orientation at `SessionStart` and on `ape_run` results so the main session
+knows the active contract and next safe action, but that prose is not an enforcement boundary.
 
 ## The nine
 
@@ -55,6 +55,14 @@ enforces.
 | Gated auto-merge | `lib/runtime/gates.js` `runMergeGates` / `autoMergeGithub` |
 
 ## Capability-recovery generations
+
+Codex's native bootstrap grants authority only after a host-observed child presents a distinct,
+generation-bound bearer to the trusted `ape_bind` hook. Provisional child evidence is not a ticket;
+the MCP confirmation is not context. Native model, parent linkage, current immutable ticket and
+deadline, and one-child ownership are checked before injection. The parent is trusted to deliver
+the unchanged bootstrap message; the runtime does not infer a physical spawn-to-child UUID proof
+from equal turn IDs, a newest-intent guess, or transcript contents. See [lifecycle hooks](hooks.md)
+for this explicit transport boundary and legacy compatibility.
 
 A receipt-contract-v1 capability denial may request one additive successor rather than consume a
 product retry. Before any receipt, ticket, contract, state, audit, history, or shipping sink, the

@@ -3,7 +3,8 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { expireDispatch, recordReceipt, startRun } from '../lib/runtime/service.js';
+import { expireDispatch, recordReceipt } from '../lib/runtime/service.js';
+import { seedLegacyRun } from './legacy-run-test-helper.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 
@@ -75,10 +76,9 @@ function git(cwd, ...args) {
   }).trim();
 }
 
-// Deliberately mirrors this project's own .ape/runtime/config.json shape as
-// traced in the run objective: test_commands.full is set, neither `targeted`
-// nor `targeted_template` is — the exact configuration under which the
-// refusal at service.js:1449-1457 fires on an empty testPaths.
+// Historical configuration: full is set, neither targeted nor its template
+// is. seedLegacyRun preserves this old state for receipt/expiry diagnosis;
+// mandatory new-run readiness correctly refuses this configuration today.
 async function project() {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-expire-orphan-'));
   cleanups.push(dir);
@@ -210,7 +210,7 @@ function expectPredecessorDisclosure(ticket, predecessor) {
 describe('expire-dispatch orphan admission (expire-dispatch-orphan-blocks-red-admission)', () => {
   it('a retry inheriting its dead predecessor\'s authored red test is not refused by blaming test_commands.targeted_template', async () => {
     const dir = await project();
-    const started = await startRun(dir, startInput());
+    const started = await seedLegacyRun(dir, startInput());
     expect(started.ok).toBe(true);
     const ticket1 = started.run.tickets[0];
     expect(ticket1.role).toBe('test_writer');
@@ -281,7 +281,7 @@ describe('expire-dispatch orphan admission (expire-dispatch-orphan-blocks-red-ad
 
   it('FINDING 1: a READ-ONLY stage\'s expiry retry carries no Inherited-base disclosure and is never ordered to re-author', async () => {
     const dir = await project();
-    const started = await startRun(dir, startInput());
+    const started = await seedLegacyRun(dir, startInput());
     expect(started.ok).toBe(true);
     const testTicket = started.run.tickets[0];
     expect(testTicket.role).toBe('test_writer');
@@ -334,7 +334,7 @@ describe('expire-dispatch orphan admission (expire-dispatch-orphan-blocks-red-ad
 
   it('never weakens: an inherited test the runtime never actually observed red is still refused, not silently admitted', async () => {
     const dir = await project();
-    const started = await startRun(dir, startInput());
+    const started = await seedLegacyRun(dir, startInput());
     expect(started.ok).toBe(true);
     const ticket1 = started.run.tickets[0];
 
@@ -370,7 +370,7 @@ describe('expire-dispatch orphan admission (expire-dispatch-orphan-blocks-red-ad
     // the inherited-base one above, never simply delete or reword the
     // message everywhere.
     const dir = await project();
-    const started = await startRun(dir, startInput());
+    const started = await seedLegacyRun(dir, startInput());
     expect(started.ok).toBe(true);
     const ticket1 = started.run.tickets[0];
 
@@ -410,7 +410,7 @@ describe('expiry-retry-disclosure fidelity (expiry-retry-disclosure-fidelity)', 
     // never fires either — otherwise this would be exercising defect (b),
     // not (a). 20 * 't/NN.js' (7 chars) + 19 * ', ' (2 chars) = 178.
     const manyPaths = Array.from({ length: 25 }, (_, i) => `t/${String(i).padStart(2, '0')}.js`);
-    const started = await startRun(dir, startInput({ test_paths: manyPaths }));
+    const started = await seedLegacyRun(dir, startInput({ test_paths: manyPaths }));
     expect(started.ok).toBe(true);
     const ticket1 = started.run.tickets[0];
     expect(ticket1.test_paths.length).toBe(25);
@@ -439,7 +439,7 @@ describe('expiry-retry-disclosure fidelity (expiry-retry-disclosure-fidelity)', 
     // before the join.
     const longPath = `src/${'x'.repeat(250)}.js`;
     const shortPaths = ['src/short-a.js', 'src/short-b.js', 'src/short-c.js'];
-    const started = await startRun(dir, startInput({ test_paths: [longPath, ...shortPaths] }));
+    const started = await seedLegacyRun(dir, startInput({ test_paths: [longPath, ...shortPaths] }));
     expect(started.ok).toBe(true);
     const ticket1 = started.run.tickets[0];
 
@@ -463,7 +463,7 @@ describe('expiry-retry-disclosure fidelity (expiry-retry-disclosure-fidelity)', 
 
   it('FINDING (c): issueTicket names the retryOf predecessor, never the oldest expired ticket of the same stage', async () => {
     const dir = await project();
-    const started = await startRun(dir, startInput());
+    const started = await seedLegacyRun(dir, startInput());
     expect(started.ok).toBe(true);
     const ticket1 = started.run.tickets[0];
 
@@ -512,7 +512,7 @@ describe('expiry-retry-disclosure fidelity (expiry-retry-disclosure-fidelity)', 
 
   it('FINDING (d): a predecessor that died before writing anything still gets the targeted-config advice, without asserting output that was never written', async () => {
     const dir = await project(); // test_commands.full only — no targeted, no targeted_template
-    const started = await startRun(dir, startInput());
+    const started = await seedLegacyRun(dir, startInput());
     expect(started.ok).toBe(true);
     const ticket1 = started.run.tickets[0];
 

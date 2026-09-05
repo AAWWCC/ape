@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -85,6 +85,7 @@ describe('ape v2 config doctor diagnosis mode', () => {
     expect(entry.warning).toBeUndefined();
     expect(entry.detail).toMatch(/spawn_agent/i);
     expect(entry.detail).toMatch(/SubagentStart/i);
+    expect(entry.detail).toMatch(/ape_bind/i);
     expect(entry.detail).toMatch(/mandatory live binding preflight/i);
   });
 
@@ -111,6 +112,37 @@ describe('ape v2 config doctor diagnosis mode', () => {
     });
     expect(report.passed).toBe(false);
     expect(report.detail).toContain('collaborationspawn_agent');
+  });
+
+  it('does not let the exact-canary wildcard falsely certify the production spawn matcher', () => {
+    const manifest = JSON.parse(readFileSync(
+      new URL('../hooks/hooks.json', import.meta.url),
+      'utf8',
+    ));
+    const productionPreTool = manifest.hooks.PreToolUse.find((group) =>
+      group.hooks?.some((hook) =>
+        hook.command?.includes('ape-hooks.bundle.mjs') &&
+        !hook.command.includes('--ape-canary-only')));
+    productionPreTool.matcher = 'spawn_agent';
+
+    const report = validateCodexHookWiring(manifest);
+    expect(report.passed).toBe(false);
+    expect(report.detail).toContain('PreToolUse collaborationspawn_agent matcher');
+    expect(report.detail).not.toContain('exact-canary wildcard');
+  });
+
+  it.each(['PreToolUse', 'PostToolUse'])('requires every ape_bind alias on the %s production hook', (eventName) => {
+    const aliases = ['ape_bind', 'mcp__ape__ape_bind', 'mcp__plugin_ape_ape__ape_bind'];
+    for (const omitted of aliases) {
+      const manifest = JSON.parse(readFileSync(new URL('../hooks/hooks.json', import.meta.url), 'utf8'));
+      const production = manifest.hooks[eventName].find((group) => group.hooks?.some((hook) =>
+        hook.command?.includes('ape-hooks.bundle.mjs') && !hook.command.includes('--ape-canary-only')));
+      production.matcher = `^(?:spawn_agent|collaborationspawn_agent|${aliases.filter((name) => name !== omitted).join('|')})$`;
+      const report = validateCodexHookWiring(manifest);
+      expect(report.passed, omitted).toBe(false);
+      expect(report.detail).toContain(`${eventName} ${omitted} matcher`);
+      expect(report.detail).not.toContain('exact-canary wildcard');
+    }
   });
 
   it('makes no Codex write-enforcement claim on a Claude host', async () => {

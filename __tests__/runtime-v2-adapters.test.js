@@ -129,7 +129,7 @@ describe('APE v2 adapter conformance', () => {
     expect(common).toBeLessThan(role);
     expect(role).toBeLessThan(ticket);
     expect(protocol).toMatch(/On Codex,[\s\S]*transport-only\s+bootstrap/);
-    expect(protocol).toContain('`ticket_projection: "hook-injected"`');
+    expect(protocol).toContain('`ticket_projection: "bootstrap-hook-injected"`');
     expect(protocol).toMatch(/return that draft unchanged[\s\S]*Call `next`/);
 
     for (const role of roles) {
@@ -206,7 +206,7 @@ describe('APE v2 adapter conformance', () => {
       reasoning_effort: 'medium',
       message: CODEX_DISPATCH_BOOTSTRAP_MESSAGE,
     });
-    expect(injected).toContain('APE trusted SubagentStart context (authoritative)');
+    expect(injected).toContain('APE trusted native binding context (authoritative)');
     expect(injected).toContain('Shell inspection permits only ls, cat, pwd, which, and these read-only git verbs:');
     expect(injected).toContain('ls-files, and ls-tree.');
     expect(injected).toContain('Keep recognized command heads unquoted.');
@@ -238,7 +238,7 @@ describe('APE v2 adapter conformance', () => {
     expect(codex.spawn_args.message).not.toContain(ticket.ticket_id);
     expect(codex.next_control).toBe(CODEX_DISPATCH_NEXT_CONTROL);
     expect(codex.next_control).toBe(
-      'After native spawn returns, call ape_run action "status" with only action and project_dir; never send run_id on status. When active-bound, wait for the worker to validate its exact final draft with ape_validate_receipt and return it unchanged. Record it unchanged. Follow the runtime next_action exactly: continue_same_agent carries exact corrections; redispatch_same_ticket alone authorizes one fresh worker on the same ticket; receipt-contract failures never authorize product remediation, replan, abort, or a successor. After the group is fully recorded, call ape_run action "next". Continue through scheduler-owned stages, reviews, replans, remediations, gates, waits, and configured auto-merge without asking the user to say continue; the explicit APE invocation already authorizes them. Yield only for completed, a genuinely terminal block, or an outcome-changing input request.',
+      'After native spawn returns, call ape_run action "status" with only action and project_dir; never send run_id on status. While launched, wait for that same child to call ape_bind and receive trusted ticket context; do not launch a replacement or advance early. When active-bound, wait for the worker to validate its exact final draft with ape_validate_receipt and return it unchanged. Record it unchanged. Follow the runtime next_action exactly: continue_same_agent carries exact corrections; redispatch_same_ticket alone authorizes one fresh worker on the same ticket; receipt-contract failures never authorize product remediation, replan, abort, or a successor. After the group is fully recorded, call ape_run action "next". Continue through scheduler-owned stages, reviews, replans, remediations, gates, waits, and configured auto-merge without asking the user to say continue; the explicit APE invocation already authorizes them. Yield only for completed, a genuinely terminal block, or an outcome-changing input request.',
     );
 
     // Compatibility and diagnostics stay available, but no installed-package

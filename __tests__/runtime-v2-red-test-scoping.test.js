@@ -3,7 +3,12 @@ import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { recordReceipt, startRun } from '../lib/runtime/service.js';
+import { recordReceipt } from '../lib/runtime/service.js';
+import { seedLegacyRun as startRun } from './legacy-run-test-helper.js';
+
+// These are historical receipt-time fallback/guard fixtures. Missing or
+// unscopeable runners are refused before dispatch on new admitted runs;
+// retained legacy runs must still execute the same fail-closed receipt checks.
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
 import { isPytestInvocation, targetedInvocation, templateInvocation } from '../lib/runtime/runner.js';

@@ -43,6 +43,7 @@ function currentPurposes(document) {
 }
 
 function typeOf(key, value) {
+  if (key === 'shipping.target') return 'object or null';
   if (value === null) return 'string or null';
   if (Array.isArray(value)) return key === 'policy.evidence_scripts' ? 'string array' : 'object array';
   if (value && typeof value === 'object') return 'object';

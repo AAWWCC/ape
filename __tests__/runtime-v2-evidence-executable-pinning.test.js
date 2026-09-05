@@ -91,6 +91,7 @@ describe('trusted-start evidence executable resolution', () => {
       tree_sha: await currentTreeSha(project),
       tickets: [{
         ticket_id: 'ticket-evidence-pin',
+        stage_id: 'test',
         role: 'test_writer',
         writable: false,
         claimed_paths: ['src/value.js'],

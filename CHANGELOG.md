@@ -2,6 +2,150 @@
 
 ## Unreleased
 
+Certification preparation now binds an explicitly selected Codex executable to the compatibility
+pin before a parent launch, validates every prompt input before creating output, and rejects
+out-of-order campaigns even when their individual attempts passed. These are offline harness
+guards, not installed/loaded/trusted evidence or authorization to begin a live campaign.
+
+The live-certification launcher now parses the isolated Codex TOML and checks retry/WebSocket
+settings in the selected custom provider's own table. Decoy assignments, inactive providers,
+incorrect scalar types, duplicate/malformed TOML and unvalidated profiles cannot establish the
+zero-retry contract. Equivalent valid TOML forms are accepted. Bounded file reads and sanitized
+parse failures protect this admission boundary without changing either packaged plugin's bytes.
+
+Live certification schema v5 records the observed immediate or automatic protected squash path
+instead of requiring a manufactured auto-merge refusal. Both paths require exact checked-head and
+passed-gate/merged-tree agreement, unchanged retained protection observations, administrator-enforced
+strict checks and PRs, and no bypass. Legacy certificate JSON is retained without automatic upgrade;
+the one-attempt, zero-recovery release rule is unchanged.
+
+Shipping now treats a successful merge command as submission, not proof of completion. A queued
+exact-head request remains on its existing watch, with a persisted marker suppressing repeat
+normal-poll submissions. Both immediate and automatic paths require a fresh observed merge and
+the passed-gate tree before local cleanup; unreadable, malformed or drifted evidence cannot become
+a completed run. This does not claim an atomic exactly-once transaction across GitHub and disk.
+
+Prevention admission now binds a read-only preview manifest/digest to public starts, checks future
+role/schema feasibility even without optional capability requests, and refuses reviewed-input,
+index, configuration, scope, or working-content drift before issuing a worker. Planning templates
+are validated by the receiving contract and are explicitly not semantic plan approval. Generator
+outputs require approved writable scope; they cannot be declared as read-only verification.
+
+Static command admission checks entry scripts, selected package scripts and shebang interpreters
+without executing them, and compares tracked prerequisites with the base START will actually use.
+The scheduler matrix binds branch-sensitive review checks to their canonical ticket definitions.
+Supersession schema/digest/ancestor refusals now precede receipt-lock storage as well as branch and
+ticket mutation. Historical unknown causes remain unknown; offline closure and separate live
+acceptance requirements are recorded in `docs/prevention-release-status.md`.
+
+Receipt rejection no longer recommends an impossible active-run reset. Typed bounded recovery
+descriptors preserve current state and work, and static malformed preflight/record calls fail
+before creating runtime storage. Certification prompts use provisional identity, exact `ape_bind`,
+injected authority, and the reviewed admission digest; launchers compare candidate package bytes
+and no longer apply implicit approval/sandbox bypass flags. Live certification remains a separate
+authorization and evidence gate, not a claim made by these offline fixes.
+
+Shipping freezes an explicitly configured origin/repository/base and checks admitted, staged,
+committed and pushed identities. General projects no longer inherit APE's upstream repository;
+the canonical public APE package retains its AAWWCC/ape restriction. Retry and repair budgets have
+not increased, and expanded repair-and-land behavior remains deferred.
+
+Offline runtime regressions now compose the registered MCP catalog, exact returned native launch
+arguments, provisional startup guidance, trusted bootstrap hook, capability-free MCP confirmation,
+acknowledgement, and single-use start proof without launching a model. Probe status exposes its
+effective launch deadline and bounded current-generation bootstrap rejection instead of presenting
+expired or rejected binding as ordinary waiting. Failed probes return a blocked orchestration
+next action with no automatic successor; successful status reads are not binding success.
+
+Canary fencing now uses immutable, domain-separated child and exact parent/child-turn denial
+evidence, independently of provisional candidate storage. Damaged candidate state cannot release
+an authenticated canary, while merely observed unrelated children retain external integrations on
+later turns. Parent sessions alone are never canary keys. Early rejected bootstrap hooks retain
+typed diagnostics through a diagnostic-only path that cannot bind or emit authority. Read-only
+SessionStart guidance diagnoses failed or unreadable probes without repairing state, publishing
+legacy quarantine, or suggesting another launch.
+
+Bounded response fallbacks preserve the typed `idempotent_replay` flag on dispatch actions.
+Larger bootstrap messages exposed its loss in compact responses even though the original launch
+authority was intact; replay metadata now survives both reference-only compaction stages.
+
+Bootstrap instructions now distinguish the pre-binding operation from post-binding authority checks.
+Ticket/receipt context is expected to be absent before `ape_bind`; the child must not treat that
+expected absence as a stop condition. Only after the call returns does missing injected authority
+require stopping. This corrects a live canary's premature stop without granting stage authority.
+
+Bootstrap discovery now searches the registered tool name `ape_bind` rather than the host-qualified
+invocation alias. A same-child native diagnostic confirmed that the qualified query returned zero
+tools while the bare-name query returned the installed APE binding tool. Launch and startup
+instructions distinguish catalog lookup from invocation without changing binding checks or exposing
+capabilities to search.
+
+Valid Codex SubagentStart observations now receive a bounded, capability-free bootstrap reminder,
+so runtime-owned child startup directions no longer depend solely on the launch message. The
+reminder is conditional on the child's assigned bootstrap task; it neither associates a ticket nor
+grants stage authority or supplies missing launch arguments. Known native children also suppress
+parent-only SessionStart guidance when the host omits explicit child flags. Exact bearer validation,
+one-child binding, and probe acknowledgement requirements remain unchanged.
+
+Native bootstrap instructions now allow host tool-catalog discovery solely for the installed
+`ape_bind` tool. The trusted live canary exposed a deadlock on deferred-tool hosts: requiring binding
+before every tool call also prohibited the search needed to make binding callable. Discovery never
+includes the bearer, grants no stage authority, and does not permit shell or substitute MCP execution.
+
+Codex native-binding certification now exercises the same persisted StageTicket, HMAC-derived launch,
+and trusted bootstrap context path as real workers. New Codex children record provisional identity
+and actual model at SubagentStart, then present a separate generation-specific bearer to the child-only
+`ape_bind` tool. Its trusted PreToolUse hook atomically binds and injects authority; the MCP handler
+returns only a capability-free confirmation. Parent and child turn IDs are no longer assumed equal.
+The unchanged bootstrap message is a trusted-orchestrator delivery boundary, not a claim that an opaque
+native task-name result proves a child's physical UUID. Bounded typed diagnostics distinguish a
+start event that was never observed from accepted, rejected, and exceptional binding outcomes without
+persisting native identities, ticket ids, exception text, or bearer material.
+
+Prepared probes are durably replayable after a lost tool response and return the exact native
+`spawn_agent` argument object callers must forward unchanged. Probe readiness now corroborates the
+hash-bound ticket, selected model, launch turn, production intent, bound native identity, and one-way
+capability at each lifecycle edge. Because Codex identities remain resumable after SubagentStop,
+expired and replaced canaries stay tool-quarantined in a private, append-only, content-addressed
+identity ledger. Exact lookups remain constant-time without a monolithic eviction ceiling, and torn
+probe projections cannot release an already-bound canary. Upgrade handling migrates shipped v1
+bound identities into that fence. Legacy probes retain retired launch-turn fences; new bootstrap
+probes retire only the exact old token's child, so a delayed child cannot claim a replacement even
+when the parent turn is reused. An independent fallback ledger keeps rejected identities fenced when the
+primary quarantine container is damaged. Probe projections, tickets, and tombstones use bounded,
+no-follow reads, and ledger publication refuses redirected containers or shards. The deny-only wildcard scanner also recognizes exact
+canaries in hook payloads beyond the ordinary 8 MB input budget without retaining the oversized body
+or trusting nested tool fields.
+
+`answer-preflight` now declares its audit reason as conditionally required and omits absent optional
+fields before input validation, preserving the handler's actionable missing-reason diagnostic instead
+of returning a generic unsupported-undefined error. `recover-receipt` uses the same omission-safe
+boundary, and aimed preflight answers diagnose stale run ids before stage eligibility checks. Receipt
+retry status retains its same-worker correction action instead of contradicting it with milestone
+advancement.
+
+Authoritative lifecycle consumers now read dispatch intents strictly: damaged evidence can no longer
+look like a missing worker and authorize an overlapping retry after its ticket deadline. The read-only
+status projection remains available for diagnosis without weakening NEXT, resume, or receipt
+settlement. Lifecycle records now require their complete launch and binding ancestry, canonical
+ticket-hash filename, monotonic generation history, and host-specific evidence. Intent reads are
+bounded and no-follow, wrong-shaped containers and entries are quarantined with their forensic bytes
+intact during audited abort, probe, or start recovery, and runtime ancestor symlinks are rejected
+before locks or authority files can be written outside the governed project. Sealed orphan writes
+remain fenced when their own or unrelated intent evidence becomes unreadable.
+
+APE no longer proposes or writes operational policy into repository-owned instruction files. A
+synchronous SessionStart hook and every state-bearing `ape_run` response now supply bounded,
+versioned runtime guidance with active contract and next-action context; scheduler and hook enforcement
+remain authoritative. Codex guidance names the required probe, unchanged native dispatch, status,
+acknowledgement, and start sequence instead of claiming a sealed or inactive run can start immediately.
+Session guidance and `answer-preflight` now use the canonical active-state corruption path for
+unparseable, scalar, or incomplete state instead of treating falsey JSON as an inactive project or
+mutating a run-looking fragment. Active-state and SubagentStart diagnostic reads also reject
+symlinks, special files, and oversized payloads without blocking. Audited reset verifies the diagnosed
+entry before quarantining it so a replacement run is preserved. Claude receives the synchronous guidance once through the shared
+auto-discovered manifest; its explicit manifest remains supplemental asynchronous LARP only.
+
 ## 2.24.10 — 2026-09-04
 
 Windows host-edge marketplace smoke now resolves each installed Codex and Claude package entrypoint

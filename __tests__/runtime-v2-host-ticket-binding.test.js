@@ -39,6 +39,7 @@ async function runningProject() {
     status: 'running',
     tickets: [{
       ticket_id: 'run-1:build:ticket-1',
+      stage_id: 'build',
       role: 'implementer',
       writable: true,
       claimed_paths: ['src'],

@@ -1559,6 +1559,7 @@ function hookProject() {
         tickets: [
           {
             ticket_id: 'run-evidence:review:r',
+            stage_id: 'review',
             role: 'reviewer',
             writable: false,
             claimed_paths: [],
@@ -1661,6 +1662,7 @@ describe('APE v2 hook binary evidence containment (cwd + operand precompute)', (
         },
         tickets: [{
           ticket_id: 'run-evidence:review:r',
+          stage_id: 'review',
           role: 'reviewer',
           writable: false,
           claimed_paths: [],

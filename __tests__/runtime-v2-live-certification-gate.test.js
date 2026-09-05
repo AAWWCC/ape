@@ -1,9 +1,9 @@
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import childProcess, { execFileSync, spawnSync } from 'node:child_process';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   TERMINAL_REASON_CODES,
   TERMINAL_REASON_TAXONOMY_VERSION,
@@ -11,6 +11,7 @@ import {
 import {
   LIVE_CERTIFICATION_HOSTS,
   LIVE_CERTIFICATION_PIPELINES,
+  LIVE_CERTIFICATION_SCHEMA_VERSION,
   LIVE_CERTIFICATION_UNVERIFIED_HOSTS,
   LiveCertificationError,
   parseLiveCertificationJson,
@@ -38,6 +39,12 @@ const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
 const SOURCE = 'a'.repeat(40);
 const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
 const temporaryRepositories = [];
+const realSpawnSync = spawnSync;
+
+function codexVersionResult(overrides = {}) {
+  return { status: 0, signal: null, stdout: Buffer.from(`codex-cli ${HOST_VERSIONS.codex}\n`),
+    stderr: Buffer.alloc(0), ...overrides };
+}
 
 function certificationParentFixture({
   zeroRetry = true,
@@ -81,6 +88,10 @@ function certificationParentFixture({
     path.join(codexHome, 'config.toml'),
     [
       'model_provider = "openai-zero-retry"',
+      '[model_providers.openai-zero-retry]',
+      'name = "OpenAI zero retry"',
+      'wire_api = "responses"',
+      'requires_openai_auth = true',
       zeroRetry ? 'request_max_retries = 0' : 'request_max_retries = 5',
       'stream_max_retries = 0',
       'supports_websockets = false',
@@ -92,15 +103,35 @@ function certificationParentFixture({
       remotePluginEnabled ? 'remote_plugin = true' : 'remote_plugin = false',
     ].join('\n'),
   );
-  writeFileSync(
-    path.join(codexHome, 'plugins', 'cache', 'ape', 'ape', VERSION, 'package.json'),
-    `${JSON.stringify({ name: 'ape', version: VERSION })}\n`,
-  );
+  cpSync(fileURLToPath(new URL('../plugins/ape', import.meta.url)),
+    path.join(codexHome, 'plugins', 'cache', 'ape', 'ape', VERSION), { recursive: true });
+  vi.spyOn(childProcess, 'spawnSync').mockReturnValue(codexVersionResult());
   return {
     projectDir: exactProject,
     codexHome: realpathSync(codexHome),
     promptPath,
+    codexBin: realpathSync(process.execPath),
   };
+}
+
+function certificationParentWithConfig(update) {
+  const fixture = certificationParentFixture();
+  const configPath = path.join(fixture.codexHome, 'config.toml');
+  writeFileSync(configPath, update(readFileSync(configPath, 'utf8')));
+  return fixture;
+}
+
+function expectCertificationConfigRefusal(fixture) {
+  let failure;
+  try {
+    buildCodexParentInvocation(fixture);
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(LiveCertificationParentError);
+  expect(failure.message.length).toBeLessThan(1024);
+  expect(failure.message).toMatch(/config|provider|retries|analytics|features|plugins|apps|websockets|TOML/iu);
+  return failure;
 }
 
 function hash(number) {
@@ -117,7 +148,22 @@ function landProof(sequence) {
   return {
     target_branch: 'main',
     merge_method: 'squash',
-    auto_merge_required: true,
+    merge_path: 'immediate',
+    bypass_used: false,
+    required_checks_passed: true,
+    checked_head_commit: pushed,
+    gate_tree: hash(400 + sequence),
+    merged_tree: hash(400 + sequence),
+    branch_protection: {
+      pull_request_required: true,
+      required_checks_strict: true,
+      required_checks_count: 1,
+      admins_enforced: true,
+      force_pushes_allowed: false,
+      deletions_allowed: false,
+      before_sha256: runRecordHash(500 + sequence),
+      after_sha256: runRecordHash(500 + sequence),
+    },
     pr_state: 'MERGED',
     pushed_head_commit: pushed,
     observed_merged_pr_head: pushed,
@@ -167,7 +213,7 @@ function validLedger(sourceCommit = SOURCE) {
     }
   }
   return {
-    schema_version: 4,
+    schema_version: 5,
     ape_version: VERSION,
     source_commit: sourceCommit,
     certified_hosts: [...LIVE_CERTIFICATION_HOSTS],
@@ -268,24 +314,150 @@ function certificationCommit({
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const directory of temporaryRepositories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
 describe('live certification Codex parent launcher', () => {
-  it('always carries the vetted-hook flag and the isolated zero-retry home', () => {
+  it('host pin binds the explicitly selected resolved executable before producing a parent invocation', () => {
     const fixture = certificationParentFixture();
     const invocation = buildCodexParentInvocation(fixture);
-    expect(invocation.command).toBe('codex');
+    expect(invocation.command).toBe(fixture.codexBin);
+    expect(childProcess.spawnSync).toHaveBeenCalledExactlyOnceWith(fixture.codexBin, ['--version'], {
+      cwd: fixture.projectDir,
+      env: { ...process.env, CODEX_HOME: fixture.codexHome },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 5_000,
+      killSignal: 'SIGKILL',
+      maxBuffer: 4_096,
+      windowsHide: true,
+      shell: false,
+    });
+    expect(invocation.host_version).toBe(HOST_VERSIONS.codex);
+  });
+
+  it.each([undefined, '', 'codex', './codex', 7, null])('host pin rejects missing or non-absolute executable %s without running it', (codexBin) => {
+    const fixture = certificationParentFixture();
+    expect(() => buildCodexParentInvocation({ ...fixture, codexBin })).toThrow(/absolute.*--codex-bin/iu);
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
+  });
+
+  it.each(['missing', 'directory', 'non-executable'])('host pin rejects a %s executable before probing', (kind) => {
+    const fixture = certificationParentFixture();
+    const codexBin = path.join(path.dirname(fixture.projectDir), 'invalid-codex');
+    if (kind === 'directory') mkdirSync(codexBin);
+    if (kind === 'non-executable') writeFileSync(codexBin, 'not executable\n', { mode: 0o600 });
+    // Windows executable validity is established by CreateProcess, not POSIX mode bits.
+    if (kind === 'non-executable' && process.platform === 'win32') {
+      childProcess.spawnSync.mockReturnValue(codexVersionResult({ error: new Error('EACCES'), status: null }));
+    }
+    expect(() => buildCodexParentInvocation({ ...fixture, codexBin })).toThrow(/--codex-bin|version check/iu);
+  });
+
+  it.each([
+    ['wrong pin', { stdout: Buffer.from('codex-cli 0.148.0\n') }],
+    ['missing version', { stdout: Buffer.alloc(0) }],
+    ['malformed version', { stdout: Buffer.from('0.147.0\n') }],
+    ['extra version lines', { stdout: Buffer.from('codex-cli 0.147.0\ncodex-cli 0.148.0\n') }],
+    ['invalid UTF-8', { stdout: Buffer.from([0xff]) }],
+    ['failed process', { status: 1 }],
+    ['terminated process', { status: null, signal: 'SIGKILL' }],
+    ['timeout', { status: null, error: Object.assign(new Error('SYNTHETIC_SECRET'), { code: 'ETIMEDOUT' }) }],
+    ['spawn failure', { status: null, error: Object.assign(new Error('SYNTHETIC_SECRET'), { code: 'ENOENT' }) }],
+    ['oversized stdout', { stdout: Buffer.alloc(4_097, 120) }],
+    ['oversized stderr', { stderr: Buffer.alloc(4_097, 120) }],
+    ['oversized combined output', { stdout: Buffer.from(`codex-cli ${HOST_VERSIONS.codex}\n`), stderr: Buffer.alloc(4_090, 120) }],
+    ['unexpected result shape', { stdout: undefined }],
+  ])('host pin refuses %s with bounded sanitized guidance', (_name, result) => {
+    const fixture = certificationParentFixture();
+    childProcess.spawnSync.mockReturnValue(codexVersionResult(result));
+    let failure;
+    try { buildCodexParentInvocation(fixture); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(LiveCertificationParentError);
+    expect(failure.message).toMatch(/Codex.*version|Codex.*0\.147\.0/iu);
+    expect(failure.message.length).toBeLessThan(400);
+    expect(failure.message).not.toContain('SYNTHETIC_SECRET');
+    expect(failure.message).not.toContain(fixture.codexBin);
+  });
+
+  it('host pin accepts CRLF version output from the exact supported host', () => {
+    const fixture = certificationParentFixture();
+    childProcess.spawnSync.mockReturnValue(codexVersionResult({ stdout: Buffer.from(`codex-cli ${HOST_VERSIONS.codex}\r\n`) }));
+    expect(buildCodexParentInvocation(fixture).host_version).toBe(HOST_VERSIONS.codex);
+  });
+
+  it.skipIf(process.platform === 'win32')('host pin resolves a symlink once and invokes its absolute target', () => {
+    const fixture = certificationParentFixture();
+    const link = path.join(path.dirname(fixture.projectDir), 'codex-link');
+    symlinkSync(fixture.codexBin, link);
+    expect(buildCodexParentInvocation({ ...fixture, codexBin: link }).command).toBe(fixture.codexBin);
+    expect(childProcess.spawnSync.mock.calls[0][0]).toBe(fixture.codexBin);
+  });
+
+  it('host pin checks the real executable in CLI dry-run without starting a parent', () => {
+    const fixture = certificationParentFixture();
+    const checked = realSpawnSync(process.execPath, [
+      fileURLToPath(new URL('../scripts/run-live-certification-parent.mjs', import.meta.url)),
+      '--project-dir', fixture.projectDir, '--codex-home', fixture.codexHome,
+      '--prompt', fixture.promptPath, '--codex-bin', process.execPath, '--dry-run',
+    ], { encoding: 'utf8', timeout: 10_000, maxBuffer: 4_096 });
+    expect(checked.error).toBeUndefined();
+    expect(checked.status).toBe(1);
+    expect(checked.stdout).toBe('');
+    expect(checked.stderr).toMatch(/Codex.*0\.147\.0/iu);
+  });
+
+  it('host pin rejects executable metadata drift during the version check', () => {
+    const fixture = certificationParentFixture();
+    const codexBin = path.join(path.dirname(fixture.projectDir), 'changed-codex');
+    writeFileSync(codexBin, 'synthetic executable\n', { mode: 0o700 });
+    childProcess.spawnSync.mockImplementation(() => {
+      writeFileSync(codexBin, 'replacement synthetic executable\n');
+      return codexVersionResult();
+    });
+    expect(() => buildCodexParentInvocation({ ...fixture, codexBin })).toThrow(/Codex version check/iu);
+  });
+
+  it.skipIf(process.platform === 'win32' || /\s/u.test(process.execPath)).each([
+    ['success', `process.stdout.write('codex-cli ${HOST_VERSIONS.codex}\\n');`, 0],
+    ['oversized diagnostics', "process.stderr.write('SYNTHETIC_SECRET'.repeat(10000)); setInterval(() => {}, 1000);", 1],
+    ['timeout despite ignored SIGTERM', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);", 1],
+  ])('host pin CLI subprocess handles %s before any parent launch', (_name, body, expectedStatus) => {
+    const fixture = certificationParentFixture();
+    const codexBin = path.join(path.dirname(fixture.projectDir), 'synthetic-codex.mjs');
+    // Direct Node shebang, not a shell shim; Windows uses the portable mocked boundary above.
+    writeFileSync(codexBin, `#!${process.execPath}\nif (process.argv.length !== 3 || process.argv[2] !== '--version') process.exit(77);\n${body}\n`, { mode: 0o700 });
+    const checked = realSpawnSync(process.execPath, [
+      fileURLToPath(new URL('../scripts/run-live-certification-parent.mjs', import.meta.url)),
+      '--project-dir', fixture.projectDir, '--codex-home', fixture.codexHome,
+      '--prompt', fixture.promptPath, '--codex-bin', codexBin, '--dry-run',
+    ], { encoding: 'utf8', timeout: 10_000, maxBuffer: 4_096 });
+    expect(checked.error).toBeUndefined();
+    expect(checked.status).toBe(expectedStatus);
+    expect(checked.stderr).not.toContain('SYNTHETIC_SECRET');
+    if (expectedStatus === 0) {
+      expect(JSON.parse(checked.stdout)).toMatchObject({ command: realpathSync(codexBin), host_version: HOST_VERSIONS.codex });
+      expect(checked.stderr).toBe('');
+    } else {
+      expect(checked.stdout).toBe('');
+      expect(checked.stderr).toMatch(/Codex version check.*5 seconds.*4096/iu);
+    }
+  }, 12_000);
+
+  it('preserves sandbox and hook trust while using the exact staged candidate and zero-retry home', () => {
+    const fixture = certificationParentFixture();
+    const invocation = buildCodexParentInvocation(fixture);
+    expect(invocation.command).toBe(fixture.codexBin);
     expect(invocation.args).toEqual([
       'exec',
       '-c',
       'chatgpt_base_url="http://127.0.0.1:1"',
       '-c',
       'features.apps=false',
-      '--dangerously-bypass-approvals-and-sandbox',
-      '--dangerously-bypass-hook-trust',
+      '--sandbox',
+      'workspace-write',
       '--color',
       'never',
       '-C',
@@ -302,12 +474,269 @@ describe('live certification Codex parent launcher', () => {
     expect(invocation.input).toBe(
       `$ape:run\nPass project_dir "${fixture.projectDir}" on every APE MCP call.\n`,
     );
+    expect(invocation.candidate_package).toMatchObject({ version: VERSION, staged_parity: true });
+    expect(invocation.candidate_package.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(invocation.candidate_package.file_count).toBeGreaterThan(1);
+    expect(invocation.candidate_package).not.toHaveProperty('loaded');
+    expect(invocation.args.join(' ')).not.toMatch(/bypass|danger-full-access|approval_policy="never"/);
+  });
+
+  it.each(['changed', 'missing', 'extra', 'symlink'])('rejects same-version candidate bytes that are %s', (kind) => {
+    const fixture = certificationParentFixture();
+    const cached = path.join(fixture.codexHome, 'plugins', 'cache', 'ape', 'ape', VERSION);
+    const manifest = path.join(cached, '.codex-plugin', 'plugin.json');
+    if (kind === 'changed') writeFileSync(manifest, `${readFileSync(manifest, 'utf8')} `);
+    if (kind === 'missing' || kind === 'symlink') rmSync(manifest);
+    if (kind === 'extra') writeFileSync(path.join(cached, 'extra-authority.json'), '{}');
+    if (kind === 'symlink') symlinkSync(path.join(cached, 'package.json'), manifest);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/candidate package.*(?:parity|regular|symlink)/i);
   });
 
   it('fails closed before launch when automatic transport retries are enabled', () => {
     const fixture = certificationParentFixture({ zeroRetry: false });
     expect(() => buildCodexParentInvocation(fixture)).toThrow(LiveCertificationParentError);
     expect(() => buildCodexParentInvocation(fixture)).toThrow(/request_max_retries = 0/iu);
+  });
+
+  it.each([
+    ['selected retries are nonzero', (config) => config.replace('request_max_retries = 0', 'request_max_retries = 5')],
+    ['selected retry fields are absent', (config) => config.replace(/^(?:request_max_retries|stream_max_retries|supports_websockets) = .*\n/gmu, '')],
+    ['selected provider is absent', (config) => config.replace('[model_providers.openai-zero-retry]', '[model_providers.another-provider]')],
+  ])('does not borrow zero-retry declarations from an inactive provider when %s', (_name, update) => {
+    const fixture = certificationParentWithConfig((config) => `${update(config)}\n${[
+      '[model_providers.inactive-zero-retry]',
+      'name = "Inactive provider"',
+      'wire_api = "responses"',
+      'request_max_retries = 0',
+      'stream_max_retries = 0',
+      'supports_websockets = false',
+    ].join('\n')}\n`);
+    expectCertificationConfigRefusal(fixture);
+  });
+
+  it('does not borrow zero-retry declarations from the top level', () => {
+    const fixture = certificationParentWithConfig((config) => [
+      'request_max_retries = 0',
+      'stream_max_retries = 0',
+      'supports_websockets = false',
+      config.replace(/^(?:request_max_retries|stream_max_retries|supports_websockets) = .*\n/gmu, ''),
+    ].join('\n'));
+    expectCertificationConfigRefusal(fixture);
+  });
+
+  it('requires model_provider at the top level, not under an unrelated table', () => {
+    const fixture = certificationParentWithConfig((config) => `[unrelated]\n${config}`);
+    expectCertificationConfigRefusal(fixture);
+  });
+
+  it.each(['"""', "'''"])('does not interpret assignments in a %s multiline string as configuration', (delimiter) => {
+    const fixture = certificationParentWithConfig((config) => [
+      `notes = ${delimiter}`,
+      'model_provider = "openai-zero-retry"',
+      'request_max_retries = 0',
+      'stream_max_retries = 0',
+      'supports_websockets = false',
+      '[analytics]',
+      'enabled = false',
+      '[features]',
+      'plugins = true',
+      'apps = false',
+      'remote_plugin = true',
+      delimiter,
+      config.replace('request_max_retries = 0', 'request_max_retries = 5'),
+    ].join('\n'));
+    expectCertificationConfigRefusal(fixture);
+  });
+
+  it.each([
+    ['malformed table', (config) => `${config}\n[broken\n`],
+    ['duplicate scalar key', (config) => config.replace('request_max_retries = 0', 'request_max_retries = 0\nrequest_max_retries = 0')],
+    ['duplicate quoted key', (config) => config.replace('request_max_retries = 0', 'request_max_retries = 0\n"request_max_retries" = 0')],
+    ['duplicate table', (config) => `${config}\n[analytics]\nenabled = false\n`],
+    ['numeric model_provider', (config) => config.replace('model_provider = "openai-zero-retry"', 'model_provider = 7')],
+    ['missing model_provider', (config) => config.replace('model_provider = "openai-zero-retry"\n', '')],
+    ['empty model_provider', (config) => config.replace('model_provider = "openai-zero-retry"', 'model_provider = ""')],
+    ['missing selected provider name', (config) => config.replace('name = "OpenAI zero retry"\n', '')],
+    ['numeric selected provider name', (config) => config.replace('name = "OpenAI zero retry"', 'name = 7')],
+    ['empty selected provider name', (config) => config.replace('name = "OpenAI zero retry"', 'name = "  "')],
+    ['string request retry count', (config) => config.replace('request_max_retries = 0', 'request_max_retries = "0"')],
+    ['boolean request retry count', (config) => config.replace('request_max_retries = 0', 'request_max_retries = false')],
+    ['float zero request retry count', (config) => config.replace('request_max_retries = 0', 'request_max_retries = 0.0')],
+    ['exponent zero stream retry count', (config) => config.replace('stream_max_retries = 0', 'stream_max_retries = 0e0')],
+    ['array stream retry count', (config) => config.replace('stream_max_retries = 0', 'stream_max_retries = [0]')],
+    ['fractional stream retry count', (config) => config.replace('stream_max_retries = 0', 'stream_max_retries = 0.5')],
+    ['string websocket flag', (config) => config.replace('supports_websockets = false', 'supports_websockets = "false"')],
+    ['missing request retry count', (config) => config.replace('request_max_retries = 0\n', '')],
+    ['missing stream retry count', (config) => config.replace('stream_max_retries = 0\n', '')],
+    ['missing websocket flag', (config) => config.replace('supports_websockets = false\n', '')],
+    ['string analytics flag', (config) => config.replace('enabled = false', 'enabled = "false"')],
+    ['missing analytics flag', (config) => config.replace('enabled = false\n', '')],
+    ['string plugin flag', (config) => config.replace('plugins = true', 'plugins = "true"')],
+    ['string apps flag', (config) => config.replace('apps = false', 'apps = "false"')],
+    ['string remote plugin flag', (config) => config.replace('remote_plugin = true', 'remote_plugin = "true"')],
+  ])('rejects invalid or incomplete TOML configuration: %s', (_name, update) => {
+    expectCertificationConfigRefusal(certificationParentWithConfig(update));
+  });
+
+  it.each([
+    ['an unrelated provider with retries enabled', (config) => `${config}\n${[
+      '[model_providers.unrelated]',
+      'name = "Unrelated provider"',
+      'wire_api = "responses"',
+      'request_max_retries = 5',
+      'stream_max_retries = 5',
+      'supports_websockets = true',
+    ].join('\n')}\n`],
+    ['quoted table and field names', (config) => config
+      .replace('[model_providers.openai-zero-retry]', '["model_providers"."openai-zero-retry"]')
+      .replace('[analytics]', '["analytics"]')
+      .replace('[features]', '["features"]')
+      .replace(/^([a-z_]+)(\s*=)/gmu, '"$1"$2')],
+    ['dotted keys and literal strings', () => [
+      "model_provider = 'openai-zero-retry'",
+      "model_providers.openai-zero-retry.name = 'OpenAI zero retry'",
+      "model_providers.openai-zero-retry.wire_api = 'responses'",
+      'model_providers.openai-zero-retry.requires_openai_auth = true',
+      'model_providers.openai-zero-retry.request_max_retries = 0',
+      'model_providers.openai-zero-retry.stream_max_retries = 0',
+      'model_providers.openai-zero-retry.supports_websockets = false',
+      'analytics.enabled = false',
+      'features.plugins = true',
+      'features.apps = false',
+      'features.remote_plugin = true',
+    ].join('\n')],
+    ['inline tables', () => [
+      'model_provider = "openai-zero-retry"',
+      'model_providers = { openai-zero-retry = { name = "OpenAI zero retry", wire_api = "responses", requires_openai_auth = true, request_max_retries = 0, stream_max_retries = 0, supports_websockets = false } }',
+      'analytics = { enabled = false }',
+      'features = { plugins = true, apps = false, remote_plugin = true }',
+    ].join('\n')],
+    ['valid trailing comments', (config) => config.split('\n').map((line) => `${line} # certification setting`).join('\n')],
+  ])('accepts the actual selected zero-retry provider with %s', (_name, update) => {
+    const invocation = buildCodexParentInvocation(certificationParentWithConfig(update));
+    expect(invocation.command).toBe(realpathSync(process.execPath));
+    expect(invocation.candidate_package.staged_parity).toBe(true);
+  });
+
+  it.each(['openai', 'ollama', 'lmstudio', 'amazon-bedrock'])('rejects reserved built-in provider %s with custom-provider guidance', (providerId) => {
+    const fixture = certificationParentWithConfig((config) => config.replaceAll('openai-zero-retry', providerId));
+    const failure = expectCertificationConfigRefusal(fixture);
+    expect(failure.message).toMatch(/custom model_provider.*zero retries.*built-in/iu);
+  });
+
+  it.each(['openai', 'ollama', 'lmstudio'])('rejects a redefined inactive built-in provider %s before host loading', (providerId) => {
+    const fixture = certificationParentWithConfig((config) => `${config}\n${[
+      `[model_providers.${providerId}]`,
+      'name = "Inactive built-in override"',
+      'wire_api = "responses"',
+      'request_max_retries = 0',
+      'stream_max_retries = 0',
+      'supports_websockets = false',
+    ].join('\n')}\n`);
+    const failure = expectCertificationConfigRefusal(fixture);
+    expect(failure.message).toMatch(/reserved built-in.*inactive.*custom provider name/iu);
+  });
+
+  it('allows supported inactive Bedrock AWS overrides without borrowing their settings', () => {
+    const fixture = certificationParentWithConfig((config) => `${config}\n${[
+      '[model_providers.amazon-bedrock.aws]',
+      'region = "us-east-1"',
+      'profile = "synthetic"',
+    ].join('\n')}\n`);
+    expect(buildCodexParentInvocation(fixture).command).toBe(fixture.codexBin);
+  });
+
+  it.each([
+    ['selected profile', (config) => `profile = "certification"\n${config}`],
+    ['profile definitions', (config) => `${config}\n[profiles.certification]\nmodel_provider = "openai-zero-retry"\n`],
+  ])('rejects %s with explicit flattening guidance', (_name, update) => {
+    const failure = expectCertificationConfigRefusal(certificationParentWithConfig(update));
+    expect(failure.message).toMatch(/profile.*flatten.*config\.toml/iu);
+  });
+
+  it.each(['symlink', 'directory'])('rejects a config.toml %s before reading it', (kind) => {
+    const fixture = certificationParentFixture();
+    const configPath = path.join(fixture.codexHome, 'config.toml');
+    const contents = readFileSync(configPath);
+    rmSync(configPath);
+    if (kind === 'symlink') {
+      const target = path.join(fixture.codexHome, 'reviewed-source.toml');
+      writeFileSync(target, contents);
+      symlinkSync(target, configPath);
+    } else {
+      mkdirSync(configPath);
+    }
+    const failure = expectCertificationConfigRefusal(fixture);
+    expect(failure.message).toMatch(/regular file.*symlinks/iu);
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a config.toml FIFO without blocking on its contents', () => {
+    const fixture = certificationParentFixture();
+    const configPath = path.join(fixture.codexHome, 'config.toml');
+    rmSync(configPath);
+    execFileSync('mkfifo', [configPath], { timeout: 2_000 });
+    // Isolate the real synchronous admission call so a broken reader cannot hang Vitest.
+    const launcher = new URL('../scripts/run-live-certification-parent.mjs', import.meta.url).href;
+    const checked = spawnSync(process.execPath, ['--input-type=module', '-e', [
+      `import { buildCodexParentInvocation } from ${JSON.stringify(launcher)};`,
+      'try {',
+      '  buildCodexParentInvocation(JSON.parse(process.argv[1]));',
+      '  process.exitCode = 2;',
+      '} catch (error) {',
+      '  process.stdout.write(JSON.stringify({ name: error.name, message: error.message }));',
+      '  process.exitCode = 1;',
+      '}',
+    ].join('\n'), JSON.stringify(fixture)], {
+      encoding: 'utf8', timeout: 2_000, maxBuffer: 4_096,
+    });
+    expect(checked.error).toBeUndefined();
+    expect(checked.signal).toBeNull();
+    expect(checked.status).toBe(1);
+    expect(JSON.parse(checked.stdout)).toMatchObject({
+      name: 'LiveCertificationParentError',
+      message: expect.stringMatching(/regular file/iu),
+    });
+  });
+
+  it.each([0, 1])('enforces the 256 KiB byte boundary at limit plus %i', (extraBytes) => {
+    const fixture = certificationParentWithConfig((config) => {
+      const prefix = `${config}\n#`;
+      return `${prefix}${'x'.repeat((256 * 1024) + extraBytes - Buffer.byteLength(prefix))}`;
+    });
+    expect(readFileSync(path.join(fixture.codexHome, 'config.toml')).length).toBe((256 * 1024) + extraBytes);
+    if (extraBytes === 0) {
+      expect(buildCodexParentInvocation(fixture).command).toBe(fixture.codexBin);
+    } else {
+      expect(expectCertificationConfigRefusal(fixture).message).toMatch(/262144 bytes/iu);
+    }
+  });
+
+  it('rejects invalid UTF-8 even in a TOML comment', () => {
+    const fixture = certificationParentFixture();
+    const configPath = path.join(fixture.codexHome, 'config.toml');
+    writeFileSync(configPath, Buffer.concat([
+      readFileSync(configPath), Buffer.from('\n#'), Buffer.from([0xff]),
+    ]));
+    expect(expectCertificationConfigRefusal(fixture).message).toMatch(/UTF-8/iu);
+  });
+
+  it('does not leak configuration lines through a TOML parser error', () => {
+    const sentinel = 'SYNTHETIC_NOT_A_REAL_CREDENTIAL_8a6c';
+    const fixture = certificationParentWithConfig((config) => `${config}\nsecret = "${sentinel}" trailing-invalid-token\n`);
+    const failure = expectCertificationConfigRefusal(fixture);
+    expect(failure.message).toMatch(/valid TOML.*correct.*before launch/iu);
+    expect(failure.message).not.toContain(sentinel);
+    expect(failure.message).not.toContain('secret =');
+    expect(failure.message).not.toContain('trailing-invalid-token');
+  });
+
+  it.each([
+    ['dotted-key depth', (config) => `${Array(34).fill('nested').join('.')} = true\n${config}`],
+    ['inline-table depth', (config) => `nested = ${'{ nested = '.repeat(34)}true${' }'.repeat(34)}\n${config}`],
+    ['parsed node count', (config) => `many_nodes = [${Array(10_001).fill('true').join(',')}]\n${config}`],
+  ])('rejects excessive %s before launcher admission', (_name, update) => {
+    const failure = expectCertificationConfigRefusal(certificationParentWithConfig(update));
+    expect(failure.message).toMatch(/nesting|depth|nodes|bounded/iu);
   });
 
   it('fails closed before launch when optional analytics transport is enabled', () => {
@@ -569,6 +998,9 @@ describe('live certification prompt preparation', () => {
       const preview = exactControlCall(prompt, 'PREVIEW');
       const start = exactControlCall(prompt, 'START');
       expect(start).toEqual({ ...preview, action: 'start' });
+      expect(start).not.toHaveProperty('expected_admission_digest');
+      expect(prompt).toContain("expected_admission_digest copied unchanged from the preview's top-level admission_digest");
+      expect(prompt).toContain('never use a placeholder, guess a digest, or send the digest on preview');
       expect(preview.action).toBe('preview');
       expect(preview.project_dir).toBe(path.join(root, pipeline));
       expect(preview.objective).toBeTruthy();
@@ -606,6 +1038,18 @@ describe('live certification prompt preparation', () => {
       }
       expect(prompt).toMatch(/preview exactly once[\s\S]*start exactly once/iu);
       expect(prompt).toMatch(/stop immediately[\s\S]*Never correct or retry one of those control calls/iu);
+      expect(prompt).toContain('SubagentStart is provisional native identity evidence only');
+      expect(prompt).toContain('first APE operation is ape_bind');
+      expect(prompt).toContain('literal registered tool name ape_bind');
+      if (pipeline === 'land') {
+        expect(prompt).toContain('Protected land may complete by immediate or automatic squash');
+        expect(prompt).toContain('Do not force the automatic path');
+        expect(prompt).toContain('Require observed MERGED state at the exact pushed head and the passed-gate tree');
+        expect(prompt).not.toContain('enable protected auto-merge, and squash-merge');
+      }
+      expect(prompt).toContain('never include bootstrap arguments or capabilities in discovery');
+      expect(prompt).toContain('For the probe only, follow its injected acknowledgement-only contract');
+      expect(prompt).not.toContain('Require the trusted SubagentStart context before stage work');
     }
   });
 
@@ -621,6 +1065,23 @@ describe('live certification prompt preparation', () => {
 });
 
 describe('live release certification evidence', () => {
+  it.each([
+    [1, 0, 2, 3],
+    [0, 2, 1, 3],
+    [0, 1, 3, 2],
+    [3, 2, 1, 0],
+  ])('rejects out-of-order clean campaigns (%s, %s, %s, %s)', (...order) => {
+    const document = validLedger();
+    const original = document.attempts;
+    document.attempts = order.map((index, sequence) => ({
+      ...original[index], sequence: sequence + 1,
+    }));
+    expect(() => validateLiveCertificationDocument(document, {
+      packageVersion: VERSION,
+      sourceCommit: SOURCE,
+    })).toThrow(/campaign order.*mechanical.*fast.*full.*protected-branch-land/iu);
+  });
+
   it('requires the exact repository-local service identity before live attempts', () => {
     const { repo } = sourceRepository();
     expect(() => verifyLiveCertificationEnvironment(repo))
@@ -780,11 +1241,101 @@ describe('live release certification evidence', () => {
     const unprotected = validLedger();
     const unprotectedAttempt = unprotected.attempts
       .find((attempt) => attempt.pipeline === 'protected-branch-land');
-    unprotectedAttempt.protected_land.auto_merge_required = false;
+    unprotectedAttempt.protected_land.branch_protection.admins_enforced = false;
     expect(() => validateLiveCertificationDocument(unprotected, {
       packageVersion: VERSION,
       sourceCommit: SOURCE,
-    })).toThrow(/required protected auto-merge path/iu);
+    })).toThrow(/protected branch policy/iu);
+  });
+
+  it.each(['immediate', 'auto'])('accepts fully attested protected %s squash without forcing a different merge path', (mergePath) => {
+    const document = validLedger();
+    document.attempts.at(-1).protected_land.merge_path = mergePath;
+    expect(() => validateLiveCertificationDocument(document)).not.toThrow();
+  });
+
+  it.each([
+    ['bypass_used', true],
+    ['required_checks_passed', false],
+    ['merge_path', 'queued'],
+    ['pr_state', 'OPEN'],
+    ['merge_method', 'merge'],
+    ['checked_head_commit', hash(999)],
+    ['merged_tree', hash(999)],
+    ['gate_tree', 'not-a-tree'],
+  ])('rejects missing or contradictory protected land evidence: %s', (field, value) => {
+    const document = validLedger();
+    document.attempts.at(-1).protected_land[field] = value;
+    expect(() => validateLiveCertificationDocument(document)).toThrow();
+  });
+
+  it.each([
+    ['pull_request_required', false],
+    ['required_checks_strict', false],
+    ['required_checks_count', 0],
+    ['required_checks_count', 101],
+    ['required_checks_count', 1.5],
+    ['admins_enforced', false],
+    ['force_pushes_allowed', true],
+    ['deletions_allowed', true],
+    ['before_sha256', 'unretained'],
+    ['after_sha256', runRecordHash(999)],
+  ])('rejects absent, bypassable or drifted protection: %s=%s', (field, value) => {
+    const document = validLedger();
+    document.attempts.at(-1).protected_land.branch_protection[field] = value;
+    expect(() => validateLiveCertificationDocument(document)).toThrow();
+  });
+
+  it('keeps old certificate JSON readable without upgrading its weaker merge proof', () => {
+    const old = validLedger();
+    old.schema_version = 4;
+    const proof = old.attempts.at(-1).protected_land;
+    old.attempts.at(-1).protected_land = {
+      target_branch: proof.target_branch,
+      merge_method: proof.merge_method,
+      auto_merge_required: true,
+      pr_state: proof.pr_state,
+      pushed_head_commit: proof.pushed_head_commit,
+      observed_merged_pr_head: proof.observed_merged_pr_head,
+      merge_commit: proof.merge_commit,
+      remote_head_after_merge: proof.remote_head_after_merge,
+    };
+    expect(parseLiveCertificationJson(canonical(old))).toEqual(old);
+    expect(() => validateLiveCertificationDocument(old)).toThrow(/schema version is unsupported/iu);
+    expect(old.schema_version).toBe(4);
+  });
+
+  it.each(['immediate', 'auto'])('rejects missing, extra and forged-legacy fields for the %s path', (mergePath) => {
+    for (const field of Object.keys(landProof(4))) {
+      const document = validLedger();
+      const proof = document.attempts.at(-1).protected_land;
+      proof.merge_path = mergePath;
+      delete proof[field];
+      expect(() => validateLiveCertificationDocument(document), field).toThrow();
+    }
+    for (const field of Object.keys(landProof(4).branch_protection)) {
+      const document = validLedger();
+      const proof = document.attempts.at(-1).protected_land;
+      proof.merge_path = mergePath;
+      delete proof.branch_protection[field];
+      expect(() => validateLiveCertificationDocument(document), field).toThrow();
+    }
+    for (const mutation of [
+      (proof) => { proof.auto_merge_required = true; },
+      (proof) => { proof.branch_protection.prose = 'synthetic unsupported evidence'; },
+      (proof) => { proof.bypass_used = true; },
+      (proof) => { proof.required_checks_passed = false; },
+      (proof) => { proof.checked_head_commit = hash(999); },
+      (proof) => { proof.merged_tree = hash(999); },
+      (proof) => { proof.branch_protection.admins_enforced = false; },
+      (proof) => { proof.branch_protection.after_sha256 = runRecordHash(999); },
+    ]) {
+      const document = validLedger();
+      const proof = document.attempts.at(-1).protected_land;
+      proof.merge_path = mergePath;
+      mutation(proof);
+      expect(() => validateLiveCertificationDocument(document)).toThrow();
+    }
   });
 
   it('rejects free-form fields, unsafe versions, mismatched source/version, and non-canonical JSON', () => {
@@ -908,7 +1459,22 @@ describe('tagged certification-only commit gate', () => {
     expect(schema.$defs.attempt.additionalProperties).toBe(false);
     expect(schema.properties.terminal_reason_taxonomy_version.const)
       .toBe(TERMINAL_REASON_TAXONOMY_VERSION);
-    expect(schema.properties.schema_version.const).toBe(4);
+    expect(schema.properties.schema_version.const).toBe(5);
+    expect(schema.properties.schema_version.const).toBe(LIVE_CERTIFICATION_SCHEMA_VERSION);
+    const proof = landProof(4);
+    expect(schema.$defs.protected_land.required.toSorted()).toEqual(Object.keys(proof).sort());
+    expect(Object.keys(schema.$defs.protected_land.properties).sort()).toEqual(Object.keys(proof).sort());
+    expect(schema.$defs.protected_land.additionalProperties).toBe(false);
+    expect(schema.$defs.protected_land.properties.merge_path.enum).toEqual(['immediate', 'auto']);
+    expect(schema.$defs.protected_land.properties.bypass_used.const).toBe(false);
+    expect(schema.$defs.protected_land.properties.required_checks_passed.const).toBe(true);
+    expect(schema.$defs.branch_protection.required.toSorted()).toEqual(Object.keys(proof.branch_protection).sort());
+    expect(Object.keys(schema.$defs.branch_protection.properties).sort()).toEqual(Object.keys(proof.branch_protection).sort());
+    expect(schema.$defs.branch_protection.additionalProperties).toBe(false);
+    for (const [field, value] of Object.entries(proof.branch_protection)) {
+      if (typeof value === 'boolean') expect(schema.$defs.branch_protection.properties[field].const).toBe(value);
+    }
+    expect(schema.$defs.branch_protection.properties.required_checks_count).toEqual({ type: 'integer', minimum: 1, maximum: 100 });
     expect(schema.properties.certified_hosts.const).toEqual(['codex']);
     expect(schema.properties.unverified_hosts.const).toEqual(['claude']);
     expect(schema.properties.attempts.minItems).toBe(4);

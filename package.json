@@ -84,6 +84,7 @@
     "@vitest/coverage-v8": "^4.1.10",
     "esbuild": "^0.28.1",
     "fast-check": "^4.9.0",
+    "smol-toml": "1.8.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },

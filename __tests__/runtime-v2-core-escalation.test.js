@@ -39,7 +39,7 @@ async function project(config = {}) {
   git(dir, 'commit', '-qm', 'test: baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node -e "process.exit(0)"' },
+    test_commands: { full: 'node -e "process.exit(0)"', targeted_template: 'node --test {paths}' },
     ...config,
   });
   return dir;

@@ -108,7 +108,7 @@ async function planProject() {
   git(dir, 'commit', '-qm', 'test: baseline');
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test' },
+    test_commands: { full: 'node --test', targeted_template: 'node --test {paths}' },
   });
   return dir;
 }

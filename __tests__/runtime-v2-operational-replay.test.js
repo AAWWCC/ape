@@ -14,10 +14,22 @@ const requiredCases = [
   'protected-branch-shipping',
   'nonbehavioral-test-stage-omission',
   'versioned-terminal-diagnostics',
+  'omitted-preflight-audit-reason',
+  'native-bootstrap-phase-and-catalog-contract',
+  'native-probe-failure-reporting',
+  'native-canary-identity-isolation',
+  'compiled-future-stage-contract',
+  'reviewed-admission-drift',
+  'scheduled-base-command-prerequisites',
+  'admissible-receipt-rejection-guidance',
+  'frozen-shipping-and-tested-tree',
+  'current-command-prerequisites',
+  'branch-exact-scheduler-review-checks',
+  'supersession-prelock-admission',
 ];
 
 describe('operational replay corpus', () => {
-  it('binds every historical failure class to an executable regression test', async () => {
+  it('binds each declared synthetic failure family to an executable regression test', async () => {
     const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
     expect(corpus.schema_version).toBe(1);
     expect(corpus.cases.map((entry) => entry.id)).toEqual(requiredCases);

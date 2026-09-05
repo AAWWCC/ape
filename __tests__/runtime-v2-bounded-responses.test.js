@@ -16,6 +16,7 @@ import { RECEIPT_INPUT_SCHEMA } from '../lib/runtime/receipt-input.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { hashRecord } from '../lib/runtime/canonical.js';
+import { attachRuntimeGuidance } from '../lib/runtime/session-guidance.js';
 import { bindCodexDispatch, completeCodexBindingProbe } from './codex-native-test-helper.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -115,6 +116,42 @@ function countOccurrences(haystack, needle) {
 }
 
 describe('APE v2 bounded MCP responses: projection unit behavior', () => {
+  it('projects failed native probe reads as orchestration blocks without authorizing retry', () => {
+    const response = Object.freeze({
+      ok: true,
+      infrastructure: true,
+      attempts_consumed: 0,
+      probe: Object.freeze({
+        status: 'launched', infrastructure_status: 'failed',
+        failure_reason: 'native launch window elapsed before binding',
+      }),
+    });
+    const expected = {
+      kind: 'blocked',
+      failure_domain: 'orchestration',
+      automatic_successor: false,
+      required_operator_action: 'diagnose_native_binding_failure',
+    };
+    const projected = projectRunResponse(attachRuntimeGuidance(response));
+    expect(projected).toEqual({ ...response, next_action: expected });
+    expect(projected).not.toHaveProperty('runtime_guidance');
+    expect(response).not.toHaveProperty('next_action');
+    expect(projectRunResponse({ ...response, next_action: { kind: 'wait' } }).next_action).toEqual(expected);
+    const bounded = projectRunResponse({ ...response, padding: 'x'.repeat(RESPONSE_BUDGET_BYTES * 2) });
+    expect(bounded).toMatchObject({ ok: true, next_action: expected });
+    expect(Buffer.byteLength(JSON.stringify(bounded))).toBeLessThanOrEqual(RESPONSE_BUDGET_BYTES);
+  });
+
+  it.each(['awaiting_launch', 'awaiting_binding', 'awaiting_acknowledgement', 'ready', 'consumed', undefined])(
+    'does not invent a failed-probe block for infrastructure state %s', (infrastructureStatus) => {
+      const response = {
+        ok: true, infrastructure: true, attempts_consumed: 0,
+        probe: { status: 'failed', infrastructure_status: infrastructureStatus },
+      };
+      expect(projectRunResponse(response)).toEqual(response);
+    },
+  );
+
   it('keeps oversized read-only preview facts inline without a fake artifact reference', () => {
     const configHash = 'a'.repeat(64);
     const catalogHash = 'b'.repeat(64);
@@ -651,6 +688,12 @@ function session(messages) {
 }
 
 async function callApe(name, args) {
+  if (name === 'ape_run' && args.action === 'start') {
+    const preview = await callApe(name, { ...args, action: 'preview' });
+    expect(preview.admission.ready).toBe(true);
+    expect(preview.admission_digest).toMatch(/^[a-f0-9]{64}$/);
+    args = { ...args, expected_admission_digest: preview.admission_digest };
+  }
   const responses = await session([
     {
       jsonrpc: '2.0',
@@ -759,7 +802,7 @@ describe('APE v2 bounded ape_history responses at the MCP wire', () => {
     expect(explained.run).toMatchObject({ run_id: runId, status: 'completed' });
     expect(explained.diagnostic).toMatchObject({
       reason_code: 'completed',
-      next_safe_action: 'ape_run start',
+      next_safe_action: 'check host prerequisites, then ape_run start',
     });
     expect(JSON.stringify(explained)).not.toContain(OBJECTIVE);
     expect(JSON.stringify(explained)).not.toContain('One-time receipt capability token');

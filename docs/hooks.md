@@ -4,6 +4,51 @@
 hosts. The host is pinned by the launcher; stale variables from the other host are ignored. A
 project hint seeds an upward walk to the nearest `.ape/`, so governance survives cwd drift.
 
+## Codex native bootstrap
+
+For new Codex dispatches, `SubagentStart` stores bounded provisional evidence: the native parent
+session, child turn, child agent ID/type, and actual model. It does not bind a ticket. A valid
+native observation also delivers a capability-free reminder to execute the parent-assigned
+bootstrap, if that task contains bootstrap arguments, without requesting a new human task. The
+reminder does not associate that child with a pending ticket or supply a bearer; unrelated assigned
+tasks remain unrelated. Known native children do not receive parent-only SessionStart orientation,
+even when later startup input omits the explicit child flag.
+The child's first APE operation is `ape_bind` with the separate bootstrap bearer delivered in
+`spawn_args.message`.
+Bootstrap discovery and binding are not stage work and require no pre-existing ticket context.
+That context is expected to be absent initially; the child checks for complete injected authority
+only after `ape_bind` returns, never as a reason to skip the handshake.
+If it is a deferred tool, search the host catalog for its bare registered name `ape_bind`, then
+invoke the returned installed APE tool. Do not search by the host-qualified invocation alias:
+the live catalog returned no results for that alias but found the registered name. The bearer is
+never a search term. Only the required catalog/invocation wrapper is allowed, never
+shell execution, project inspection, or another MCP operation as a substitute for binding.
+Its trusted `PreToolUse` hook validates the exact authorized generation, parent linkage, actual
+model, live immutable ticket and deadline, and atomically admits one child. Only this hook emits
+the ticket context through `hookSpecificOutput.additionalContext`; it does not bypass host
+permissions. A tool result without that complete trusted context grants no stage authority.
+The two context-bearing binding handlers set Codex's `additionalContextLimit` to `0`: APE already
+caps its injected contract at 160 KiB, and a host-spilled preview is not a complete contract. This
+also avoids placing the receipt bearer in Codex's hook-output spill files.
+
+The host can omit `agent_id` on later tool events. Identity is then recovered only from the
+native observation keyed by that exact child turn and native session (or child-ID alias). Parent
+and child turn IDs need not match. Conflicting, malformed, or unsafe evidence fails closed.
+Bootstrap bearers, launch-name capabilities, and receipt capabilities use distinct derivations.
+
+This is a bearer-delivery boundary: the trusted orchestrator must relay the returned native
+message unchanged. The current native spawn result exposes a task name, not a verified link to
+the child's UUID, so APE does not claim independent cryptographic proof of the physical spawn-to-UUID
+relationship. Before the bearer is claimed, a provisional observation alone cannot label an
+otherwise unrelated child as an APE probe. After binding, the exact canary identity remains
+tool-denied, including external tools and later resumes. The wildcard hook permits only the exact
+already-admitted bootstrap invocation to account for concurrent hook execution.
+Canary-only denial evidence has separate immutable keys for its native child UUID and exact
+parent-session/child-turn pair. These survive damaged candidate storage; a parent session alone
+and an unrelated provisional child do not match. The keys grant no binding or stage authority.
+Main-session startup reads failed or unreadable probe evidence without repairing it and directs
+diagnosis rather than automatic relaunch, replacement, or run start.
+
 During an active run, a project write requires one bound native subagent, one active ticket, a
 writable role, and a path inside that ticket's claims. Test writers may edit authored tests only;
 implementers may edit production claims only. Unknown or ambiguous paths fail closed. Outside-

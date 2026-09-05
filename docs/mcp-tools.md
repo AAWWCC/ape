@@ -1,11 +1,12 @@
 # MCP tools
 
-APE exposes five tools. Skills are the normal user interface; these actions are the
+APE exposes six tools. Skills are the normal user interface; these actions are the
 machine contract behind them.
 
 | Tool | Actions |
 | --- | --- |
 | `ape_run` | `probe`, `probe-status`, `probe-ack`, `preview`, `start`, `next`, `record`, `recover-receipt`, `answer-preflight`, `status`, `resume`, `regate`, `ship`, `expire-dispatch`, `abort`, `override` |
+| `ape_bind` | Native Codex child bootstrap confirmation; trusted hooks bind the exact launch and inject authority. Not a parent orchestration operation. |
 | `ape_status` | Dedicated read-only current-run, pending-ticket, lane, and gate snapshot. |
 | `ape_history` | `query`, `explain`, `metrics`, `import`, `maintenance-status`, `compact-artifacts`, `roadmap-status`, `roadmap-register`, `roadmap-supersede`, `roadmap-attest` |
 | `ape_config` | `get`, `set`, `doctor`, `wire`, `unwire`, `init` |
@@ -78,6 +79,17 @@ metrics calls do not mutate that cache or send telemetry anywhere.
   frozen as a required capability. Do not set `operator_authorized: true` until the operator has
   approved the exact literal command; repository tree reconciliation does not make arbitrary code
   execution intrinsically safe.
+- New-protocol `preview` also returns `admission` (version 1) and `admission_digest`. Review a ready
+  complete manifest, then add only `expected_admission_digest` to the otherwise identical start
+  inputs. Start recomputes repository/index/content, configuration, scope, command, and pipeline
+  facts before mutation and rejects drift. The digest is an input commitment, not proof of human
+  authorization. Preview neither runs tests nor creates state; baseline failure is not confused
+  with an unavailable runner. A response too large to expose its whole manifest is refused without
+  a usable digest. Legacy records retain their admitted contracts; they are not silently upgraded.
+- Command profiles that modify tracked files must use `effect: "write"`, writable roles, and exact
+  `output_paths`. Those outputs must already be approved in that role's claimed scope. Such a
+  generator cannot also be a runtime verification/test command. Declarations never exempt files
+  from the existing runtime tree checks or permit a read-only worker to write.
 - `ape_config init` normally grounds commands in existing manifests. For a metadata-only blank
   repository, pass the prospective `behavioral` and `test_paths` values; an unambiguous JS/TS or
   Python family yields dependency-free targeted and full commands. The parent auto-applies a
@@ -192,33 +204,71 @@ Terminal `resume` also retries checkout reconciliation. Once an exact remote mer
 local worktree conflict is stored as retained cleanup guidance rather than changing the run back to
 a shipping failure.
 
-`abort` and `override` may include `run_id` as a confirmation, never as a selector. A mismatched or
-explicitly null aim refuses before any effect. Other actions reject `run_id`. If `active.json` is
-unreadable, use an unaimed `override reset`; the runtime cannot safely confirm an aimed recovery.
+`answer-preflight`, `abort`, and `override` may include `run_id` as a confirmation, never as a
+selector. For `answer-preflight`, it rejects a stale answer submission aimed at a newer active run.
+A mismatched or explicitly null aim refuses before any effect; other actions reject `run_id`. If
+`active.json` is unreadable, use an unaimed `override reset`; the runtime cannot safely confirm an
+aimed recovery.
 
 ### Codex binding preflight
 
 Codex `start` requires a fresh live capability proof:
 
 1. `probe` returns `dispatch_probe` after ordinary doctor checks.
-2. Spawn it with the returned task name, model, reasoning effort, and message unchanged. The
-   returned type is APE's logical probe role, not a Multi-Agent V2 native argument.
-3. PreToolUse consumes the visible task-name capability; `SubagentStart` must bind the host child and
-   inject a probe capability.
+2. Pass the returned `dispatch.spawn_args` object to native `spawn_agent` unchanged. It includes
+   the exact task name, `fork_turns: "none"`, model, optional reasoning effort, and message. The
+   returned type is APE's logical probe role, not a Multi-Agent V2 native argument. If the tool
+   response is lost before launch, repeat `probe`; APE re-emits the same durable envelope.
+3. Launch PreToolUse consumes the visible task-name capability. `SubagentStart` records provisional
+   native child identity and actual model, but grants no authority. The child calls `ape_bind` with
+   the exact `{project_dir, bootstrap_capability}` in its launch message before doing any work. That
+   call's trusted PreToolUse hook validates and binds the child, then injects a distinct probe
+   acknowledgement capability. The MCP result itself contains no ticket or acknowledgement authority.
+   Ticket context is expected to be absent before bootstrap. The child checks for complete trusted
+   injection only after `ape_bind` returns, not before deciding whether to call it.
+   On deferred-tool hosts, the child may first search the host's tool catalog for the bare registered
+   name `ape_bind`, then invoke the returned installed APE tool. The host-qualified invocation alias
+   is not the search query; catalog lookup must never include the bootstrap bearer.
 4. `probe-status` must show a bound canary awaiting acknowledgement.
 5. Send its `probe_id` and `probe_capability` to `probe-ack`; `start` atomically consumes the
-   completed, single-use proof before its first Git mutation.
+completed, single-use proof before its first Git mutation.
+
+`probe-status` distinguishes a successful diagnostic read (`ok: true`) from successful binding.
+The effective `launch_expires_at` deadline or a typed current-generation bootstrap rejection makes
+`infrastructure_status` failed and returns a blocked orchestration `next_action` with no automatic
+successor. The launched reservation remains protected until its own expiry; a failed launch window
+does not authorize an overlapping replacement. Rejection observations contain only bounded codes,
+outcome, and time, not bearer material, native identities, or raw exceptions.
+
+The parent session must run in the governed project: a tool's `project_dir` does not relocate native
+children. Parent and child turns are distinct. The bootstrap capability identifies exactly one
+authorized launch generation; the hook obtains child identity from the native observation of that
+child turn, not from caller-supplied IDs. A stale token cannot select a replacement probe or ticket.
 
 Manifest wiring is only a static package check; it does not prove that the current Codex session
 delivers lifecycle events. Missing, expired, replayed, or observed-but-unbound probes fail as
 infrastructure without creating a run or consuming a stage attempt. Claude uses its existing native
 binding path and does not run this preflight.
 
+`probe` and `start` are also audited no-live-run recovery boundaries for stale malformed dispatch
+evidence. APE moves damaged files, special entries, or a wrong-shaped intent container to inert
+`.corrupt-*` names without discarding their bytes before preparing new authority. It refuses
+symlinked `.ape` or runtime ancestors before creating a lock or intent outside the governed project.
+Status reports unreadable evidence as an orchestration error; an active run must use reason-audited
+`abort`, which performs the same forensic quarantine before sealing.
+
 For ordinary stage workers, binding injects the immutable ticket reference, exact receipt envelope,
 and a role-specific excerpt of its `output_schema`. `SubagentStop` refuses an absent or malformed
 final receipt and returns field-level corrections to the same worker. The worker must still attest
 the exact draft with `ape_validate_receipt`; the hook scaffold prevents avoidable shape mistakes but
 does not weaken independent validation.
+
+New production Codex dispatches use `ticket_projection: "bootstrap-hook-injected"` and the same
+child-only `ape_bind` path. Wait for the existing launched child to bootstrap; do not mistake the
+interval between spawn and binding for permission to launch another worker. Resume of that same
+worker rechecks its native child/model observation before reinjecting context. Older unmarked
+dispatch records retain their legacy protocol; a pending legacy probe must expire before a fresh
+bootstrap-protocol probe can replace it.
 
 ### Behavioral plan preflight evidence
 
@@ -227,6 +277,11 @@ baseline entry in `evidence.preflight_artifact` must be backed by a receipt test
 command. `output_hash` may be omitted from both entries when the host does not expose enough raw
 output to compute it; agents must never invent a digest. When a baseline hash is supplied, the
 matching receipt hash is required and must be byte-for-byte identical.
+
+If preflight evidence leaves operator questions, continue with `answer-preflight` using the exact
+returned `preflight_hash`, the complete `{id, answer}` list, and a nonblank audit `reason`. The MCP
+schema marks all three fields as conditionally required for that action; omitting the reason returns
+the action-specific diagnostic without consuming or changing the run.
 
 ### External MCP tools
 

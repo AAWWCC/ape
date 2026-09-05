@@ -207,7 +207,7 @@ describe('APE v2 history effective records (superseding completions)', () => {
     expect(explained.run).toMatchObject({ run_id: 'run-effective', status: 'completed' });
     expect(explained.diagnostic).toMatchObject({
       reason_code: 'completed',
-      next_safe_action: 'ape_run start',
+      next_safe_action: 'check host prerequisites, then ape_run start',
     });
     expect(explained.text).toContain('Status: completed');
     expect(explained.text).toContain('Merged:');
@@ -297,7 +297,7 @@ describe('APE v2 cross-run supersession (friction #10)', () => {
     expect(explained.run).toMatchObject({ run_id: first.run.run_id, status: 'aborted' });
     expect(explained.diagnostic).toMatchObject({
       reason_code: 'aborted',
-      next_safe_action: 'ape_run start',
+      next_safe_action: 'check host prerequisites, then ape_run start',
     });
     expect(JSON.stringify(explained)).not.toContain(abortReason);
   });
