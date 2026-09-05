@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,7 @@ import { configAction, previewRun, startRun } from '../lib/runtime/service.js';
 import { evaluateRunReadiness } from '../lib/runtime/readiness.js';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { projectRunState } from '../lib/runtime/projection.js';
+import * as capabilityContract from '../lib/runtime/capability-contract.js';
 
 function runInput(overrides = {}) {
   return RunStartInputSchema.parse({
@@ -205,6 +206,29 @@ describe('run readiness and capability manifests', () => {
       .toBe('main');
     expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim())
       .toBe(headBefore);
+  });
+
+  it('skips dynamic scenario expansion only when a source collection already exceeds its bound', () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.test_commands.targeted_template = 'npm test -- {paths}';
+    config.test_commands.full = 'npm test';
+    config.policy.command_profiles = Array.from({ length: 65 }, (_, index) => ({
+      id: `command.${index}`, command: `tool verify-${index}`, roles: ['implementer'], effect: 'execute',
+    }));
+    const expand = vi.spyOn(capabilityContract, 'worstCaseCapabilityTestPathSets');
+    try {
+      const rejected = readinessFor(runInput(), config);
+      expect(rejected.ready).toBe(false);
+      expect(rejected.blocking.map((entry) => entry.code)).toContain('capability-command-profiles-over-limit');
+      expect(expand).not.toHaveBeenCalled();
+
+      config.policy.command_profiles.pop();
+      const admitted = readinessFor(runInput(), config);
+      expect(expand).toHaveBeenCalledOnce();
+      expect(admitted.ready).toBe(true);
+    } finally {
+      expand.mockRestore();
+    }
   });
 
   it('rejects an over-limit derived command allowlist even when every source collection is within its count bound', () => {
