@@ -25,6 +25,9 @@ const SPAWN_SERIAL_FILES = [
   '__tests__/runtime-v2-mcp.test.js',
   '__tests__/runtime-v2-mcp-interleaving.test.js',
   '__tests__/runtime-v2-mcp-progress.test.js',
+  // Benchmark lock tests also await cold CLI children. Keep their existing
+  // deadlines out of contention with parallel workers (PR #9 shard failure).
+  '__tests__/runtime-v2-benchmark.test.js',
   // Contention quarantine: this audit sweep awaits REAL children today (line
   // refs into that file) — execFileSync `git` repos (:293-299) and a real
   // `mkfifo` (:1573), and decisively its fixture's `targeted: 'node
