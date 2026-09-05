@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 2.24.11 — 2026-09-05
+
+Local prevention candidate; not published or live-certified. This new identity keeps
+the fixed candidate separate from failed earlier acceptance attempts. The existing
+Codex 0.147.0 pin, trust requirements, and stop-on-first-failure policy are unchanged.
+
+Codex response projection now removes repeated admitted metadata while preserving
+exact worker launch arguments and durable authority. The unchanged response limit
+also counts escaped MCP framing; undeliverable new-protocol admission manifests
+are rejected before branch, lock, or ticket mutation. Synthetic regressions and
+model-free host evidence cover the output boundary without claiming live acceptance.
+
 Certification preparation now binds an explicitly selected Codex executable to the compatibility
 pin before a parent launch, validates every prompt input before creating output, and rejects
 out-of-order campaigns even when their individual attempts passed. These are offline harness

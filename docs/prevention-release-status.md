@@ -8,6 +8,12 @@ substitute for that evidence.
 
 ## Current state — read before the historical records
 
+The output-boundary fix passed 4,063 tests and 586 operational replay checks, then
+was frozen locally with exact source/package parity. Candidate 2.24.11 gives the
+fixed source a distinct identity from the failed 2.24.10 campaign. Version-only
+follow-up checks and separately authorized isolated installation are recorded
+externally; this document does not claim loaded, trusted, or live-certified status.
+
 The next Codex-only campaign passed mechanical through protected merge, then
 stopped in fast before a stage worker launched. Its parent reported a truncated
 start response although the saved result was complete. A model-free reproduction
@@ -31,8 +37,8 @@ boundary fix, not proof that every possible host/model has been certified.
 
 The failed campaign remains stopped; full and protected-land were not attempted.
 Its failed active state is preserved without reset, abort, or a fabricated archive.
-This follow-up is not yet the frozen/installed/loaded candidate and does not
-authorize another campaign. The earlier source and setup records below remain
+The fix is frozen locally but has not passed a new clean acceptance campaign.
+Neither that freeze nor installation authorizes another campaign. The earlier source and setup records below remain
 historical evidence, not validation of later source edits.
 
 This source snapshot includes the reviewed launcher-only permission preflight
