@@ -161,6 +161,14 @@
       "recovery_contract": "Run the same read-only schema, ancestor and admission checks before the outer lock and again inside it; rejected inputs do not create storage or follow redirected ancestors.",
       "test_file": "__tests__/runtime-v2-start-admission-prelock.test.js",
       "test_anchor": "supersession admission precedes receipt-lock storage"
+    },
+    {
+      "id": "codex-model-input-response-framing",
+      "category": "transport",
+      "observed_failure": "A complete saved Codex tool result could be truncated in the next model request because escaped MCP framing exceeded the host budget despite an inner JSON bound and a larger execution-wrapper setting.",
+      "recovery_contract": "Compact repeated admitted metadata and bootstrap ticket bodies, preserve exact launch authority, measure escaped MCP framing, and refuse an undeliverable complete admission before mutation; do not retry the failed live campaign.",
+      "test_file": "__tests__/runtime-v2-bounded-responses.test.js",
+      "test_anchor": "Codex bootstrap parent wire compaction"
     }
   ]
 }

@@ -70,6 +70,19 @@ describe('supersession admission precedes receipt-lock storage', () => {
     expect(await snapshot(root)).toEqual(before);
   });
 
+  it('refuses an undeliverable complete preview before start can mutate even with a supplied digest', async () => {
+    const root = await fixture();
+    const input = request({ claimed_paths: Array.from({ length: 60 }, (_, index) =>
+      `docs/${'a'.repeat(190)}/${'b'.repeat(190)}/${index}.md`) });
+    const before = await snapshot(root);
+    const preview = await previewRun(root, input);
+    expect(preview).toMatchObject({ ok: false, code: 'admission-response-too-large', attempts_consumed: 0 });
+    expect(preview).not.toHaveProperty('admission_digest');
+    const started = await startRun(root, { ...input, expected_admission_digest: 'f'.repeat(64) });
+    expect(started).toMatchObject({ ok: false, code: 'admission-response-too-large', attempts_consumed: 0 });
+    expect(await snapshot(root)).toEqual(before);
+  });
+
   it.each(['.ape', 'runtime'])('does not write through a redirected %s ancestor before refusal', async (redirect) => {
     const root = await fixture();
     const outside = await mkdtemp(path.join(tmpdir(), 'ape-start-admission-outside-'));

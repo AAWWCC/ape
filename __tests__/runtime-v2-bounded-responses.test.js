@@ -9,13 +9,15 @@ import {
   RESPONSE_BUDGET_BYTES,
   RUN_OBJECTIVE_REFERENCE,
   compactPendingTicket,
+  projectHistoryResponse,
   projectRunResponse,
   projectRunState,
 } from '../lib/runtime/projection.js';
 import { RECEIPT_INPUT_SCHEMA } from '../lib/runtime/receipt-input.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
-import { hashRecord } from '../lib/runtime/canonical.js';
+import { hashRecord, sha256 } from '../lib/runtime/canonical.js';
+import { receiptOutputSchemaForTicket } from '../lib/runtime/receipt-validator.js';
 import { attachRuntimeGuidance } from '../lib/runtime/session-guidance.js';
 import { bindCodexDispatch, completeCodexBindingProbe } from './codex-native-test-helper.js';
 
@@ -114,6 +116,173 @@ function countOccurrences(haystack, needle) {
   }
   return count;
 }
+
+function bootstrapParentResponse() {
+  const objective = 'Synthetic bounded parent preflight response';
+  const manifest = {
+    version: 1, authorization: 'reviewed-inputs-only', ready: true,
+    pipeline: { stages: Array.from({ length: 24 }, (_, index) => ({ id: `synthetic-${index}`, contract: 'x'.repeat(650) })) },
+  };
+  const ticket = makeTicket('preflight', 'preflight_analyst', 'run-wire:preflight:synthetic', {
+    objective, binding_protocol: 'native-v1', plan_contract_version: 2, receipt_contract_version: 1,
+    required_checks: [], writable: false, ticket_hash: 'a'.repeat(64),
+    capability_manifest: {
+      version: 1, config_hash: 'b'.repeat(64), objective_hash: sha256(objective), preflight_hash: null,
+      allowed_evidence_commands: [], verification_profiles: [],
+    },
+  });
+  ticket.output_schema = receiptOutputSchemaForTicket(ticket);
+  const state = {
+    ...unitState(), run_id: 'run-wire', binding_protocol: 'native-v1', objective, stage: 'preflight',
+    admission: { version: 1, digest: sha256(manifest), manifest }, tickets: [ticket], receipts: [], expired_tickets: [],
+  };
+  return {
+    ok: true, run: state,
+    actions: [{
+      type: 'dispatch_agent', ticket, idempotent_replay: false,
+      dispatch: {
+        host: 'codex', native_tool: 'spawn_agent', bootstrap_protocol: 1,
+        bootstrap_args: { project_dir: '/synthetic/never-executed', bootstrap_capability: 'synthetic-not-authority' },
+        spawn_args: { task_name: 'synthetic-not-issued', fork_turns: 'none', model: 'synthetic', message: 'Synthetic never-executed bootstrap message.' },
+        ticket,
+      },
+    }],
+  };
+}
+
+const framedMcpText = (value) => JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(value) }] }, null, 2);
+
+describe('Codex bootstrap parent wire compaction', () => {
+  it('keeps a high-escaping admitted parent response complete inside the framed MCP limit', () => {
+    const response = bootstrapParentResponse();
+    for (const stage of response.run.admission.manifest.pipeline.stages) stage.contract = '\n'.repeat(430);
+    response.run.admission.digest = sha256(response.run.admission.manifest);
+    expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThan(RESPONSE_BUDGET_BYTES);
+    expect(Buffer.byteLength(framedMcpText(response))).toBeGreaterThan(RESPONSE_BUDGET_BYTES);
+    const projected = projectRunResponse(response);
+    const framed = framedMcpText(projected);
+    expect(Buffer.byteLength(framed)).toBeLessThan(RESPONSE_BUDGET_BYTES);
+    const recovered = JSON.parse(JSON.parse(framed).content[0].text);
+    expect(recovered).toEqual(projected);
+    expect(recovered.actions[0].dispatch.spawn_args).toEqual(response.actions[0].dispatch.spawn_args);
+  });
+
+  it('uses reference fallback when a below-budget inner run result exceeds the escaped MCP frame limit', () => {
+    const response = { ...projectRunResponse(bootstrapParentResponse()), retained_note: '\n'.repeat(16_000) };
+    expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThan(RESPONSE_BUDGET_BYTES);
+    expect(Buffer.byteLength(framedMcpText(response))).toBeGreaterThan(RESPONSE_BUDGET_BYTES);
+    const projected = projectRunResponse(response);
+    expect(projected.projection?.kind).toBe('reference-only-v1');
+    expect(Buffer.byteLength(framedMcpText(projected))).toBeLessThan(RESPONSE_BUDGET_BYTES);
+    expect(projected.actions[0].dispatch.spawn_args).toEqual(response.actions[0].dispatch.spawn_args);
+    expect(projectRunResponse(JSON.parse(JSON.stringify(projected)))).toEqual(projected);
+  });
+
+  it('refuses an oversized complete preview before issuing a usable admission digest', () => {
+    const admission = { version: 1, ready: true, contract: { detail: '\n'.repeat(18_000) } };
+    const response = {
+      ok: true, advisory: true, admission, admission_digest: sha256(admission),
+      blueprint: { lane: 'fast', stages: [] },
+    };
+    expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThan(RESPONSE_BUDGET_BYTES);
+    expect(Buffer.byteLength(framedMcpText(response))).toBeGreaterThan(RESPONSE_BUDGET_BYTES);
+    const projected = projectRunResponse(response);
+    expect(projected).toMatchObject({ ok: false, blocked: true, code: 'admission-response-too-large', attempts_consumed: 0, admission: { ready: false } });
+    expect(projected).not.toHaveProperty('admission_digest');
+    expect(projected).not.toHaveProperty('run');
+    expect(projected).not.toHaveProperty('actions');
+    expect(Buffer.byteLength(framedMcpText(projected))).toBeLessThan(RESPONSE_BUDGET_BYTES);
+    expect(response.admission).toBe(admission);
+    expect(response.admission_digest).toBe(sha256(admission));
+  });
+
+  it('applies the same escaped frame bound to history projections', () => {
+    const response = { ok: true, records: [], retained_note: '\n'.repeat(17_000) };
+    expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThan(RESPONSE_BUDGET_BYTES);
+    expect(Buffer.byteLength(framedMcpText(response))).toBeGreaterThan(RESPONSE_BUDGET_BYTES);
+    const projected = projectHistoryResponse(response);
+    expect(projected.projection?.kind).toBe('reference-only-v1');
+    expect(Buffer.byteLength(framedMcpText(projected))).toBeLessThan(RESPONSE_BUDGET_BYTES);
+    expect(projectHistoryResponse(JSON.parse(JSON.stringify(projected)))).toEqual(projected);
+  });
+
+  it('references admitted metadata and the role schema below the global budget without changing launch authority', () => {
+    const response = bootstrapParentResponse();
+    const before = structuredClone(response);
+    expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThan(RESPONSE_BUDGET_BYTES);
+    const projected = projectRunResponse(response);
+    expect(projected.run.admission).toEqual({
+      version: 1, digest: response.run.admission.digest, projection: 'bounded-reference-v1',
+      manifest_ref: { path: '.ape/runtime/runs/run-wire.json', json_pointer: '/admission/manifest' },
+    });
+    expect(projected.actions[0].ticket.output_schema).toEqual(OUTPUT_SCHEMA_REFERENCE);
+    expect(projected.actions[0].ticket.capability_manifest).toEqual(compactPendingTicket(response.actions[0].ticket, response.run.objective).capability_manifest);
+    expect(projected.actions[0].ticket.objective).toBe(RUN_OBJECTIVE_REFERENCE);
+    for (const field of ['ticket_id', 'ticket_hash', 'role', 'deadline_at', 'model', 'claimed_paths', 'test_paths', 'required_checks']) {
+      expect(projected.actions[0].ticket[field]).toEqual(response.actions[0].ticket[field]);
+    }
+    expect(projected.actions[0].dispatch).toEqual({ ...response.actions[0].dispatch, ticket: { ticket_id: response.actions[0].ticket.ticket_id } });
+    expect(projected.actions[0].idempotent_replay).toBe(false);
+    expect(Buffer.byteLength(JSON.stringify(projected))).toBeLessThan(8_000);
+    expect(projectRunResponse(JSON.parse(JSON.stringify(projected)))).toEqual(projected);
+    expect(response).toEqual(before);
+    // Resolve the exact on-disk layout against an in-memory file fixture. The
+    // wire projection must not change the underlying admitted contract/schema.
+    const files = { '.ape/runtime/runs/run-wire.json': response.run };
+    const ref = projected.run.admission.manifest_ref;
+    const retained = ref.json_pointer.slice(1).split('/').reduce((value, key) => value[key], files[ref.path]);
+    expect(retained).toEqual(before.run.admission.manifest);
+    expect(sha256(retained)).toBe(projected.run.admission.digest);
+    expect(response.run.tickets[0].output_schema).toEqual(before.actions[0].ticket.output_schema);
+  });
+
+  it('uses the same admission reference in status and its nested state while leaving full preview unchanged', () => {
+    const { run } = bootstrapParentResponse();
+    const preview = { ok: true, advisory: true, admission: run.admission.manifest, admission_digest: run.admission.digest };
+    expect(projectRunResponse(preview)).toEqual(preview);
+    const projected = projectRunResponse({ ok: true, run, actions: [{ type: 'status', state: run }] });
+    expect(projected.run.admission.manifest_ref?.path).toBe('.ape/runtime/runs/run-wire.json');
+    expect(projected.actions[0].state.admission).toEqual(projected.run.admission);
+    expect(projectRunResponse(JSON.parse(JSON.stringify(projected)))).toEqual(projected);
+  });
+
+  it.each([
+    ['Claude', (response) => { response.run.host = 'claude'; response.actions[0].dispatch.host = 'claude'; }],
+    ['legacy Codex', (response) => { delete response.run.admission; delete response.actions[0].dispatch.bootstrap_protocol; }],
+    ['legacy receipt with bootstrap', (response) => { delete response.run.admission; delete response.actions[0].ticket.receipt_contract_version; }],
+    ['unrecognized bootstrap', (response) => { delete response.run.admission; response.actions[0].dispatch.bootstrap_protocol = 2; }],
+  ])('preserves existing under-budget full action tickets for %s', (_, change) => {
+    const response = bootstrapParentResponse();
+    change(response);
+    const projected = projectRunResponse(response);
+    expect(projected.actions[0].ticket).toEqual(response.actions[0].ticket);
+    expect(projected.run.admission).toEqual(response.run.admission);
+  });
+
+  it.each([
+    ['missing binding protocol', (state) => { delete state.binding_protocol; }],
+    ['unsafe run id', (state) => { state.run_id = '../outside'; }],
+    ['unsupported admission version', (state) => { state.admission.version = 2; }],
+    ['missing manifest', (state) => { delete state.admission.manifest; }],
+    ['array manifest', (state) => { state.admission.manifest = []; state.admission.digest = sha256([]); }],
+    ['unreviewed manifest', (state) => { state.admission.manifest.authorization = 'unknown'; state.admission.digest = sha256(state.admission.manifest); }],
+    ['not-ready manifest', (state) => { state.admission.manifest.ready = false; state.admission.digest = sha256(state.admission.manifest); }],
+    ['invalid digest', (state) => { state.admission.digest = 'not-a-digest'; }],
+    ['mismatched digest', (state) => { state.admission.digest = 'f'.repeat(64); }],
+    ['unknown admission field', (state) => { state.admission.future_evidence = { preserve: true }; }],
+  ])('keeps malformed or legacy admitted metadata complete for %s', (_, change) => {
+    const { run } = bootstrapParentResponse();
+    change(run);
+    expect(projectRunState(run).admission).toEqual(run.admission);
+  });
+
+  it('keeps the unique objective when a bootstrap action has no run-level objective', () => {
+    const { actions } = bootstrapParentResponse();
+    const projected = projectRunResponse({ ok: true, actions });
+    expect(projected.actions[0].ticket.objective).toBe(actions[0].ticket.objective);
+    expect(projected.actions[0].ticket.output_schema).toEqual(OUTPUT_SCHEMA_REFERENCE);
+  });
+});
 
 describe('APE v2 bounded MCP responses: projection unit behavior', () => {
   it('projects failed native probe reads as orchestration blocks without authorizing retry', () => {
@@ -857,10 +1026,14 @@ describe('APE v2 bounded MCP responses over a live run', () => {
     });
     expect(started.ok).toBe(true);
     expect(started.run.objective).toBe('Change behavior');
-    // The canonical complete ticket rides the dispatch_agent action; run.tickets[0]
-    // is the deduped wire summary (friction #26 follow-up).
+    // Bootstrap-v1 parent tickets carry references; the bound worker consumes
+    // the complete immutable ticket. Exercise that same file-backed contract.
     const dispatched = started.actions.find((action) => action.type === 'dispatch_agent');
-    const testTicket = dispatched.ticket;
+    const paths = runtimePaths(dir);
+    const testTicket = await readJson(path.join(paths.tickets, `${dispatched.ticket.ticket_id.replaceAll(':', '_')}.json`));
+    expect(dispatched.ticket.objective).toBe(RUN_OBJECTIVE_REFERENCE);
+    expect(dispatched.ticket.output_schema).toEqual(OUTPUT_SCHEMA_REFERENCE);
+    expect(dispatched.ticket.ticket_hash).toBe(testTicket.ticket_hash);
     const receiptCapability = await bindCodexDispatch(root, dir, dispatched);
     expect(testTicket.role).toBe('test_writer');
     expect(testTicket.objective).toBe('Change behavior');
@@ -869,8 +1042,8 @@ describe('APE v2 bounded MCP responses over a live run', () => {
     expect(testTicket.deadline_at).toBeTruthy();
     expect(testTicket.output_schema.required).toContain('ticket_id');
     expect(dispatched.dispatch.ticket).toEqual({ ticket_id: testTicket.ticket_id });
-    // The run.tickets[] summary references the run objective and the dispatch
-    // ticket's schema instead of re-embedding either.
+    // Both parent ticket projections reference the run objective and immutable
+    // ticket schema instead of re-embedding either.
     const wireTest = started.run.tickets[0];
     expect(wireTest.objective).toBe(RUN_OBJECTIVE_REFERENCE);
     expect(wireTest.output_schema).toEqual(OUTPUT_SCHEMA_REFERENCE);
@@ -900,12 +1073,14 @@ describe('APE v2 bounded MCP responses over a live run', () => {
     expect(receiptedSummary.status).toBe('receipted');
     expect(receiptedSummary).not.toHaveProperty('objective');
     expect(Object.keys(recorded.run.receipts[0]).sort()).toEqual(RECEIPT_SUMMARY_KEYS);
-    // The implementer's complete ticket rides the next dispatch_agent action; the
-    // run.tickets[] pending entry is the deduped marker form.
+    // The implementer's bootstrap ticket follows the same file-backed contract.
     const implementerDispatch = recorded.actions.find(
       (action) => action.type === 'dispatch_agent',
     );
-    const implementer = implementerDispatch.ticket;
+    const implementer = await readJson(path.join(paths.tickets, `${implementerDispatch.ticket.ticket_id.replaceAll(':', '_')}.json`));
+    expect(implementerDispatch.ticket.objective).toBe(RUN_OBJECTIVE_REFERENCE);
+    expect(implementerDispatch.ticket.output_schema).toEqual(OUTPUT_SCHEMA_REFERENCE);
+    expect(implementerDispatch.ticket.ticket_hash).toBe(implementer.ticket_hash);
     expect(implementer.role).toBe('implementer');
     expect(implementer.objective).toBe('Change behavior');
     expect(implementer.required_checks).toEqual(['targeted-tests']);
@@ -923,7 +1098,6 @@ describe('APE v2 bounded MCP responses over a live run', () => {
 
     // Persistence unchanged: the projection lives at the MCP wire only, the
     // active state on disk keeps the full tickets and receipts (friction #26).
-    const paths = runtimePaths(dir);
     const persisted = await readJson(paths.active);
     const persistedTest = persisted.tickets.find(
       (entry) => entry.ticket_id === testTicket.ticket_id,

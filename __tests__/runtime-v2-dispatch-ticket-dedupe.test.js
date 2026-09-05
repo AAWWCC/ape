@@ -916,7 +916,7 @@ function session(messages) {
 // the bytes the host receives (bin/ape-mcp.mjs writes JSON.stringify(value) into
 // the tool result), so the arms measure that text, not a re-serialization.
 async function apeRun(args) {
-  if (args.action === 'start') {
+  if (args.action === 'start' && args.expected_admission_digest === undefined) {
     const preview = await apeRun({ ...args, action: 'preview' });
     expect(preview.value.admission?.ready, JSON.stringify(preview.value.readiness?.blocking)).toBe(true);
     expect(preview.value.admission_digest).toMatch(/^[a-f0-9]{64}$/u);
@@ -1016,8 +1016,7 @@ describe('APE v2 ape_run response size cap over the MCP wire', () => {
   ])('new %s starts default to contract v2 and dispatch preflight first', async (_label, lane, claimedPaths) => {
     const dir = await project();
     await completeCodexBindingProbe(root, dir);
-    const started = await apeRun({
-      action: 'start',
+    const input = {
       project_dir: dir,
       objective: 'Exercise the default structured-preflight route.',
       mode: 'phase',
@@ -1030,11 +1029,37 @@ describe('APE v2 ape_run response size cap over the MCP wire', () => {
       hooks_trusted: true,
       subagents_available: true,
       explicit_invocation: true,
+    };
+    const preview = await apeRun({ ...input, action: 'preview' });
+    expect(preview.value.admission.ready).toBe(true);
+    expect(sha256(preview.value.admission)).toBe(preview.value.admission_digest);
+    const started = await apeRun({
+      ...input, action: 'start', expected_admission_digest: preview.value.admission_digest,
     });
     expect(started.value.ok).toBe(true);
     expect(started.value.run.plan_contract_version).toBe(2);
     expect(started.value.actions.find((action) => action.type === 'dispatch_agent')?.ticket)
       .toMatchObject({ stage_id: 'preflight', role: 'preflight_analyst', writable: false });
+    // The native host may retain complete rollout output yet truncate the next
+    // model request. Measure the escaped MCP wrapper, not just its inner JSON.
+    expect(Buffer.byteLength(JSON.stringify({ content: [{ type: 'text', text: started.text }] }, null, 2)))
+      .toBeLessThan(BUDGET_CHARS);
+    const admission = started.value.run.admission;
+    expect(admission.digest).toBe(preview.value.admission_digest);
+    expect(admission).not.toHaveProperty('manifest');
+    const persisted = await readJson(path.join(dir, admission.manifest_ref.path));
+    expect(admission.manifest_ref.json_pointer).toBe('/admission/manifest');
+    expect(persisted.admission.manifest).toEqual(preview.value.admission);
+    const action = started.value.actions.find((entry) => entry.type === 'dispatch_agent');
+    expect(action.dispatch.spawn_args.message).toBeTruthy();
+    expect(action.ticket.output_schema).toEqual(OUTPUT_SCHEMA_REFERENCE);
+    expect(persisted.tickets[0].output_schema.properties).toHaveProperty('receipt_capability');
+    // Re-projecting a saved response preserves its exact launch object. A new
+    // resume call is not this operation: lifecycle may refresh an unlaunched
+    // bootstrap generation while keeping the same logical ticket.
+    const projectedAgain = projectRunResponse(JSON.parse(started.text));
+    expect(projectedAgain.actions.find((entry) => entry.type === 'dispatch_agent').dispatch.spawn_args)
+      .toEqual(action.dispatch.spawn_args);
   }, 30_000);
 
   it('A1 acceptance: no ape_run response exceeds the cap, including the two-member plan-review dispatch', async () => {

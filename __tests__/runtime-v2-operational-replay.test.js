@@ -26,6 +26,7 @@ const requiredCases = [
   'current-command-prerequisites',
   'branch-exact-scheduler-review-checks',
   'supersession-prelock-admission',
+  'codex-model-input-response-framing',
 ];
 
 describe('operational replay corpus', () => {

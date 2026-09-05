@@ -8,6 +8,33 @@ substitute for that evidence.
 
 ## Current state — read before the historical records
 
+The next Codex-only campaign passed mechanical through protected merge, then
+stopped in fast before a stage worker launched. Its parent reported a truncated
+start response although the saved result was complete. A model-free reproduction
+on pinned Codex 0.147.0 resolved that discrepancy: the same 44,944-byte inner /
+49,132-byte wrapped synthetic result is stored intact but truncated in the next
+model request, even with the 30,000-token execution-wrapper setting. Canned
+loopback responses, fresh credential-free state, and OS-enforced external-network
+denial keep this reproduction separate from a live acceptance attempt.
+
+The source follow-up now references the already-reviewed Codex admission manifest
+by its persisted run file and digest, and removes repeated receipt-v1 schema and
+capability bodies from bootstrap-v1 parent action tickets. Full preview, persisted
+records, ticket identity/control fields, and exact native launch arguments remain
+unchanged. Malformed and legacy contracts are not silently converted. A paired
+native-host fixture confirms that the reduced response reaches the next model
+request intact. The existing shared response guard now also measures escaped MCP
+framing, not only inner JSON. Preview and start share the resulting complete-
+manifest refusal before branch, lock, or ticket mutation; an independently
+computed digest cannot bypass an undeliverable manifest. This is an output-
+boundary fix, not proof that every possible host/model has been certified.
+
+The failed campaign remains stopped; full and protected-land were not attempted.
+Its failed active state is preserved without reset, abort, or a fabricated archive.
+This follow-up is not yet the frozen/installed/loaded candidate and does not
+authorize another campaign. The earlier source and setup records below remain
+historical evidence, not validation of later source edits.
+
 This source snapshot includes the reviewed launcher-only permission preflight
 follow-ups. Its local source freeze is maintained in the existing separate
 checkout. The original partially staged index does not represent the tested final

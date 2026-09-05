@@ -89,6 +89,7 @@ const expected = new Set([
   'current-command-prerequisites',
   'branch-exact-scheduler-review-checks',
   'supersession-prelock-admission',
+  'codex-model-input-response-framing',
 ]);
 for (const id of expected) {
   if (!ids.has(id)) fail(`replay corpus is missing required case: ${id}`);
