@@ -13,7 +13,8 @@ not authorize more testing, installation, or publication.
   selection. Current and baseline inspection share the selected invocation.
 - Node 22 hook responses finish writing before exit. Windows file reads compare
   exact identifiers using the same volume-serial representation as corrected
-  libuv versions, retaining device, inode, replacement, and mutation checks.
+  libuv versions. Missing pathname device identifiers use separately verified
+  read-only handles, retaining device, inode, replacement, and mutation checks.
 - Task operations capture their own gate ownership while holding the receipt
   lock. Cancellation preserves another operation's watch and already-completed
   results; fresh processes retain durable receipt/task replay boundaries.
@@ -94,14 +95,23 @@ automatic recovery were not expanded. Repair-and-land remains deferred.
 
 ## What passed
 
-The Node 22 CI repairs passed the complete macOS / Node 24.15.0 suite: 4,521
+Before the missing-device follow-up, the Node 22 CI repairs passed the complete
+macOS / Node 24.15.0 suite: 4,521
 tests across 270 files, with 87 existing skips, in 466.79 seconds. The rebuilt
 native selection also passed on actual macOS / Node 22.12.0: 167 tests across
 ten files, with three Windows-only skips. Both packaged-host lifecycle fixtures
 passed, along with the new output-backpressure and Windows file-identity
 regressions. Type, compatibility, public-safety, package freshness, package and
 release reproducibility, packaged MCP smoke, prompt definitions and verified
-public export checks passed. Native Windows CI for these repairs remains pending.
+public export checks passed. That native Windows run still failed, leading to
+the missing-device follow-up below.
+
+The subsequent native Windows diagnostic isolated an omitted pathname device
+identifier (`0`), beyond the volume-width discrepancy. The missing-device fix
+adds stable-file, cross-device, inode-substitution, and replacement-race controls.
+All 80 focused tests across four files passed on macOS / Node 22.12.0, including
+the output-drain, active-state, and module-boundary suites. Native Windows CI for
+this follow-up remains required.
 
 The complete audited runtime, immediately before the 2.24.14 metadata bump,
 passed 4,512 tests across 268 files with 87 skips in 458.79 seconds on macOS and

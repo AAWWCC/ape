@@ -14,7 +14,9 @@ certification remain required. Claude live operation remains unverified.
   lookup without executing commands during admission.
 - Drain hook responses before exit to prevent truncated JSON on Node 22.
 - Reconcile Windows Node 22 pathname and descriptor volume identifiers without
-  dropping device, inode, or file mutation checks.
+  dropping device, inode, or file mutation checks. Recover omitted pathname
+  device identifiers through a separately verified read-only handle; retain
+  retryable contention when the pathname changes during metadata recovery.
 - Preserve task receipt-lock leases, stopped-worker recovery, cancellation
   ownership, and existing terminal results.
 - Correct gate runner paths, deleted-file routing, directory-specific cache
