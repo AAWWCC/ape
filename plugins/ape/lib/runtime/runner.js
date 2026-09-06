@@ -376,6 +376,10 @@ export async function runTestSuite(projectDir, options = {}) {
     timeout_ms: options.timeout_ms ?? 30 * 60_000,
     kill_grace_ms: options.kill_grace_ms,
     drain_ms: options.drain_ms,
+    // Inline profile, targeted and red-admission suites need the same owned
+    // cleanup as detached full gates, including when their host process dies.
+    supervise: true,
+    signal: options.signal,
   });
   if (result.spawn_error) {
     return {
@@ -392,17 +396,18 @@ export async function runTestSuite(projectDir, options = {}) {
     // manages to exit 0 (a SIGTERM-trapping suite shutting down "cleanly"):
     // no verdict was observed before the deadline, so nothing may be cached
     // or admitted as one.
-    passed: result.exit_code === 0 && result.timed_out !== true,
+    passed: result.exit_code === 0 && result.timed_out !== true && result.aborted !== true,
     runner,
     exit_code: result.exit_code,
     duration_ms: Date.now() - started,
     output: result.combined,
     tooling_failure: false,
-    // Absent-when-false, never `timed_out: false`, and no other new keys:
+    // Absent-when-false timeout/cancellation markers preserve normal results:
     // sha256(verification) feeds the red-test/gate result hashes and the
     // suite cache, so every non-timeout verification must keep its
     // historical hash byte-identical.
     ...(result.timed_out === true ? { timed_out: true } : {}),
+    ...(result.aborted === true ? { aborted: true } : {}),
   };
 }
 
@@ -506,6 +511,10 @@ export async function runGateJob(options = {}) {
   // The parent already resolves a finite deadline into the job; guard again here.
   const timeoutMs = Number.isFinite(job.timeout_ms) ? job.timeout_ms : 30 * 60_000;
   const heartbeatMs = Number.isFinite(job.heartbeat_ms) ? job.heartbeat_ms : 5_000;
+  const cancellation = new AbortController();
+  const cancelSuite = () => cancellation.abort();
+  process.on('SIGTERM', cancelSuite);
+  process.on('SIGINT', cancelSuite);
 
   // Track AT MOST one in-flight beat write (serialize-by-skipping) rather than
   // discarding it: `inFlight`, when set, is always the CATCH-WRAPPED promise
@@ -548,18 +557,22 @@ export async function runGateJob(options = {}) {
     collect: 'combined',
     max_output: 200_000,
     timeout_ms: timeoutMs,
-    // Keep the suite in THIS runner's process group so an ABORT that signals the
-    // runner's group also reaches the suite (A6). A4: scrub APE_GATE_RUNNER_JOB
-    // from the suite grandchild's environment — spawnWithTimeout merges env over
-    // process.env, and an undefined value is omitted from the child env.
-    detached: false,
+    // A separate suite group lets its deadline kill all descendants. Relay
+    // runner cancellation into that group before the runner itself is reaped.
+    // Its retained group leader also watches an IPC lifeline: a runner crash
+    // kills the suite group without trusting a later reused PID from disk.
+    signal: cancellation.signal,
+    supervise: true,
+    // Scrub the nested runner sentinel from the suite's environment.
     env: { APE_GATE_RUNNER_JOB: undefined },
   });
+  process.off('SIGTERM', cancelSuite);
+  process.off('SIGINT', cancelSuite);
   stopped = true;
   clearInterval(heartbeat);
   const durationMs = Date.now() - started;
 
-  const passed = !result.spawn_error && result.exit_code === 0 && result.timed_out !== true;
+  const passed = !result.spawn_error && result.exit_code === 0 && result.timed_out !== true && result.aborted !== true;
   const verification = {
     passed,
     exit_code: result.spawn_error ? null : result.exit_code,
@@ -567,6 +580,7 @@ export async function runGateJob(options = {}) {
     output: result.spawn_error ? result.spawn_error.message : result.combined,
     tooling_failure: Boolean(result.spawn_error),
     ...(result.timed_out === true ? { timed_out: true } : {}),
+    ...(result.aborted === true ? { aborted: true } : {}),
   };
   const artifact = {
     version: 1,

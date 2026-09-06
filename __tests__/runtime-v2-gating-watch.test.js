@@ -90,8 +90,8 @@ function track(result) {
   return result;
 }
 
-// Best-effort kill of a detached runner's whole process tree: the runner is a
-// detached group leader and its suite child shares the group. Never throws.
+// Best-effort kill of the detached runner group. Its POSIX supervisor closes
+// the suite group when runner death disconnects IPC. Never throws.
 function killTree(pid) {
   if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return;
   try {

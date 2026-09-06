@@ -9,6 +9,8 @@ import { archiveRun, explainRun, queryHistory } from '../lib/runtime/history.js'
 import { projectHistoryResponse, summarizeHistoryRecord } from '../lib/runtime/projection.js';
 import { abortRun, historyAction, startRun } from '../lib/runtime/service.js';
 import { readJson } from '../lib/runtime/storage.js';
+import { isValidMergeEvidence } from '../lib/runtime/diagnostics.js';
+import { MERGE_PROVENANCE } from '../lib/runtime/constants.js';
 
 const cleanups = [];
 afterEach(async () => {
@@ -103,6 +105,23 @@ function terminalState(overrides = {}) {
 }
 
 describe('APE v2 history effective records (superseding completions)', () => {
+  it.each([undefined, ...Object.values(MERGE_PROVENANCE)])('retains supported merge provenance %s through archive, query, and explain', async (provenance) => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'ape-history-merge-provenance-'));
+    cleanups.push(directory);
+    const paths = runtimePaths(directory);
+    const merge = {
+      provider: 'github', url: 'https://github.com/acme/project/pull/19',
+      branch: 'ape/feature', base: 'main', merged_at: '2026-07-01T00:01:00.000Z',
+      sha: 'c'.repeat(40), ...(provenance ? { provenance } : {}),
+    };
+    const record = await archiveRun(paths, terminalState({ status: 'completed', stage: 'completed', merge }));
+    expect(record.merge).toEqual(merge);
+    expect((await queryHistory(paths, { run_id: record.run_id }))[0].merge).toEqual(merge);
+    expect(explainRun(record)).toContain('Merged: recorded.');
+    expect(isValidMergeEvidence({ ...merge, provenance: 'unrecognized-observation' })).toBe(false);
+    expect(isValidMergeEvidence({ ...merge, url: 'https://github.com/other/project/pull/19?token=secret' })).toBe(false);
+  });
+
   it('collapses a superseded run to its completed record in the unfiltered listing', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'ape-history-effective-'));
     cleanups.push(dir);

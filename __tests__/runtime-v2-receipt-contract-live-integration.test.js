@@ -1932,6 +1932,43 @@ describe('live receipt contract integration', () => {
     },
   );
 
+  it.each(['ordinary', 'task'])('settles an exhausted stopped worker through %s NEXT before redispatch', async (pathKind) => {
+    const value = await fixture();
+    const invalid = draft(value.ticket, value.capability, 'invalid-status');
+    for (let attempt = 0; attempt < 3; attempt += 1) await validateReceiptForDispatch(value.directory, invalid);
+    expect(await observeCodexSubagentStop(value.paths, await readJson(value.paths.active), {
+      session_id: 'session-1', agent_id: 'agent-1', agent_type: 'default',
+    })).toMatchObject({ observed: true });
+    const operation = {
+      operationId: `op-${'N'.repeat(43)}`, action: 'next', expectedRunId: value.state.run_id,
+      request: { action: 'next', wait_ms: 1 },
+    };
+    if (pathKind === 'task') {
+      const before = await readFile(value.paths.active, 'utf8');
+      const stale = await executeApeRunTaskOperation(value.directory, {
+        ...operation, operationId: `op-${'S'.repeat(43)}`, expectedRunId: 'run-stale-task',
+      });
+      expect(stale).toMatchObject({ ok: false });
+      expect(await readFile(value.paths.active, 'utf8')).toBe(before);
+    }
+    const result = pathKind === 'task'
+      ? await executeApeRunTaskOperation(value.directory, operation)
+      : await nextRun(value.directory);
+    expect(result.ok).toBe(true);
+    expect(result.actions).toEqual(expect.arrayContaining([expect.objectContaining({
+      type: 'dispatch_agent', recovery_kind: 'redispatch_same_ticket',
+      ticket: expect.objectContaining({ ticket_id: value.ticket.ticket_id }),
+    })]));
+    expect(result.run.receipt_contract_exhaustions).toEqual({ [value.ticket.ticket_id]: 1 });
+    expect(result.run.attempts).toEqual(value.state.attempts);
+    expect(result.run.tickets).toHaveLength(1);
+    if (pathKind === 'task') {
+      const after = await readFile(value.paths.active, 'utf8');
+      expect(await executeApeRunTaskOperation(value.directory, operation)).toEqual(result);
+      expect(await readFile(value.paths.active, 'utf8')).toBe(after);
+    }
+  });
+
   it('blocks an identical malformed final draft twice, then retires and redispatches the same ticket once', async () => {
     const value = await fixture();
     const stop = (status) => ({

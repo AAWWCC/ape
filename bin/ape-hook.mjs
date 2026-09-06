@@ -11,7 +11,7 @@ import {
   formatHookResponse,
   parseDeletionCommand,
   parseEvidenceCommand,
-  evidenceOperandCandidates,
+  evidencePathOperands,
   evidenceOperandIsGitNoIndexDevNull,
   evidenceOperandNeedsRoot,
   verifyEvidenceExecutableSnapshot,
@@ -1213,26 +1213,24 @@ try {
             reason = reason ?? `cd target ${parsedEvidence.cdTarget} resolves outside the governed project`;
           }
         }
-        outer: for (const [tokenIndex, token] of parsedEvidence.tokens.entries()) {
+        for (const { tokenIndex, candidate } of evidencePathOperands(parsedEvidence.tokens)) {
           if (!safe) break;
-          for (const candidate of evidenceOperandCandidates(token)) {
-            if (
-              evidenceOperandIsGitNoIndexDevNull(
-                parsedEvidence.tokens,
-                tokenIndex,
-                candidate,
-              )
-            ) {
-              continue;
-            }
-            if (!evidenceOperandNeedsRoot(candidate)) continue;
-            // The admitted leading cd relocates every remaining operand.
-            const absolute = path.resolve(executionCwd, candidate);
-            if (await pathResolvesOutsideProject(paths.root, absolute)) {
-              safe = false;
-              reason = reason ?? `evidence operand ${candidate} resolves outside the governed project`;
-              break outer;
-            }
+          if (
+            evidenceOperandIsGitNoIndexDevNull(
+              parsedEvidence.tokens,
+              tokenIndex,
+              candidate,
+            )
+          ) {
+            continue;
+          }
+          if (!evidenceOperandNeedsRoot(candidate)) continue;
+          // The admitted leading cd relocates every remaining operand.
+          const absolute = path.resolve(executionCwd, candidate);
+          if (await pathResolvesOutsideProject(paths.root, absolute)) {
+            safe = false;
+            reason = reason ?? `evidence operand ${candidate} resolves outside the governed project`;
+            break;
           }
         }
       }

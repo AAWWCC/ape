@@ -126,3 +126,30 @@ describe('literal inspection words preserve read-only command semantics', () => 
     expect(execFileSync('/bin/sh', ['-c', 'test ! -e unwanted'], { cwd: dir }).length).toBe(0);
   });
 });
+
+
+describe('search patterns and filesystem arguments remain distinct', () => {
+  it.each([
+    "rg '/api/' src", "grep '/api/' src",
+    "rg -e '/api/' src", "rg '--regexp=/api/' src",
+    "rg -g '/literal/glob' '/api/' src",
+    "grep --color '/api/' src",
+    "grep --context '/api/' src", "grep --context=2 '/api/' src",
+    "rg --sort path '/api/' src", "rg --type-add 'api:*.js' '/api/' src",
+    "rg -d 2 '/api/' src",
+  ])('admits pattern data in %s', (command) => {
+    expect(policy(command).decision).toBe('allow');
+  });
+  it.each([
+    "rg '/api/' /outside", "grep '/api/' /outside",
+    "rg -e '/api/' /outside", "rg -f /outside/patterns src",
+    "rg -f/outside/patterns src", "grep -f/outside/patterns src",
+    "rg --file=/outside/patterns src", "grep --exclude-from=/outside/ignore '/api/' src",
+    "rg --ignore-file=/outside/ignore '/api/' src", "rg --files /outside",
+    "grep --color '/api/' /outside",
+    "grep --context x /outside/file", "grep --context=2 '/api/' /outside",
+    "rg --sort path '/api/' /outside", "rg --type-add 'api:*.js' '/api/' /outside",
+  ])('retains containment for actual paths in %s', (command) => {
+    expect(policy(command).decision).toBe('deny');
+  });
+});

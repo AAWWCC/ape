@@ -96,6 +96,7 @@ async function refusedStart(dir, input) {
 async function shippingHarness({
   remotes = ['git@github.com:AAWWCC/ape.git'],
   remoteTree = 'f'.repeat(40),
+  mergeTree = 'f'.repeat(40),
   gh = {},
 } = {}) {
   vi.resetModules();
@@ -125,6 +126,7 @@ async function shippingHarness({
     if (args[0] === 'show-ref') return '';
     if (args[0] === 'rev-parse' && String(args[1]).includes('origin/main') &&
       String(args[1]).endsWith('^{tree}')) return remoteTree;
+    if (args[0] === 'rev-parse' && args[1] === `${'e'.repeat(40)}^{tree}`) return mergeTree;
     if (args[0] === 'rev-parse' && String(args[1]).endsWith('^{tree}')) return 'f'.repeat(40);
     if (args[0] === 'rev-parse') return 'c'.repeat(40);
     return '';
@@ -944,7 +946,7 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
   it('binds every remote mutation to one immutable public target', async () => {
     const harness = await shippingHarness({ gh: { view: [
       { exit_code: 1, combined: 'no pull request found\n' },
-      { exit_code: 0, combined: `MERGED https://github.com/AAWWCC/ape/pull/7 2026-07-09T12:00:00Z ${'c'.repeat(40)}\n` },
+      { exit_code: 0, combined: `MERGED https://github.com/AAWWCC/ape/pull/7 2026-07-09T12:00:00Z ${'c'.repeat(40)} ${'e'.repeat(40)}\n` },
     ] } });
 
     const result = await harness.autoMergeGithub('/tmp/ape-public-origin', shippingState(), config);
@@ -1043,14 +1045,14 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
       entry.kind === 'gh' && entry.args[1] === 'merge')).toBe(false);
   });
 
-  it('does not report a merge until public origin/main has the attested tree', async () => {
+  it('does not report a merge unless its immutable merge commit has the attested tree', async () => {
     const harness = await shippingHarness({
-      remoteTree: 'd'.repeat(40),
+      mergeTree: 'd'.repeat(40),
       gh: {
         checks: { exit_code: 0, combined: 'passed\n' },
         view: {
           exit_code: 0,
-          combined: `MERGED https://github.com/AAWWCC/ape/pull/7 2026-09-03T09:00:00Z ${'c'.repeat(40)}\n`,
+          combined: `MERGED https://github.com/AAWWCC/ape/pull/7 2026-09-03T09:00:00Z ${'c'.repeat(40)} ${'e'.repeat(40)}\n`,
         },
       },
     });

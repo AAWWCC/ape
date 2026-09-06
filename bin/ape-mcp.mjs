@@ -534,7 +534,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.24.13' };
+    return { name: 'ape', version: '2.24.14' };
   }
 }
 
@@ -630,8 +630,14 @@ function taskWireProjection(task) {
   return projected;
 }
 
-function assertRunCommandProfilesAction(input) {
+function assertApeRunActionFields(input) {
   const action = input.action;
+  if (Object.hasOwn(input, 'successor')) {
+    throw new Error(STRUCTURED_SUCCESSOR_UNAVAILABLE_ERROR);
+  }
+  if (input.run_id !== undefined && !['answer-preflight', 'abort', 'override'].includes(action)) {
+    throw new Error(`action '${action}' does not take a run_id; run_id confirmation is accepted by 'answer-preflight', 'abort', and 'override', not action '${action}'`);
+  }
   if (action === 'record' && (!input.receipt || typeof input.receipt !== 'object' || Array.isArray(input.receipt))) {
     throw new Error('record requires a receipt object from the authenticated worker; legacy tool_output is not a receipt and the parent must not reconstruct one');
   }
@@ -650,10 +656,7 @@ function assertRunCommandProfilesAction(input) {
 
 async function dispatchApeRun(projectDir, input) {
   const action = input.action;
-  if (Object.hasOwn(input, 'successor')) {
-    throw new Error(STRUCTURED_SUCCESSOR_UNAVAILABLE_ERROR);
-  }
-  assertRunCommandProfilesAction(input);
+  assertApeRunActionFields(input);
   if (action === 'answer-preflight') {
     return answerPreflight(projectDir, {
       ...(input.run_id !== undefined ? { run_id: input.run_id } : {}),
@@ -664,21 +667,6 @@ async function dispatchApeRun(projectDir, input) {
       ...(input.test_paths !== undefined ? { test_paths: input.test_paths } : {}),
       ...(input.risk_triggers !== undefined ? { risk_triggers: input.risk_triggers } : {}),
     });
-  }
-  // Misroute guard (C4, roadmap id abort-cannot-be-aimed): answer-preflight
-  // consumes its optional exact-run confirmation in the early arm above. For
-  // the remaining arms, run_id confirms the abort/override levers only. Every
-  // arm below (start, next, record,
-  // status, resume, regate, ship, expire-dispatch) RETURNS from inside its
-  // own branch, all of them ahead of abort's own operation guard — so a
-  // run_id guard placed where that operation guard sits would be dead code
-  // for every action it exists to protect. It must PRECEDE the whole arm
-  // chain instead. Silently dropping run_id on an unrelated action would sell
-  // unchecked aiming to start/regate/ship while doing nothing. Keyed on
-  // `!== undefined` so an explicit `run_id: null` on start/next also throws,
-  // consistent with the decided null semantics (null is never an omission).
-  if (input.run_id !== undefined && action !== 'abort' && action !== 'override') {
-    throw new Error(`action '${action}' does not take a run_id; run_id confirmation is accepted by 'answer-preflight', 'abort', and 'override', not action '${action}'`);
   }
   if (action === 'probe') {
     return prepareNativeBindingProbe(projectDir, {
@@ -920,14 +908,6 @@ function apeRunPayloadFromServiceValue(value) {
   };
 }
 
-function gateAttribution(before, after) {
-  const beforeWatch = before?.run?.gates_watch;
-  const afterWatch = after?.run?.gates_watch;
-  if (!afterWatch || afterWatch === beforeWatch) return null;
-  if (beforeWatch && beforeWatch.pid === afterWatch.pid && beforeWatch.nonce === afterWatch.nonce) return null;
-  return { runId: after.run.run_id, watch: afterWatch };
-}
-
 async function settleCancelledTask(projectDir, task, attribution = null, reason = 'task cancellation requested') {
   if (attribution) await cleanupAttributedTaskGate(projectDir, attribution).catch(() => {});
   return appendTaskGeneration(projectDir, task.taskId, {
@@ -952,16 +932,6 @@ async function runCreatedTask(projectDir, task, name, args) {
       await settleCancelledTask(projectDir, requested ?? initial, {});
       return;
     }
-    const before = await statusRun(projectDir).catch(() => null);
-    if (runtime) runtime.before = before;
-    // A cancellation handler sets cancelRequested synchronously before its
-    // first durable-write await. Re-check after the status read so cancellation
-    // cannot land in that window and still let an expensive effect begin.
-    if (runtime?.cancelRequested) {
-      const requested = await runtime.cancellationPromise;
-      await settleCancelledTask(projectDir, requested ?? initial, null);
-      return;
-    }
     const serviceValue = await executeApeRunTaskOperation(projectDir, {
       operationId: task.operationId,
       action: task.action,
@@ -969,11 +939,12 @@ async function runCreatedTask(projectDir, task, name, args) {
       expectedRunId: runtime?.expectedRunId ?? null,
       preflightRefusal: runtime?.preflightRefusal ?? null,
       isCancelled: () => runtime?.cancelRequested === true,
+      onGateCreated: (owned) => {
+        attribution = owned;
+        if (runtime) runtime.attribution = owned;
+      },
     });
     const payload = apeRunPayloadFromServiceValue(serviceValue);
-    const after = await statusRun(projectDir).catch(() => null);
-    attribution = gateAttribution(before, after);
-    if (runtime) runtime.attribution = attribution;
     if (runtime?.cancelRequested) {
       const requested = await runtime.cancellationPromise;
       if (requested) await settleCancelledTask(projectDir, requested, attribution);
@@ -1025,25 +996,36 @@ async function runCreatedTask(projectDir, task, name, args) {
 
 async function cancelRunningTask(projectDir, task, running, reason) {
   let attribution = running?.attribution ?? null;
-  if (!attribution && running?.before) {
-    const current = await statusRun(projectDir).catch(() => null);
-    attribution = gateAttribution(running.before, current);
-    if (attribution) running.attribution = attribution;
-  }
   if (!attribution) {
-    // Wait behind any already-entered service effect, then re-read the exact
-    // persisted watch. This catches a gate created while cancellation was
-    // waiting without ever authorizing a signal from pid alone.
+    // Wait behind an entered effect, then use only the ownership evidence it
+    // captured under that same lock. A different task/run may have created the
+    // currently visible watch, so a fresh status read is not attribution.
     await cleanupAttributedTaskGate(projectDir, {}).catch(() => {});
-    const current = await statusRun(projectDir).catch(() => null);
-    attribution = gateAttribution(running?.before, current);
-    if (attribution && running) running.attribution = attribution;
+    attribution = running?.attribution ?? null;
   }
   return settleCancelledTask(projectDir, task, attribution, reason);
 }
 
 async function createToolTask(message, projectDir, name, args) {
-  const activeBeforeCreation = await statusRun(projectDir).catch(() => null);
+  let activeBeforeCreation;
+  try {
+    activeBeforeCreation = await statusRun(projectDir);
+  } catch (cause) {
+    // An unreadable selector is not evidence that no run exists. Match the
+    // ordinary tool fault before publishing a task with an invented null bind.
+    return result(message.id, {
+      resultType: 'complete',
+      isError: true,
+      content: [{ type: 'text', text: cause?.message ?? String(cause) }],
+    });
+  }
+  if (activeBeforeCreation?.code === 'APE_ACTIVE_STATE_BUSY') {
+    return result(message.id, {
+      resultType: 'complete',
+      isError: true,
+      content: [{ type: 'text', text: activeBeforeCreation.reason }],
+    });
+  }
   // Opportunistic bounded collection keeps both terminal and abandoned task
   // journals from accumulating merely because clients never poll them again.
   await collectExpiredTasks(projectDir, { limit: 100 });
@@ -1110,11 +1092,11 @@ export async function shutdownOwnedTasks(reason = 'MCP server shutdown requested
     const requested = await running.cancellationPromise;
     if (requested) requestedLive.push({ running, requested });
   }
-  // Phase two performs attributable cleanup for runners far enough along to
-  // have a before-state. Deferred runners observe the cancellation at their
+  // Phase two performs attributable cleanup for entered runners. Deferred
+  // runners observe the cancellation at their
   // first checkpoint and cross the service-lock barrier there.
   for (const { running, requested } of requestedLive) {
-    if (running.attribution || running.before) {
+    if (running.started) {
       await cancelRunningTask(running.projectDir, requested, running, reason);
     } else if (!running.started) {
       clearTimeout(running.timer);
@@ -1153,11 +1135,10 @@ export async function executeToolCall(message) {
   const name = message.params?.name;
   const args = message.params?.arguments ?? {};
   if (name === 'ape_run') {
-    // Reject a misplaced immutable grant before task wrapping. Otherwise a
-    // task-capable `next`/`record` could bypass dispatchApeRun and silently
-    // discard a caller-supplied run profile inside executeApeRunTaskOperation.
+    // Validate action-specific fields before choosing either execution path.
+    // Task wrapping must preserve ordinary successor, run-ID and grant refusals.
     try {
-      assertRunCommandProfilesAction(args);
+      assertApeRunActionFields(args);
     } catch (cause) {
       return result(message.id, {
         resultType: 'complete',
@@ -1267,7 +1248,7 @@ export async function handle(message) {
     if (running) running.cancellationPromise = cancellationPromise;
     const task = await cancellationPromise;
     if (!task) return error(message.id, -32602, 'Failed to cancel task: Task not found');
-    if (running && (running.attribution || running.before)) {
+    if (running) {
       await cancelRunningTask(projectDir, task, running, 'client requested task cancellation');
     } else if (!running) {
       // Persisted work owned by another/dead process is never signalled: doing

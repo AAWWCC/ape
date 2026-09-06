@@ -1,9 +1,87 @@
 import { spawn } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 const DEFAULT_KILL_GRACE_MS = 10_000;
 const DEFAULT_DRAIN_MS = 5_000;
+const SUITE_SUPERVISOR_SENTINEL = '--ape-suite-supervisor';
+
+// Source callers live in lib/runtime; bundled callers live in dist. Always
+// launch the packaged unbundled helper: import.meta.url itself names the MCP
+// bundle after bundling and would otherwise launch another server as a suite.
+function resolveSuiteSupervisorEntry() {
+  for (const relative of ['./spawn.js', '../lib/runtime/spawn.js']) {
+    try { return realpathSync(fileURLToPath(new URL(relative, import.meta.url))); }
+    catch { /* try the other supported runtime layout */ }
+  }
+  throw new Error('Suite supervisor entry is unavailable; restore lib/runtime/spawn.js');
+}
+
+/** @typedef {{ type: 'ape-suite-start', version: 1, command: string, args: string[], shell: boolean }} SupervisorStart */
+/** @typedef {{ type: 'ape-suite-completion', version: 1, exit_code: number | null, signal: string | null, spawn_error: { message: string, code?: string } | null }} SupervisorCompletion */
+
+/** @returns {message is SupervisorStart} */
+function validSupervisorStart(message) {
+  return message && typeof message === 'object' && !Array.isArray(message) &&
+    message.type === 'ape-suite-start' && message.version === 1 &&
+    typeof message.command === 'string' && Array.isArray(message.args) &&
+    message.args.every((arg) => typeof arg === 'string') && typeof message.shell === 'boolean';
+}
+
+// This unbundled entry ships beside runner.js. The calling process's owned IPC
+// channel is a lifeline, not a durable numeric PID that can later be recycled.
+// The supervisor remains the POSIX group leader even after the real command
+// exits, so cleanup can still reach ordinary grandchildren safely. The real
+// command gets no IPC channel. On runner death, the supervisor kills its OWN
+// group; on completion, the runner kills that still-live group before settling.
+function runSuiteSupervisor() {
+  if (!process.send || !process.connected || process.platform === 'win32') { process.exitCode = 1; return; }
+  const stopGroup = () => {
+    try { process.kill(-process.pid, 'SIGKILL'); }
+    catch { process.exit(1); }
+  };
+  process.on('disconnect', stopGroup);
+  process.on('SIGTERM', stopGroup);
+  process.on('SIGINT', stopGroup);
+  let launched = false;
+  const complete = (exit_code, signal, error = null) => {
+    const spawn_error = error ? { message: String(error.message).slice(0, 4096),
+      ...(typeof error.code === 'string' ? { code: error.code.slice(0, 64) } : {}) } : null;
+    process.send?.({ type: 'ape-suite-completion', version: 1, exit_code, signal, spawn_error }, (sendError) => {
+      if (sendError) stopGroup();
+    });
+  };
+  process.on('message', (message) => {
+    if (launched || !validSupervisorStart(message)) {
+      stopGroup();
+      return;
+    }
+    launched = true;
+    let command;
+    try {
+      command = spawn(message.command, message.args, {
+        shell: message.shell, detached: false, windowsHide: true,
+        stdio: ['ignore', 'inherit', 'inherit'],
+        env: { ...process.env, NODE_CHANNEL_FD: undefined, NODE_CHANNEL_SERIALIZATION_MODE: undefined },
+      });
+    } catch (error) { complete(null, null, error); return; }
+    command.once('error', (error) => complete(null, null, error));
+    command.once('exit', (code, signal) => complete(code, signal));
+  });
+}
+
+/** @returns {message is SupervisorCompletion} */
+function validSupervisorCompletion(message) {
+  return message && typeof message === 'object' && !Array.isArray(message) &&
+    message.type === 'ape-suite-completion' && message.version === 1 &&
+    (message.exit_code === null || (Number.isInteger(message.exit_code) && message.exit_code >= 0 && message.exit_code <= 255)) &&
+    (message.signal === null || (typeof message.signal === 'string' && /^SIG[A-Z0-9]+$/.test(message.signal))) &&
+    (message.spawn_error === null || (message.spawn_error && typeof message.spawn_error.message === 'string' &&
+      message.spawn_error.message.length <= 4096 && (message.spawn_error.code === undefined ||
+      (typeof message.spawn_error.code === 'string' && message.spawn_error.code.length <= 64))));
+}
 
 // Force-kill the child's entire process tree. A bare child.kill() reaches only
 // the direct child: test suites and remote-check watchers routinely fan out
@@ -55,7 +133,8 @@ function killTree(child, signal) {
 // kill_grace_ms (SIGTERM -> SIGKILL escalation window), drain_ms (post-exit
 // stdio wait), collect ('combined' default | 'separate'), max_output
 // (combined only; checked before append, so output overshoots by at most one
-// pipe chunk — byte-identical to the historical runner cap).
+// pipe chunk — byte-identical to the historical runner cap), signal, supervise
+// (POSIX suites: keep an owned group leader until tree cleanup).
 //
 // Result: { exit_code, signal, timed_out, stdout, stderr, combined,
 // spawn_error }. timed_out is true only when the timeout fired and initiated
@@ -66,22 +145,27 @@ export function spawnWithTimeout(command, args, options = {}) {
   const drainMs = options.drain_ms ?? DEFAULT_DRAIN_MS;
   const combinedMode = options.collect !== 'separate';
   const maxOutput = options.max_output;
+  // Windows retains the existing live parent chain and taskkill /T behavior.
+  const supervised = options.supervise === true && process.platform !== 'win32';
   return new Promise((resolve) => {
+    if (options.signal?.aborted) {
+      resolve({ exit_code: null, signal: null, timed_out: false, aborted: true,
+        stdout: '', stderr: '', combined: '', spawn_error: null });
+      return;
+    }
     let child;
     try {
-      child = spawn(command, args ?? [], {
+      child = spawn(supervised ? process.execPath : command,
+        supervised ? [resolveSuiteSupervisorEntry(), SUITE_SUPERVISOR_SENTINEL] : args ?? [], {
         cwd: options.cwd,
-        shell: options.shell ?? false,
+        shell: supervised ? false : options.shell ?? false,
         windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: supervised ? ['ignore', 'pipe', 'pipe', 'ipc'] : ['ignore', 'pipe', 'pipe'],
         // POSIX: make the child a process-group leader so the timeout can
         // signal the whole tree at once. Never detach on win32 — taskkill
-        // walks the tree by pid there instead. A caller may force detached:false
-        // to keep the child in its OWN process group (the gate runner does this
-        // so an ABORT that signals the runner's group also reaches the suite —
-        // A6), at the cost of the timeout's group tree-kill degrading to a
-        // direct-child kill (fine for the single-process suites this covers).
-        detached: options.detached ?? process.platform !== 'win32',
+        // walks the tree by pid there instead. Nested runners relay cancellation
+        // through options.signal so the suite retains its own timeout group.
+        detached: supervised || (options.detached ?? process.platform !== 'win32'),
         ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
       });
     } catch (error) {
@@ -95,11 +179,14 @@ export function spawnWithTimeout(command, args, options = {}) {
     let stderr = '';
     let combined = '';
     let timedOut = false;
+    let aborted = false;
     // Whether the timeout's force-kill has already been delivered to the tree.
     // Exactly one of the escalate callback and the 'exit' handler below may
     // deliver it; a second one would double-signal the group.
     let escalated = false;
     let exitInfo = null;
+    let completion = null;
+    let supervisorError = null;
     let settled = false;
     let timeoutTimer = null;
     let escalateTimer = null;
@@ -113,14 +200,19 @@ export function spawnWithTimeout(command, args, options = {}) {
       clearTimeout(escalateTimer);
       clearTimeout(failsafeTimer);
       clearTimeout(drainTimer);
+      options.signal?.removeEventListener('abort', abort);
+      if (supervised && child.connected) {
+        try { child.disconnect(); } catch { /* already disconnected */ }
+      }
       resolve({
-        exit_code: exitInfo?.code ?? null,
-        signal: exitInfo?.signal ?? null,
+        exit_code: completion ? completion.exit_code : exitInfo?.code ?? null,
+        signal: completion ? completion.signal : exitInfo?.signal ?? null,
         timed_out: timedOut,
+        ...(aborted ? { aborted: true } : {}),
         stdout,
         stderr,
         combined,
-        spawn_error: spawnError,
+        spawn_error: spawnError ?? supervisorError,
       });
     };
     const collect = (chunk, stream) => {
@@ -139,12 +231,33 @@ export function spawnWithTimeout(command, args, options = {}) {
     child.stdout.on('data', (chunk) => collect(chunk, 'stdout'));
     child.stderr.on('data', (chunk) => collect(chunk, 'stderr'));
 
+    // The owner may itself be about to exit. Cancel the live, owned process
+    // group immediately rather than relying on a later timer in that owner.
+    const abort = () => {
+      if (settled) return;
+      aborted = true;
+      clearTimeout(timeoutTimer);
+      clearTimeout(escalateTimer);
+      clearTimeout(failsafeTimer);
+      escalated = true;
+      // Do not signal a recycled numeric group after losing the live child.
+      if (child.exitCode === null && child.signalCode === null) killTree(child, 'SIGKILL');
+      failsafeTimer = setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        child.unref?.();
+        settle();
+      }, killGraceMs);
+    };
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) abort();
+
     // Arm the deadline for any finite number a caller provided (setTimeout
     // clamps degenerate values to "immediately", which fails closed: a
     // nonsense deadline must never mean "no deadline"). Only an absent
     // timeout_ms leaves the timer unarmed — setTimeout with an undefined
     // delay would fire on the next tick and brand everything timed_out.
-    if (Number.isFinite(options.timeout_ms)) {
+    if (!aborted && Number.isFinite(options.timeout_ms)) {
       timeoutTimer = setTimeout(() => {
         // The child can exit in the same tick the timer fires; a verdict that
         // beat the deadline must not be branded timed_out.
@@ -179,11 +292,17 @@ export function spawnWithTimeout(command, args, options = {}) {
 
     child.on('error', (error) => {
       // Spawn failures (ENOENT and friends) may never emit 'exit'.
+      if (supervised && child.pid && child.exitCode === null && child.signalCode === null) killTree(child, 'SIGKILL');
       settle(error);
     });
     child.on('exit', (code, signal) => {
       exitInfo = { code, signal };
-      // An OWED escalation is DELIVERED here rather than dropped. The direct
+      if (supervised && !completion && !timedOut && !aborted) {
+        supervisorError = new Error('Suite supervisor exited without reporting the command result');
+      }
+      // An OWED escalation is DELIVERED here rather than dropped. A supervised
+      // group is also cleaned at the exact owned leader-exit event if that
+      // leader died unexpectedly before reporting completion. The direct
       // child routinely dies on the polite group SIGTERM (sh, npm and vitest
       // all do) while a DESCENDANT ignores or slow-walks it; settle() then
       // clears escalateTimer — on the shipped defaults the drain deadline
@@ -194,7 +313,7 @@ export function spawnWithTimeout(command, args, options = {}) {
       // it is still in use as an active process-group id: kill(-pid) can
       // only miss the original group once that group is EMPTY, exactly when
       // there is nothing left to kill and the ESRCH is harmless.
-      if (timedOut && !escalated) {
+      if ((timedOut || supervised) && !escalated) {
         escalated = true;
         // win32 is never owed one: killTree's polite step there is ALREADY
         // `taskkill /T /F` on the whole tree, and node closes the process
@@ -222,7 +341,56 @@ export function spawnWithTimeout(command, args, options = {}) {
       exitInfo = { code, signal };
       settle();
     });
+    if (supervised) {
+      child.on('message', (message) => {
+        if (settled || completion) return;
+        if (!validSupervisorCompletion(message)) {
+          supervisorError = new Error('Suite supervisor returned an invalid command result');
+        } else {
+          completion = message;
+          // A result observed before the deadline must not be reclassified
+          // while the already-finished command's owned group is cleaned up.
+          clearTimeout(timeoutTimer);
+          if (completion.spawn_error) supervisorError = Object.assign(new Error(completion.spawn_error.message), {
+            ...(completion.spawn_error.code ? { code: completion.spawn_error.code } : {}),
+          });
+        }
+        // This exact ChildProcess owns the IPC channel, and the supervisor
+        // deliberately stays live until this kill. The command cannot spoof
+        // completion through stdout or inherit the channel to its descendants.
+        escalated = true;
+        if (child.exitCode === null && child.signalCode === null) killTree(child, 'SIGKILL');
+        clearTimeout(failsafeTimer);
+        failsafeTimer = setTimeout(() => {
+          supervisorError ??= new Error('Suite process-group cleanup did not finish');
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          child.unref?.();
+          settle();
+        }, killGraceMs);
+      });
+      child.once('spawn', () => {
+        if (settled || aborted) return;
+        const failed = (error) => {
+          if (!error || settled) return;
+          supervisorError = error;
+          if (child.exitCode === null && child.signalCode === null) killTree(child, 'SIGKILL');
+        };
+        try {
+          child.send({ type: 'ape-suite-start', version: 1, command, args: args ?? [], shell: options.shell === true }, failed);
+        } catch (error) { failed(error); }
+      });
+    }
   });
+}
+
+// Source and bundled runtime callers launch this unbundled module. A matching main
+// module, the private sentinel and an IPC endpoint are required; ordinary
+// imports do not start a supervisor.
+if (process.argv[2] === SUITE_SUPERVISOR_SENTINEL && process.send) {
+  try {
+    if (realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) runSuiteSupervisor();
+  } catch { /* not the unbundled supervisor entry */ }
 }
 
 // Spawn a fire-and-forget detached child that OUTLIVES the parent MCP call: the
@@ -364,14 +532,10 @@ function pidExists(pid) {
 // heartbeat_ms, and rm's the file when it finishes — so this is an IDENTITY
 // witness, not a mere touch file. Missing or unparseable => no witness.
 //
-// WHAT ABSENCE ACTUALLY MEANS, STATED HONESTLY. Absence proves only that nothing
-// is currently ATTESTING; it does NOT prove the runner's process group is empty,
-// and the group may still hold OUR OWN suite grandchild. The
-// witness-less-but-possibly-live cases are argued rather than assumed away at
-// FALSE-NEGATIVE LEDGER (a) and (f) on killProcessTree below. UNPARSEABLE no
-// longer joins them by way of a torn read: runner.js now publishes each beat
-// atomically (temp + rename), so a reader sees the previous beat or the next one
-// and never half of one. Ledger (b) records what that closed and what it traded.
+// A missing witness provides no authority to signal a numeric process group.
+// Current POSIX gate suites have their own supervisor cleanup; historical or
+// other runner-group members may still exist. Atomic heartbeat replacement
+// prevents torn reads. The remaining limits are recorded below.
 async function readRunnerWitness(file) {
   try {
     const beat = JSON.parse(await readFile(file, 'utf8'));
@@ -412,10 +576,10 @@ function withinArmedLifetime(watch) {
   return age >= 0 && age <= timeoutMs + RUNNER_LIFETIME_SLACK_MS;
 }
 
-// Best-effort kill of a detached gate-runner's whole process tree, Windows-safe
-// (mirrors killTree's discipline, but keyed on a PERSISTED watch rather than a
-// live child handle — the aborting process is a different `ape_run` call than the
-// one that spawned the runner).
+// Best-effort signaling of the verified detached runner group. Current POSIX
+// suites stop through runner cancellation forwarding or their supervisor's IPC
+// disconnect handler. Windows taskkill walks the live runner's process tree.
+// This caller holds a persisted watch rather than the original child handle.
 //
 // THE HAZARD THIS GUARDS. watch.pid is read off durable run state, and a run can
 // rest in 'gating' for an arbitrary wall-clock interval, so the number may name a
@@ -431,8 +595,8 @@ function withinArmedLifetime(watch) {
 // parses AND names THIS pid — the identity witness, where beat.pid is never
 // trusted alone or a parseable file could redirect a SIGKILL; then either that
 // witness is FRESH, or the watch is still inside its armed lifetime. That last
-// branch is deliberate: a runner that stopped heartbeating may still have left a
-// suite grandchild writing the tree, and skipping there would trade the
+// branch is deliberate: a stalled runner or legacy group members may still
+// be active, and skipping there would trade the
 // stray-signal hazard for a false NEGATIVE against the A6 contract (invariant 4).
 // Only then is the group probed and signalled. Nothing is EVER signalled through
 // the bare positive pid: the old catch-fallback fired precisely on the strongest
@@ -448,44 +612,16 @@ function withinArmedLifetime(watch) {
 // have.
 //
 // ===========================================================================
-// FALSE-NEGATIVE LEDGER — every case in which this guard SKIPS a kill the old
-// unguarded code would have delivered. The A6 contract these call sites
-// implement is that aborting a gating run leaves no surviving suite grandchild
-// writing the tree that later evidence is computed over (invariant 4), so each
-// skip is a DEBT against that contract and is argued here rather than asserted
-// safe. Nothing is silently dropped.
+// Remaining limits and historical cases for the persisted-watch guard.
 //
-//  (a) ABSENT WITNESS AFTER A NORMAL RUNNER COMPLETION — THE LARGEST MEMBER,
-//      and the ORDINARY case rather than a corner. runner.js writes its result
-//      artifact and then rm's the heartbeat, and the run KEEPS RESTING in
-//      'gating' for an unbounded wall-clock interval until some later poll
-//      adopts that artifact. Every abort arriving in that window finds no
-//      witness and skips. And the tree is not necessarily quiet then:
-//      spawnWithTimeout settles after its BOUNDED drain even while a
-//      pipe-holding GRANDCHILD is still alive — the npm -> vitest -> dev-server
-//      fan-out that killTree's own header exists for — and that grandchild is
-//      still in the runner's process group and still writing the tree. The old
-//      code killed it, and killed it SAFELY, because a non-empty group is
-//      exactly the case where the pgid is still RESERVED by its own members and
-//      kill(-pid) cannot mis-target.
-//      WHY THE SKIP NEVERTHELESS STANDS: groupExists(pid) answers only "some
-//      process group with this id exists". It CANNOT distinguish our own
-//      surviving grandchild from a pgid that was freed and retaken by an
-//      unrelated process — that indistinguishability IS the recycled-pid hazard
-//      this function exists for, and it is not resolvable from inside an
-//      aborting process that holds no handle. Signalling on that evidence would
-//      put a SIGTERM and then a SIGKILL into a stranger's process group on the
-//      operator's own machine. Weighed against each other: the false negative is
-//      BOUNDED and self-limiting (the leftover grandchild is a suite process
-//      that exits on its own, and the run whose tree it writes is being ABORTED,
-//      so its evidence is discarded rather than admitted), while the false
-//      positive is UNBOUNDED (an arbitrary unrelated group, force-killed). The
-//      lesser harm wins and the veto stays.
-//      THE DEBT IS REAL, AND THE HONEST CLOSING MOVE IS NOT TO WIDEN THIS GUARD.
-//      It is to stop producing witness-less live trees at all: keep the runner
-//      heartbeating until its process group is actually empty, and/or close the
-//      'gating' rest window by adopting the artifact promptly. Both live in
-//      runner.js and the poll path, neither of which is claimed here.
+//  (a) ABSENT WITNESS AFTER NORMAL COMPLETION — CLOSED for supervised POSIX
+//      gate suites. Their retained supervisor leads the suite group until the
+//      command exits; ordinary descendants are killed before the runner writes
+//      its result artifact. Runner death instead closes the supervisor's IPC
+//      lifeline and triggers the same cleanup. The missing-witness veto stays:
+//      a bare pgid may belong to an unrelated, recycled group. Windows, legacy
+//      or unsupervised jobs, and deliberately detached descendants are outside
+//      this supervised POSIX guarantee.
 //
 //  (b) TORN HEARTBEAT READ AGAINST A FULLY LIVE RUNNER — CLOSED, and kept here
 //      because closing it bought a smaller cost that is now the live residual.
@@ -679,15 +815,10 @@ export async function killProcessTree(watch, options = {}) {
       return;
     }
 
-    // AGE FENCE (POSIX only): a stale witness still authorizes the kill while
-    // the watch is inside its armed lifetime — the orphaned-suite case. Past it,
-    // nothing of ours can still be there — EXCEPT after an A2 respawn, where the
-    // lifetime is still measured from the FIRST runner's created_at. That
-    // exception is real, bounded, and argued on withinArmedLifetime above
-    // (ledger entry (c)); it is not silently assumed away here. The `!fresh &&`
-    // conjunct is equally load-bearing in the other direction: a runner that is
-    // heartbeating RIGHT NOW is alive by direct attestation, and an over-running
-    // suite is exactly what an abort exists for, so the fence must not veto it.
+    // AGE FENCE (POSIX only): a stale witness authorizes signaling only within
+    // the watch's armed lifetime. This may skip a stalled runner or legacy
+    // group members, including the respawn case recorded above. A fresh
+    // heartbeat remains direct evidence even after the original deadline.
     if (!fresh && !withinArmedLifetime(watch)) return;
     // The probe and the signal are one synchronous turn: no await may separate
     // them, or the window this narrows re-opens between them.

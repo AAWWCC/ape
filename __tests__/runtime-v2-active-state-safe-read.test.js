@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   access,
+  link,
   lstat,
   mkdir,
   mkdtemp,
@@ -15,27 +16,45 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadSessionGuidance } from '../lib/runtime/session-guidance.js';
-import { overrideRun, statusRun } from '../lib/runtime/service.js';
+import { compactStatus, overrideRun, statusRun } from '../lib/runtime/service.js';
+import { executeToolCall } from '../bin/ape-mcp.mjs';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { ACTIVE_STATE_MAX_BYTES } from '../lib/runtime/status-service.js';
+import { activeState } from '../lib/runtime/active-state.js';
 
 const cleanups = [];
-const replacementRace = vi.hoisted(() => ({ active: null, audit: null, point: null, bytes: null, fired: false }));
+const replacementRace = vi.hoisted(() => ({ active: null, audit: null, point: null, bytes: null, fired: false, atomic: false, repeat: false, inPlace: false }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal();
   const replace = async () => {
     replacementRace.fired = true;
-    await actual.rename(replacementRace.active, `${replacementRace.active}.previous`);
-    await actual.writeFile(replacementRace.active, replacementRace.bytes);
+    if (replacementRace.inPlace) {
+      await actual.writeFile(replacementRace.active, replacementRace.bytes);
+    } else if (replacementRace.atomic) {
+      await actual.writeFile(`${replacementRace.active}.next`, replacementRace.bytes);
+      await actual.rename(`${replacementRace.active}.next`, replacementRace.active);
+    } else {
+      await actual.rename(replacementRace.active, `${replacementRace.active}.previous`);
+      await actual.writeFile(replacementRace.active, replacementRace.bytes);
+    }
   };
   return {
     ...actual,
     open: async (...args) => {
-      if (!replacementRace.fired && replacementRace.point === 'open' && args[0] === replacementRace.active) {
+      if ((!replacementRace.fired || replacementRace.repeat) && replacementRace.point === 'open' && args[0] === replacementRace.active) {
         await replace();
       }
-      return actual.open(...args);
+      const handle = await actual.open(...args);
+      if (args[0] === replacementRace.active && replacementRace.point === 'read') {
+        const read = handle.read.bind(handle);
+        handle.read = async (...readArgs) => {
+          const result = await read(...readArgs);
+          if (!replacementRace.fired || replacementRace.repeat) await replace();
+          return result;
+        };
+      }
+      return handle;
     },
     writeFile: async (...args) => {
       const result = await actual.writeFile(...args);
@@ -54,7 +73,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 });
 
 afterEach(async () => {
-  Object.assign(replacementRace, { active: null, audit: null, point: null, bytes: null, fired: false });
+  Object.assign(replacementRace, { active: null, audit: null, point: null, bytes: null, fired: false, atomic: false, repeat: false, inPlace: false });
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -97,14 +116,81 @@ describe('APE v2 active.json descriptor-bound reads and audited recovery', () =>
       bytes: replacementBytes,
     });
 
-    await expect(overrideRun(dir, 'reset', 'recover the originally diagnosed corrupt entry'))
-      .rejects.toThrow(/state changed (after it was diagnosed|during quarantine)/);
+    const reset = overrideRun(dir, 'reset', 'recover the originally diagnosed corrupt entry');
+    if (point === 'open') {
+      // A replacement before the descriptor read is retried and validated as
+      // the current run. It never enters corrupt-state quarantine.
+      await expect(reset).resolves.toMatchObject({ ok: false, reason: expect.stringMatching(/reset is allowed only/) });
+    } else {
+      await expect(reset).rejects.toThrow(/state changed (after it was diagnosed|during quarantine)/);
+    }
 
     expect(replacementRace.fired).toBe(true);
     expect(await readFile(paths.active, 'utf8')).toBe(replacementBytes);
     expect(await readFile(paths.lock, 'utf8')).toBe('replacement-run-lock');
     expect(forensicNames(await readdir(paths.runtime))).toHaveLength(0);
     expect(await readFile(`${paths.active}.previous`, 'utf8')).toBe('{broken');
+  });
+
+  it.each(['open', 'read'])('retries a valid atomic replacement at the %s boundary without corrupt-state guidance', async (point) => {
+    const { dir, paths } = await project('ape-active-atomic-read-');
+    await writeFile(paths.active, '{"run_id":"run-before"}\n');
+    Object.assign(replacementRace, {
+      active: paths.active, point, atomic: true,
+      bytes: '{"run_id":"run-after","tickets":[],"receipts":[]}\n',
+    });
+    const status = await statusRun(dir);
+    expect(replacementRace.fired).toBe(true);
+    expect(status).toMatchObject({ ok: true, run: { run_id: 'run-after' } });
+    expect(status).not.toHaveProperty('corrupt_state');
+  });
+
+  it('bounds replacement retries and returns a transient error without authorizing quarantine', async () => {
+    const { dir, paths } = await project('ape-active-atomic-churn-');
+    await writeFile(paths.active, '{"run_id":"run-before"}\n');
+    Object.assign(replacementRace, {
+      active: paths.active, point: 'open', atomic: true, repeat: true,
+      bytes: '{"run_id":"run-after"}\n',
+    });
+    const error = await activeState(paths).catch((cause) => cause);
+    expect(error).toMatchObject({ code: 'APE_ACTIVE_STATE_BUSY' });
+    expect(error.message).toMatch(/retry the operation/);
+    expect(error.message).not.toMatch(/corrupt|quarantine|reset/i);
+    for (const readStatus of [statusRun, compactStatus]) {
+      const status = await readStatus(dir);
+      expect(status).toMatchObject({ ok: false, code: 'APE_ACTIVE_STATE_BUSY', retryable: true });
+      expect(status).not.toHaveProperty('active');
+      expect(status).not.toHaveProperty('corrupt_state');
+      expect(JSON.stringify(status)).not.toMatch(/corrupt|quarantine|reset/i);
+    }
+    const guidance = await loadSessionGuidance(dir, { source: 'startup', host: 'codex' });
+    expect(guidance).toContain('Next safe action: retry ape_status');
+    expect(guidance).not.toMatch(/corrupt|invalid|reset|no active APE run/);
+    const tasked = await executeToolCall({
+      jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: { name: 'ape_run', arguments: { action: 'regate', project_dir: dir }, _meta: {
+        'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+        'io.modelcontextprotocol/clientCapabilities': { extensions: { 'io.modelcontextprotocol/tasks': {} } },
+      } },
+    });
+    expect(tasked.result).toMatchObject({ resultType: 'complete', isError: true });
+    expect(tasked.result.content[0].text).toMatch(/retry ape_status/);
+    await expect(access(path.join(paths.runtime, 'tasks'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(overrideRun(dir, 'reset', 'must not quarantine a changing valid state'))
+      .rejects.toMatchObject({ code: 'APE_ACTIVE_STATE_BUSY' });
+    expect(forensicNames(await readdir(paths.runtime))).toHaveLength(0);
+  });
+
+  it('continues refusing an in-place mutation and a multiply-linked active file', async () => {
+    const { dir, paths } = await project('ape-active-in-place-');
+    await writeFile(paths.active, '{"run_id":"run-before"}\n');
+    Object.assign(replacementRace, {
+      active: paths.active, point: 'read', inPlace: true,
+      bytes: '{"run_id":"run-after-longer-than-the-original"}\n',
+    });
+    await expect(activeState(paths)).rejects.toMatchObject({ code: 'APE_CORRUPT_ACTIVE_STATE', variant: 'unsafe' });
+    await link(paths.active, path.join(paths.runtime, 'other-link'));
+    await corruptSurfaces(dir, /unsafe/i);
   });
 
   it.skipIf(process.platform === 'win32')('refuses a FIFO without opening it and reset preserves the FIFO node as forensic evidence', async () => {

@@ -1,4 +1,7 @@
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { GATE_RUNNER_SENTINEL } from '../lib/runtime/runner.js';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -176,5 +179,141 @@ describe('collection modes', () => {
       { timeout_ms: 15_000, env: { APE_SPAWN_PROBE: 'probe-value' } },
     );
     expect(result.combined).toContain('probe-value:inherited');
+  });
+});
+
+
+describe.skipIf(process.platform === 'win32')('nested gate suite cleanup', () => {
+  it('cleans remaining descendants before publishing a normally exited suite result', async () => {
+    const dir = await fixtureDir();
+    const marker = path.join(dir, 'exited');
+    const beats = path.join(dir, 'beats');
+    const pidFile = path.join(dir, 'grand.pid');
+    const artifact = path.join(dir, 'artifact.json');
+    const jobFile = path.join(dir, 'job.json');
+    await writeFile(path.join(dir, 'grand.mjs'), `
+      import { appendFileSync } from 'node:fs';
+      process.on('SIGTERM', () => {});
+      appendFileSync(process.argv[2], 'beat\\n');
+      setInterval(() => appendFileSync(process.argv[2], 'beat\\n'), 20);
+    `);
+    await writeFile(path.join(dir, 'suite.mjs'), `
+      import { spawn } from 'node:child_process';
+      import { existsSync, writeFileSync } from 'node:fs';
+      if (typeof process.send !== 'undefined') process.exit(91);
+      const grand = spawn(process.execPath, ['grand.mjs', process.argv[3]], { stdio: 'inherit' });
+      writeFileSync(process.argv[4], String(grand.pid));
+      setInterval(() => {
+        if (existsSync(process.argv[3])) {
+          writeFileSync(process.argv[2], 'exited');
+          process.exit(0);
+        }
+      }, 20);
+    `);
+    await writeFile(jobFile, JSON.stringify({ project_dir: dir,
+      artifact_file: artifact, timeout_ms: 60000,
+      plan: { command: process.execPath, args: ['suite.mjs', marker, beats, pidFile] },
+    }));
+    const runner = spawn(process.execPath, [fileURLToPath(new URL('../lib/runtime/runner.js', import.meta.url)), GATE_RUNNER_SENTINEL], {
+      cwd: dir, env: { ...process.env, APE_GATE_RUNNER_JOB: jobFile }, detached: true, stdio: 'ignore',
+    });
+    const exited = new Promise((resolve) => runner.once('exit', resolve));
+    let grandPid = null;
+    try {
+      for (let attempt = 0; attempt < 100 && await fileSize(marker) === 0; attempt += 1) await sleep(20);
+      expect(await fileSize(marker)).toBeGreaterThan(0);
+      grandPid = Number(await readFile(pidFile, 'utf8'));
+      await exited;
+      const result = JSON.parse(await readFile(artifact, 'utf8'));
+      expect(result.verification.exit_code).toBe(0);
+      expect(result.verification.aborted).toBeUndefined();
+      expect(result.passed).toBe(true);
+      await expectTreeDead(beats);
+    } finally {
+      if (runner.exitCode === null && runner.signalCode === null) runner.kill('SIGTERM');
+      const before = await fileSize(beats);
+      await sleep(60);
+      if (grandPid && await fileSize(beats) > before) {
+        try { process.kill(grandPid, 'SIGKILL'); } catch { /* fixture already exited */ }
+      }
+    }
+  }, 15000);
+
+  it.each(['timeout', 'cancel', 'runner-crash'])('stops suite descendants on gate %s', async (mode) => {
+    const dir = await fixtureDir();
+    const marker = path.join(dir, 'marker');
+    const pidFile = path.join(dir, 'grand.pid');
+    const artifact = path.join(dir, 'artifact.json');
+    const heartbeat = path.join(dir, 'heartbeat.json');
+    await writeFile(path.join(dir, 'grand.mjs'), `
+      import { appendFileSync } from 'node:fs';
+      process.on('SIGTERM', () => {});
+      setInterval(() => appendFileSync(process.argv[2], 'beat\\n'), 20);
+    `);
+    await writeFile(path.join(dir, 'suite.mjs'), `
+      import { spawn } from 'node:child_process';
+      import { writeFileSync } from 'node:fs';
+      const grand = spawn(process.execPath, ['grand.mjs', process.argv[2]], { stdio: 'inherit' });
+      writeFileSync(process.argv[3], String(grand.pid));
+      setInterval(() => {}, 1000);
+    `);
+    const jobFile = path.join(dir, 'job.json');
+    await writeFile(jobFile, JSON.stringify({ project_dir: dir,
+      heartbeat_file: heartbeat, artifact_file: artifact,
+      timeout_ms: mode === 'timeout' ? 1500 : 60000, heartbeat_ms: 50,
+      plan: { command: process.execPath, args: ['suite.mjs', marker, pidFile] },
+    }));
+    const runner = spawn(process.execPath, [fileURLToPath(new URL('../lib/runtime/runner.js', import.meta.url)), GATE_RUNNER_SENTINEL], {
+      cwd: dir, env: { ...process.env, APE_GATE_RUNNER_JOB: jobFile }, detached: true, stdio: 'ignore',
+    });
+    const exited = new Promise((resolve) => runner.once('exit', resolve));
+    let grandPid = null;
+    try {
+      for (let attempt = 0; attempt < 100 && await fileSize(marker) === 0; attempt += 1) await sleep(20);
+      expect(await fileSize(marker)).toBeGreaterThan(0);
+      grandPid = Number(await readFile(pidFile, 'utf8'));
+      if (mode === 'cancel') runner.kill('SIGTERM');
+      if (mode === 'runner-crash') runner.kill('SIGKILL');
+      await exited;
+      if (mode === 'runner-crash') {
+        expect(await fileSize(artifact)).toBe(0);
+      } else {
+        const result = JSON.parse(await readFile(artifact, 'utf8'));
+        expect(result.passed).toBe(false);
+        if (mode === 'timeout') expect(result.timed_out).toBe(true);
+        else expect(result.verification.aborted).toBe(true);
+        expect(await fileSize(heartbeat)).toBe(0);
+      }
+      await expectTreeDead(marker);
+    } finally {
+      if (runner.exitCode === null && runner.signalCode === null) runner.kill('SIGTERM');
+      // Only clean the fixture's still-writing child if a failed assertion left it alive.
+      const before = await fileSize(marker);
+      await sleep(60);
+      if (grandPid && await fileSize(marker) > before) {
+        try { process.kill(grandPid, 'SIGKILL'); } catch { /* fixture already exited */ }
+      }
+    }
+  }, 15000);
+
+  it('preserves the real exit status and output without exposing the supervisor IPC endpoint', async () => {
+    const result = await spawnWithTimeout(process.execPath, ['-e', `
+      console.log(JSON.stringify({ type: 'ape-suite-completion', version: 1, exit_code: 0, signal: null, spawn_error: null }));
+      console.error('fixture-stderr');
+      process.exit(typeof process.send === 'undefined' ? 7 : 91);
+    `], { supervise: true, timeout_ms: 5000, collect: 'separate' });
+    expect(result).toMatchObject({ exit_code: 7, signal: null, timed_out: false, spawn_error: null });
+    expect(result.stdout).toContain('ape-suite-completion');
+    expect(result.stderr).toContain('fixture-stderr');
+  });
+
+  it('reports a supervised spawn failure and handles cancellation before launch', async () => {
+    const failed = await spawnWithTimeout('/ape-synthetic-missing-command', [], { supervise: true, timeout_ms: 5000 });
+    expect(failed.exit_code).toBeNull();
+    expect(failed.spawn_error?.code).toBe('ENOENT');
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = await spawnWithTimeout('/ape-synthetic-missing-command', [], { supervise: true, signal: controller.signal });
+    expect(cancelled).toMatchObject({ exit_code: null, aborted: true, timed_out: false, spawn_error: null });
   });
 });

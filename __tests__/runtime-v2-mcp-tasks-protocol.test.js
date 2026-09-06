@@ -204,6 +204,50 @@ describe('APE v2 experimental MCP task protocol', () => {
     expect(await getTask(projectDir, taskId)).not.toBeNull();
   });
 
+  it.each(['next', 'record', 'recover-receipt', 'regate', 'ship'])(
+    'rejects run_id on %s before task creation with ordinary-call parity',
+    async (action) => {
+      const projectDir = await scratchDir('ape-task-run-id-');
+      const paths = runtimePaths(projectDir);
+      await mkdir(paths.runtime, { recursive: true });
+      const bytes = JSON.stringify({ run_id: 'run-actual-active', status: 'running' });
+      await writeFile(paths.active, bytes);
+      for (const run_id of ['run-stale-request', null]) {
+        const arguments_ = { run_id, wait_ms: 1, ...(action === 'record' ? { receipt: {} } : {}) };
+        const ordinary = await executeToolCall(toolCall(1, projectDir, action, { arguments: arguments_ }));
+        const tasked = await executeToolCall(toolCall(2, projectDir, action, { tasks: true, arguments: arguments_ }));
+        expect(tasked.result).toEqual(ordinary.result);
+        expect(tasked.result).toMatchObject({ resultType: 'complete', isError: true });
+        expect(tasked.result.content[0].text).toMatch(/does not take a run_id/);
+      }
+      expect(await readFile(paths.active, 'utf8')).toBe(bytes);
+      await expect(readFile(path.join(paths.runtime, 'tasks'))).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
+
+  it.each(['next', 'record', 'recover-receipt', 'regate', 'ship'])(
+    'rejects a present successor on %s before task creation with legacy-call parity',
+    async (action) => {
+      const projectDir = await scratchDir('ape-task-successor-');
+      const paths = runtimePaths(projectDir);
+      await mkdir(paths.runtime, { recursive: true });
+      const bytes = JSON.stringify({ run_id: 'run-actual-active', status: 'running' });
+      await writeFile(paths.active, bytes);
+      for (const successor of [null, {}, '']) {
+        const arguments_ = { successor, wait_ms: 1, ...(action === 'record' ? { receipt: {} } : {}) };
+        const legacyCall = toolCall(1, projectDir, action, { arguments: arguments_ });
+        delete legacyCall.params._meta;
+        const ordinary = await executeToolCall(legacyCall);
+        const tasked = await executeToolCall(toolCall(2, projectDir, action, { tasks: true, arguments: arguments_ }));
+        expect(tasked.result).toEqual(ordinary.result);
+        expect(tasked.result).toMatchObject({ resultType: 'complete', isError: true });
+        expect(tasked.result.content[0].text).toMatch(/structured successor start is unavailable/i);
+      }
+      expect(await readFile(paths.active, 'utf8')).toBe(bytes);
+      await expect(readFile(path.join(paths.runtime, 'tasks'))).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
+
   it('requires opt-in again for every get/update/cancel and rejects unknown or path-like ids', async () => {
     const projectDir = await scratchDir('ape-task-method-capability-');
     const task = await storedTask(projectDir, 'method-capability');

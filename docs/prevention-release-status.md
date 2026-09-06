@@ -1,12 +1,28 @@
 # Prevention-first reliability status
 
-**2.24.13 is a review candidate, not a certified release.** Reproduced blockers
+**2.24.14 is a review candidate, not a certified release.** Reproduced blockers
 have fixes and regression tests. The full live acceptance requirement is still
-incomplete. This page records the latest results as of September 5, 2026; it does
+incomplete. This page records the latest results as of September 6, 2026; it does
 not authorize more testing, installation, or publication.
 
 ## What changed
 
+- The 2.24.14 audit repairs fresh preflight audit initialization and answer
+  handling, Windows npm/npx launcher and command-name resolution, and npm
+  package/script inspection across workspace, shell, environment, and PATH
+  selection. Current and baseline inspection share the selected invocation.
+- Task operations capture their own gate ownership while holding the receipt
+  lock. Cancellation preserves another operation's watch and already-completed
+  results; fresh processes retain durable receipt/task replay boundaries.
+- The audit also repairs runner location and deletion routing, required fast-lane
+  verification profiles, per-directory cache identity, exact merge evidence,
+  interrupted roadmap recovery, and configuration/diagnostic handling. Ordinary
+  POSIX suite descendants are supervised through exit, timeout, cancellation,
+  and owner loss in source and packaged paths.
+- New fixtures execute both copied plugin packages through fresh MCP/hook
+  processes and test real process restarts and locks. Required native CI now
+  selects eight runtime suites on Linux, macOS, and Windows under Node 22.12.0
+  and 24.15.0. The aggregate rejects failed, cancelled, or skipped dependencies.
 - Certification preflight now requires the pinned Codex CLI's native V2 agent
   interface explicitly. The 2.24.12 live attempt exposed a setup gap: ordinary
   multi-agent availability did not establish support for APE's launch fields.
@@ -75,7 +91,25 @@ automatic recovery were not expanded. Repair-and-land remains deferred.
 
 ## What passed
 
-The final 2.24.13 full source run passed all 4,316 tests across 260 files with 86
+The complete audited runtime, immediately before the 2.24.14 metadata bump,
+passed 4,512 tests across 268 files with 87 skips in 458.79 seconds on macOS and
+Node 24.15.0. The new native CI selection passed 158 tests with three Windows-only
+skips across eight files. The complete run includes a corrected test-only
+cancellation ordering race and an explicit control for cancellation registered
+after completion. The 87 skips comprise 80 opt-in Claude-validator comparisons,
+three Windows-only cases, and four optional research/fixture checks.
+
+After the 2.24.14 bump, all 328 focused tests across nine files passed, including
+version parity, packaged lifecycle, launcher, release-artifact, and certification
+validator fixtures. Type, compatibility, public-safety, package freshness, package
+and release reproducibility, packaged MCP smoke, prompt-scenario definitions,
+and a verified public export also passed for the bumped candidate.
+
+These results use synthetic host hook inputs and disposable projects. They do
+not establish native Windows/Linux or Node 22 execution, live host certification,
+or publication. Earlier recorded baselines remain below for provenance.
+
+An earlier 2.24.13 full source run passed all 4,316 tests across 260 files with 86
 existing skips in 383.26 seconds, including the seven new native-agent preflight
 regressions. An earlier run found a documentation assertion caused by a required
 phrase split across two lines. The phrase was restored, its focused recheck
@@ -137,8 +171,11 @@ The 2.24.12 Claude worker-validator check could not authenticate on two authoriz
 attempts. No validator call or passing proof was produced. That check is optional
 under the 2.24.13 release policy; the retained failures remain failures.
 
-The corrected 2.24.13 packages require a fresh candidate-bound Codex live campaign.
+The corrected 2.24.14 packages require a fresh candidate-bound Codex live campaign.
 Earlier version evidence cannot certify them.
+
+The new native CI matrix must still run on the submitted candidate. Local macOS
+results and static Windows portability review do not certify its other cells.
 
 The fast, full, and protected-land live scenarios on 2.24.11 remain unverified.
 The campaign stopped at the operator's request, and its disposable setup was

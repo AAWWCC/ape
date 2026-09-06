@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TEST_ROOT = join(ROOT, '__tests__');
 
-// These host/locking/protocol cases run in the fast Windows smoke job. Full
-// shards exclude them, so a green smoke result is never paid for twice.
-export const WINDOWS_SMOKE_TEST_FILES = Object.freeze([
+// The Ubuntu smoke job and full shards partition the complete inventory.
+// Native runtime jobs separately repeat only their bounded platform selection.
+export const SMOKE_TEST_FILES = Object.freeze([
   '__tests__/runtime-v2-codex-windows-launchers.test.js',
   '__tests__/runtime-v2-lock-protocol.test.js',
   '__tests__/runtime-v2-mcp.test.js',
@@ -20,6 +20,24 @@ export const WINDOWS_SMOKE_TEST_FILES = Object.freeze([
   '__tests__/runtime-v2-mcp-tasks-reissue.test.js',
   '__tests__/runtime-v2-plugin-validation.test.js',
   '__tests__/runtime-v2-gates-plugin-parity.test.js',
+]);
+
+// Preserve imports of the old name; it describes a historical Windows job,
+// not the operating system of the current smoke partition.
+export const WINDOWS_SMOKE_TEST_FILES = SMOKE_TEST_FILES;
+
+// Real process, filesystem and packaged-entry coverage on each supported
+// OS/Node pair. Keep platform simulations in the complete Ubuntu partitions;
+// the dedicated native fixtures exercise the current operating system.
+export const NATIVE_RUNTIME_TEST_FILES = Object.freeze([
+  '__tests__/runtime-v2-codex-windows-launchers.test.js',
+  '__tests__/runtime-v2-lock-protocol.test.js',
+  '__tests__/runtime-v2-native-platform.test.js',
+  '__tests__/runtime-v2-native-recovery.test.js',
+  '__tests__/runtime-v2-packaged-lifecycle.test.js',
+  '__tests__/runtime-v2-runner.test.js',
+  '__tests__/runtime-v2-spawn.test.js',
+  '__tests__/runtime-v2-suite-supervision.test.js',
 ]);
 
 export async function listTestFiles() {
@@ -46,8 +64,8 @@ async function loadDurations() {
   return parsed;
 }
 
-// Longest-processing-time scheduling is deterministic and gives each Windows
-// runner a similar historical workload. New files use source size as a stable
+// Longest-processing-time scheduling is deterministic and gives each full-suite
+// shard a similar historical workload. New files use source size as a stable
 // cost proxy until the duration snapshot is refreshed.
 export async function balancedShards(files, shardCount, durations = {}) {
   if (!Number.isInteger(shardCount) || shardCount < 1) throw new Error('shard count must be a positive integer');
@@ -69,13 +87,20 @@ export async function balancedShards(files, shardCount, durations = {}) {
 
 export async function selectCiTests(mode, shardNumber = 1, shardCount = 1) {
   const inventory = await listTestFiles();
-  const smoke = new Set(WINDOWS_SMOKE_TEST_FILES);
-  if (smoke.size !== WINDOWS_SMOKE_TEST_FILES.length
-    || WINDOWS_SMOKE_TEST_FILES.some((file) => !inventory.includes(file))) {
+  if (mode === 'native') {
+    if (new Set(NATIVE_RUNTIME_TEST_FILES).size !== NATIVE_RUNTIME_TEST_FILES.length
+      || NATIVE_RUNTIME_TEST_FILES.some((file) => !inventory.includes(file))) {
+      throw new Error('CI native runtime inventory is duplicate, missing, or unsupported');
+    }
+    return [...NATIVE_RUNTIME_TEST_FILES].sort();
+  }
+  const smoke = new Set(SMOKE_TEST_FILES);
+  if (smoke.size !== SMOKE_TEST_FILES.length
+    || SMOKE_TEST_FILES.some((file) => !inventory.includes(file))) {
     throw new Error('CI smoke inventory is duplicate, missing, or unsupported');
   }
-  if (mode === 'smoke') return [...WINDOWS_SMOKE_TEST_FILES].sort();
-  if (mode !== 'shard') throw new Error(`unknown mode '${mode}'; expected smoke or shard`);
+  if (mode === 'smoke') return [...SMOKE_TEST_FILES].sort();
+  if (mode !== 'shard') throw new Error(`unknown mode '${mode}'; expected smoke, shard, or native`);
   if (!Number.isInteger(shardNumber) || shardNumber < 1 || shardNumber > shardCount) {
     throw new Error(`shard number must be between 1 and ${shardCount}`);
   }

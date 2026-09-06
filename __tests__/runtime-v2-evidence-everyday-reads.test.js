@@ -97,8 +97,9 @@ describe('ordinary evidence reads retain their actual argv and effects', () => {
   it('preserves containment, exact executable names, and trusted executable checks', () => {
     for (const head of ['rg', 'grep', 'head', 'tail']) {
       expect(EVIDENCE_COMMAND_HEADS).toContain(head);
-      expect(decision(`${head} /outside/input`), head).toBe('deny');
-      expect(decision(`${head} ../outside/input`), head).toBe('deny');
+      const readCommand = ['rg', 'grep'].includes(head) ? `${head} TODO` : head;
+      expect(decision(`${readCommand} /outside/input`), head).toBe('deny');
+      expect(decision(`${readCommand} ../outside/input`), head).toBe('deny');
       expect(decision(`${head}-pwn src/value.js`), head).toBe('deny');
       expect(decision(`${head} src/value.js > result.txt`), head).toBe('deny');
       expect(decision(`${head} src/value.js && cp src/value.js result.txt`), head).toBe('deny');

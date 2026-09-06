@@ -89,6 +89,79 @@ async function preparedShipping(directory) {
   return { state, events, originalGit };
 }
 
+describe('immutable observed merge evidence', () => {
+  it.each(['already-merged', 'submitted', 'command-race'])('accepts the exact attested squash merge after an unrelated later base commit (%s)', async (observation) => {
+    const directory = await project();
+    const { state, originalGit } = await preparedShipping(directory);
+    await originalGit(directory, ['add', 'value.txt']);
+    await originalGit(directory, ['commit', '-m', 'attested feature']);
+    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD']);
+    const mergeCommit = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', state.base_commit_sha, '-m', 'observed squash merge']);
+    expect(mergeCommit).not.toBe(pushedHead);
+    await writeFile(path.join(directory, 'unrelated.txt'), 'later independent change\n');
+    await originalGit(directory, ['add', 'unrelated.txt']);
+    const laterTree = await originalGit(directory, ['write-tree']);
+    const laterCommit = await originalGit(directory, ['commit-tree', laterTree, '-p', mergeCommit, '-m', 'later base change']);
+    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', laterCommit]);
+    const prUrl = 'https://github.com/acme/project/pull/1';
+    state.shipping_watch = { provider: 'github', pr_url: prUrl, branch: state.branch, base: 'main', head_oid: pushedHead, created_at: new Date().toISOString(), shipping_target: state.shipping_target, ...(observation === 'submitted' ? { merge_request_submitted: true } : {}) };
+    const originalSpawn = spawning.spawnWithTimeout.getMockImplementation();
+    let probes = 0;
+    vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
+      if (command !== 'gh') return originalSpawn(command, args, options);
+      if (args[1] === 'merge') return Promise.resolve({ exit_code: 1, combined: 'Pull Request is not mergeable', timed_out: false });
+      const output = args[1] === 'checks' ? 'test pass\n'
+        : observation === 'command-race' && probes++ === 0 ? `OPEN ${prUrl} - ${pushedHead} -\n`
+          : `MERGED ${prUrl} 2026-09-05T00:00:00Z ${pushedHead} ${mergeCommit}\n`;
+      return Promise.resolve({ exit_code: 0, combined: output, timed_out: false });
+    });
+    vi.spyOn(git, 'runGit').mockImplementation((root, args, options) => {
+      if (args[0] === 'fetch') return Promise.resolve('');
+      if (['push', 'pull'].includes(args[0]) || (args[0] === 'ls-remote' && !args.includes('--get-url'))) throw Error('offline network intercepted');
+      return originalGit(root, args, options);
+    });
+
+    const result = await shipping.pollRemoteChecksAndMerge(directory, state, config);
+    expect(result).toMatchObject({ merged: { url: prUrl } });
+    expect(result.failed).toBeUndefined();
+    expect(git.runGit).toHaveBeenCalledWith(directory, ['rev-parse', `${mergeCommit}^{tree}`]);
+    expect(await originalGit(directory, ['rev-parse', `${mergeCommit}^{tree}`])).toBe(state.gates.tree_sha);
+    expect(await originalGit(directory, ['rev-parse', `${laterCommit}^{tree}`])).not.toBe(state.gates.tree_sha);
+  });
+
+  it.each(['missing-commit', 'unattested-tree', 'outside-base', 'head-drift', 'other-repository', 'other-pr'])('refuses invalid observed merge authority: %s', async (invalid) => {
+    const directory = await project();
+    const { state, originalGit } = await preparedShipping(directory);
+    await originalGit(directory, ['add', 'value.txt']);
+    await originalGit(directory, ['commit', '-m', 'attested feature']);
+    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD']);
+    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', pushedHead]);
+    const prUrl = 'https://github.com/acme/project/pull/1';
+    state.shipping_watch = { provider: 'github', pr_url: prUrl, branch: state.branch, base: 'main', head_oid: pushedHead, created_at: new Date().toISOString(), shipping_target: state.shipping_target };
+    const observedHead = invalid === 'head-drift' ? state.base_commit_sha : pushedHead;
+    const observedUrl = invalid === 'other-repository' ? 'https://github.com/other/project/pull/1' : invalid === 'other-pr' ? 'https://github.com/acme/project/pull/2' : prUrl;
+    const mergeCommit = invalid === 'missing-commit' ? '-'
+      : invalid === 'unattested-tree' ? state.base_commit_sha
+        : invalid === 'outside-base' ? await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-m', 'unrelated root']) : pushedHead;
+    const originalSpawn = spawning.spawnWithTimeout.getMockImplementation();
+    vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
+      if (command !== 'gh') return originalSpawn(command, args, options);
+      return Promise.resolve({ exit_code: 0, timed_out: false, combined: args[1] === 'checks' ? 'test pass\n' : `MERGED ${observedUrl} 2026-09-05T00:00:00Z ${observedHead} ${mergeCommit}\n` });
+    });
+    const mutations = [];
+    vi.spyOn(git, 'runGit').mockImplementation((root, args, options) => {
+      if (['switch', 'reset', 'pull', 'push'].includes(args[0]) || (args[0] === 'branch' && args.includes('-D'))) mutations.push(args);
+      if (args[0] === 'fetch') return Promise.resolve('');
+      if (['push', 'pull'].includes(args[0]) || (args[0] === 'ls-remote' && !args.includes('--get-url'))) throw Error('offline network intercepted');
+      return originalGit(root, args, options);
+    });
+    const result = await shipping.pollRemoteChecksAndMerge(directory, state, config);
+    expect(result.failed).toBeTypeOf('string');
+    expect(result.merged).toBeUndefined();
+    expect(mutations).toEqual([]);
+  });
+});
+
 describe('prevention-first shipping admission', () => {
   it('admits an explicitly configured non-APE project with stubbed prerequisite reads and no repository mutation', async () => {
     const directory = await project();

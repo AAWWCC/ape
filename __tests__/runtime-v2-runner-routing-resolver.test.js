@@ -16,10 +16,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 //   * CONFIGURED runners  → { strategy:'multi', participants[], orphans[],
 //                             orphan_forced_full, orphan_policy, blocked }
 // Changed-set normalization mirrors resolveSuiteSelection: the de-duplicated
-// union of every receipt.changed_files (missing → []), filtered to files that
-// EXIST on disk under projectDir, sorted ascending. Because of the on-disk
-// filter EVERY routed file must be written to a real mkdtemp project dir; a
-// "deleted" file is simply one that is never written.
+// union of every receipt.changed_files (missing → []), including deletions, sorted ascending. Missing files keep their owners in
+// the full suite; only impacted command operands require existing files.
 import { resolveRunnerSet } from '../lib/runtime/gates.js';
 
 // ---------------------------------------------------------------------------
@@ -254,7 +252,7 @@ describe('resolveRunnerSet — per-runner impacted rule (case 5)', () => {
     expect(js.changedSubset).toEqual(['packages/js/a.js']);
     expect(js.impacted_paths).toEqual(['packages/js/a.js']);
     expect(js.template).toBe('js-runner {paths}');
-    expect(js.invocation).toEqual({ command: 'js-runner', args: ['packages/js/a.js'] });
+    expect(js.invocation).toEqual({ command: 'js-runner', args: ['a.js'] });
   });
 
   it('flipping required_remote_checks=false reverts that runner to full PER runner (invariant 9)', async () => {
@@ -344,7 +342,7 @@ describe('resolveRunnerSet — per-runner impacted rule (case 5)', () => {
     expect(js.mode).toBe('impacted');
     expect(js.impacted_paths).toEqual(['packages/js/a.js']);
     expect(js.template).toBe('js-runner {paths}');
-    expect(js.invocation).toEqual({ command: 'js-runner', args: ['packages/js/a.js'] });
+    expect(js.invocation).toEqual({ command: 'js-runner', args: ['a.js'] });
     // services/py/** matches services/py/main.py
     expect(py.mode).toBe('full');
     expect(py.changedSubset).toEqual(['services/py/main.py']);
@@ -405,16 +403,16 @@ describe('resolveRunnerSet — determinism and coverage fail-safe (case 7)', () 
     expect(second).toEqual(first);
   });
 
-  it('drops a deleted changed file (in receipts, not on disk): neither routed nor an orphan', async () => {
-    // packages/js/a.js is written; random/deleted.txt is NOT (a deletion). Were
-    // random/deleted.txt on disk it would be an orphan; deleted, it must vanish.
+  it('keeps a deleted unowned file as an orphan so it cannot hide a required suite', async () => {
+    // Deletion changes are still part of the authoritative receipt diff.
     const dir = await makeProjectDir(['packages/js/a.js']);
     const config = { runners: [makeRunner('js', ['packages/js/**'], { root: 'packages/js' })] };
     const state = stateWith(receiptsFrom(['packages/js/a.js', 'random/deleted.txt']));
 
     const result = await resolveRunnerSet(dir, state, config);
 
-    expect(result.orphans).toEqual([]);
+    expect(result.orphans).toEqual(['random/deleted.txt']);
+    expect(result.orphan_forced_full).toBe(true);
     const js = byRunner(result, 'js');
     expect(js.changedSubset).toEqual(['packages/js/a.js']);
     expect(js.changedSubset).not.toContain('random/deleted.txt');
@@ -440,7 +438,7 @@ describe('resolveRunnerSet — determinism and coverage fail-safe (case 7)', () 
     expect(result.participants.map((p) => p.runner)).toEqual(['js', 'py']);
     for (const p of result.participants) {
       expect(p.mode).toBe('full');
-      expect(p.changedSubset).toEqual([]);
+      expect(p.changedSubset).toEqual([p.runner === 'js' ? 'packages/js/ghost.js' : 'services/py/ghost.py']);
       expect(p.invocation).toBeNull();
       expect(p.impacted_paths).toBeNull();
       expect(p.template).toBeNull();

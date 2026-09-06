@@ -54,6 +54,7 @@ const GATE_TREE = 'f'.repeat(40);
 // The sha `git rev-parse HEAD` answers in the mocked repo; merged-PR probes
 // compare it against the PR's headRefOid.
 const HEAD_SHA = 'c'.repeat(40);
+const MERGE_SHA = 'e'.repeat(40);
 // The run started at 10:00; merged-PR probes compare mergedAt against it.
 const RUN_CREATED_AT = '2026-07-09T10:00:00.000Z';
 
@@ -163,6 +164,7 @@ describe('autoMergeGithub', () => {
       switchBaseError: null,
       pullBaseError: null,
       remoteBaseTree: GATE_TREE,
+      mergeTree: GATE_TREE,
     };
     currentTreeSha.mockReset();
     currentTreeSha.mockResolvedValue(GATE_TREE);
@@ -182,6 +184,7 @@ describe('autoMergeGithub', () => {
       if (args[0] === 'rev-parse' && args[1] === 'refs/remotes/origin/main^{tree}') {
         return gitResponses.remoteBaseTree;
       }
+      if (args[0] === 'rev-parse' && args[1] === `${MERGE_SHA}^{tree}`) return gitResponses.mergeTree;
       if (args[0] === 'rev-parse' && String(args[1]).endsWith('^{tree}')) return GATE_TREE;
       if (args[0] === 'rev-parse') return gitResponses.head;
       if (args[0] === 'diff') return gitResponses.staged;
@@ -223,7 +226,10 @@ describe('autoMergeGithub', () => {
       }
       ghRouteCalls[route] += 1;
       setImmediate(() => {
-        if (result.output) child.stdout.emit('data', result.output);
+        // Model the immutable mergeCommit.oid supplied by the native gh query.
+        // Older scenario declarations omit only this common fixture field.
+        const output = result.output?.replace(/^(MERGED https:\/\/\S+ \S+ \S+)\s*$/gm, `$1 ${MERGE_SHA}`);
+        if (output) child.stdout.emit('data', output);
         child.emit('close', result.code);
       });
       return child;
@@ -242,8 +248,8 @@ describe('autoMergeGithub', () => {
     // the PR state alongside the URL.
     expect(view).toEqual([
       'gh', 'pr', 'view', 'feat/thing',
-      '--json', 'url,state,mergedAt,headRefOid',
-      '--jq', '[.state, .url, (.mergedAt // "-"), .headRefOid] | join(" ")',
+      '--json', 'url,state,mergedAt,headRefOid,mergeCommit',
+      '--jq', '[.state, .url, (.mergedAt // "-"), .headRefOid, (.mergeCommit.oid // "-")] | join(" ")',
       '--repo', 'acme/repo',
     ]);
     expect(ghCalls.some((call) => call[2] === 'create')).toBe(false);
@@ -687,14 +693,14 @@ describe('autoMergeGithub', () => {
       expect(gitCalls.some((args) => ['fetch', 'switch', 'pull', 'branch'].includes(args[0]))).toBe(false);
     });
 
-    it('does not complete an exact merged PR whose remote tree lacks gate attestation', async () => {
+    it('does not complete an exact merged PR whose merge commit tree lacks gate attestation', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.mergeLeavesOpen = true;
       ghResponses.view = [
         { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
         { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` },
       ];
-      gitResponses.remoteBaseTree = 'b'.repeat(40);
+      gitResponses.mergeTree = 'b'.repeat(40);
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
       expect(result.failed).toMatch(/does not equal the attested tree/);
       expect(result.merged).toBeUndefined();
