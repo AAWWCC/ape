@@ -273,21 +273,21 @@ describe('APE v2 roadmap store — batch all-or-nothing and bounds (RM1)', () =>
     expect(stored.entries.map((entry) => entry.id)).toEqual(['RM1']);
   });
 
-  it('rejects a batch larger than 64 entries and writes no store', async () => {
+  it('rejects a batch beyond the aggregate input budget and writes no store', async () => {
     const { registerEntries } = await importRoadmap();
     const paths = await tempPaths();
-    const entries = Array.from({ length: 65 }, (_, index) => inputEntry(`RM-b${index}`));
+    const entries = Array.from({ length: 2049 }, (_, index) => inputEntry(`RM-b${index}`));
 
     await expect(registerEntries(paths, { entries, reason: 'over the batch bound' })).rejects.toThrow();
     await expect(readJson(roadmapFile(paths), null)).resolves.toBeNull();
   });
 
-  it('rejects an entry whose title exceeds 200 characters', async () => {
+  it('rejects an entry whose title exceeds the aggregate input budget', async () => {
     const { registerEntries } = await importRoadmap();
     const paths = await tempPaths();
     await expect(
       registerEntries(paths, {
-        entries: [inputEntry('RM1', { title: 'x'.repeat(201) })],
+        entries: [inputEntry('RM1', { title: 'x'.repeat(65536) })],
         reason: 'title too long',
       }),
     ).rejects.toThrow();

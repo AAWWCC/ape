@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { LANES } from '../lib/runtime/constants.js';
+import { GENERAL_INPUT_MAX_BYTES, INPUT_LIMITS } from '../lib/runtime/input-guard.js';
 import { RESPONSE_BUDGET_BYTES } from '../lib/runtime/projection.js';
 import { receiptInputHash } from '../lib/runtime/receipt-input.js';
 import { ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA } from '../lib/runtime/schemas.js';
@@ -426,7 +427,7 @@ describe('APE v2 MCP public surface', () => {
     ]);
     expect(run.inputSchema.properties.run_command_profiles).toMatchObject({
       type: 'array',
-      maxItems: 64,
+      maxItems: INPUT_LIMITS.maxArrayLength,
       items: {
         additionalProperties: false,
         required: ['id', 'command', 'roles', 'effect', 'operator_authorized', 'reason'],
@@ -438,7 +439,7 @@ describe('APE v2 MCP public surface', () => {
           },
           effect: { const: 'execute' },
           operator_authorized: { const: true },
-          reason: { type: 'string', minLength: 1, maxLength: 2000, pattern: '\\S' },
+          reason: { type: 'string', minLength: 1, maxLength: GENERAL_INPUT_MAX_BYTES, pattern: '\\S' },
         },
       },
     });
@@ -537,13 +538,13 @@ describe('APE v2 MCP public surface', () => {
       },
     });
     expect(ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.properties.reason)
-      .toEqual({ type: 'string', minLength: 1, maxLength: 4000, pattern: '\\S' });
+      .toEqual({ type: 'string', minLength: 1, maxLength: GENERAL_INPUT_MAX_BYTES, pattern: '\\S' });
     expect(ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.properties.answers).toMatchObject({
-      type: 'array', maxItems: 64,
+      type: 'array', maxItems: INPUT_LIMITS.maxArrayLength,
       items: { additionalProperties: false, required: ['id', 'answer'],
-        properties: { answer: { maxLength: 16384, pattern: '\\S' }, id: { maxLength: 160 } } },
+        properties: { answer: { maxLength: GENERAL_INPUT_MAX_BYTES, pattern: '\\S' }, id: { maxLength: 160 } } },
     });
-    expect(ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.properties.claimed_paths).toMatchObject({ maxItems: 64, items: { maxLength: 512 } });
+    expect(ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.properties.claimed_paths).toMatchObject({ maxItems: INPUT_LIMITS.maxArrayLength, items: { maxLength: 512 } });
     expect(run.inputSchema.allOf).toContainEqual({
       if: {
         properties: { action: { enum: ['ship', 'expire-dispatch', 'abort', 'override'] } },
@@ -586,7 +587,7 @@ describe('APE v2 MCP public surface', () => {
       }]);
       expect(responses[0].result.isError).toBe(true);
       expect(responses[0].result.content[0].text)
-        .toBe('answer-preflight requires a non-empty audit reason of at most 4000 characters');
+        .toBe(`answer-preflight requires a non-empty audit reason within the ${GENERAL_INPUT_MAX_BYTES}-byte input envelope`);
       expect(responses[0].result.content[0].text).not.toMatch(/unsupported undefined data/iu);
     } finally {
       await rm(scratch, { recursive: true, force: true });
@@ -614,7 +615,7 @@ describe('APE v2 MCP public surface', () => {
         { action: 'preview', host: 'claude', objective: 'x'.repeat(65_537) },
         { action: 'answer-preflight', reason: '', preflight_hash: 'a'.repeat(64), answers: [] },
         { action: 'answer-preflight', reason: 42, preflight_hash: 'a'.repeat(64), answers: [] },
-        { action: 'answer-preflight', reason: 'x'.repeat(4_001), preflight_hash: 'a'.repeat(64), answers: [] },
+        { action: 'answer-preflight', reason: 'x'.repeat(GENERAL_INPUT_MAX_BYTES), preflight_hash: 'a'.repeat(64), answers: [] },
       ];
       const responses = await session(inputs.map((input, index) => ({
         jsonrpc: '2.0', id: index + 1, method: 'tools/call',
@@ -627,9 +628,10 @@ describe('APE v2 MCP public surface', () => {
       }
       expect(responses[0].result.content[0].text).toMatch(/unknown tool or action/);
       expect(responses[1].result.content[0].text).toMatch(/input exceeds .*UTF-8 bytes/);
-      expect(responses.slice(2).map((response) => response.result.content[0].text)).toEqual(Array(3).fill(
-        'answer-preflight requires a non-empty audit reason of at most 4000 characters',
+      expect(responses.slice(2, 4).map((response) => response.result.content[0].text)).toEqual(Array(2).fill(
+        `answer-preflight requires a non-empty audit reason within the ${GENERAL_INPUT_MAX_BYTES}-byte input envelope`,
       ));
+      expect(responses[4].result.content[0].text).toMatch(/input exceeds .*UTF-8 bytes/);
       expect(await readdir(scratch)).toEqual([]);
     } finally { await rm(scratch, { recursive: true, force: true }); }
   });
@@ -667,7 +669,7 @@ describe('APE v2 MCP public surface', () => {
     expect(history.inputSchema.properties.keep_recent_runs).toMatchObject({
       type: 'integer',
       minimum: 0,
-      maximum: 10000,
+      maximum: Number.MAX_SAFE_INTEGER,
     });
     expect(history.inputSchema.properties.max_runs).toMatchObject({
       type: 'integer',
@@ -686,7 +688,7 @@ describe('APE v2 MCP public surface', () => {
     expect(history.inputSchema.properties.requirement_ids).toMatchObject({
       type: 'array',
       minItems: 1,
-      maxItems: 64,
+      maxItems: INPUT_LIMITS.maxArrayLength,
       items: { type: 'string', minLength: 1, maxLength: 128 },
     });
     expect(history.inputSchema.allOf).toContainEqual({

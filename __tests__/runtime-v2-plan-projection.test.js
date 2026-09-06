@@ -53,6 +53,20 @@ function occurrences(value, hash) {
 }
 
 describe('APE v2 structured-plan wire projection', () => {
+  it('references a complete plan larger than the wire budget without mutating its persisted authority', () => {
+    const value = plan();
+    value.workstreams[0].outcome = 'x'.repeat(60_000);
+    const candidate = { plan_hash: sha256(value), plan: value };
+    const checker = ticket('run-large:plan-check:checker', 'Review the complete artifact', { candidate_plan: candidate });
+    const response = { ok: true, run: { run_id: 'run-large', status: 'running', stage: 'plan-check',
+      objective: checker.objective, tickets: [checker], receipts: [] }, actions: [dispatch(checker)] };
+    const projected = projectRunResponse(response);
+    expect(Buffer.byteLength(JSON.stringify(projected))).toBeLessThan(RESPONSE_BUDGET_CHARS);
+    expect(projected.projection).toBeDefined();
+    expect(projected.actions[0].ticket.ticket_ref).toContain('run-large_plan-check_checker.json');
+    expect(response.run.tickets[0].candidate_plan).toEqual(candidate);
+  });
+
   it('keeps one candidate plan under budget and makes every duplicate round-trip through its ticket', () => {
     const objective = 'Review the structured plan';
     const value = plan();

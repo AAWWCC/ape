@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalJson, sha256 } from '../lib/runtime/canonical.js';
-import { PLAN_CONTRACT_MAX_BYTES } from '../lib/runtime/plan-contract.js';
+import { LEGACY_PLAN_CONTRACT_MAX_BYTES, PLAN_CONTRACT_MAX_BYTES } from '../lib/runtime/plan-contract.js';
 import {
   receiptDraftJsonSchemaForTicket,
   receiptDraftSchemaForTicket,
@@ -19,8 +19,9 @@ import {
 
 const CAPABILITY = 'a'.repeat(32);
 
-function contractTicket(overrides = {}) {
+function contractTicket(overrides = {}, planMaxBytes = LEGACY_PLAN_CONTRACT_MAX_BYTES) {
   const manifestBase = {
+    byte_budgets: { candidate_plan_utf8_bytes: planMaxBytes },
     allowed_evidence_commands: ['npm test'],
     verification_profiles: [],
     risk_triggers: [],
@@ -63,7 +64,7 @@ function validDraft(ticket, overrides = {}) {
   };
 }
 
-function planAtUtf8Bytes(target) {
+function planAtUtf8Bytes(target, textMaxChars = 500) {
   const filled = () => Array.from({ length: 16 }, () => 'x');
   const plan = {
     version: 1,
@@ -82,9 +83,12 @@ function planAtUtf8Bytes(target) {
   let bytes = Buffer.byteLength(canonicalJson(plan), 'utf8');
   for (const values of [plan.workstreams[0].steps, plan.workstreams[0].acceptance, plan.non_goals]) {
     for (let index = 0; index < values.length && bytes < target; index += 1) {
-      while (values[index].length < 500 && bytes < target) {
-        values[index] += target - bytes === 1 ? 'x' : 'é';
-        bytes = Buffer.byteLength(canonicalJson(plan), 'utf8');
+      const pairs = Math.min(textMaxChars - values[index].length, Math.floor((target - bytes) / 2));
+      values[index] += 'é'.repeat(pairs);
+      bytes += pairs * 2;
+      if (bytes < target && values[index].length < textMaxChars) {
+        values[index] += 'x';
+        bytes += 1;
       }
     }
   }
@@ -503,19 +507,22 @@ describe('new-run receipt schema parity', () => {
 
 describe('candidate plan UTF-8 byte boundary', () => {
   const cases = [
-    [16_383, true],
-    [16_384, true],
-    [16_385, false],
+    [LEGACY_PLAN_CONTRACT_MAX_BYTES, 16_383, true],
+    [LEGACY_PLAN_CONTRACT_MAX_BYTES, 16_384, true],
+    [LEGACY_PLAN_CONTRACT_MAX_BYTES, 16_385, false],
+    [PLAN_CONTRACT_MAX_BYTES, 65_535, true],
+    [PLAN_CONTRACT_MAX_BYTES, 65_536, true],
+    [PLAN_CONTRACT_MAX_BYTES, 65_537, false],
   ];
 
-  it.each(cases)('measures and enforces a %i-byte Unicode plan', (bytes, accepted) => {
+  it.each(cases)('enforces the immutable %i-byte contract on a %i-byte Unicode plan', (maxBytes, bytes, accepted) => {
     const ticket = contractTicket({
       ticket_id: `run-schema:plan:ticket-${bytes}`,
       stage_id: 'plan',
       role: 'planner',
       plan_contract_version: 1,
-    });
-    const candidatePlan = planAtUtf8Bytes(bytes);
+    }, maxBytes);
+    const candidatePlan = planAtUtf8Bytes(bytes, maxBytes === LEGACY_PLAN_CONTRACT_MAX_BYTES ? 500 : PLAN_CONTRACT_MAX_BYTES);
     expect(Buffer.byteLength(canonicalJson(candidatePlan), 'utf8')).toBe(bytes);
     const result = validateReceiptDraft(ticket, validDraft(ticket, {
       evidence: { candidate_plan: candidatePlan },
@@ -523,9 +530,9 @@ describe('candidate plan UTF-8 byte boundary', () => {
     expect(result.valid).toBe(accepted);
     expect(result.budgets.candidate_plan_utf8_bytes).toEqual({
       used_bytes: bytes,
-      max_bytes: PLAN_CONTRACT_MAX_BYTES,
-      remaining_bytes: Math.max(0, PLAN_CONTRACT_MAX_BYTES - bytes),
+      max_bytes: maxBytes,
+      remaining_bytes: Math.max(0, maxBytes - bytes),
     });
-    if (!accepted) expect(result.corrections.map((entry) => entry.issue).join(' ')).toMatch(/16384 UTF-8 bytes/u);
+    if (!accepted) expect(result.corrections.map((entry) => entry.issue).join(' ')).toContain(`${maxBytes} UTF-8 bytes`);
   });
 });

@@ -1,6 +1,34 @@
 # Changelog
 
-## Unreleased
+## 2.25.0 — 2026-09-06
+
+Release candidate; fresh candidate-bound Codex live certification is required
+before tagged publication. Claude live operation remains unverified.
+
+- Replace separate plan, preflight, receipt and roadmap prose/count caps with
+  their shared resource envelopes. New plans use 64 KiB; historical tickets keep
+  their exact issued schemas and budgets. Capability growth checks actual commands
+  and manifests instead of a separate 64-path/4-KiB guess.
+- Make stage, replan, remediation, re-gate, physical-worker and validation limits
+  configurable and freeze execution policy and timing for each new run.
+- Page history beyond the first 256 records, disclose incomplete lineage context,
+  preserve large diagnostic records and duration precision, and report retention
+  scan and omission counts accurately.
+- Classify complete prompt-evaluation commands before truncating report text;
+  reject invalid evaluation concurrency before provider work.
+- Make heuristic planning complexity and prompt word targets advisory; preserve
+  actual schema, command authority, and aggregate artifact bounds.
+- Fit valid preflight artifacts inside receipt and durable-task envelopes; permit
+  exact plan commands up to the existing 8,192-character command contract, and
+  reference complete immutable ticket schemas when injection budgets are exceeded.
+- Deliver complete bounded receipt corrections and disclose omitted review evidence
+  without overflowing the review finding count.
+- Preserve debug/spike deadlines during receipt recovery, validate numeric timer and
+  count domains, and count normalized file scope cumulatively across receipts.
+- Match native probe model lengths to production, archive admission paths up to
+  the producer's bound, and reserve exhausted task journals for cancellation and completion.
+- Require at least 90% passing benchmark observations as cohorts grow, and skip
+  reading public files already rejected for exceeding the file-size limit.
 
 ## 2.24.14 — 2026-09-06
 

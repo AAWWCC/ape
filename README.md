@@ -9,7 +9,7 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.24.14** is a release candidate awaiting a new live certification
+Version **2.25.0** is a release candidate awaiting a new live certification
 campaign and tagged publication. The 2.24.12 campaign stopped
 before an APE run started because Codex exposed an incompatible native agent
 schema. The earlier 2.24.11 mechanical run does not certify this candidate. See the

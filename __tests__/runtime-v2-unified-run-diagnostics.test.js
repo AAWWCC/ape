@@ -1,3 +1,5 @@
+// Regression boundary of the retired observer-only collection cap.
+const LEGACY_COLLECTION_BOUNDARY = 256;
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -400,7 +402,7 @@ describe('unified public run diagnostics', () => {
     ['malformed receipt ticket identifier', (state, secret) => { state.receipts[0].ticket_id = `../${secret}`; }],
     ['malformed expired identifier', (state, secret) => { state.expired_tickets = [`../${secret}`]; }],
     ['oversized pending values', (state, secret) => { state.pending = Array.from({ length: 257 }, () => secret); }],
-    ['oversized preflight answers', (state, secret) => { state.preflight = { answers: Array.from({ length: 257 }, () => ({ id: secret })) }; }],
+    ['malformed preflight answers', (state, secret) => { state.preflight = { answers: [secret] }; }],
   ])('fails closed for an active state with %s', async (label, mutate) => {
     const secret = `PRIVATE_ACTIVE_${label.replaceAll(' ', '_').toUpperCase()}`;
     const state = runState({ host: 'codex', dispatch_state: 'none' });
@@ -438,7 +440,7 @@ describe('unified public run diagnostics', () => {
     ['malformed receipt ticket identifier', (record, secret) => { record.receipts[0].ticket_id = `../${secret}`; }],
     ['malformed expired identifier', (record, secret) => { record.expired_tickets = [`../${secret}`]; }],
     ['oversized pending values', (record, secret) => { record.pending = Array.from({ length: 257 }, () => secret); }],
-    ['oversized preflight answers', (record, secret) => { record.preflight = { answers: Array.from({ length: 257 }, () => ({ id: secret })) }; }],
+    ['malformed preflight answers', (record, secret) => { record.preflight = { answers: [secret] }; }],
   ])('fails closed for an archived record with %s', (label, mutate) => {
     const secret = `PRIVATE_ARCHIVE_${label.replaceAll(' ', '_').toUpperCase()}`;
     const record = runState({
@@ -491,7 +493,7 @@ describe('unified public run diagnostics', () => {
     ['input_hold.question_count', (record, value) => { record.input_hold = { occurred: true, question_count: value, question_ids: [] }; }],
     ['gates.checks_count', (record, value) => { record.gates = { passed: true, checks: {}, checks_count: value }; }],
   ])('rejects oversized finite archived numeric fact %s', (label, mutate) => {
-    const oversized = Number.MAX_SAFE_INTEGER;
+    const oversized = Number.MAX_SAFE_INTEGER + 1;
     const record = runState({
       host: 'codex',
       dispatch_state: 'none',
@@ -625,7 +627,7 @@ describe('unified public run diagnostics', () => {
     expect(surfaces[3].length).toBeLessThan(1024);
   });
 
-  it('never reads collection tails beyond the diagnostic input caps', async () => {
+  it('never invokes hostile collection tails during diagnostic validation', async () => {
     const { projectRunDiagnostic } = await import('../lib/runtime/diagnostics.js');
     let tailReads = 0;
     const tickets = Array.from({ length: 2000 }, (_, index) => ({
@@ -686,20 +688,20 @@ describe('unified public run diagnostics', () => {
     expect(JSON.stringify(diagnostic)).not.toContain('PRIVATE_TAIL');
   });
 
-  it('accepts canonical collection maxima and rejects max-plus-one before reading any tail', async () => {
-    const { MAX_DIAGNOSTIC_COLLECTION, projectRunDiagnostic } = await import('../lib/runtime/diagnostics.js');
-    const tickets = Array.from({ length: MAX_DIAGNOSTIC_COLLECTION }, (_, index) => ({
+  it('accepts the historical collection boundary and rejects accessor-backed tails', async () => {
+    const { projectRunDiagnostic } = await import('../lib/runtime/diagnostics.js');
+    const tickets = Array.from({ length: LEGACY_COLLECTION_BOUNDARY }, (_, index) => ({
       ticket_id: `run-collection-boundary:implement:${index}`,
       stage_id: 'implement',
       role: 'implementer',
     }));
     const receipts = tickets.map((ticket) => ({ ticket_id: ticket.ticket_id, status: 'passed' }));
     const expired = Array.from(
-      { length: MAX_DIAGNOSTIC_COLLECTION },
+      { length: LEGACY_COLLECTION_BOUNDARY },
       (_, index) => `run-collection-boundary:implement:expired-${index}`,
     );
     const checks = Object.fromEntries(Array.from(
-      { length: MAX_DIAGNOSTIC_COLLECTION },
+      { length: LEGACY_COLLECTION_BOUNDARY },
       (_, index) => [`check-${index}`, { passed: index !== 0 }],
     ));
     const boundary = runState({
@@ -719,7 +721,7 @@ describe('unified public run diagnostics', () => {
       ['expired_tickets', [...expired, 'PRIVATE_EXPIRED_TAIL']],
     ]) {
       let reads = 0;
-      Object.defineProperty(value, MAX_DIAGNOSTIC_COLLECTION, {
+      Object.defineProperty(value, LEGACY_COLLECTION_BOUNDARY, {
         enumerable: true,
         get() {
           reads += 1;
@@ -956,6 +958,9 @@ describe('unified public run diagnostics', () => {
     const expected = [
       path.join(claude, 'bin', 'ape-statusline.mjs'),
       path.join(claude, 'lib', 'runtime', 'diagnostics.js'),
+      path.join(claude, 'lib', 'runtime', 'resource-limits.js'),
+      path.join(claude, 'lib', 'runtime', 'input-guard.js'),
+      path.join(claude, 'lib', 'runtime', 'pipeline-limits.js'),
       path.join(claude, 'lib', 'runtime', 'paths.js'),
     ];
     for (const file of expected) await expect(readFile(file, 'utf8')).resolves.toBeTypeOf('string');
@@ -1407,7 +1412,7 @@ describe('unified public run diagnostics', () => {
   }, 30_000);
 
   it('validates every diagnostic fact collection before accessing max-plus-one tails', async () => {
-    const { MAX_DIAGNOSTIC_COLLECTION, projectRunDiagnostic } = await import('../lib/runtime/diagnostics.js');
+    const { projectRunDiagnostic } = await import('../lib/runtime/diagnostics.js');
     const cases = [
       ['input_required.questions', (state, values) => {
         state.input_required = { questions: values, question_ids: [] };
@@ -1447,10 +1452,10 @@ describe('unified public run diagnostics', () => {
     for (const [label, assign, makeValue] of cases) {
       let reads = 0;
       const values = Array.from(
-        { length: MAX_DIAGNOSTIC_COLLECTION + 1 },
+        { length: LEGACY_COLLECTION_BOUNDARY + 1 },
         (_, index) => makeValue(index),
       );
-      Object.defineProperty(values, MAX_DIAGNOSTIC_COLLECTION, {
+      Object.defineProperty(values, LEGACY_COLLECTION_BOUNDARY, {
         enumerable: true,
         get() {
           reads += 1;
@@ -1465,7 +1470,7 @@ describe('unified public run diagnostics', () => {
       expect(JSON.stringify(diagnostic)).not.toContain('PRIVATE_');
     }
 
-    const sparse = Array(MAX_DIAGNOSTIC_COLLECTION);
+    const sparse = Array(LEGACY_COLLECTION_BOUNDARY);
     sparse[0] = { id: 'profile-0' };
     const sparseDiagnostic = projectRunDiagnostic(runState({ profiles: sparse }));
     expectDiagnostic(sparseDiagnostic, 'corrupt_state', 'ape_run override reset');

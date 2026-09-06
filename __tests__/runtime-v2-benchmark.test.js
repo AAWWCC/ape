@@ -87,6 +87,23 @@ describe('APE v2 latency certification', () => {
     }
   });
 
+  it('keeps the 90% deadline requirement as cohorts grow beyond twenty runs', () => {
+    const cohort = (count, passing) => Array.from({ length: count }, (_, index) => ({
+      host: 'claude', lane: 'mechanical',
+      raw_ms: DEFAULT_DEADLINES_MS.mechanical * (index < passing ? 0.5 : 2),
+    }));
+    const report = (count, passing) => verifyBenchmarks(cohort(count, passing)).groups[0];
+    expect(report(40, 18)).toMatchObject({
+      required_passing: 36, passing_count: 18, passed: false,
+      certification_status: 'insufficient-passes',
+      adjusted_p90_ms: DEFAULT_DEADLINES_MS.mechanical * 2,
+    });
+    expect(report(40, 35).passed).toBe(false);
+    expect(report(40, 36).passed).toBe(true);
+    expect(report(21, 18)).toMatchObject({ required_passing: 19, passed: false });
+    expect(report(21, 19).passed).toBe(true);
+  });
+
   it('reports the governing threshold and explicit certification fields at both boundaries', () => {
     const group = (count, passing) => Array.from({ length: count }, (_, index) => ({
       host: 'claude',

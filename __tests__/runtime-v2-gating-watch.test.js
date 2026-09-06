@@ -290,8 +290,8 @@ async function writeConfig(dir, { full, autoMerge = true, cache = false, graceMs
     // keeps the explicit inline_grace_ms=0 that forces the multi-call shape.
     gates: omitInlineGrace ? {} : { inline_grace_ms: graceMs },
   };
-  // N-e overrides: a lowered stale_ms lets a poll treat a live-but-recorded-dead
-  // runner as stale; a max_spawns cap forces spawn exhaustion.
+  // N-e overrides: a lowered positive stale_ms makes an expired heartbeat
+  // eligible for recovery; a max_spawns cap forces spawn exhaustion.
   if (staleMs !== undefined) config.gates.stale_ms = staleMs;
   if (maxSpawns !== undefined) config.gates.max_spawns = maxSpawns;
   // The wait_ms poll-loop tests pin poll_retry_delay_ms=0 so the loop's
@@ -567,9 +567,9 @@ describe('APE v2 gating watch — non-blocking, resumable local merge gates', ()
   it('respawns exactly one dead gate runner and completes after arming (N-e, A2 dead-runner respawn)', async () => {
     const { dir, outside, probe } = await makeProject();
     const suite = makeSuite(outside, probe, 'full', 'block', 8000);
-    // A stale_ms of 0 makes any recorded heartbeat instantly stale, so the
-    // respawn fence hinges purely on the recorded pid being not-alive.
-    await writeConfig(dir, { full: suite.command, staleMs: 0 });
+    // Keep the stale threshold inside the supported positive timer domain.
+    // Killing the runner and removing its heartbeat makes recovery deterministic.
+    await writeConfig(dir, { full: suite.command, staleMs: 1 });
     const { paths } = await seedBlockedAtGates(dir, 'run-gate-respawn');
 
     const regate = track(await regateRun(dir));
@@ -577,16 +577,14 @@ describe('APE v2 gating watch — non-blocking, resumable local merge gates', ()
     expect(await waitFor(() => suite.startedExists())).toBe(true);
     expect(await suite.executions()).toBe(1);
 
-    // Rewrite the recorded runner to a provably-dead pid and drop its heartbeat:
-    // the next poll must treat the runner as dead and respawn once.
-    const deadPid = spawnSync(process.execPath, ['-e', '']).pid; // exited, pid is free
+    // Stop the actual runner before removing its heartbeat, so it cannot race
+    // the fixture by refreshing that heartbeat while the next poll runs.
     const active = await readJson(paths.active);
-    // Ledger the live gen-1 runner pid before the fixture overwrites it with the
-    // dead pid, so teardown can kill the still-blocking gen-1 runner.
-    trackPid(active.gates_watch?.pid);
+    const deadPid = active.gates_watch.pid;
+    trackPid(deadPid);
+    killTree(deadPid);
+    expect(await waitFor(() => !alive(deadPid))).toBe(true);
     const heartbeatFile = active.gates_watch.heartbeat_file;
-    active.gates_watch = { ...active.gates_watch, pid: deadPid };
-    await atomicWriteJson(paths.active, active);
     await rm(heartbeatFile, { force: true }).catch(() => {});
 
     // One poll → exactly one respawn: spawn_attempts increments, a second suite
@@ -610,21 +608,19 @@ describe('APE v2 gating watch — non-blocking, resumable local merge gates', ()
     const suite = makeSuite(outside, probe, 'full', 'block', 20000);
     // max_spawns:1 means the initial spawn already exhausts the budget: a
     // recorded-dead runner with no artifact can produce no verdict.
-    await writeConfig(dir, { full: suite.command, staleMs: 0, maxSpawns: 1 });
+    await writeConfig(dir, { full: suite.command, staleMs: 1, maxSpawns: 1 });
     const { paths } = await seedBlockedAtGates(dir, 'run-gate-exhaust');
 
     const regate = track(await regateRun(dir));
     expect(regate.run.status).toBe('gating'); // red anchor (base feature)
     expect(await waitFor(() => suite.startedExists())).toBe(true);
 
-    const deadPid = spawnSync(process.execPath, ['-e', '']).pid;
     const active = await readJson(paths.active);
-    // Ledger the live runner pid before the fixture overwrites it with the dead
-    // pid, so teardown can kill the still-blocking runner.
-    trackPid(active.gates_watch?.pid);
+    const deadPid = active.gates_watch.pid;
+    trackPid(deadPid);
+    killTree(deadPid);
+    expect(await waitFor(() => !alive(deadPid))).toBe(true);
     const heartbeatFile = active.gates_watch.heartbeat_file;
-    active.gates_watch = { ...active.gates_watch, pid: deadPid };
-    await atomicWriteJson(paths.active, active);
     await rm(heartbeatFile, { force: true }).catch(() => {});
 
     // The poll cannot respawn (attempts already at the cap) and has no verdict:
@@ -718,23 +714,18 @@ describe('APE v2 gating watch — non-blocking, resumable local merge gates', ()
     await drivePolls(dir);
   });
 
-  it('arms the 30-minute suite fallback in the job when the configured deadline is non-finite (A5)', async () => {
+  it('rejects a malformed configured deadline before re-gate effects (A5)', async () => {
     const { dir, outside, probe } = await makeProject();
     const suite = makeSuite(outside, probe, 'full', 'block', 5000);
     await writeConfig(dir, { full: suite.command, deadlines: { mechanical: null } });
     const { paths } = await seedBlockedAtGates(dir, 'run-gate-fallback');
-
-    const regate = track(await regateRun(dir));
-    expect(regate.run.status).toBe('gating'); // red anchor
-
-    // A job with a non-finite/absent timeout still gets the 30-minute suite
-    // fallback: a hung suite can never pend gating forever.
-    const job = await readGateJob(paths);
-    expect(job).toBeTruthy();
-    expect(job.timeout_ms).toBe(30 * 60 * 1000);
-
-    await suite.arm();
-    await drivePolls(dir);
+    const before = await readFile(paths.active, 'utf8');
+    await expect(regateRun(dir)).rejects.toThrow(/deadlines_ms\.mechanical.*integer/);
+    expect(await readFile(paths.active, 'utf8')).toBe(before);
+    expect(await readGateJob(paths)).toBeNull();
+    expect(await suite.executions()).toBe(0);
+    expect(await exists(paths.lock)).toBe(false);
+    expect(autoMergeGithub).not.toHaveBeenCalled();
   });
 
   it('abort from gating kills the recorded runner and seals aborted without invoking gh (f, A6)', async () => {

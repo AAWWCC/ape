@@ -20,6 +20,7 @@ import {
 import { sha256 } from '../lib/runtime/canonical.js';
 import { evaluateLifecyclePolicy } from '../lib/runtime/lifecycle-policy.js';
 import { projectRunResponse } from '../lib/runtime/projection.js';
+import { seedLegacyRun } from './legacy-run-test-helper.js';
 
 const cleanups = [];
 afterEach(async () => {
@@ -134,6 +135,26 @@ async function reachReview(dir) {
 }
 
 describe('versioned structured plan contract', () => {
+  it('keeps historical plan limits when an issued ticket predates budget metadata', async () => {
+    const dir = await project();
+    const started = await seedLegacyRun(dir, startInput());
+    const planner = started.run.tickets[0];
+    expect(planner).not.toHaveProperty('receipt_contract_version');
+    expect(planner).not.toHaveProperty('capability_manifest');
+    const expanded = structuredClone(PLAN);
+    expanded.workstreams[0].outcome = 'x'.repeat(501);
+    // The standalone current-plan helper has no historical ticket to bind.
+    expect(candidatePlanForScope(expanded, ['src/value.js', 'tests/value.test.js']).valid).toBe(true);
+    const before = await readJson(runtimePaths(dir).active);
+    const rejected = await recordReceipt(dir, receipt(planner, { verdict: 'pass', candidate_plan: expanded }));
+    expect(rejected).toMatchObject({ ok: false, rejected: true });
+    expect(rejected.errors.join(' ')).toMatch(/500/);
+    expect(await readJson(runtimePaths(dir).active)).toEqual(before);
+    const accepted = await recordReceipt(dir, receipt(planner, { verdict: 'pass', candidate_plan: PLAN }));
+    expect(accepted.ok, JSON.stringify(accepted.errors)).toBe(true);
+    expect(accepted.run.tickets.find((ticket) => ticket.stage_id === 'plan-check').candidate_plan.plan).toEqual(PLAN);
+  });
+
   it('accepts omitted deviation evidence with or without a plan and rejects array placeholders', () => {
     expect(validatePlanDeviation(undefined, undefined, []).valid).toBe(true);
     expect(validatePlanDeviation(undefined, {}, []).valid).toBe(true);
@@ -188,9 +209,8 @@ describe('versioned structured plan contract', () => {
 
     const oversized = structuredClone(PLAN);
     const long = 'x'.repeat(500);
-    oversized.workstreams[0].steps = Array(16).fill(long);
-    oversized.workstreams[0].acceptance = Array(16).fill(long);
-    oversized.workstreams[0].evidence_commands = Array(16).fill(long);
+    oversized.workstreams[0].steps = Array(70).fill(long);
+    oversized.workstreams[0].acceptance = Array(70).fill(long);
     const rejected = candidatePlanForScope(oversized, ['src/value.js', 'tests/value.test.js']);
     expect(rejected.valid).toBe(false);
     expect(rejected.errors.join(' ')).toContain(`${PLAN_CONTRACT_MAX_BYTES}`);

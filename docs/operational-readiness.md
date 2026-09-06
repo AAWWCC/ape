@@ -294,11 +294,12 @@ Readiness also checks these runtime boundaries. See [pipeline](pipeline.md) and
 - **Convergence:** planning and remediation may continue only when the normalized
   finding set strictly shrinks with no additions. Evidence anchors are provenance,
   not finding identity. Equality, expansion, incomparable or malformed evidence,
-  or the two-replan/three-remediation ceilings cause the existing blocked outcome.
+  or the frozen replan/remediation ceilings cause the existing blocked outcome.
 - **Capability recovery:** additive test paths must be unique, project-relative,
-  non-reserved, at most 64 items and 4096 serialized UTF-8 bytes. Validation rejects
-  invalid input before mutation. The lineage retains the limits of three
-  submissions per worker and two workers per ticket.
+  non-reserved, and within the shared structural guard and actual expanded-command
+  and manifest budgets. Historical version-1 contracts retain 64 items and 4,096
+  bytes. Validation rejects invalid input before mutation. The lineage retains
+  its frozen submission and worker policy (defaults: three and two).
 - **Durability:** recovery reuses one hash-bound immutable generation and successor
   after response loss or restart. It does not mint replacements or double-charge
   attempts. Selector edges—not mutable projections—choose the recovery head.

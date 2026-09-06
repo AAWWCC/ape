@@ -279,7 +279,12 @@ async function scanRoot(root, forbiddenHashes, forbiddenFingerprints) {
       }
       files += 1;
       const metadata = await stat(path);
-      if (metadata.size > MAX_PUBLIC_FILE_BYTES) failures.push(`${normalized}: exceeds 5 MiB`);
+      if (metadata.size > MAX_PUBLIC_FILE_BYTES) {
+        failures.push(`${normalized}: exceeds 5 MiB`);
+        // This file already fails the gate. Do not allocate and hash its full
+        // contents after discovering that it exceeds the inspection budget.
+        continue;
+      }
       const bytes = await readFile(path);
       if (audioMagic(bytes)) failures.push(`${normalized}: audio file signature`);
       const digest = createHash('sha256').update(bytes).digest('hex');

@@ -31,7 +31,8 @@ describe('prevention-first admission compiler', () => {
     const spec = pipelineRunSpec(args.input, args.classification, args.config);
     expect(spec.plan_contract_version).toBe(version);
     expect(spec.policy).toEqual({
-      high_risk_security_review: false, design_assurance_required: false, max_remediation_cycles: 10,
+      ...pipelineLimits({ policy: args.config.policy }),
+      high_risk_security_review: false, design_assurance_required: false,
     });
     args.projection = projectedPipeline(spec);
     expect(args.projection.stages.some((entry) => entry.id === 'preflight')).toBe(version === 2);
@@ -43,13 +44,13 @@ describe('prevention-first admission compiler', () => {
 
   it('rejects future manifest overflow without an explicit capability request', () => {
     const args = fixture();
-    args.config.policy.command_profiles = Array.from({ length: 65 }, (_, index) => ({
-      id: `future.${index}`, command: `tool check-${index}`, roles: ['reviewer'], effect: 'read',
+    args.config.policy.command_profiles = Array.from({ length: 40 }, (_, index) => ({
+      id: `future.${index}`, command: `tool ${'x'.repeat(7_000)}${index}`, roles: ['reviewer'], effect: 'read',
     }));
     const result = evaluateRunReadiness(args);
     expect(result.ready).toBe(false);
     expect(result.blocking).toContainEqual(expect.objectContaining({
-      code: 'capability-command-profiles-over-limit',
+      code: 'capability-manifest-resource-over-limit',
     }));
   });
 
@@ -158,11 +159,11 @@ describe('prevention-first admission compiler', () => {
     }
   });
 
-  it('decomposes seventeen exact paths into consumer-valid bounded workstreams', () => {
+  it('keeps seventeen exact paths in a consumer-valid workstream', () => {
     const args = fixture({ claimed_paths: Array.from({ length: 17 }, (_, i) => `src/file-${i}.js`), test_paths: [] });
     const result = compileRunAdmissionContract(args);
     expect(result.valid).toBe(true);
-    expect(result.planner.template.workstreams.map((entry) => entry.paths.length)).toEqual([16, 1]);
+    expect(result.planner.template.workstreams.map((entry) => entry.paths.length)).toEqual([17]);
     const accepted = candidatePlanForScope(result.planner.template, args.input.claimed_paths, null, {
       preflight_hash: result.planner.template.preflight_hash,
       verification_profiles: [], risk_triggers: [], require_design_assurance: true,
@@ -191,14 +192,11 @@ describe('prevention-first admission compiler', () => {
     }).valid).toBe(true);
   });
 
-  it('reports decomposition before allocating an impossible candidate and never truncates requirements', () => {
+  it('preserves requirements beyond the former count ceiling', () => {
     const args = fixture({ requirements: Array.from({ length: 33 }, (_, i) => `requirement-${i}`) });
     const result = compileRunAdmissionContract(args);
-    expect(result.valid).toBe(false);
-    expect(result.blocking).toContainEqual(expect.objectContaining({
-      code: 'planner-decomposition-required', field: 'requirements', provided: 33, limit: 32,
-    }));
-    expect(result.planner).not.toHaveProperty('template');
+    expect(result.valid).toBe(true);
+    expect(result.planner.template.requirements.map((entry) => entry.requirement)).toEqual(args.input.requirements);
     expect(args.input.requirements).toHaveLength(33);
   });
 
@@ -223,13 +221,15 @@ describe('prevention-first admission compiler', () => {
     }
   });
 
-  it('rejects a provably oversized template instead of silently dropping scope', () => {
-    const paths = Array.from({ length: 40 }, (_, index) => `src/${'x'.repeat(480)}-${index}.js`);
+  it('leaves template representability unknown without silently dropping authorized scope', () => {
+    const paths = Array.from({ length: 130 }, (_, index) => `src/${'x'.repeat(480)}-${index}.js`);
     const result = compileRunAdmissionContract(fixture({ claimed_paths: paths, test_paths: [] }));
-    expect(result.valid).toBe(false);
-    expect(result.blocking).toContainEqual(expect.objectContaining({
-      code: 'planner-decomposition-required', field: 'candidate_plan_utf8_bytes', limit: 16384,
-    }));
+    expect(result.valid).toBe(true);
+    expect(result.blocking).toEqual([]);
+    expect(result.planner.representable).toBeNull();
+    expect(result.planner.advisory).toMatchObject({
+      code: 'planner-template-exceeds-byte-budget', limit: PLAN_CONTRACT_LIMITS.candidate_plan_utf8_bytes,
+    });
     expect(result.planner).not.toHaveProperty('template');
   });
 

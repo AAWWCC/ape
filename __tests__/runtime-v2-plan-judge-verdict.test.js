@@ -379,7 +379,7 @@ describe('APE v2 plan-judge failed-receipt regression guard (friction #22)', () 
 
     expect(actions.some((action) => action.type === 'issue_ticket')).toBe(false);
     expect(state.status).toBe('blocked');
-    expect(state.block_reason).toBe('stage plan-judge failed twice');
+    expect(state.block_reason).toBe('stage plan-judge failed after 2 configured attempts');
   });
 });
 

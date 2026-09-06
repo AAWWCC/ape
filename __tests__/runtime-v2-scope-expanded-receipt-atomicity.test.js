@@ -1203,17 +1203,31 @@ describe('APE v2 SCOPE_EXPANDED receipt atomicity across a crash (audit 1.3, inv
 
 describe('APE v2 bounded capability-recovery publication', () => {
   it.each([
+    [Array.from({ length: 64 }, (_, index) => `tests/generated-${index}.test.js`), 'tests/generated-64.test.js'],
+    [testPathsAt4096Bytes(), 'tests/another.test.js'],
+  ])('admits scope beyond retired path-count and path-byte cuts when actual resources fit', async (initialTestPaths, addedPath) => {
+    const dir = await project();
+    const { ticket, capability } = await nativeCapabilityTicket(dir, { test_paths: initialTestPaths });
+    const payload = capabilityReceipt(ticket, capability, { test_paths: [addedPath] });
+    expect(await validateReceiptForDispatch(dir, payload, ticket.ticket_id)).toMatchObject({ ok: true, valid: true });
+    const recorded = await recordReceipt(dir, payload);
+    expect(recorded.ok, JSON.stringify(recorded.errors)).toBe(true);
+    expect(recorded.run.test_paths).toContain(addedPath);
+  });
+
+  it.each([
     [
-      'the 65th canonical test path',
-      Array.from({ length: 64 }, (_, index) => `tests/generated-${String(index).padStart(2, '0')}.test.js`),
-      'tests/generated-64.test.js',
-      /64|test_paths.*bound/i,
+      'the 2049th canonical test path',
+      Array.from({ length: 2048 }, (_, index) => `tests/${index}.js`),
+      'tests/2048.js',
+      /2048|test_paths.*bound/i,
     ],
     [
-      'the 4097th serialized UTF-8 byte',
-      testPathsAt4096Bytes(),
-      'tests/one-byte-too-many.test.js',
-      /4096|test_paths.*bound/i,
+      'an actual targeted command beyond 8192 characters',
+      ['tests/value.test.js'],
+      Array.from({ length: 64 }, (_, index) => `tests/${'x'.repeat(130)}${index}.test.js`),
+      /8192|command.*limit/i,
+      true,
     ],
     [
       'an absolute out-of-project test path',
@@ -1292,13 +1306,20 @@ describe('APE v2 bounded capability-recovery publication', () => {
     initialTestPaths,
     addedPath,
     expectedError,
+    renderedCommandCase,
   ) => {
     const dir = await project();
+    if (renderedCommandCase) {
+      const paths = runtimePaths(dir);
+      const config = await readJson(paths.config);
+      config.test_commands = { full: 'node --test', targeted_template: 'node --test {paths}' };
+      await atomicWriteJson(paths.config, config);
+    }
     const { ticket, capability } = await nativeCapabilityTicket(dir, {
       test_paths: initialTestPaths,
     });
     const payload = capabilityReceipt(ticket, capability, {
-      test_paths: [addedPath],
+      test_paths: Array.isArray(addedPath) ? addedPath : [addedPath],
     });
     const validation = await validateReceiptForDispatch(dir, payload, ticket.ticket_id);
     expect(validation).toMatchObject({
@@ -1306,8 +1327,8 @@ describe('APE v2 bounded capability-recovery publication', () => {
       valid: false,
       attested: false,
       dynamic_test_paths: expect.objectContaining({
-        max_items: 64,
-        max_bytes: 4_096,
+        max_items: 2048,
+        max_bytes: null,
       }),
     });
     expect(validation.corrections.map((entry) => entry.issue).join(' '))
@@ -1622,15 +1643,7 @@ describe('APE v2 bounded capability-recovery publication', () => {
         derived_at: expect.any(String),
       },
       capability_manifest: {
-        field_bounds: {
-          validation_attempts_per_worker: 3,
-          max_physical_workers_per_ticket: 2,
-          corrections_per_validation: 20,
-          dynamic_test_paths: {
-            max_items: 64,
-            max_serialized_utf8_bytes: 4_096,
-          },
-        },
+        field_bounds: ticket.capability_manifest.field_bounds,
         byte_budgets: ticket.capability_manifest.byte_budgets,
         run_contract: expect.any(Object),
       },

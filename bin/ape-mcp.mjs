@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto';
+import { GENERAL_INPUT_MAX_BYTES, INPUT_LIMITS } from '../lib/runtime/input-guard.js';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -187,7 +188,7 @@ const TOOLS = Object.freeze([
         },
         required_capabilities: {
           type: 'array',
-          maxItems: 64,
+          maxItems: INPUT_LIMITS.maxArrayLength,
           description: 'Optional additive capabilities that must exist before start. Every entry names one exact configured command profile, verification profile, or evidence command.',
           items: {
             oneOf: [
@@ -218,7 +219,7 @@ const TOOLS = Object.freeze([
         },
         run_command_profiles: {
           type: 'array',
-          maxItems: 64,
+          maxItems: INPUT_LIMITS.maxArrayLength,
           description: 'Preview/start only, and only for debug or spike: exact operator-attested measurement commands frozen into this run. Each profile must authorize only the matching read-only role, use effect execute, carry a nonblank audit reason, and set operator_authorized true only after explicit approval of that literal command.',
           items: {
             type: 'object',
@@ -246,7 +247,7 @@ const TOOLS = Object.freeze([
               reason: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 2000,
+                maxLength: GENERAL_INPUT_MAX_BYTES,
                 pattern: '\\S',
                 description: 'Nonblank audit reason for granting this exact run-local execution capability.',
               },
@@ -376,6 +377,8 @@ const TOOLS = Object.freeze([
         },
         run_id: { type: 'string', description: 'Run selector for query/explain, or exact archived run bound by roadmap-attest.' },
         requirement: { type: 'string' },
+        limit: { type: 'integer', minimum: 1, maximum: 256, description: 'query/metrics page size (default 256); not a lifetime history limit.' },
+        cursor: { type: 'string', description: 'query/metrics continuation cursor from the preceding page; keep the same selectors and filters.' },
         since: { type: 'string', format: 'date-time', description: 'metrics only: inclusive ISO timestamp start of date range filter.' },
         until: { type: 'string', format: 'date-time', description: 'metrics only: inclusive ISO timestamp end of date range filter; must not precede since.' },
         lane: { type: 'string', enum: [...LANES], description: 'metrics only: filter by lane.' },
@@ -393,7 +396,7 @@ const TOOLS = Object.freeze([
         keep_recent_runs: {
           type: 'integer',
           minimum: 0,
-          maximum: 10000,
+          maximum: Number.MAX_SAFE_INTEGER,
           description: 'compact-artifacts only: retain at least this many newest immutable runs in directly addressable artifact directories (default 32).',
         },
         max_runs: {
@@ -402,23 +405,23 @@ const TOOLS = Object.freeze([
           maximum: 256,
           description: 'compact-artifacts only: maximum successful run compactions in this bounded sweep (default 64).',
         },
-        // roadmap-register: a batch (≤64) of plan entries. Each entry is written
+        // roadmap-register: a batch within the ordinary 64 KiB input budget of plan entries. Each entry is written
         // for a cold reader — id, title, description, acceptance, optional
         // depends_on and discovered_by (a run id, else defaults to 'operator').
         // Never supply a status: status is derived, never stored.
         entries: {
           type: 'array',
-          maxItems: 64,
+          maxItems: INPUT_LIMITS.maxArrayLength,
           items: {
             type: 'object',
             additionalProperties: false,
             required: ['id', 'title', 'description', 'acceptance'],
             properties: {
               id: { type: 'string', minLength: 1, maxLength: 128 },
-              title: { type: 'string', minLength: 1, maxLength: 200 },
-              description: { type: 'string', minLength: 1, maxLength: 4000 },
-              acceptance: { type: 'string', minLength: 1, maxLength: 2000 },
-              depends_on: { type: 'array', maxItems: 32, items: { type: 'string', minLength: 1, maxLength: 128 } },
+              title: { type: 'string', minLength: 1 },
+              description: { type: 'string', minLength: 1 },
+              acceptance: { type: 'string', minLength: 10 },
+              depends_on: { type: 'array', maxItems: INPUT_LIMITS.maxArrayLength, items: { type: 'string', minLength: 1, maxLength: 128 } },
               discovered_by: { type: 'string', minLength: 1, maxLength: 128, description: "Omit for operator provenance. A non-operator run id is accepted only when that active or archived run contains an accepted receipt with an exact normalized evidence.roadmap_followups declaration." },
             },
           },
@@ -426,15 +429,15 @@ const TOOLS = Object.freeze([
         // roadmap-supersede: the entry ids to mark stale, plus optional
         // replacement ids. reason is required for register, supersede, and
         // the explicit compact-artifacts maintenance action.
-        ids: { type: 'array', maxItems: 64, items: { type: 'string', minLength: 1, maxLength: 128 } },
+        ids: { type: 'array', maxItems: INPUT_LIMITS.maxArrayLength, items: { type: 'string', minLength: 1, maxLength: 128 } },
         requirement_ids: {
           type: 'array',
           minItems: 1,
-          maxItems: 64,
+          maxItems: INPUT_LIMITS.maxArrayLength,
           items: { type: 'string', minLength: 1, maxLength: 128 },
           description: 'roadmap-attest only: live requirement ids to bind to the archived run.',
         },
-        replaced_by: { type: 'array', maxItems: 32, items: { type: 'string', minLength: 1, maxLength: 128 } },
+        replaced_by: { type: 'array', maxItems: INPUT_LIMITS.maxArrayLength, items: { type: 'string', minLength: 1, maxLength: 128 } },
         reason: {
           type: 'string',
           minLength: 1,
@@ -474,7 +477,7 @@ const TOOLS = Object.freeze([
         },
         test_paths: {
           type: 'array',
-          maxItems: 64,
+          maxItems: INPUT_LIMITS.maxArrayLength,
           items: { type: 'string' },
           description: 'Doctor/init prospective authored test paths. On a blank repository, one unambiguous JS/TS or Python extension family grounds dependency-free bootstrap commands.',
         },
@@ -534,7 +537,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.24.14' };
+    return { name: 'ape', version: '2.25.0' };
   }
 }
 

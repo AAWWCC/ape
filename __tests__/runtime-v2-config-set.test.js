@@ -105,18 +105,19 @@ describe('ape v2 config set type validation against the defaults tree', () => {
       .rejects.toThrow(/policy\.fast_max_files/);
   });
 
-  it('bounds the configurable remediation-cycle budget', async () => {
+  it('accepts operator remediation budgets without a hidden ten-cycle ceiling', async () => {
     const dir = project();
     const { config } = await configAction(dir, 'set', {
       key: 'policy.max_remediation_cycles', value: 5,
     });
     expect(config.policy.max_remediation_cycles).toBe(5);
+    for (const value of [0, 11]) {
+      expect((await configAction(dir, 'set', { key: 'policy.max_remediation_cycles', value }))
+        .config.policy.max_remediation_cycles).toBe(value);
+    }
     await expect(configAction(dir, 'set', {
-      key: 'policy.max_remediation_cycles', value: 0,
-    })).rejects.toThrow(/integer from 1 through 10/);
-    await expect(configAction(dir, 'set', {
-      key: 'policy.max_remediation_cycles', value: 11,
-    })).rejects.toThrow(/integer from 1 through 10/);
+      key: 'policy.max_remediation_cycles', value: -1,
+    })).rejects.toThrow(/integer/);
   });
 
   it('leaves unknown keys unvalidated (no shipped shape to enforce)', async () => {

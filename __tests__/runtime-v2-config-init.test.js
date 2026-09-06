@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configAction } from '../lib/runtime/service.js';
 import { doctor } from '../lib/runtime/doctor.js';
+import { INPUT_LIMITS } from '../lib/runtime/input-guard.js';
 
 // Foreign-repo onboarding (`ape_config init`): a project that has never used
 // APE inspects its own manifests and proposes grounded gate commands, then
@@ -351,7 +352,7 @@ describe('ape v2 config init onboarding', () => {
     expect(configTool.inputSchema.properties.values).toBeDefined();
     expect(configTool.inputSchema.properties.test_paths).toMatchObject({
       type: 'array',
-      maxItems: 64,
+      maxItems: INPUT_LIMITS.maxArrayLength,
     });
     expect(configTool.inputSchema.properties.test_paths.description)
       .toMatch(/blank repository[\s\S]*JS\/TS or Python/iu);

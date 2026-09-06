@@ -182,7 +182,7 @@ describe('APE v2 every transition into blocked archives immediately (F7, reducer
     });
     expect(actions[0].patch.status).toBe('blocked');
     // No attempt carried a summary: the reason stays the bare noise-free string.
-    expect(actions[0].patch.block_reason).toBe('stage build failed twice');
+    expect(actions[0].patch.block_reason).toBe('stage build failed after 2 configured attempts');
     expect(archiveOf(actions)).toMatchObject({ if_absent: true });
     expect(types(actions).indexOf('archive_history')).toBeLessThan(types(actions).indexOf('release_lock'));
   });
@@ -203,7 +203,7 @@ describe('APE v2 every transition into blocked archives immediately (F7, reducer
     });
     expect(actions[0].patch.status).toBe('blocked');
     expect(actions[0].patch.block_reason).toBe(
-      'stage build failed twice: attempt 1: npm test exited 1: missing module; attempt 2: npm test exited 1: missing module',
+      'stage build failed after 2 configured attempts: attempt 1: npm test exited 1: missing module; attempt 2: npm test exited 1: missing module',
     );
   });
 
@@ -222,7 +222,7 @@ describe('APE v2 every transition into blocked archives immediately (F7, reducer
       stage: { id: 'build', role: 'implementer', parallel_group: null },
     });
     expect(actions[0].patch.block_reason).toBe(
-      `stage build failed twice: attempt 1: line1 line2 spaced; attempt 2: ${'x'.repeat(120)}…`,
+      `stage build failed after 2 configured attempts: attempt 1: line1 line2 spaced; attempt 2: ${'x'.repeat(120)}…`,
     );
     expect(actions[0].patch.block_reason).not.toMatch(/\n/);
   });
@@ -242,7 +242,7 @@ describe('APE v2 every transition into blocked archives immediately (F7, reducer
       stage: { id: 'build', role: 'implementer', parallel_group: null },
     });
     expect(actions[0].patch.block_reason).toBe(
-      'stage build failed twice: attempt 1: (no summary); attempt 2: disk full',
+      'stage build failed after 2 configured attempts: attempt 1: (no summary); attempt 2: disk full',
     );
   });
 

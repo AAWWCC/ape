@@ -3,7 +3,7 @@
  * Bounded APE v2 latency certification ledger.
  *
  * adjusted_ms = raw_ms - test_ms - remote_ci_ms. Certification requires at
- * least 20 observations and 18 passing observations in every host/lane group.
+ * least 20 observations and 90% passing observations in every host/lane group.
  */
 import { randomBytes } from 'node:crypto';
 import {
@@ -34,6 +34,8 @@ import { DEFAULT_DEADLINES_MS } from '../lib/runtime/constants.js';
 const DEFAULT_FILE = 'benchmarks/reference-runs.json';
 const HOSTS = ['claude', 'codex'];
 const CERT_LANES = ['mechanical', 'fast', 'full'];
+const MIN_COHORT_RECORDS = 20;
+const REQUIRED_PASS_FRACTION = 0.9;
 const BUILDING_MODES = ['phase', 'patch'];
 const LOCK_LEASE_MS = 60_000;
 const LOCK_BYTES = 4 * 1024;
@@ -613,16 +615,17 @@ export function verifyBenchmarks(records) {
         adjusted_ms: record.raw_ms - (record.test_ms ?? 0) - (record.remote_ci_ms ?? 0),
       }));
       const passingCount = normalized.filter((record) => record.adjusted_ms <= thresholdMs).length;
-      const certificationStatus = normalized.length < 20
+      const requiredPassing = Math.ceil(Math.max(MIN_COHORT_RECORDS, normalized.length) * REQUIRED_PASS_FRACTION);
+      const certificationStatus = normalized.length < MIN_COHORT_RECORDS
         ? 'insufficient-records'
-        : passingCount < 18 ? 'insufficient-passes' : 'certified';
+        : passingCount < requiredPassing ? 'insufficient-passes' : 'certified';
       groups.push({
         host,
         lane,
         count: normalized.length,
-        required_count: 20,
+        required_count: MIN_COHORT_RECORDS,
         passing_count: passingCount,
-        required_passing: 18,
+        required_passing: requiredPassing,
         threshold_ms: thresholdMs,
         raw_p90_ms: percentile(normalized.map((record) => record.raw_ms), 0.9),
         adjusted_p90_ms: percentile(normalized.map((record) => record.adjusted_ms), 0.9),

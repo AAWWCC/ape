@@ -169,7 +169,7 @@ describe('field reproduction: landing a tracked benchmarks data refresh (RED at 
 // ---------------------------------------------------------------------------
 // GREEN guardrails: pass at base and must stay green after the fix — the
 // mechanical widening is data-file-scoped, never a blanket behavioral:false
-// pass and never a change to './'-prefixed claim handling.
+// pass. Equivalent normalized paths use the same classification.
 // ---------------------------------------------------------------------------
 
 describe('non-data scopes stay non-mechanical (GREEN guardrails)', () => {
@@ -205,14 +205,10 @@ describe('non-data scopes stay non-mechanical (GREEN guardrails)', () => {
     expect(escalated.reasons).toContain('behavioral-change');
   });
 
-  // Critic's addition: './'-prefixed claims are matched on their raw first
-  // segment ('.'), so today this shape classifies fast. Pin exactly today's
-  // result so the implementation cannot silently change './'-handling in
-  // either direction while fixing the bare-path case.
-  it("pins today's classification for a './'-prefixed data claim", () => {
+  it('classifies a normalized data claim consistently with its canonical path', () => {
     expect(classifyLane(dataClaim(['./benchmarks/reference-runs.json']))).toEqual({
-      lane: 'fast',
-      reasons: ['bounded-behavioral-scope'],
+      lane: 'mechanical',
+      reasons: ['non-behavioral-mechanical-scope'],
       risk_triggers: [],
     });
   });

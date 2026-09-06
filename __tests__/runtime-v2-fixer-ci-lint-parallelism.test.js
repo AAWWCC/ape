@@ -36,7 +36,9 @@ describe('public cross-platform CI and release contract', () => {
       /remote_ci_ms/iu,
       /adjusted/iu,
       /20 records/iu,
-      /18 pass/iu,
+      /90% passing/iu,
+      /18 of 20/iu,
+      /36 of 40/iu,
     ]) expect(guide).toMatch(marker);
     expect(guide).toMatch(/empty|insufficient/iu);
     expect(guide).toMatch(/not (?:a )?certification|does not certify/iu);

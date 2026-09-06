@@ -14,6 +14,7 @@ import {
   buildCallPlan,
   buildOracleResponse,
   checkHarness,
+  codexTrace,
   hashJson,
   hashText,
   loadResponseSchema,
@@ -61,6 +62,31 @@ function syntheticRecord(call, response, providerTrace = null) {
 }
 
 describe('prompt evaluation release gate', () => {
+  it('classifies and retains unsafe command suffixes beyond the former display cut', () => {
+    const action = `pwd${' '.repeat(500)}; touch modified.txt`;
+    const trace = codexTrace([{ item: { type: 'command_execution', command: action } }]);
+    expect(trace.actual_tools).toEqual([{ type: 'command_execution', action, read_only: false }]);
+    expect(trace.unsafe_events).toEqual(trace.actual_tools);
+  });
+
+  it.each([0, -1, 1.5, 7, Infinity, NaN])(
+    'rejects invalid concurrency %s before starting any provider work', async (concurrency) => {
+      await expect(runLiveEvaluation({ concurrency })).rejects.toThrow(
+        '--concurrency must be an integer from 1 to 6',
+      );
+    },
+  );
+
+  it.each([999, 1000.5, 2_147_483_648, Number.MAX_SAFE_INTEGER, Infinity])(
+    'rejects invalid timeout %s before starting any provider work', async (timeoutMs) => {
+      await expect(runLiveEvaluation({ timeoutMs })).rejects.toThrow(
+        '--timeout-ms must be an integer from 1000 through 2147483647',
+      );
+      await expect(run(process.execPath, [SCRIPT, 'check', '--timeout-ms', String(timeoutMs)]))
+        .rejects.toMatchObject({ stderr: expect.stringContaining('--timeout-ms must be an integer from 1000 through 2147483647') });
+    },
+  );
+
   it('pins all paired scenarios and the exact 18-call host/tier/repetition matrix', async () => {
     const [suite, schema, check, plan] = await Promise.all([
       loadSuite(),

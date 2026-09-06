@@ -6,6 +6,7 @@ import path from 'node:path';
 import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
 import { configAction } from '../lib/runtime/service.js';
 import { evaluateGatePreflight } from '../lib/runtime/gate-evaluation.js';
+import { MAX_TIMER_DELAY_MS } from '../lib/runtime/constants.js';
 
 const dirs = [];
 afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -29,7 +30,7 @@ describe('verification.profiles configuration', () => {
   it('ships a bounded empty profile list and round-trips valid exact commands', async () => {
     expect(DEFAULT_CONFIG.verification).toEqual({ profiles: [] });
     const dir = project();
-    const profiles = [valid(), valid({ id: 'types', command: 'npm run typecheck', root: 'packages/api' })];
+    const profiles = [valid(), valid({ id: 'types', command: 'npm run typecheck', root: 'packages/api', timeout_ms: MAX_TIMER_DELAY_MS })];
     await setProfiles(dir, profiles);
     expect((await configAction(dir, 'get', {})).config.verification.profiles).toEqual(profiles);
   });
@@ -43,7 +44,7 @@ describe('verification.profiles configuration', () => {
     ['trailing-slash root', [valid({ root: 'tests/' })]],
     ['oversized root', [valid({ root: 'a'.repeat(513) })]],
     ['zero timeout', [valid({ timeout_ms: 0 })]],
-    ['oversized timeout', [valid({ timeout_ms: 86_400_001 })]],
+    ['timeout above the Node timer domain', [valid({ timeout_ms: MAX_TIMER_DELAY_MS + 1 })]],
     ['blank description', [valid({ description: ' ' })]],
   ])('rejects %s atomically', async (_label, profiles) => {
     const dir = project();
@@ -92,4 +93,3 @@ describe('verification.profiles configuration', () => {
     });
   });
 });
-
