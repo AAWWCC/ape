@@ -1,9 +1,10 @@
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, open, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { activeState } from '../lib/runtime/active-state.js';
 import { inspectAdmissionCommandPrerequisites } from '../lib/runtime/admission-command-prerequisites.js';
+import { lstatFile, statFileHandle } from '../lib/runtime/file-stats.js';
 
 const scenario = vi.hoisted(() => ({ root: null, otherDevice: false, otherInode: false }));
 vi.mock('node:fs/promises', async (original) => {
@@ -56,6 +57,26 @@ async function fixture() {
 }
 
 describe('Windows descriptor and pathname file identity compatibility', () => {
+  it('matches native pathname and descriptor identities for a real ordinary file', async () => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'ape-native-stat-')));
+    roots.push(root);
+    const file = path.join(root, 'ordinary.json');
+    await writeFile(file, '{}');
+    const handle = await open(file, 'r');
+    const identity = (metadata) => ({ dev: String(metadata.dev), ino: String(metadata.ino) });
+    try {
+      const entry = await lstatFile(file);
+      const descriptor = await statFileHandle(handle);
+      const rawEntry = await lstat(file, { bigint: true });
+      const rawDescriptor = await handle.stat({ bigint: true });
+      expect(identity(entry), JSON.stringify({ node: process.version, platform: process.platform,
+        rawEntry: identity(rawEntry), rawDescriptor: identity(rawDescriptor),
+      })).toEqual(identity(descriptor));
+    } finally {
+      await handle.close();
+    }
+  });
+
   it('reads stable state despite the old libuv volume-serial representation difference', async () => {
     const value = await fixture();
     expect(await activeState({ active: value.file })).toEqual(value.state);

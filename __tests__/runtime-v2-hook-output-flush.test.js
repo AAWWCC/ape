@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const hook = fileURLToPath(new URL('../bin/ape-hook.mjs', import.meta.url));
@@ -35,7 +35,7 @@ async function fixture() {
 }
 
 function invoke(f, input, slow, args = []) {
-  return spawnSync(process.execPath, [...(slow ? ['--import', f.preload] : []), hook, ...args], {
+  return spawnSync(process.execPath, [...(slow ? ['--import', pathToFileURL(f.preload).href] : []), hook, ...args], {
     cwd: f.root, env: f.env, input: `${JSON.stringify({ project_dir: f.root, cwd: f.root, ...input })}\n`,
     encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024,
   });
