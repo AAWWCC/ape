@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CAPABILITY_MANIFEST_MAX_REQUIRED_CAPABILITIES } from '../lib/runtime/constants.js';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const pkg = JSON.parse(await readFile(join(REPO_ROOT, 'package.json'), 'utf8'));
@@ -41,7 +42,11 @@ function assertToolContract(host, tools) {
   }
 
   const capabilities = runSchema?.properties?.required_capabilities;
-  assertContract(capabilities?.type === 'array' && capabilities?.maxItems === 64, host, 'required_capabilities is not a bounded array');
+  assertContract(
+    capabilities?.type === 'array' && capabilities?.maxItems === CAPABILITY_MANIFEST_MAX_REQUIRED_CAPABILITIES,
+    host,
+    `required_capabilities does not publish the shared ${CAPABILITY_MANIFEST_MAX_REQUIRED_CAPABILITIES}-item capability bound`,
+  );
   const variants = capabilities?.items?.oneOf ?? [];
   const kinds = variants.map((variant) => variant?.properties?.kind?.const).sort();
   assertContract(

@@ -1,11 +1,29 @@
 # Prevention-first reliability status
 
-**2.24.14 is a review candidate, not a certified release.** Reproduced blockers
+**2.25.0 is a review candidate, not a certified release.** Reproduced blockers
 have fixes and regression tests. The full live acceptance requirement is still
 incomplete. This page records the latest results as of September 6, 2026; it does
 not authorize more testing, installation, or publication.
 
-## What changed
+## 2.25.0 limits audit
+
+The limits overhaul replaces separate plan/prose/count ceilings with shared
+resource budgets, makes execution limits configurable and freezes them per run,
+and repairs history pagination, storage observers and receipt recovery. Existing
+issued contracts retain their exact legacy bounds. See [runtime limits](limits.md)
+for each retained policy and its rationale.
+
+The final local verification covers 4,637 passing tests across 276 files, with
+87 platform or live-host skips, using the complete suite plus complete reruns of
+three corrected files. Type, configuration documentation, bundle freshness,
+package parity/reproducibility, both packaged MCP servers, public-safety and
+offline prompt checks passed. After the 2.25.0 bump, all 216 version-specific
+tests across five files and all 671 operational canaries across 23 files passed.
+Native platform CI and fresh candidate-bound live certification are separate
+evidence; these local results do not certify a live release. Historical results
+below retain their original version attribution.
+
+## Earlier candidate changes
 
 - The 2.24.14 audit repairs fresh preflight audit initialization and answer
   handling, Windows npm/npx launcher and command-name resolution, and npm
@@ -193,7 +211,7 @@ The 2.24.12 Claude worker-validator check could not authenticate on two authoriz
 attempts. No validator call or passing proof was produced. That check is optional
 under the 2.24.13 release policy; the retained failures remain failures.
 
-The corrected 2.24.14 packages require a fresh candidate-bound Codex live campaign.
+The current 2.25.0 packages require a fresh candidate-bound Codex live campaign.
 Earlier version evidence cannot certify them.
 
 The new native CI matrix must still run on the submitted candidate. Local macOS

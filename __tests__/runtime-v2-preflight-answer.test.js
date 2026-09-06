@@ -104,6 +104,22 @@ function valid() {
 }
 
 describe('audited preflight answers', () => {
+  it('carries complete answers and the audit reason beyond former prose and question caps within the shared input envelope', async () => {
+    const dir = await heldProject();
+    const state = await readJson(runtimePaths(dir).active);
+    const questions = Array.from({ length: 65 }, (_, i) => ({ id: `Q${i}`, question: `Decision ${i}`, rationale: 'Compatibility' }));
+    state.preflight.questions = questions;
+    state.preflight.artifact.questions = questions;
+    state.input_required.question_ids = questions.map(({ id }) => id);
+    await atomicWriteJson(runtimePaths(dir).active, state);
+    const answers = questions.map(({ id }, i) => ({ id, answer: i === 0 ? 'x'.repeat(17_000) : 'Keep current behavior.' }));
+    const reason = 'r'.repeat(17_000);
+    const result = await service.answerPreflight(dir, { ...valid(), answers, reason });
+    expect(result.ok).toBe(true);
+    expect(result.run.tickets.find((ticket) => ticket.stage_id === 'plan').preflight.operator_evidence.answers).toEqual(answers);
+    expect(result.run.audit.at(-1)).toMatchObject({ type: 'preflight_answered', reason, answer_ids: questions.map(({ id }) => id) });
+  });
+
   it('accepts one complete exact answer set under serialization and reclassifies fast to full', async () => {
     expect(service.answerPreflight).toBeTypeOf('function');
     const dir = await heldProject();
@@ -274,7 +290,7 @@ describe('audited preflight answers', () => {
     ['wrong hash', () => ({ ...valid(), preflight_hash: 'b'.repeat(64) })],
     ['missing reason', () => { const value = valid(); delete value.reason; return value; }],
     ['empty reason', () => ({ ...valid(), reason: '   ' })],
-    ['oversized reason', () => ({ ...valid(), reason: 'x'.repeat(4_001) })],
+    ['reason exceeding the shared input envelope', () => ({ ...valid(), reason: 'x'.repeat(65_536) })],
     ['traversal claim', () => ({ ...valid(), claimed_paths: ['../outside'] })],
     ['noncanonical risk', () => ({ ...valid(), risk_triggers: ['PUBLIC API'] })],
     ['new path in both scopes', () => ({ ...valid(), claimed_paths: ['shared/value.js'], test_paths: ['shared/value.js'] })],

@@ -805,10 +805,10 @@ describe('APE v2 start-time git/lock hygiene (baseline integrity)', () => {
 });
 
 describe('APE v2 canonical initial test-path admission', () => {
-  it('admits the exact 64-item and 4096-byte boundaries without rewriting order or bytes', async () => {
+  it('admits path sets beyond the former 64-item and 4096-byte limits without rewriting order or bytes', async () => {
     const itemDir = await project('ape-start-path-items-');
     const itemBoundary = Array.from(
-      { length: 64 },
+      { length: 65 },
       (_, index) => `tests/generated-${String(index).padStart(2, '0')}.test.js`,
     );
     const itemStarted = await startRun(itemDir, startInput({ test_paths: itemBoundary }));
@@ -816,7 +816,7 @@ describe('APE v2 canonical initial test-path admission', () => {
     expect(itemStarted.run.test_paths).toEqual(itemBoundary);
 
     const byteDir = await project('ape-start-path-bytes-');
-    const byteBoundary = initialTestPathsAt4096Bytes();
+    const byteBoundary = initialTestPathsAt4096Bytes(1);
     const byteStarted = await startRun(byteDir, startInput({ test_paths: byteBoundary }));
     expect(byteStarted.ok).toBe(true);
     expect(byteStarted.run.test_paths).toEqual(byteBoundary);
@@ -824,17 +824,17 @@ describe('APE v2 canonical initial test-path admission', () => {
 
   it.each([
     [
-      '65 canonical items',
+      'a path array beyond the shared 2048-item guard',
       Array.from(
-        { length: 65 },
-        (_, index) => `tests/generated-${String(index).padStart(2, '0')}.test.js`,
+        { length: 2049 },
+        (_, index) => `tests/${index}.test.js`,
       ),
-      /64.*test_paths|test_paths.*64/i,
+      /input array is too large|2048/i,
     ],
     [
-      '4097 serialized UTF-8 bytes',
-      initialTestPathsAt4096Bytes(1),
-      /4096.*test_paths|test_paths.*4096/i,
+      'a path payload beyond the shared 65536-byte input envelope',
+      Array.from({ length: 140 }, (_, index) => boundedInitialTestPath(index, 511)),
+      /input exceeds 65536 UTF-8 bytes/i,
     ],
     [
       'a canonical alias duplicate',

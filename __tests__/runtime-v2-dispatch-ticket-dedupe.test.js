@@ -45,6 +45,7 @@ import { sha256 } from '../lib/runtime/canonical.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { finalizeTicket, validateTicket } from '../lib/runtime/schemas.js';
+import { CAPABILITY_MANIFEST_MAX_VERIFICATION_PROFILES } from '../lib/runtime/constants.js';
 import { seedLegacyRun } from './legacy-run-test-helper.js';
 import { bindCodexDispatch, bindCodexDispatchContext, completeCodexBindingProbe } from './codex-native-test-helper.js';
 
@@ -272,7 +273,7 @@ describe('APE v2 immutable ticket planning context', () => {
         writable: false,
       }),
       plan_contract_version: 2,
-      verification_profiles: Array.from({ length: 65 }, (_, index) => ({
+      verification_profiles: Array.from({ length: CAPABILITY_MANIFEST_MAX_VERIFICATION_PROFILES + 1 }, (_, index) => ({
         id: `profile-${index}`,
         description: 'A bounded profile.',
         command: 'npm test',

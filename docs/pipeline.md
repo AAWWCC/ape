@@ -13,9 +13,11 @@ Preview returns a versioned admission manifest and digest. New-protocol `start` 
 `expected_admission_digest`, repeats the checks, and rejects drift before creating a branch or
 ticket. The digest records reviewed inputs; it is not proof of human approval.
 
-Missing paths must be approved, including generated outputs. The planner skeleton checks whether
-the declared work fits the contract and gives decomposition guidance when it does not. It does
-not approve the design. See [MCP tools](mcp-tools.md) for the request fields.
+Missing paths must be approved, including generated outputs. Admission checks actual schema and
+catalog bounds. The complexity score and illustrative planner template provide decomposition
+advice: a template that exceeds the byte budget does not prove that a complete plan cannot fit.
+The final plan must still satisfy its schema and 64 KiB artifact budget. See [runtime limits](limits.md)
+for the distinction and [MCP tools](mcp-tools.md) for the request fields.
 
 ## Building lanes
 
@@ -32,6 +34,9 @@ For documentation, generated output, non-behavioral configuration, and tracked d
 `test writer → [implementer] → reviewer → gates → ship`
 
 For bounded behavioral work: at most six production files by default, with no high-risk trigger.
+Exact paths are counted after normalization. A known directory claim is unbounded for this
+decision and selects full; admission does not scan its descendants. Validated production
+changes accumulate across receipts so retries do not reset the file count.
 The test writer authors tests and a short plan. The implementer cannot edit those tests; the
 reviewer cannot edit files. Test-only `green-maintenance` uses the authored-test scope and omits
 the implementer.

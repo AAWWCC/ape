@@ -35,12 +35,13 @@
  * Degrades to `model · dir · branch · ctx%` outside APE projects, so it is safe
  * to wire globally.
  */
-import { readFileSync, readdirSync, existsSync, lstatSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { constants as fsConstants, openSync, closeSync, fstatSync, readSync, readFileSync, readdirSync, existsSync, lstatSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostname, tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolveGovernedRoot } from '../lib/runtime/paths.js';
+import { RUNTIME_STATE_MAX_BYTES } from '../lib/runtime/resource-limits.js';
 import { projectRunDiagnostic, safeDiagnosticText, strictIsoMs } from '../lib/runtime/diagnostics.js';
 
 const RESET = '\x1b[0m';
@@ -128,6 +129,30 @@ const projectDir = (p) =>
     // missing Claude marker in a manually wired shell) cannot redirect it.
     host: 'claude',
   });
+// Reuse the live-state ceiling for status observations. The descriptor and
+// sentinel read keep a concurrent file replacement, symlink, or FIFO from
+// turning a small advisory render into an unbounded or blocking read.
+function boundedJsonFile(file, maxBytes = RUNTIME_STATE_MAX_BYTES) {
+  let descriptor;
+  try {
+    descriptor = openSync(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) |
+      (fsConstants.O_NONBLOCK ?? 0));
+    const before = fstatSync(descriptor);
+    if (!before.isFile() || before.size > maxBytes) throw new Error('unsupported status artifact');
+    const buffer = Buffer.alloc(Math.min(before.size + 1, maxBytes + 1));
+    let offset = 0;
+    while (offset < buffer.length) {
+      const count = readSync(descriptor, buffer, offset, buffer.length - offset, offset);
+      if (count === 0) break;
+      offset += count;
+    }
+    const after = fstatSync(descriptor);
+    if (offset !== before.size || offset !== after.size || after.mtimeMs !== before.mtimeMs ||
+        after.ctimeMs !== before.ctimeMs) throw new Error('status artifact changed during read');
+    return JSON.parse(buffer.subarray(0, offset).toString('utf8'));
+  } finally { if (descriptor !== undefined) closeSync(descriptor); }
+}
+
 let activeStateCorrupt = false;
 const readActive = (dir) => {
   // The renderer is normally one process per refresh, but tests and embedders
@@ -135,7 +160,7 @@ const readActive = (dir) => {
   // workspace rendered by the same process.
   activeStateCorrupt = false;
   try {
-    const value = JSON.parse(readFileSync(join(dir, '.ape', 'runtime', 'active.json'), 'utf8'));
+    const value = boundedJsonFile(join(dir, '.ape', 'runtime', 'active.json'));
     // v2 keeps dispatch liveness in bounded lock/intent artifacts instead of
     // requiring a denormalized dispatch_state in active.json. Supply a
     // validation-only witness when the key is absent so artifact inspection
@@ -159,8 +184,8 @@ const readActive = (dir) => {
           'security-review', 'remediation-test', 'remediation-build', 'remediation-review',
           'remediation-security-review', 'gates', 'merge', 'debug', 'spike', 'complete',
           'completed', 'aborted'].includes(value.stage) &&
-        Array.isArray(value.tickets) && value.tickets.length <= 256 &&
-        Array.isArray(value.receipts) && value.receipts.length <= 256 &&
+        Array.isArray(value.tickets) &&
+        Array.isArray(value.receipts) &&
         (value.tickets.length > 0 || Object.hasOwn(value, 'updated_at') ||
           ['blocked', 'completed', 'aborted'].includes(value.status));
       if (legacy) {
@@ -189,8 +214,8 @@ const readActive = (dir) => {
           'security-review', 'remediation-test', 'remediation-build', 'remediation-review',
           'remediation-security-review', 'gates', 'merge', 'debug', 'spike', 'complete',
           'completed', 'aborted'].includes(value.stage)
-        && Array.isArray(value.tickets) && value.tickets.length <= 256
-        && Array.isArray(value.receipts) && value.receipts.length <= 256;
+        && Array.isArray(value.tickets)
+        && Array.isArray(value.receipts);
       if (!safeVisual) return null;
       return {
         schema_version: '2.0.0',
@@ -491,11 +516,7 @@ const DISPATCH_TEXT = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 function boundedArtifactJson(file) {
   try {
-    const metadata = lstatSync(file);
-    if (!metadata.isFile() || metadata.size > DISPATCH_ARTIFACT_MAX_BYTES) return null;
-    const bytes = readFileSync(file);
-    if (bytes.length > DISPATCH_ARTIFACT_MAX_BYTES) return null;
-    const value = JSON.parse(bytes.toString('utf8'));
+    const value = boundedJsonFile(file, DISPATCH_ARTIFACT_MAX_BYTES);
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) return null;
     return value;
   } catch {
@@ -755,7 +776,7 @@ function historySamples(dir) {
     if (newest) { try { newestMtime = statSync(join(hist, newest)).mtimeMs; } catch { /* key stays 0 */ } }
     const key = { count: files.length, newest, newest_mtime_ms: newestMtime };
     try {
-      const cached = JSON.parse(readFileSync(cachePath(dir), 'utf8'));
+      const cached = boundedJsonFile(cachePath(dir));
       if (
         cached?.version === STATUSLINE_CACHE_VERSION &&
         JSON.stringify(cached.key) === JSON.stringify(key) &&
@@ -765,7 +786,7 @@ function historySamples(dir) {
       }
     } catch { /* absent or corrupt cache: fall through to a fresh parse */ }
     for (const f of files.slice(-20)) {
-      try { collectReceiptTimings(samples, JSON.parse(readFileSync(join(hist, f), 'utf8')).receipts); } catch { /* skip */ }
+      try { collectReceiptTimings(samples, boundedJsonFile(join(hist, f)).receipts); } catch { /* skip */ }
     }
     const temp = `${cachePath(dir)}.${process.pid}.tmp`;
     try {

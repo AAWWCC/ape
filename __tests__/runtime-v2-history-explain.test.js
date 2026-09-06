@@ -485,6 +485,7 @@ describe('APE v2 History Explain & Lifecycle Telemetry Output', () => {
         leaf_run_id: runId,
         complete: false,
         immutable_run_count: 1,
+        coverage: { available_runs: 1, processed_runs: 1, limit: 256, requested_run_included: true, truncated: false },
         audit_outcomes: { completed: 0, blocked: 1, aborted: 0 },
         incomplete_reasons: ['self-link'],
       });

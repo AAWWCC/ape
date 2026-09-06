@@ -379,8 +379,8 @@ describe('APE v2 receipt roadmap follow-up declarations', () => {
 
   it('bounds the proposal array', () => {
     expect(() => finalizeReceipt(receiptWithFollowups(
-      Array.from({ length: 65 }, (_, index) => inputEntry(`follow-${index}`)),
-    ))).toThrow(/too_big|64|array/i);
+      Array.from({ length: 2049 }, (_, index) => inputEntry(`follow-${index}`)),
+    ))).toThrow(/too_big|65536|2048|array/i);
   });
 });
 

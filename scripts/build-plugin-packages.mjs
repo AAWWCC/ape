@@ -33,9 +33,12 @@ const DIST_FILES = Object.freeze([
 ]);
 const RUNTIME_FILES = Object.freeze(['runner.js', 'spawn.js']);
 const CLAUDE_STATUSLINE_FILES = Object.freeze([
+  ['lib/runtime', 'input-guard.js'],
+  ['lib/runtime', 'pipeline-limits.js'],
   ['bin', 'ape-statusline.mjs'],
   ['lib/runtime', 'constants.js'],
   ['lib/runtime', 'diagnostics.js'],
+  ['lib/runtime', 'resource-limits.js'],
   ['lib/runtime', 'paths.js'],
 ]);
 const SKILL_NAMES = Object.freeze(['config', 'history', 'override', 'resume', 'roadmap', 'run', 'status']);

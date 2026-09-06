@@ -379,7 +379,7 @@ describe('formatDraftCorrections', () => {
     expect(typeof receiptInput.formatDraftCorrections).toBe('function');
   });
 
-  it('produces bounded output under 2000 characters', () => {
+  it('delivers every contract-sized correction as a complete actionable entry', () => {
     const ticket = makeTicket();
     const corrections = Array.from({ length: 20 }, (_, i) => ({
       field: `field_${i}`,
@@ -388,7 +388,13 @@ describe('formatDraftCorrections', () => {
     }));
     const output = receiptInput.formatDraftCorrections(corrections, ticket);
     expect(typeof output).toBe('string');
-    expect(output.length).toBeLessThanOrEqual(2000);
+    for (const correction of corrections) {
+      expect(output).toContain(`- ${correction.field}: ${correction.issue} -> ${correction.correction}`);
+    }
+    expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(
+      receiptInput.RECEIPT_CORRECTIONS_MAX * (receiptInput.RECEIPT_CORRECTION_FIELD_MAX_BYTES +
+        2 * receiptInput.RECEIPT_CORRECTION_TEXT_MAX_BYTES + 8) + 1024,
+    );
   });
 
   it('renders empty corrections as an empty or minimal string', () => {

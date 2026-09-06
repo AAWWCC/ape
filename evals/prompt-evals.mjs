@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, loadRuntimeConfig } from '../lib/runtime/config.js';
+import { MAX_TIMER_DELAY_MS } from '../lib/runtime/constants.js';
 
 export const HARNESS_VERSION = 1;
 export const HOSTS = Object.freeze(['claude', 'codex']);
@@ -826,16 +827,19 @@ export function readOnlyCommand(command) {
   });
 }
 
-function codexTrace(events) {
+export function codexTrace(events) {
   const actualTools = [];
   for (const event of events) {
     const item = event?.item;
     if (!item || typeof item !== 'object') continue;
     if (item.type === 'command_execution') {
-      const action = String(item.command ?? '').slice(0, 500);
+      // Provider output already has one aggregate byte budget. Preserve the
+      // complete action so a mutating suffix cannot disappear before safety
+      // classification or from the retained audit evidence.
+      const action = String(item.command ?? '');
       actualTools.push({ type: item.type, action, read_only: readOnlyCommand(action) });
     } else if (['file_change', 'mcp_tool_call', 'web_search'].includes(item.type)) {
-      actualTools.push({ type: item.type, action: String(item.name ?? item.path ?? '').slice(0, 500), read_only: false });
+      actualTools.push({ type: item.type, action: String(item.name ?? item.path ?? ''), read_only: false });
     }
   }
   return {
@@ -985,7 +989,7 @@ async function invokeCall(call, plan, versions, timeoutMs) {
     : await invokeClaude(call, plan.assets.prompts[call.host].text, plan.assets.schema, timeoutMs);
   const responseValidation = validateResponse(invoked.response, plan.assets.suite);
   if (!responseValidation.valid) {
-    throw new EvalError(`structured response invalid: ${responseValidation.errors.slice(0, 8).join('; ')}`);
+    throw new EvalError(`structured response invalid: ${responseValidation.errors.join('; ')}`);
   }
   const base = {
     harness_version: HARNESS_VERSION,
@@ -1021,6 +1025,8 @@ export async function runLiveEvaluation({
   timeoutMs = 30 * 60_000,
   callIds = [],
 } = {}) {
+  assertEvaluationConcurrency(concurrency);
+  assertEvaluationTimeout(timeoutMs);
   const plan = await buildCallPlan({ configPath });
   const output = path.resolve(resultsDir ?? path.join(DEFAULT_RESULTS_ROOT, plan.manifest.plan_id.slice(0, 16)));
   assertResultWriteLocation(output);
@@ -1055,7 +1061,7 @@ export async function runLiveEvaluation({
         schema_hash: plan.assets.schema_hash,
         completed_at: new Date().toISOString(),
         status: 'error',
-        error: String(error?.message ?? error).slice(0, 2000),
+        error: String(error?.message ?? error),
       });
     }
   });
@@ -1173,6 +1179,18 @@ function usage() {
   ].join('\n');
 }
 
+function assertEvaluationTimeout(value) {
+  if (!Number.isInteger(value) || value < 1000 || value > MAX_TIMER_DELAY_MS) {
+    throw new EvalError(`--timeout-ms must be an integer from 1000 through ${MAX_TIMER_DELAY_MS}`);
+  }
+}
+
+function assertEvaluationConcurrency(value) {
+  if (!Number.isInteger(value) || value < 1 || value > 6) {
+    throw new EvalError('--concurrency must be an integer from 1 to 6');
+  }
+}
+
 function parseArgs(argv) {
   const command = argv[0] && !argv[0].startsWith('--') ? argv.shift() : 'check';
   const options = {
@@ -1208,12 +1226,8 @@ function parseArgs(argv) {
     else if (flag === '--concurrency') options.concurrency = Number(value);
     else options.timeoutMs = Number(value);
   }
-  if (!Number.isInteger(options.concurrency) || options.concurrency < 1 || options.concurrency > 6) {
-    throw new EvalError('--concurrency must be an integer from 1 to 6');
-  }
-  if (!Number.isInteger(options.timeoutMs) || options.timeoutMs < 1000) {
-    throw new EvalError('--timeout-ms must be an integer of at least 1000');
-  }
+  assertEvaluationConcurrency(options.concurrency);
+  assertEvaluationTimeout(options.timeoutMs);
   return options;
 }
 

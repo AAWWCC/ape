@@ -35,6 +35,14 @@ async function inspect(root, command) {
 }
 
 describe('current command prerequisites before dispatch', () => {
+  it('charges shared executable content once across many distinct admitted aliases', async () => {
+    const root = await fixture({});
+    const commands = Array.from({ length: 300 }, (_, index) => ({
+      id: `alias-${index}`, command: `node --version alias-${index}`, root: '.',
+    }));
+    const facts = commands.map((entry) => ({ id: entry.id, resolved: process.execPath }));
+    expect(await inspectAdmissionCommandPrerequisites(root, commands, facts)).toEqual([]);
+  });
   it.each([
     ['missing interpreter entry', 'node missing-entry.js', {}, 'entry-script-missing', 'missing-entry.js'],
     ['missing Node syntax-check entry', 'node -c missing-entry.js', {}, 'entry-script-missing', 'missing-entry.js'],

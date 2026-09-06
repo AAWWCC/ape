@@ -193,6 +193,7 @@ const INTERNAL_OWNER_ASSERTIONS = [
       'lib/runtime/constants.js',
       'lib/runtime/diagnostics.js',
       'lib/runtime/file-stats.js',
+      'lib/runtime/resource-limits.js',
     ],
   },
   {
@@ -211,6 +212,8 @@ const INTERNAL_OWNER_ASSERTIONS = [
     owner: 'lib/runtime/capability-contract.js',
     exports: [
       'CAPABILITY_MANIFEST_GROWTH_CONTRACT_VERSION',
+      'addCapabilityEvidenceCommand',
+      'assertCapabilitySourceCollectionsFit',
       'capabilityDynamicTestPathBounds',
       'capabilityTestPathBoundErrors',
       'capabilityTestPathUsage',
@@ -218,6 +221,7 @@ const INTERNAL_OWNER_ASSERTIONS = [
     ],
     dependencies: [
       'lib/runtime/constants.js',
+      'lib/runtime/input-guard.js',
       'lib/runtime/path-scope.js',
     ],
   },

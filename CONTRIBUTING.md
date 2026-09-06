@@ -3,6 +3,10 @@
 Keep changes focused. Preserve public APIs and include tests for changed behavior.
 See the [development commands](README.md#development).
 
+`npm run prompts:budget` reports prompt and skill word counts against editorial
+targets. Exceeding a word target is advisory; semantic contracts, package parity,
+and prompt evaluations remain required checks.
+
 ## Runtime defects: regression first
 
 For every confirmed runtime defect, add a minimal failing regression test and

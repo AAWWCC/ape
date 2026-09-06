@@ -12,7 +12,11 @@ debugging: four orchestration tools, plus two tools used by native workers.
 | `ape_config` | `get`, `set`, `doctor`, `wire`, `unwire`, `init` |
 | `ape_validate_receipt` | Validate and attest a bound worker's exact receipt draft. Does not advance the run. |
 
-Inputs have a 64 KiB UTF-8 limit. Responses summarize larger records; full tickets
+Ordinary inputs have a 64 KiB UTF-8 limit. Receipts have a 128 KiB limit so a valid
+64 KiB preflight artifact fits alongside its receipt envelope and observations.
+Recovery validates the same receipt allowance plus a separate 64 KiB control
+envelope, so recovery metadata does not reduce valid receipt capacity. Structural
+and artifact-specific bounds still apply. Responses summarize larger records; full tickets
 (worker assignments), receipts (worker results), and run records live in `.ape/runtime/`.
 
 ## History observability and metrics
@@ -21,7 +25,14 @@ Inputs have a 64 KiB UTF-8 limit. Responses summarize larger records; full ticke
 retries, remediation, and recovery. The summary keeps preflight question IDs and
 counts, not the operator's answer text.
 
-`ape_history metrics` summarizes the newest 256 runs. It accepts inclusive ISO
+`ape_history query` and `metrics` accept `limit` (1–256, default 256) and an opaque
+`cursor`. Their `pagination` object contains `limit`, `returned`, `has_more` and
+`next_cursor`. Continue with the returned cursor and the same selectors to reach
+older records. Cursors use stable record keys so newly inserted records do not
+shift an in-progress page. A page may contain fewer records to fit the wire budget;
+the next cursor follows the records actually returned.
+
+`ape_history metrics` summarizes one selected page. It accepts inclusive ISO
 `since` / `until` timestamps and exact filters for:
 
 - `lane`, `mode`, `host`, `status`;
@@ -31,7 +42,8 @@ counts, not the operator's answer text.
 
 Invalid values and reversed date ranges are refused. Results report outcomes,
 failure reasons, p50/p90/p95/p99 durations, version groups, and legacy-unknown counts
-for the processed records matching those filters.
+for the processed records matching those filters. Page percentiles and rates are
+not whole-history aggregates and must not be averaged to invent global values.
 
 Read the coverage fields before treating a result as complete:
 
@@ -131,10 +143,12 @@ parent will submit as `ape_run record`'s `receipt`. Apart from the child bootstr
 this is the worker's only APE tool.
 
 The validator checks the same role contract as `record`: plan structure, profile
-IDs, evidence commands, and the 16,384-byte canonical candidate-plan limit. It
+IDs, evidence commands, and the ticket's canonical candidate-plan allowance
+(65,536 bytes for new runs; 16,384 for previously issued contracts). It
 returns field corrections and
 `budgets.candidate_plan_utf8_bytes.{used_bytes,max_bytes,remaining_bytes}`.
-This byte limit bounds storage and model context, not plan quality.
+This cap limits the artifact's stored and transmitted size. Model capacity and
+plan quality require separate evidence.
 
 A successful validation attests the normalized draft hash for that physical
 dispatch. Changing the draft invalidates it. `record` requires this matching
@@ -342,7 +356,8 @@ the entry, journal, and override audit. Retries recover
 unapplied, applied-but-unaudited, and committed operations exactly once. A store matching
 neither recorded hash is divergent and is never overwritten.
 
-Receipts may propose up to 64 `receipt.evidence.roadmap_followups`, without `status`
+Receipts may propose `receipt.evidence.roadmap_followups` within their shared
+receipt resource envelope (historical tickets retain their 64-entry contract), without `status`
 or `discovered_by`. A later non-operator `discovered_by` must identify an active or
 archived run with an accepted receipt containing the exact declaration. Approval
 and a separate `roadmap-register` call are still required.

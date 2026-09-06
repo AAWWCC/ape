@@ -88,10 +88,13 @@ The successor must have the correct v4 UUID and canonical filename. Missing, ext
 duplicate, forged, or rebound fields are rejected. New preparation and replayed receipt adoption
 use the same schema, policy, filesystem, and runtime checks.
 
-Each worker gets at most three validations; each ticket lineage gets at most two workers.
+Validation submissions and physical workers follow the execution policy frozen
+into the ticket; defaults are three submissions and two workers.
 Test paths must be unique, canonical, contained project-relative names. Absolute, parent-relative,
 `.ape`-reserved, alias, and option-like paths are rejected. The complete additive union is
-checked before mutation: at most 64 paths and 4096 serialized UTF-8 JSON bytes.
+checked before mutation against the actual derived command and complete manifest
+budgets, plus the shared 2,048-item structural guard. Historical version-1 growth
+contracts retain their exact 64-path and 4,096-byte limits.
 
 ### Publishing and replay
 

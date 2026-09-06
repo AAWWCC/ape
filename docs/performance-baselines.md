@@ -40,9 +40,10 @@ order and selects rank `ceil(0.90 * count)`. Report both raw and adjusted p90.
 
 Measure six groups separately: Claude and Codex, each with `mechanical`, `fast`,
 and `full` lanes. Thresholds come from runtime lane deadlines. Each group needs
-at least 20 records and 18 passing records. Report count, required count, passing
+at least 20 records and 90% passing records (rounded up: 18 of 20, 36 of 40).
+Report count, required count, passing
 count, required passing, threshold, both p90 values, and status.
-Fewer than 20 records is `insufficient-records`; fewer than 18 passes is
+Fewer than 20 records is `insufficient-records`; fewer than the required 90% passes is
 `insufficient-passes` once the record minimum is met.
 
 ## Persistence, privacy, and bounds

@@ -270,6 +270,18 @@ async function bootstrapObservedChild(dir, action, { parent, agent, turn }) {
 }
 
 describe('APE v2 mandatory pre-run native binding proof', () => {
+  it('preserves the production Codex model envelope through probe persistence and projection', async () => {
+    const dir = await project();
+    const paths = runtimePaths(dir);
+    const model = { model: 'm'.repeat(512), reasoning_effort: 'medium' };
+    const prepared = await prepareBindingProbeImplementation(paths, { host: 'codex', model });
+    expect(prepared.probe.model).toEqual(model);
+    expect((await bindingProbeStatus(paths, { readOnly: true })).model).toEqual(model);
+    await expect(prepareBindingProbeImplementation(paths, {
+      host: 'codex', model: { ...model, model: 'm'.repeat(513) },
+    })).rejects.toThrow(/resolved model/);
+  });
+
   it('replays a lost prepared response with the exact durable native spawn envelope', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);

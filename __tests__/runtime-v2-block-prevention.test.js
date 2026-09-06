@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateRunReadiness } from '../lib/runtime/readiness.js';
+import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
+import { pipelineRunSpec, projectedPipeline } from '../lib/runtime/pipeline.js';
 
 function config() {
+  const defaults = structuredClone(DEFAULT_CONFIG);
   return {
-    policy: { evidence_scripts: [], command_profiles: [] },
+    ...defaults,
+    policy: { ...defaults.policy, evidence_scripts: [], command_profiles: [] },
     verification: {
       profiles: [
         {
@@ -23,33 +27,27 @@ function config() {
       ],
     },
     runners: [],
-    test_commands: {},
+    test_commands: { targeted_template: 'npm test -- {paths}', full: 'npm test' },
   };
 }
 
 function readinessFor(input, riskTriggers = []) {
+  const configured = config();
+  const resolvedInput = {
+    host: 'codex', mode: 'phase', lane: 'full', behavioral: false,
+    capability_contract_required: true, run_command_profiles: [], required_capabilities: [], ...input,
+  };
+  const classification = { lane: 'full', risk_triggers: riskTriggers };
   return evaluateRunReadiness({
-    input: {
-      behavioral: false,
-      capability_contract_required: true,
-      run_command_profiles: [],
-      required_capabilities: [],
-      ...input,
-    },
-    config: config(),
-    classification: { lane: 'full', risk_triggers: riskTriggers },
-    projection: {
-      stages: [
-        { id: 'plan', role: 'planner', required_checks: [] },
-        { id: 'build', role: 'implementer', required_checks: [] },
-        { id: 'review', role: 'reviewer', required_checks: [] },
-      ],
-    },
+    input: resolvedInput,
+    config: configured,
+    classification,
+    projection: projectedPipeline(pipelineRunSpec(resolvedInput, classification, configured)),
   });
 }
 
 describe('APE v2 deterministic complexity admission', () => {
-  it('blocks score above 48 before dispatch and returns an actionable decomposition contract', () => {
+  it('warns above score 48 without blocking valid work and preserves decomposition guidance', () => {
     const productionClaims = Array.from({ length: 10 }, (_, index) => `src/part-${index}.js`);
     const testPaths = Array.from({ length: 10 }, (_, index) => `tests/part-${index}.test.js`);
     const requirements = Array.from({ length: 5 }, (_, index) => `R${index + 1}`);
@@ -65,10 +63,13 @@ describe('APE v2 deterministic complexity admission', () => {
       required_capabilities: requiredCapabilities,
     }, ['security', 'public-api', 'schema', 'concurrency']);
 
-    expect(readiness.ready).toBe(false);
-    expect(readiness.blocking).toContainEqual(expect.objectContaining({
-      code: 'complexity-decomposition-required',
+    expect(readiness.ready).toBe(true);
+    expect(readiness.blocking).toEqual([]);
+    expect(readiness.warnings).toContainEqual(expect.objectContaining({
+      code: 'complexity-decomposition-recommended',
       complexity: {
+        advisory: true,
+        decomposition_recommended: true,
         production_claims: 10,
         test_paths: 10,
         requirements: 5,
@@ -96,7 +97,7 @@ describe('APE v2 deterministic complexity admission', () => {
           'complete-requirement-and-scope-coverage',
           'non-overlapping-writable-ownership',
           'shared-compatibility-and-rollback',
-          'each-slice-passes-complexity-admission',
+          'each-slice-passes-contract-admission',
         ],
       },
     }));
@@ -138,7 +139,7 @@ describe('APE v2 deterministic complexity admission', () => {
     });
   });
 
-  it('blocks aggregate decomposable scope above the byte threshold at a low score', () => {
+  it('warns about aggregate planning bytes without reinstating the retired path-byte blocker', () => {
     const longPath = (kind, index) =>
       `${kind}/${Array.from({ length: 48 }, () => `segment-${index}`).join('/')}.js`;
     const readiness = readinessFor({
@@ -148,8 +149,10 @@ describe('APE v2 deterministic complexity admission', () => {
       requirements: [],
       plan_contract_version: 1,
     });
-    const blocker = readiness.blocking.find((entry) =>
-      entry.code === 'complexity-decomposition-required');
+    const blocker = readiness.warnings.find((entry) =>
+      entry.code === 'complexity-decomposition-recommended');
+    expect(readiness.blocking.some((entry) => entry.code === 'capability-test-path-bytes-over-limit')).toBe(false);
+    expect(readiness.admission_contract.capability_manifest_checks).toMatchObject({ concrete_initial_and_mutation_checks: true });
 
     expect(blocker).toMatchObject({
       complexity: {
@@ -161,7 +164,7 @@ describe('APE v2 deterministic complexity admission', () => {
     expect(blocker.complexity.planning_input_bytes).toBeGreaterThan(8192);
   });
 
-  it('admits the exact score boundary and rejects the first point above it', () => {
+  it('warns at the first point above the score boundary without creating a blocker', () => {
     const atBoundary = readinessFor({
       objective: 'Exactly bounded work',
       claimed_paths: Array.from({ length: 16 }, (_, index) => `src/${index}.js`),
@@ -180,8 +183,9 @@ describe('APE v2 deterministic complexity admission', () => {
       test_paths: Array.from({ length: 16 }, (_, index) => `tests/${index}.test.js`),
       requirements: ['R1', 'R2', 'R3', 'R4'],
     }, ['security', 'schema']);
-    expect(aboveBoundary.blocking).toContainEqual(expect.objectContaining({
-      code: 'complexity-decomposition-required',
+    expect(aboveBoundary.blocking).toEqual([]);
+    expect(aboveBoundary.warnings).toContainEqual(expect.objectContaining({
+      code: 'complexity-decomposition-recommended',
       complexity: expect.objectContaining({ total_score: 49 }),
     }));
   });

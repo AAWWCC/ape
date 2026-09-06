@@ -573,6 +573,22 @@ describe('ape v2 statusline renderer', () => {
     expect(out.length).toBeLessThan(1024);
   });
 
+  it('renders producer-valid 257-ticket state and refuses oversized or blocking state files', () => {
+    writeActive(dir, {
+      tickets: Array.from({ length: 257 }, (_, index) => ({ ticket_id: `ticket-${index}`, stage_id: 'build', role: 'implementer' })),
+      receipts: [],
+    });
+    const healthy = stripAnsi(render({ workspace: { current_dir: dir } }));
+    expect(healthy).toContain('APE phase/fast');
+    expect(healthy).not.toContain('corrupt_state');
+    const file = join(dir, '.ape', 'runtime', 'active.json');
+    writeFileSync(file, 'x'.repeat(8 * 1024 * 1024 + 1));
+    expect(stripAnsi(render({ workspace: { current_dir: dir } }))).toContain('corrupt_state');
+    rmSync(file);
+    execFileSync('mkfifo', [file]);
+    expect(stripAnsi(render({ workspace: { current_dir: dir } }))).toContain('corrupt_state');
+  });
+
   it('degrades malformed nested runtime collections to a bounded corrupt-state diagnostic', () => {
     writeActive(dir, {
       schema_version: '2.0.0',
@@ -762,7 +778,7 @@ describe('ape v2 statusline renderer', () => {
     expect(out).not.toContain('dispatch_pending');
   });
 
-  it('classifies oversized dispatch collections before probing intent files', () => {
+  it('classifies a malformed dispatch collection tail before probing intent files', () => {
     writeActive(dir, {
       run_id: 'run-oversized-dispatch',
       mode: 'phase',
@@ -773,7 +789,7 @@ describe('ape v2 statusline renderer', () => {
       tickets: Array.from({ length: 2000 }, (_, index) => ({
         ticket_id: `run-oversized-dispatch:build:${index}`,
         stage_id: 'build',
-        role: 'implementer',
+        role: index === 1999 ? 'malformed-role' : 'implementer',
       })),
       receipts: [],
       expired_tickets: [],

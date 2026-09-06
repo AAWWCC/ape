@@ -100,14 +100,14 @@ describe('run readiness and capability manifests', () => {
     expect(readiness.capabilities.config_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(readiness.capabilities.required_capabilities).toEqual(input.required_capabilities);
     expect(readiness.capabilities).toMatchObject({
-      manifest_growth_contract_version: 1,
+      manifest_growth_contract_version: 2,
       manifest_roles: expect.arrayContaining(['preflight_analyst', 'test_writer', 'implementer', 'reviewer']),
     });
     expect(readiness.capabilities.command_profiles.map((entry) => entry.id)).toEqual(['editor.batch', 'audit.read']);
     expect(readiness).not.toHaveProperty('execution_budget');
   });
 
-  it('sizes every reachable role for maximal dynamic test paths, required preflight profiles, and late risks', () => {
+  it('sizes actual role commands and advertises validation before each later mutation', () => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.test_commands.targeted_template = `node ${'x'.repeat(4_500)} {paths}`;
     config.test_commands.full = 'node full-tests.js';
@@ -119,21 +119,18 @@ describe('run readiness and capability manifests', () => {
     }];
     const readiness = readinessFor(runInput({ capability_contract_required: true }), config);
 
-    expect(readiness.ready).toBe(false);
-    expect(readiness.blocking).toContainEqual(expect.objectContaining({
-      code: 'capability-evidence-command-invalid',
-      source: expect.stringMatching(/^dynamic-worst-case:/),
-    }));
+    expect(readiness.ready).toBe(true);
     expect(readiness.derived_capability_requirements).toMatchObject({
-      dynamic_test_paths: { max_items: 64, max_serialized_utf8_bytes: 4_096 },
+      dynamic_test_paths: { max_items: 2_048, command_max_chars: 8_192, manifest_max_serialized_utf8_bytes: 262_144 },
       future_manifest_conditions: {
+        enforcement: 'validate-exact-state-before-persistence',
         required_verification_profile_ids: ['integration'],
         risk_triggers: expect.arrayContaining(['security', 'schema', 'concurrency']),
       },
     });
   });
 
-  it('reports every unrepresentable capability collection in preview and rejects start with zero side effects', async () => {
+  it('refuses an oversized source configuration before preview or start can create side effects', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ape-readiness-manifest-bounds-'));
     dirs.push(dir);
     execFileSync('git', ['init', '-b', 'main'], { cwd: dir, stdio: 'ignore' });
@@ -145,19 +142,19 @@ describe('run readiness and capability manifests', () => {
     const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
     const runtime = join(dir, '.ape', 'runtime');
     mkdirSync(runtime, { recursive: true });
-    const commandProfiles = Array.from({ length: 65 }, (_, index) => ({
+    const commandProfiles = Array.from({ length: 2_049 }, (_, index) => ({
       id: `command.${index}`,
       command: `tool verify-${index}`,
       roles: ['implementer'],
       effect: 'execute',
     }));
-    const verificationProfiles = Array.from({ length: 65 }, (_, index) => ({
+    const verificationProfiles = Array.from({ length: 2_049 }, (_, index) => ({
       id: `verify.${index}`,
       description: `Verification ${index}`,
       command: `verify suite-${index}`,
       timeout_ms: 1_000,
     }));
-    const runners = Array.from({ length: 65 }, (_, index) => ({
+    const runners = Array.from({ length: 2_049 }, (_, index) => ({
       id: `runner-${index}`,
       owns: [`packages/${index}/**`],
       root: `packages/${index}`,
@@ -166,7 +163,7 @@ describe('run readiness and capability manifests', () => {
     writeFileSync(join(runtime, 'config.json'), `${JSON.stringify({
       policy: {
         command_profiles: commandProfiles,
-        evidence_scripts: Array.from({ length: 65 }, (_, index) => `verify:${index}`),
+        evidence_scripts: Array.from({ length: 2_049 }, (_, index) => `verify:${index}`),
       },
       verification: { profiles: verificationProfiles },
       runners,
@@ -181,26 +178,10 @@ describe('run readiness and capability manifests', () => {
       capability_contract_required: true,
     });
 
-    const preview = await previewRun(dir, input);
-    const previewCodes = preview.blueprint.readiness.blocking.map((entry) => entry.code);
-    expect(previewCodes).toEqual(expect.arrayContaining([
-      'capability-command-profiles-over-limit',
-      'capability-verification-profiles-over-limit',
-      'capability-evidence-scripts-over-limit',
-      'capability-runners-over-limit',
-      'capability-evidence-commands-over-limit',
-    ]));
+    await expect(previewRun(dir, input)).rejects.toThrow('input exceeds 65536 UTF-8 bytes');
     expect(readdirSync(runtime).sort()).toEqual(['config.json']);
 
-    const started = await startRun(dir, input);
-    expect(started).toMatchObject({
-      ok: false,
-      blocked: true,
-      attempts_consumed: 0,
-      reason: 'run readiness failed before write',
-    });
-    expect(started.readiness.blocking.map((entry) => entry.code))
-      .toEqual(expect.arrayContaining(previewCodes));
+    await expect(startRun(dir, input)).rejects.toThrow('input exceeds 65536 UTF-8 bytes');
     expect(readdirSync(runtime).sort()).toEqual(['config.json']);
     expect(execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: dir, encoding: 'utf8' }).trim())
       .toBe('main');
@@ -208,11 +189,11 @@ describe('run readiness and capability manifests', () => {
       .toBe(headBefore);
   });
 
-  it('skips dynamic scenario expansion only when a source collection already exceeds its bound', () => {
+  it('never substitutes a hypothetical largest path for a concrete admitted path set', () => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.test_commands.targeted_template = 'npm test -- {paths}';
     config.test_commands.full = 'npm test';
-    config.policy.command_profiles = Array.from({ length: 65 }, (_, index) => ({
+    config.policy.command_profiles = Array.from({ length: 2_049 }, (_, index) => ({
       id: `command.${index}`, command: `tool verify-${index}`, roles: ['implementer'], effect: 'execute',
     }));
     const expand = vi.spyOn(capabilityContract, 'worstCaseCapabilityTestPathSets');
@@ -222,9 +203,9 @@ describe('run readiness and capability manifests', () => {
       expect(rejected.blocking.map((entry) => entry.code)).toContain('capability-command-profiles-over-limit');
       expect(expand).not.toHaveBeenCalled();
 
-      config.policy.command_profiles.pop();
+      config.policy.command_profiles = config.policy.command_profiles.slice(0, 65);
       const admitted = readinessFor(runInput(), config);
-      expect(expand).toHaveBeenCalledOnce();
+      expect(expand).not.toHaveBeenCalled();
       expect(admitted.ready).toBe(true);
     } finally {
       expand.mockRestore();
@@ -235,7 +216,7 @@ describe('run readiness and capability manifests', () => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.test_commands.targeted_template = 'npm test -- {paths}';
     config.test_commands.full = 'npm test';
-    config.runners = Array.from({ length: 64 }, (_, index) => ({
+    config.runners = Array.from({ length: 512 }, (_, index) => ({
       id: `runner-${index}`,
       owns: [`packages/${index}/**`],
       root: `packages/${index}`,
@@ -250,8 +231,8 @@ describe('run readiness and capability manifests', () => {
       required_capabilities: [{ kind: 'evidence_command', id: 'runner-0 full' }],
     }), config);
     expect(readiness.blocking).toContainEqual(expect.objectContaining({
-      code: 'capability-evidence-commands-over-limit',
-      provided: 258,
+      code: 'capability-evidence-command-derivation-failed',
+      message: expect.stringContaining('2048-item or 262144-byte capability manifest envelope'),
     }));
     expect(readiness.blocking.map((entry) => entry.code))
       .not.toContain('capability-runners-over-limit');
@@ -261,7 +242,7 @@ describe('run readiness and capability manifests', () => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.test_commands.targeted_template = 'npm test -- {paths}';
     config.test_commands.full = 'npm test';
-    config.policy.command_profiles = Array.from({ length: 65 }, (_, index) => ({
+    config.policy.command_profiles = Array.from({ length: 2_049 }, (_, index) => ({
       id: `command.${index}`,
       command: `tool verify-${index}`,
       roles: ['implementer'],
@@ -278,26 +259,26 @@ describe('run readiness and capability manifests', () => {
     dirs.push(dir);
     await expect(configAction(dir, 'set', {
       key: 'policy.evidence_scripts',
-      value: Array.from({ length: 65 }, (_, index) => `verify:${index}`),
-    })).rejects.toThrow(/at most 64 package-script names/);
+      value: Array.from({ length: 2_049 }, (_, index) => `verify:${index}`),
+    })).rejects.toThrow(/input array is too large/);
     await expect(configAction(dir, 'set', {
       key: 'policy.command_profiles',
-      value: Array.from({ length: 65 }, (_, index) => ({
+      value: Array.from({ length: 2_049 }, (_, index) => ({
         id: `command.${index}`,
         command: `tool verify-${index}`,
         roles: ['implementer'],
         effect: 'execute',
       })),
-    })).rejects.toThrow(/at most 64 command profile objects/);
+    })).rejects.toThrow(/input exceeds/);
     await expect(configAction(dir, 'set', {
       key: 'runners',
-      value: Array.from({ length: 65 }, (_, index) => ({
+      value: Array.from({ length: 2_049 }, (_, index) => ({
         id: `runner-${index}`,
         owns: [`packages/${index}/**`],
         root: `packages/${index}`,
         profile: { full: `runner-${index} full` },
       })),
-    })).rejects.toThrow(/at most 64 runner objects/);
+    })).rejects.toThrow(/input exceeds/);
     expect(existsSync(join(dir, '.ape', 'runtime', 'config.json'))).toBe(false);
   });
 

@@ -24,6 +24,8 @@ import { settleReceiptValidationSubagentStop } from '../lib/runtime/receipt-serv
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { canonicalJson, sha256 } from '../lib/runtime/canonical.js';
 import { finalizeTicket } from '../lib/runtime/schemas.js';
+import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
+import { executionPolicySnapshot } from '../lib/runtime/pipeline-limits.js';
 
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const cleanups = [];
@@ -125,6 +127,7 @@ async function fixture(host = 'codex', options = {}) {
     attempt: 1,
     issued_at: new Date().toISOString(),
     receipt_contract_version: 1,
+    ...(options.execution_policy ? { execution_limits: options.execution_policy.limits } : {}),
     ...(options.plan_contract_version
       ? { plan_contract_version: options.plan_contract_version }
       : {}),
@@ -156,8 +159,8 @@ async function fixture(host = 'codex', options = {}) {
       design_assurance_required: false,
       receipt_schema: { ref: 'ticket.output_schema', hash: sha256(outputSchema) },
       field_bounds: {
-        validation_attempts_per_worker: 3,
-        max_physical_workers_per_ticket: 2,
+        validation_attempts_per_worker: options.execution_policy?.limits.max_validation_submissions_per_worker ?? 3,
+        max_physical_workers_per_ticket: options.execution_policy?.limits.max_physical_workers_per_ticket ?? 2,
         corrections_per_validation: 20,
         ...(options.manifest_growth_contract_version === 1
           ? {
@@ -187,8 +190,9 @@ async function fixture(host = 'codex', options = {}) {
     host,
     binding_protocol: 'native-v1',
     objective,
-    mode: 'phase',
+    mode: options.mode ?? 'phase',
     lane: options.lane ?? 'fast',
+    ...(options.execution_policy ? { execution_policy: options.execution_policy } : {}),
     ...(options.plan_contract_version
       ? { plan_contract_version: options.plan_contract_version }
       : {}),
@@ -283,6 +287,10 @@ async function fixture(host = 'codex', options = {}) {
       expires_at: ticket.deadline_at,
       launch_attempts: 1,
       physical_worker_dispatches: 1,
+      ...(options.execution_policy ? { receipt_limits: {
+        max_physical_workers_per_ticket: options.execution_policy.limits.max_physical_workers_per_ticket,
+        max_validation_submissions_per_worker: options.execution_policy.limits.max_validation_submissions_per_worker,
+      } } : {}),
     },
   );
   return { directory, paths, state, ticket, capability };
@@ -332,6 +340,80 @@ function maximalPlannerPlan(preflightHash, targetBytes = 16_384) {
 }
 
 describe('live receipt contract integration', () => {
+  it('uses the frozen three-worker four-submission contract through two expired-ticket recovery launches', async () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.policy.max_physical_workers_per_ticket = 3;
+    config.policy.max_validation_submissions_per_worker = 4;
+    config.deadlines_ms.debug = 123_456;
+    const value = await fixture('codex', { mode: 'debug', lane: 'full', stage_id: 'debug', role: 'debugger',
+      writable: false, claimed_paths: [], deadline_at: new Date(Date.now() - 1_000).toISOString(),
+      execution_policy: executionPolicySnapshot(config) });
+    await atomicWriteJson(value.paths.config, { policy: { max_physical_workers_per_ticket: 1,
+      max_validation_submissions_per_worker: 1 }, deadlines_ms: { debug: 10 } });
+    let capability = value.capability;
+    let session = 'session-1';
+    let turn = undefined;
+    const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
+    for (let worker = 1; worker <= 3; worker += 1) {
+      for (let submission = 1; submission <= 4; submission += 1) {
+        const result = await validateReceiptForDispatch(value.directory,
+          draft(value.ticket, capability, `invalid-worker-${worker}-${submission}`));
+        expect(result.validation).toMatchObject({ attempt: submission, max_attempts: 4, exhausted: submission === 4 });
+      }
+      expect(await observeCodexSubagentStop(value.paths, await readJson(value.paths.active), {
+        session_id: session, ...(turn ? { turn_id: turn } : {}),
+        agent_id: `agent-${worker}`, agent_type: 'default',
+      })).toMatchObject({ observed: true });
+      const beforeRecovery = Date.now();
+      const result = await nextRun(value.directory);
+      const afterRecovery = Date.now();
+      if (worker === 3) {
+        expect(result).toEqual({ ok: false, reason: 'run is blocked' });
+        break;
+      }
+      const dispatched = result.actions.find((entry) => entry.type === 'dispatch_agent');
+      expect(dispatched).toMatchObject({ recovery_kind: 'redispatch_same_ticket', ticket: value.ticket });
+      const intent = await readJson(intentFile);
+      expect(intent).toMatchObject({ physical_worker_dispatches: worker + 1,
+        receipt_validation_exhaustions: worker, receipt_protocol_recovery: true,
+        receipt_protocol_recovery_source: { physical_worker_dispatches: worker, validation_exhaustions: worker } });
+      // The horizon is chosen before the intent is prepared. Separate clock
+      // reads can differ under load, so verify the frozen allowance against
+      // the actual call interval rather than treating both timestamps as one.
+      expect(Date.parse(intent.expires_at)).toBeGreaterThanOrEqual(beforeRecovery + 123_456);
+      expect(Date.parse(intent.expires_at)).toBeLessThanOrEqual(afterRecovery + 123_456);
+      session = `parent-${worker + 1}`;
+      turn = `child-turn-${worker + 1}`;
+      const env = { APE_HOST: 'codex', CODEX_CWD: value.directory };
+      const [launch] = await runProcess('bin/ape-hook.mjs', {
+        hook_event_name: 'PreToolUse', project_dir: value.directory,
+        session_id: session, turn_id: `parent-turn-${worker + 1}`,
+        tool_use_id: `spawn-${worker + 1}`, tool_name: 'collaborationspawn_agent',
+        tool_input: { ...dispatched.dispatch.spawn_args, message: 'gAAAAABencrypted-v2-message' },
+      }, env);
+      expect(launch).toEqual({});
+      const [start] = await runProcess('bin/ape-hook.mjs', {
+        hook_event_name: 'SubagentStart', project_dir: value.directory, session_id: session, turn_id: turn,
+        agent_id: `agent-${worker + 1}`, agent_type: 'default', model: dispatched.dispatch.model.model,
+      }, env);
+      expect(start.hookSpecificOutput?.additionalContext).toBe(codexBootstrapOrientation());
+      const [bootstrap] = await runProcess('bin/ape-hook.mjs', {
+        hook_event_name: 'PreToolUse', project_dir: value.directory, session_id: session, turn_id: turn,
+        tool_use_id: `bind-${worker + 1}`, tool_name: 'ape_bind',
+        tool_input: dispatched.dispatch.bootstrap_args, model: dispatched.dispatch.model.model,
+      }, env);
+      capability = /APE_RECEIPT_CAPABILITY=([A-Za-z0-9_-]{32,256})/
+        .exec(bootstrap.hookSpecificOutput?.additionalContext ?? '')?.[1];
+      expect(capability).toBeTruthy();
+    }
+    const blocked = await readJson(value.paths.active);
+    expect(blocked).toMatchObject({ status: 'blocked',
+      receipt_contract_exhaustions: { [value.ticket.ticket_id]: 3 },
+      orchestration: { receipt_record_attempts: 12, receipt_rejections: 12, protocol_redispatches: 2 } });
+    expect(blocked.tickets).toEqual([value.ticket]);
+    expect((await readJson(intentFile)).physical_worker_dispatches).toBe(3);
+  }, 30_000);
+
   it('limits contract-v1 normalization to value-preserving JSON canonicalization', () => {
     const semanticRewriteCandidates = {
       ticket_id: 'ticket-normalization-v1',
@@ -573,7 +655,9 @@ describe('live receipt contract integration', () => {
     }, { APE_HOST: 'codex', CODEX_CWD: stoppedValue.directory });
     expect(stopped).toMatchObject({ decision: 'block' });
     expect(JSON.stringify(stopped)).not.toContain(stoppedValue.capability);
-    expect(JSON.stringify(stopped)).toContain('[receipt-capability-redacted]');
+    // Structural rejection precedes reflective field diagnostics: the copied
+    // bearer is never echoed, so this path needs no redaction placeholder.
+    expect(stopped.reason).toContain('receipt contains a forbidden prototype key');
 
     const preSubmitValue = await fixture('claude');
     const preSubmitDraft = {
@@ -2145,8 +2229,13 @@ describe('live receipt contract integration', () => {
     expect(blockedNext).not.toHaveProperty('actions');
   }, 30_000);
 
-  it('gives stopped-worker receipt recovery precedence over the immutable ticket deadline', async () => {
+  it.each([
+    { mode: 'phase', lane: 'fast', stage_id: 'build', role: 'implementer', expectedDeadline: 1_800_000 },
+    { mode: 'debug', lane: 'full', stage_id: 'debug', role: 'debugger', expectedDeadline: 900_000 },
+    { mode: 'spike', lane: 'full', stage_id: 'spike', role: 'spike_researcher', expectedDeadline: 900_000 },
+  ])('preserves the $mode horizon when stopped-worker recovery replaces an expired ticket', async ({ expectedDeadline, ...options }) => {
     const value = await fixture('codex', {
+      ...options,
       deadline_at: new Date(Date.now() - 1_000).toISOString(),
     });
     const originalTicket = structuredClone(value.ticket);
@@ -2205,6 +2294,7 @@ describe('live receipt contract integration', () => {
       immutable_ticket_deadline_at: value.ticket.deadline_at,
     });
     expect(Date.parse(recoveryIntent.expires_at)).toBeGreaterThan(Date.now());
+    expect(Date.parse(recoveryIntent.expires_at) - Date.parse(recoveryIntent.prepared_at)).toBe(expectedDeadline);
     expect(Date.parse(value.ticket.deadline_at)).toBeLessThanOrEqual(Date.now());
 
     // The recovery intent has its own bounded host-dispatch horizon, while the

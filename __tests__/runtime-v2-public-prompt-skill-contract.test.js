@@ -19,26 +19,9 @@ const ROLES = [
   'spike_researcher',
 ];
 const SKILLS = ['config', 'history', 'override', 'resume', 'roadmap', 'run', 'status'];
-const ROLE_BUDGETS = {
-  preflight_analyst: 260,
-  planner: 220,
-  plan_checker: 220,
-  plan_critic: 220,
-  plan_judge: 220,
-  test_writer: 220,
-  implementer: 220,
-  reviewer: 220,
-  security_reviewer: 220,
-  debugger: 100,
-  spike_researcher: 100,
-};
 
 async function read(...parts) {
   return readFile(path.join(ROOT, ...parts), 'utf8');
-}
-
-function words(text) {
-  return text.trim().split(/\s+/u).filter(Boolean).length;
 }
 
 function agentPromptBody(text) {
@@ -60,12 +43,12 @@ function splitSkill(text) {
 }
 
 describe('public prompt contracts', () => {
-  it('ships one common contract and eleven bounded role prompts', async () => {
+  it('ships one common contract and eleven nonempty role prompts', async () => {
     const files = (await readdir(path.join(ROOT, 'prompts'))).filter((name) => name.endsWith('.md')).sort();
     expect(files).toEqual(['common.md', ...ROLES.map((role) => `${role}.md`)].sort());
-    expect(words(await read('prompts', 'common.md'))).toBeLessThanOrEqual(450);
+    expect((await read('prompts', 'common.md')).trim()).not.toBe('');
     for (const role of ROLES) {
-      expect(words(await read('prompts', `${role}.md`)), role).toBeLessThanOrEqual(ROLE_BUDGETS[role]);
+      expect((await read('prompts', `${role}.md`)).trim(), role).not.toBe('');
     }
   });
 
@@ -94,7 +77,7 @@ describe('public prompt contracts', () => {
       expect(common, role).toBeGreaterThan(-1);
       expect(specific, role).toBeGreaterThan(common);
       expect(wrapper).toMatch(/model: inherit/u);
-      expect(words(agentPromptBody(wrapper)), role).toBeLessThanOrEqual(40);
+      expect(agentPromptBody(wrapper).trim(), role).not.toBe('');
     }
   });
 
@@ -283,7 +266,7 @@ describe('canonical skill sources', () => {
       const claude = splitSkill(await read('plugins', 'ape-claude', 'skills', name, 'SKILL.md'));
       const codexPolicy = await read('plugins', 'ape', 'skills', name, 'agents', 'openai.yaml');
 
-      expect(words(canonical), name).toBeLessThanOrEqual(500);
+      expect(canonical.trim(), name).not.toBe('');
       expect(codex.body).toBe(canonical);
       expect(claude.body).toBe(canonical);
       expect(codex.metadata).toEqual({ name: metadata.name, description: metadata.description });

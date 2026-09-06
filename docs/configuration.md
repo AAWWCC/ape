@@ -14,6 +14,21 @@ and merges them over shipped defaults. Do not hand-edit runtime state.
 MCP discovery and permissions belong to the host, not APE. Initialization does not create or edit
 repository instruction files.
 
+Execution limits are checked both when set and when loaded. Deadlines must be
+integers from −2,147,483,647 through 2,147,483,647 milliseconds; zero and negative
+values intentionally expire immediately. Gate grace and poll delays accept zero;
+heartbeat and stale intervals must be positive. All gate intervals share the
+2,147,483,647 ms maximum supported by Node timers. File and spawn counts must be
+positive safe integers. See [runtime limits](limits.md) for their purpose and tradeoffs.
+
+Execution policy, deadlines, fast-lane file routing, gate timing and remote-check
+registration timing are frozen when a new run starts. Changing configuration
+affects subsequent runs. Existing issued tickets retain their original receipt
+and artifact contracts. Optional retry and remediation counts accept zero;
+attempt, worker and submission counts require at least one. Combined counters
+must fit safe-integer arithmetic. These are configurable operating choices,
+not claims about an optimal number of attempts.
+
 <!-- BEGIN GENERATED CONFIG REFERENCE -->
 ## Complete key reference
 
@@ -27,10 +42,20 @@ checked byte-for-byte by `npm run docs:check`.
 | `shipping.provider` | string | `"github"` | Shipping provider; GitHub is the only implementation. |
 | `shipping.required_remote_checks` | boolean | `true` | Require remote CI; use `false` only for a project intentionally without CI. |
 | `shipping.target` | object or null | `null` | Explicit `{origin, repository, base}`, frozen at admission. Required for shipping; the canonical APE checkout can target only AAWWCC/ape. |
+| `shipping.checks_registration_window_ms` | number | `120000` | Time to allow remote CI checks to register before treating their absence as failure. |
+| `shipping.checks_registration_retry_delay_ms` | number | `10000` | Suggested polling delay while remote CI checks are registering. |
+| `policy.max_stage_attempts` | number | `2` | Initial product-stage attempt plus ordinary retries. |
+| `policy.max_directed_replans` | number | `2` | Additional planner attempts for concrete review corrections. |
+| `policy.max_worker_protocol_redispatches_per_stage` | number | `1` | Replacement stage dispatches for worker-protocol failure. |
+| `policy.max_remediation_cycles` | number | `3` | Maximum remediation cycles; repeated or non-shrinking blockers stop sooner. |
+| `policy.max_regate_attempts` | number | `3` | Re-gates allowed after failed full-suite evidence. |
+| `policy.max_physical_workers_per_ticket` | number | `2` | Initial native worker plus replacements; prior workers must be retired. |
+| `policy.max_validation_submissions_per_worker` | number | `3` | Receipt-validation submissions available to each physical worker. |
+| `policy.max_reconciliation_stage_attempts` | number | `1` | Attempts for each reconciliation or recheck stage. |
+| `policy.max_reconciliation_protocol_redispatches` | number | `0` | Protocol replacements for each reconciliation or recheck stage. |
 | `policy.fast_max_files` | number | `6` | Maximum production-file scope for the fast lane. |
 | `policy.high_risk_security_review` | boolean | `true` | Add security review when a risk trigger is armed. |
 | `policy.design_assurance_required` | boolean | `true` | Require a feasibility check and executable evidence for each declared risk. |
-| `policy.max_remediation_cycles` | number | `3` | Maximum remediation cycles; repeated or non-shrinking blockers stop sooner. |
 | `policy.full_suite_cache` | boolean | `true` | Reuse passing suites for the same tree and resolved command. |
 | `policy.evidence_scripts` | string array | `[]` | Exact extra package scripts allowed as read-only evidence. |
 | `policy.command_profiles` | object array | `[]` | Exact external-tool commands approved by the operator. |
