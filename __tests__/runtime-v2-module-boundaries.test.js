@@ -178,6 +178,7 @@ const INTERNAL_OWNER_ASSERTIONS = [
     exports: ['BOOTSTRAP_TOOL_PATTERN', 'codexBootstrapOrientation', 'recordCodexBootstrapCandidate', 'resolveCodexBootstrapCandidate'],
     dependencies: [
       'lib/runtime/constants.js',
+      'lib/runtime/file-stats.js',
       'lib/runtime/lock.js',
       'lib/runtime/paths.js',
       'lib/runtime/storage.js',
@@ -191,6 +192,7 @@ const INTERNAL_OWNER_ASSERTIONS = [
       'lib/runtime/bounded-summary.js',
       'lib/runtime/constants.js',
       'lib/runtime/diagnostics.js',
+      'lib/runtime/file-stats.js',
     ],
   },
   {

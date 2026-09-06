@@ -153,6 +153,8 @@ describe('committed duration inventory and deterministic CI partition', () => {
   it('selects the bounded native process, recovery and package fixtures while preserving smoke import compatibility', async () => {
     const expected = [
       '__tests__/runtime-v2-codex-windows-launchers.test.js',
+      '__tests__/runtime-v2-file-stat-compat.test.js',
+      '__tests__/runtime-v2-hook-output-flush.test.js',
       '__tests__/runtime-v2-lock-protocol.test.js',
       '__tests__/runtime-v2-native-platform.test.js',
       '__tests__/runtime-v2-native-recovery.test.js',

@@ -1,0 +1,81 @@
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { tmpdir } from 'node:os';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { activeState } from '../lib/runtime/active-state.js';
+import { inspectAdmissionCommandPrerequisites } from '../lib/runtime/admission-command-prerequisites.js';
+
+const scenario = vi.hoisted(() => ({ root: null, otherDevice: false, otherInode: false }));
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original();
+  const identity = (metadata, descriptor) => {
+    // libuv before #4698 reports a 64-bit pathname volume serial but a
+    // 32-bit descriptor serial. Numbers lose its low bits before masking.
+    const device = descriptor ? 0xabcdef01n + BigInt(scenario.otherDevice) : 0x12345678abcdef01n;
+    const inode = (1n << 60n) + 1n + BigInt(descriptor && scenario.otherInode);
+    return Object.assign(Object.create(Object.getPrototypeOf(metadata)), metadata, {
+      dev: typeof metadata.dev === 'bigint' ? device : Number(device),
+      ino: typeof metadata.ino === 'bigint' ? inode : Number(inode),
+    });
+  };
+  const selected = (file) => scenario.root && String(file).startsWith(scenario.root);
+  return { ...actual,
+    lstat: async (file, ...args) => {
+      const metadata = await actual.lstat(file, ...args);
+      return selected(file) ? identity(metadata, false) : metadata;
+    },
+    open: async (file, ...args) => {
+      const handle = await actual.open(file, ...args);
+      if (selected(file)) {
+        const stat = handle.stat.bind(handle);
+        handle.stat = async (...options) => identity(await stat(...options), true);
+      }
+      return handle;
+    },
+  };
+});
+
+const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+const roots = [];
+afterEach(async () => {
+  Object.defineProperty(process, 'platform', platform);
+  Object.assign(scenario, { root: null, otherDevice: false, otherInode: false });
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+});
+
+async function fixture() {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'ape-stat-compat-')));
+  roots.push(root);
+  const file = path.join(root, 'active.json');
+  const state = { run_id: 'run-stat', status: 'running', stage: 'test', tickets: [], receipts: [] };
+  await writeFile(file, JSON.stringify(state));
+  await writeFile(path.join(root, 'fixture'), 'ordinary executable header');
+  scenario.root = root;
+  Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+  return { root, file, state };
+}
+
+describe('Windows descriptor and pathname file identity compatibility', () => {
+  it('reads stable state despite the old libuv volume-serial representation difference', async () => {
+    const value = await fixture();
+    expect(await activeState({ active: value.file })).toEqual(value.state);
+  });
+
+  it('inspects a stable executable without executing it or dropping identity checks', async () => {
+    const value = await fixture();
+    expect(await inspectAdmissionCommandPrerequisites(value.root,
+      [{ id: 'fixture', command: 'fixture', root: '.' }],
+      [{ id: 'fixture', resolved: path.join(value.root, 'fixture') }],
+    )).toEqual([]);
+  });
+
+  it.each(['otherDevice', 'otherInode'])('still rejects an actual %s mismatch', async (field) => {
+    const value = await fixture();
+    scenario[field] = true;
+    await expect(activeState({ active: value.file })).rejects.toMatchObject({ code: 'APE_ACTIVE_STATE_BUSY' });
+    expect(await inspectAdmissionCommandPrerequisites(value.root,
+      [{ id: 'fixture', command: 'fixture', root: '.' }],
+      [{ id: 'fixture', resolved: path.join(value.root, 'fixture') }],
+    )).toContainEqual(expect.objectContaining({ cause: 'executable-changed' }));
+  });
+});

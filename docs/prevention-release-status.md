@@ -11,6 +11,9 @@ not authorize more testing, installation, or publication.
   handling, Windows npm/npx launcher and command-name resolution, and npm
   package/script inspection across workspace, shell, environment, and PATH
   selection. Current and baseline inspection share the selected invocation.
+- Node 22 hook responses finish writing before exit. Windows file reads compare
+  exact identifiers using the same volume-serial representation as corrected
+  libuv versions, retaining device, inode, replacement, and mutation checks.
 - Task operations capture their own gate ownership while holding the receipt
   lock. Cancellation preserves another operation's watch and already-completed
   results; fresh processes retain durable receipt/task replay boundaries.
@@ -21,7 +24,7 @@ not authorize more testing, installation, or publication.
   and owner loss in source and packaged paths.
 - New fixtures execute both copied plugin packages through fresh MCP/hook
   processes and test real process restarts and locks. Required native CI now
-  selects eight runtime suites on Linux, macOS, and Windows under Node 22.12.0
+  selects ten runtime suites on Linux, macOS, and Windows under Node 22.12.0
   and 24.15.0. The aggregate rejects failed, cancelled, or skipped dependencies.
 - Certification preflight now requires the pinned Codex CLI's native V2 agent
   interface explicitly. The 2.24.12 live attempt exposed a setup gap: ordinary
@@ -91,6 +94,15 @@ automatic recovery were not expanded. Repair-and-land remains deferred.
 
 ## What passed
 
+The Node 22 CI repairs passed the complete macOS / Node 24.15.0 suite: 4,521
+tests across 270 files, with 87 existing skips, in 466.79 seconds. The rebuilt
+native selection also passed on actual macOS / Node 22.12.0: 167 tests across
+ten files, with three Windows-only skips. Both packaged-host lifecycle fixtures
+passed, along with the new output-backpressure and Windows file-identity
+regressions. Type, compatibility, public-safety, package freshness, package and
+release reproducibility, packaged MCP smoke, prompt definitions and verified
+public export checks passed. Native Windows CI for these repairs remains pending.
+
 The complete audited runtime, immediately before the 2.24.14 metadata bump,
 passed 4,512 tests across 268 files with 87 skips in 458.79 seconds on macOS and
 Node 24.15.0. The new native CI selection passed 158 tests with three Windows-only
@@ -105,8 +117,8 @@ validator fixtures. Type, compatibility, public-safety, package freshness, packa
 and release reproducibility, packaged MCP smoke, prompt-scenario definitions,
 and a verified public export also passed for the bumped candidate.
 
-These results use synthetic host hook inputs and disposable projects. They do
-not establish native Windows/Linux or Node 22 execution, live host certification,
+These local results use synthetic host hook inputs and disposable projects. They do
+not establish native Windows/Linux execution, live host certification,
 or publication. Earlier recorded baselines remain below for provenance.
 
 An earlier 2.24.13 full source run passed all 4,316 tests across 260 files with 86

@@ -27,10 +27,12 @@ export const SMOKE_TEST_FILES = Object.freeze([
 export const WINDOWS_SMOKE_TEST_FILES = SMOKE_TEST_FILES;
 
 // Real process, filesystem and packaged-entry coverage on each supported
-// OS/Node pair. Keep platform simulations in the complete Ubuntu partitions;
-// the dedicated native fixtures exercise the current operating system.
+// OS/Node pair, plus the Node 22 file-identity and output-drain regressions.
+// The native fixtures exercise the current operating system.
 export const NATIVE_RUNTIME_TEST_FILES = Object.freeze([
   '__tests__/runtime-v2-codex-windows-launchers.test.js',
+  '__tests__/runtime-v2-file-stat-compat.test.js',
+  '__tests__/runtime-v2-hook-output-flush.test.js',
   '__tests__/runtime-v2-lock-protocol.test.js',
   '__tests__/runtime-v2-native-platform.test.js',
   '__tests__/runtime-v2-native-recovery.test.js',

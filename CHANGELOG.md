@@ -12,6 +12,9 @@ certification remain required. Claude live operation remains unverified.
 - Correct Windows npm/npx launcher selection and command-name casing, npm
   workspace selection, script-shell checks, lifecycle settings, and executable
   lookup without executing commands during admission.
+- Drain hook responses before exit to prevent truncated JSON on Node 22.
+- Reconcile Windows Node 22 pathname and descriptor volume identifiers without
+  dropping device, inode, or file mutation checks.
 - Preserve task receipt-lock leases, stopped-worker recovery, cancellation
   ownership, and existing terminal results.
 - Correct gate runner paths, deleted-file routing, directory-specific cache
