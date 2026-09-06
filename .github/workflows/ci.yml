@@ -109,12 +109,47 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node scripts/run-ci-tests.mjs shard 3 3
 
+  native-runtime:
+    name: Native runtime smoke (${{ matrix.os }}, Node ${{ matrix.node.major }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node:
+          - version: 22.12.0
+            major: 22
+          - version: 24.15.0
+            major: 24
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - name: Disable automatic CRLF conversion
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node.version }}
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run bundle
+      - run: npm run package:plugins
+      - name: Require fresh generated runtime packages
+        run: git diff --exit-code -- dist/ plugins/
+      - name: Exercise native runtime and packaged lifecycle fixtures
+        run: node scripts/run-ci-tests.mjs native -- --maxWorkers=1
+
   full-suite:
     name: Full suite aggregate
-    needs: [package-smoke, marketplace-install-smoke, smoke, shard-1, shard-2, shard-3]
+    needs: [package-smoke, marketplace-install-smoke, smoke, shard-1, shard-2, shard-3, native-runtime]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Require every dependency to succeed
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: node -e "if (Object.values(JSON.parse(process.env.CI_NEEDS)).some(job => job.result !== 'success')) process.exit(1)"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:

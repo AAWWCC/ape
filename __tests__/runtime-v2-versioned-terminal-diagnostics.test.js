@@ -216,6 +216,35 @@ describe('versioned-terminal-diagnostics', () => {
     }))).toBe('aborted_planning');
   });
 
+  it.each([
+    ['plan_replan_ceiling_exhausted', 2],
+    ['plan_progress_not_strict_subset', 1],
+    ['plan_rejected_after_directed_replan', 1],
+  ])('retains %s recovery through immutable history and its wire summary', async (reason_code, attempts) => {
+    const directory = await sandbox('ape-planning-recovery-history-');
+    const blocked_recovery = {
+      reason_code,
+      directed_replan_attempts: attempts,
+      missing_assurances: [{
+        id: 'pa-0123456789abcdef', source_stage: 'plan-judge',
+        summary: 'The plan omits the required acceptance check.',
+        evidence_anchor: 'requirements.R1', requirement_id: 'R1',
+      }],
+    };
+    const archived = await archiveRun(runtimePaths(directory), terminalState('run-plan-recovery', {
+      stage: 'plan-judge', terminal_reason_code: 'planning_rejected', blocked_recovery,
+    }));
+    expect(archived.blocked_recovery).toEqual(blocked_recovery);
+    expect(summarizeHistoryRecord(archived).blocked_recovery).toEqual({
+      reason_code, directed_replan_attempts: attempts, missing_assurance_count: 1,
+    });
+    const explained = await historyAction(directory, 'explain', { run_id: archived.run_id });
+    expect(explained.run.blocked_recovery).toEqual({
+      reason_code, directed_replan_attempts: attempts, missing_assurance_count: 1,
+    });
+    expect(validatedTerminalRecoveryFields({ blocked_recovery: { ...blocked_recovery, reason_code: 'unknown-plan-reason' } })).toEqual({});
+  });
+
   it('preserves bounded terminal recovery evidence while projecting only privacy-safe counts', async () => {
     const dir = await sandbox('ape-versioned-recovery-');
     const privatePath = 'src/PRIVATE_ADDITIVE_CLAIM.js';

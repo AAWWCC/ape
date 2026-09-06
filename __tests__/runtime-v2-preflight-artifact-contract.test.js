@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { startRun, recordReceipt } from '../lib/runtime/service.js';
+import { fileURLToPath } from 'node:url';
+import { startRun, recordReceipt, answerPreflight, validateReceiptForDispatch } from '../lib/runtime/service.js';
+import { bindCodexDispatch } from './codex-native-test-helper.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { sha256 } from '../lib/runtime/canonical.js';
@@ -150,7 +152,9 @@ describe('versioned preflight artifact contract', () => {
   it('commits a question hold before creating any successor ticket or dispatch intent', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
-    const started = await startRun(dir, input());
+    const started = await startRun(dir, input({ binding_protocol: 'native-v1', capability_contract_required: true }));
+    const dispatch = started.actions.find((action) => action.type === 'dispatch_agent');
+    const capability = await bindCodexDispatch(path.dirname(path.dirname(fileURLToPath(import.meta.url))), dir, dispatch);
     const intentsBefore = await readdir(paths.dispatchIntents).catch(() => []);
     const value = artifact({
       questions: [{
@@ -160,7 +164,10 @@ describe('versioned preflight artifact contract', () => {
       }],
     });
 
-    const recorded = await recordReceipt(dir, receipt(started.run.tickets[0], value));
+    const { agent_identity: _identity, timing: _timing, ...draft } = receipt(started.run.tickets[0], value);
+    draft.receipt_capability = capability;
+    expect(await validateReceiptForDispatch(dir, draft)).toMatchObject({ valid: true });
+    const recorded = await recordReceipt(dir, draft);
     expect(recorded.ok, JSON.stringify(recorded.errors)).toBe(true);
     expect(recorded.run).toMatchObject({ status: 'input_required', stage: 'preflight' });
     expect(recorded.run.tickets.some((ticket) => ticket.writable === true)).toBe(false);
@@ -168,6 +175,17 @@ describe('versioned preflight artifact contract', () => {
       expect.objectContaining({ type: 'dispatch_agent' }),
     ]));
     expect(await readdir(paths.dispatchIntents).catch(() => [])).toEqual(intentsBefore);
+    expect(started.run.audit).toEqual([]);
+    expect(recorded.run.audit).toEqual([]);
+
+    const answered = await answerPreflight(dir, {
+      run_id: recorded.run.run_id,
+      preflight_hash: recorded.run.preflight.artifact_hash,
+      reason: 'Preserve the existing named export.',
+      answers: [{ id: 'api-name', answer: 'Keep value.' }],
+    });
+    expect(answered).toMatchObject({ ok: true, run: { status: 'running', stage: 'plan' } });
+    expect(answered.run.audit).toEqual([expect.objectContaining({ type: 'preflight_answered' })]);
   });
 
   it.each([
@@ -190,5 +208,56 @@ describe('versioned preflight artifact contract', () => {
     const rejected = await recordReceipt(dir, receipt(ticket, makeArtifact()));
     expect(rejected).toMatchObject({ ok: false, rejected: true });
     expect(await readJson(runtimePaths(dir).active)).toEqual(before);
+  });
+});
+
+
+describe('preflight verification configuration parity', () => {
+  it('runs required verification for fast v2 without requiring a full-lane plan', async () => {
+    const dir = await project();
+    const { setRuntimeConfig, loadRuntimeConfig } = await import('../lib/runtime/config.js');
+    const { gateSuiteContext, evaluateGatePreflight } = await import('../lib/runtime/gate-evaluation.js');
+    const paths = runtimePaths(dir);
+    await setRuntimeConfig(paths.config, 'verification.profiles', [{
+      id: 'unit', description: 'Runtime check', command: 'node --version', root: '.', timeout_ms: 5000,
+    }]);
+    const started = await startRun(dir, input({ lane: 'fast' }));
+    const recorded = await recordReceipt(dir, receipt(started.run.tickets[0], artifact()));
+    expect(recorded.ok).toBe(true);
+    expect(recorded.run.stage).toBe('test');
+    expect(recorded.run.approved_plan).toBeUndefined();
+    const config = await loadRuntimeConfig(paths.config);
+    const context = await gateSuiteContext(dir, paths, recorded.run, config);
+    const gate = await evaluateGatePreflight(dir, recorded.run, config, context);
+    expect(gate.verificationProfiles).toMatchObject({ passed: true, results: [{ id: 'unit', passed: true }] });
+    const full = await evaluateGatePreflight(dir, { ...recorded.run, lane: 'full' }, config, context);
+    expect(full.verificationProfiles).toMatchObject({ passed: false, results: [{ reason: 'required profile unassigned by approved plan' }] });
+  });
+
+  it('uses configured dotted identifiers consistently in start, preflight, and planning', async () => {
+    const dir = await project();
+    const { setRuntimeConfig } = await import('../lib/runtime/config.js');
+    await setRuntimeConfig(runtimePaths(dir).config, 'verification.profiles', [{
+      id: 'unit.core', description: 'Core validation', command: 'node --version', root: '.', timeout_ms: 5000,
+    }]);
+    const started = await startRun(dir, input());
+    expect(started.ok, JSON.stringify(started.readiness)).toBe(true);
+    const recorded = await recordReceipt(dir, receipt(started.run.tickets[0], artifact({
+      verification_profiles: [{ id: 'unit.core', disposition: 'required', reason: 'Core validation is required.' }],
+    })));
+    expect(recorded.ok, JSON.stringify(recorded.errors)).toBe(true);
+    expect(recorded.run.stage).toBe('plan');
+  });
+
+  it('rejects a legacy noncanonical configured root before creating a run branch', async () => {
+    const dir = await project();
+    const paths = runtimePaths(dir);
+    const config = await readJson(paths.config);
+    config.verification.profiles[0].root = 'tests/';
+    await atomicWriteJson(paths.config, config);
+    const branch = git(dir, 'branch', '--show-current');
+    await expect(startRun(dir, input())).rejects.toThrow(/root/);
+    expect(git(dir, 'branch', '--show-current')).toBe(branch);
+    expect(await readJson(paths.active, null)).toBeNull();
   });
 });

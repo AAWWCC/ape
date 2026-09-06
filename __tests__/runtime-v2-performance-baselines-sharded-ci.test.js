@@ -19,6 +19,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   listTestFiles,
+  NATIVE_RUNTIME_TEST_FILES,
+  SMOKE_TEST_FILES,
+  WINDOWS_SMOKE_TEST_FILES,
   selectCiTests,
 } from '../scripts/run-ci-tests.mjs';
 
@@ -135,7 +138,7 @@ describe('committed duration inventory and deterministic CI partition', () => {
     expect([...assigned].sort()).toEqual(inventory);
   });
 
-  it('executes only the smoke set and three shards, then aggregates without rerunning Vitest', () => {
+  it('keeps the complete Ubuntu partition and adds one bounded native selector without rerunning Vitest in the aggregate', () => {
     const workflow = readFileSync(join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
     expect(workflow).toMatch(/run-ci-tests\.mjs\s+smoke/u);
     for (const shard of [1, 2, 3]) {
@@ -143,7 +146,50 @@ describe('committed duration inventory and deterministic CI partition', () => {
     }
     expect(workflow.match(/run-ci-tests\.mjs\s+smoke/gu)).toHaveLength(1);
     expect(workflow.match(/run-ci-tests\.mjs\s+shard\s+[123]\s+3/gu)).toHaveLength(3);
+    expect(workflow.match(/run-ci-tests\.mjs\s+native/gu)).toHaveLength(1);
     expect(workflow).not.toMatch(/(?:npm test|vitest run)/u);
+  });
+
+  it('selects the bounded native process, recovery and package fixtures while preserving smoke import compatibility', async () => {
+    const expected = [
+      '__tests__/runtime-v2-codex-windows-launchers.test.js',
+      '__tests__/runtime-v2-file-stat-compat.test.js',
+      '__tests__/runtime-v2-hook-output-flush.test.js',
+      '__tests__/runtime-v2-lock-protocol.test.js',
+      '__tests__/runtime-v2-native-platform.test.js',
+      '__tests__/runtime-v2-native-recovery.test.js',
+      '__tests__/runtime-v2-packaged-lifecycle.test.js',
+      '__tests__/runtime-v2-runner.test.js',
+      '__tests__/runtime-v2-spawn.test.js',
+      '__tests__/runtime-v2-suite-supervision.test.js',
+    ];
+    expect(await selectCiTests('native')).toEqual(expected);
+    expect(NATIVE_RUNTIME_TEST_FILES).toEqual(expected);
+    expect(WINDOWS_SMOKE_TEST_FILES).toBe(SMOKE_TEST_FILES);
+    expect(expected.length).toBeLessThan((await listTestFiles()).length);
+  });
+
+  it('passes native files and bounded worker arguments to Vitest, and refuses a missing native fixture', () => {
+    const root = temporaryRoot('ape-native-selector-');
+    mkdirSync(join(root, 'scripts'), { recursive: true });
+    mkdirSync(join(root, '__tests__'), { recursive: true });
+    mkdirSync(join(root, 'node_modules', 'vitest'), { recursive: true });
+    const script = join(root, 'scripts', 'run-ci-tests.mjs');
+    copyFileSync(join(ROOT, 'scripts', 'run-ci-tests.mjs'), script);
+    for (const file of NATIVE_RUNTIME_TEST_FILES) writeFileSync(join(root, file), '');
+    const output = join(root, 'selected.json');
+    writeFileSync(join(root, 'node_modules', 'vitest', 'vitest.mjs'),
+      "import { writeFileSync } from 'node:fs'; writeFileSync(process.env.CI_TEST_OUTPUT, JSON.stringify(process.argv.slice(2)));\n");
+    const options = { cwd: root, encoding: 'utf8', env: { ...process.env, CI_TEST_OUTPUT: output } };
+    const success = spawnSync(process.execPath, [script, 'native', '--', '--maxWorkers=1'], options);
+    expect(success.status, success.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(['run', ...NATIVE_RUNTIME_TEST_FILES, '--maxWorkers=1']);
+    rmSync(output);
+    rmSync(join(root, '__tests__/runtime-v2-spawn.test.js'));
+    const missing = spawnSync(process.execPath, [script, 'native'], options);
+    expect(missing.status).not.toBe(0);
+    expect(missing.stderr).toContain('CI native runtime inventory is duplicate, missing, or unsupported');
+    expect(readdirSync(root)).not.toContain('selected.json');
   });
 });
 

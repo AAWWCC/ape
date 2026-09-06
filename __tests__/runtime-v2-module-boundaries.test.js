@@ -78,7 +78,7 @@ const OWNER_MANIFEST = [
       'resolveEvidenceExecutable', 'snapshotEvidenceExecutables',
       'verifyEvidenceExecutableSnapshot', 'EVIDENCE_SECOND_POSITION_PROBES',
       'gitEvidenceArgsSafe', 'parseEvidenceCommand', 'evidenceOperandNeedsRoot',
-      'evidenceOperandCandidates', 'evidenceOperandEscapes',
+      'evidenceOperandCandidates', 'evidencePathOperands', 'evidenceOperandEscapes',
       'evidenceOperandIsGitNoIndexDevNull',
     ],
   },
@@ -178,6 +178,7 @@ const INTERNAL_OWNER_ASSERTIONS = [
     exports: ['BOOTSTRAP_TOOL_PATTERN', 'codexBootstrapOrientation', 'recordCodexBootstrapCandidate', 'resolveCodexBootstrapCandidate'],
     dependencies: [
       'lib/runtime/constants.js',
+      'lib/runtime/file-stats.js',
       'lib/runtime/lock.js',
       'lib/runtime/paths.js',
       'lib/runtime/storage.js',
@@ -191,6 +192,7 @@ const INTERNAL_OWNER_ASSERTIONS = [
       'lib/runtime/bounded-summary.js',
       'lib/runtime/constants.js',
       'lib/runtime/diagnostics.js',
+      'lib/runtime/file-stats.js',
     ],
   },
   {
@@ -256,7 +258,7 @@ const REQUIRED_OWNER_FILES = [
 
 const FACADE_EXPORT_COUNTS = Object.freeze({
   'lib/runtime/service.js': 35,
-  'lib/runtime/hooks.js': 36,
+  'lib/runtime/hooks.js': 37,
   'lib/runtime/gates.js': 12,
   'lib/runtime/scheduler.js': 3,
 });

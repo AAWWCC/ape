@@ -1487,3 +1487,21 @@ describe('APE v2 codex binding seam (installed hook binary)', () => {
     expect(response.decision).toBe('allow');
   });
 });
+
+
+describe('managed Codex child lifecycle requires a live ticket', () => {
+  it.each(['running', 'blocked'])('denies ordinary child commands without a binding while %s', (status) => {
+    for (const command of ['node script.mjs', 'npm run generate', 'cat README.md']) {
+      const event = { host: 'codex', event: 'PreToolUse', is_subagent: true,
+        ape_managed: true, tool_name: 'Bash', command };
+      const result = evaluateLifecyclePolicy(event, { state: { status }, ticket: null });
+      expect(result).toMatchObject({ decision: 'deny', reason: expect.stringMatching(/live ticket binding/) });
+    }
+  });
+  it('preserves explicit unmanaged activity and inactive sealed-run behavior', () => {
+    const event = { host: 'codex', event: 'PreToolUse', is_subagent: true,
+      ape_managed: false, tool_name: 'Bash', command: 'node script.mjs' };
+    expect(evaluateLifecyclePolicy(event, { state: { status: 'running' }, ticket: null }).decision).toBe('allow');
+    expect(evaluateLifecyclePolicy({ ...event, ape_managed: true }, { state: { status: 'completed' }, ticket: null }).decision).toBe('allow');
+  });
+});

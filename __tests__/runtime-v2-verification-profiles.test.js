@@ -40,6 +40,8 @@ describe('verification.profiles configuration', () => {
     ['shell syntax', [valid({ command: 'npm test && touch owned' })]],
     ['absolute root', [valid({ root: '/tmp' })]],
     ['traversal root', [valid({ root: '../outside' })]],
+    ['trailing-slash root', [valid({ root: 'tests/' })]],
+    ['oversized root', [valid({ root: 'a'.repeat(513) })]],
     ['zero timeout', [valid({ timeout_ms: 0 })]],
     ['oversized timeout', [valid({ timeout_ms: 86_400_001 })]],
     ['blank description', [valid({ description: ' ' })]],

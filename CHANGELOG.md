@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+## 2.24.14 — 2026-09-06
+
+Release candidate; native platform CI and a fresh candidate-bound Codex live
+certification remain required. Claude live operation remains unverified.
+
+- Fix fresh preflight answers and duplicate-answer diagnostics; report concurrent
+  atomic state replacement as retryable contention.
+- Correct Windows npm/npx launcher selection and command-name casing, npm
+  workspace selection, script-shell checks, lifecycle settings, and executable
+  lookup without executing commands during admission.
+- Drain hook responses before exit to prevent truncated JSON on Node 22.
+- Reconcile Windows Node 22 pathname and descriptor volume identifiers without
+  dropping device, inode, or file mutation checks. Recover omitted pathname
+  device identifiers through a separately verified read-only handle; retain
+  retryable contention when the pathname changes during metadata recovery.
+- Preserve task receipt-lock leases, stopped-worker recovery, cancellation
+  ownership, and existing terminal results.
+- Correct gate runner paths, deleted-file routing, directory-specific cache
+  keys, and required fast-lane verification profiles.
+- Stop ordinary POSIX suite descendants after completion, timeout, cancellation,
+  or owner loss in source and packaged execution.
+- Preserve exact merge provenance and interrupted roadmap attestations; repair
+  planning diagnostics, verification-profile validation, and quoted TOML
+  statusline settings.
+- Add packaged lifecycle and process-restart regressions, and require native
+  runtime CI on Windows, macOS, and Linux with Node 22.12.0 and 24.15.0. Failed,
+  cancelled, or skipped native jobs prevent the full-suite aggregate from passing.
+
 ## 2.24.13 — 2026-09-05
 
 Release candidate; Codex live certification remains required before tagged

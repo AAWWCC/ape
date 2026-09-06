@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { AUTO_MERGE_HOLD_REASON, MAX_REGATE_ATTEMPTS } from './constants.js';
+import { AUTO_MERGE_HOLD_REASON, MAX_REGATE_ATTEMPTS, MERGE_PROVENANCE } from './constants.js';
+
+const MERGE_PROVENANCE_VALUES = new Set(Object.values(MERGE_PROVENANCE));
 
 const MAX_FAILED_CHECKS = 32;
 const MAX_IDENTIFIER_LENGTH = 128;
@@ -83,7 +85,7 @@ export function isValidMergeEvidence(merge){
   if(ownData(merge,'provider').value!=='github')return false;for(const key of ['url','branch','base']){const value=ownData(merge,key).value;if(typeof value!=='string'||value.length===0||value.length>2048||safeDiagnosticText(value,2048)!==value)return false;}
   try{const parsed=new URL(ownData(merge,'url').value);if(parsed.protocol!=='https:'||parsed.username||parsed.password||parsed.hostname.toLowerCase()!=='github.com'||parsed.port||parsed.search||parsed.hash)return false;}catch{return false;}
   if(!REF_NAME.test(ownData(merge,'branch').value)||!REF_NAME.test(ownData(merge,'base').value))return false;if(strictIsoMs(ownData(merge,'merged_at').value)===null)return false;
-  const provenance=ownData(merge,'provenance').value;if(provenance!==undefined&&provenance!=='observed-external')return false;const method=ownData(merge,'method').value;if(method!==undefined&&!['merge','rebase','squash'].includes(method))return false;const sha=ownData(merge,'sha').value;if(sha!==undefined&&(typeof sha!=='string'||!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(sha)))return false;return true;
+  const provenance=ownData(merge,'provenance').value;if(provenance!==undefined&&!MERGE_PROVENANCE_VALUES.has(provenance))return false;const method=ownData(merge,'method').value;if(method!==undefined&&!['merge','rebase','squash'].includes(method))return false;const sha=ownData(merge,'sha').value;if(sha!==undefined&&(typeof sha!=='string'||!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(sha)))return false;return true;
 }
 export function safeModelTier(value){return MODEL_TIERS.has(value)?value:null;}
 function plainDataSnapshot(value,budget={nodes:4096},depth=0){if(depth>32||budget.nodes<=0)return null;if(value===null||['string','number','boolean'].includes(typeof value))return value;if(value===undefined)return undefined;if(typeof value!=='object')return null;budget.nodes-=1;if(Array.isArray(value)){if(value.length>MAX_DIAGNOSTIC_COLLECTION)return null;const names=Object.getOwnPropertyNames(value);if(names.length!==value.length+1||names.some((name)=>name!=='length'&&!/^(?:0|[1-9]\d*)$/.test(name)))return null;if(Object.getOwnPropertySymbols(value).length>0)return null;const output=[];for(let index=0;index<value.length;index+=1){const descriptor=Object.getOwnPropertyDescriptor(value,String(index));if(!descriptor||!('value'in descriptor))return null;const item=plainDataSnapshot(descriptor.value,budget,depth+1);if(item===null&&descriptor.value!==null)return null;output.push(item);}return output;}if(!plain(value))return null;const names=Object.getOwnPropertyNames(value);if(names.length>MAX_DIAGNOSTIC_COLLECTION||Object.getOwnPropertySymbols(value).length>0)return null;const output={};for(const name of names){const descriptor=Object.getOwnPropertyDescriptor(value,name);if(!descriptor||!('value'in descriptor))return null;const item=plainDataSnapshot(descriptor.value,budget,depth+1);if(item===null&&descriptor.value!==null)return null;output[name]=item;}return output;}

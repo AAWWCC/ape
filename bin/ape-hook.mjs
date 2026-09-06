@@ -11,7 +11,7 @@ import {
   formatHookResponse,
   parseDeletionCommand,
   parseEvidenceCommand,
-  evidenceOperandCandidates,
+  evidencePathOperands,
   evidenceOperandIsGitNoIndexDevNull,
   evidenceOperandNeedsRoot,
   verifyEvidenceExecutableSnapshot,
@@ -102,6 +102,14 @@ import {
 // still refusing an unbounded stream; an oversized body is handled by the
 // catch, which consults the active run before denying.
 const INPUT_CAP_BYTES = 8 * 1024 * 1024;
+
+// Wait for the complete response to reach stdout before any branch exits.
+// Pipes can retain unwritten bytes even when write() returns successfully.
+function writeHookOutput(output) {
+  return new Promise((resolve, reject) => {
+    process.stdout.write(output, (error) => error ? reject(error) : resolve());
+  });
+}
 
 function parentInspection(event) {
   if (!['Bash', 'run_command'].includes(event.tool_name)) return false;
@@ -380,12 +388,12 @@ if (bodyTooLarge && CANARY_ONLY) {
   }
   if (exactCanary) {
     const oversizedEvent = { host: 'codex', event: 'PreToolUse' };
-    process.stdout.write(`${JSON.stringify(formatHookResponse(oversizedEvent, {
+    await writeHookOutput(`${JSON.stringify(formatHookResponse(oversizedEvent, {
       decision: 'deny',
       reason: 'APE binding canary may not call tools; return only the injected probe acknowledgement JSON',
     }))}\n`);
   } else {
-    process.stdout.write('{}\n');
+    await writeHookOutput('{}\n');
   }
   process.exit(0);
 }
@@ -476,10 +484,10 @@ try {
           CONTROL_PLANE_TOOLS.test(event.tool_name) && !event.is_subagent && !event.ticket_id)
       );
       if (unrelatedRecovery) {
-        process.stdout.write('{}\n');
+        await writeHookOutput('{}\n');
         process.exit(0);
       }
-      process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+      await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
         decision: 'deny', reason: 'APE native child identity evidence is unreadable; no bootstrap or stage authority was granted',
       }))}\n`);
       process.exit(0);
@@ -505,12 +513,12 @@ try {
     const admittedBootstrap = exactCanary && BOOTSTRAP_TOOL_PATTERN.test(event.tool_name) &&
       await isCodexBootstrapReplay(runtimePaths(trustedCodexHookRoot(input)), input);
     if (exactCanary && !admittedBootstrap) {
-      process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+      await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
         decision: 'deny',
         reason: 'APE binding canary may not call tools; return only the injected probe acknowledgement JSON',
       }))}\n`);
     } else {
-      process.stdout.write('{}\n');
+      await writeHookOutput('{}\n');
     }
     process.exit(0);
   }
@@ -538,7 +546,7 @@ try {
       source: input.source,
       native_input: input,
     });
-    process.stdout.write(`${JSON.stringify(formatSessionGuidanceResponse(guidance))}\n`);
+    await writeHookOutput(`${JSON.stringify(formatSessionGuidanceResponse(guidance))}\n`);
     process.exit(0);
   }
 
@@ -579,7 +587,7 @@ try {
   // active-state read below, so a corrupt or unreadable active.json still
   // allows the operator's control-plane recovery instead of failing closed.
   if (!event.is_subagent && !event.ticket_id && CONTROL_PLANE_TOOLS.test(event.tool_name)) {
-    process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+    await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
       decision: 'allow',
       reason: 'APE control-plane MCP call is exempt from the stage guard',
     }))}\n`);
@@ -600,7 +608,7 @@ try {
           runtimePaths(trustedCodexHookRoot(input)),
           input,
         )) {
-          process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+          await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
             decision: 'deny',
             reason: 'APE binding canary may not call tools; return only the injected probe acknowledgement JSON',
           }))}\n`);
@@ -613,7 +621,7 @@ try {
     // Neutral output is intentional. In particular, Claude's explicit
     // "allow" response can bypass the host's own permission prompt. APE is
     // stepping out of the decision entirely, not granting permission itself.
-    process.stdout.write('{}\n');
+    await writeHookOutput('{}\n');
     process.exit(0);
   }
 
@@ -631,7 +639,7 @@ try {
   // ordinary canary denial and the production worker/control-plane policy.
   if (BOOTSTRAP_TOOL_PATTERN.test(event.tool_name)) {
     if (event.event !== 'PreToolUse') {
-      process.stdout.write('{}\n');
+      await writeHookOutput('{}\n');
       process.exit(0);
     }
     const args = input.tool_input ?? input.toolInput ?? input.input ?? input.toolCall?.args ?? {};
@@ -654,7 +662,7 @@ try {
         binding = { valid: false, reason: 'APE bootstrap denied: binding evidence validation failed' };
       }
     }
-    process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+    await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
       decision: binding.valid ? 'allow' : 'deny',
       reason: binding.reason,
       additional_context: binding.valid ? binding.additional_context : undefined,
@@ -711,7 +719,7 @@ try {
         };
       }
     }
-    process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+    await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
       decision: launch.valid ? 'allow' : 'deny',
       reason: launch.reason,
     }))}\n`);
@@ -726,7 +734,7 @@ try {
     const launch = event.host === 'codex'
       ? await launchCodexIntent(paths, state, input)
       : await launchClaudeIntent(paths, state, input);
-    process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+    await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
       decision: launch.valid ? 'allow' : 'deny',
       reason: launch.reason,
     }))}\n`);
@@ -745,7 +753,7 @@ try {
       };
     }
     if (probeBinding.matched) {
-      process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+      await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
         decision: probeBinding.valid ? 'allow' : 'deny',
         reason: probeBinding.reason,
         additional_context: probeBinding.additional_context,
@@ -767,7 +775,7 @@ try {
       // authority to deny production binding here.
     }
     if (exactCanary) {
-      process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+      await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
         decision: 'deny',
         reason: 'APE binding canary may not bind a production ticket',
       }))}\n`);
@@ -780,7 +788,7 @@ try {
       probeIdentity = await resolvesBindingProbeIdentity(paths, input);
     } catch {
       if (!productionRunActive) {
-        process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+        await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
           decision: 'deny',
           reason: 'APE binding canary tool call denied: probe identity state validation failed',
         }))}\n`);
@@ -792,7 +800,7 @@ try {
       probeIdentity = false;
     }
     if (probeIdentity) {
-      process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+      await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
         decision: 'deny',
         reason: 'APE binding canary may not call tools; return only the injected probe acknowledgement JSON',
       }))}\n`);
@@ -810,7 +818,7 @@ try {
       binding.valid ? 'accepted' : 'rejected',
       binding.valid ? 'compatibility_ticket_accepted' : 'compatibility_ticket_rejected',
     ).catch(() => {});
-    process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+    await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
       decision: binding.valid ? 'allow' : 'deny',
       reason: binding.reason,
     }))}\n`);
@@ -839,7 +847,7 @@ try {
       }
       throw error;
     }
-    process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+    await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
       decision: binding.valid ? 'allow' : 'deny',
       reason: binding.reason,
       additional_context: binding.additional_context,
@@ -916,7 +924,7 @@ try {
         },
       );
       if (!stopReceiptValidation.observed) {
-        process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+        await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
           decision: 'deny',
           reason: `APE SubagentStop receipt validation failed closed: ${stopReceiptValidation.reason}`,
         }))}\n`);
@@ -926,7 +934,7 @@ try {
         stopReceiptValidation.result?.valid !== true &&
         stopReceiptValidation.validation?.exhausted !== true
       ) {
-        process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+        await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
           decision: 'deny',
           reason: formatDraftCorrections(
             stopReceiptValidation.result?.corrections ?? [],
@@ -1035,7 +1043,7 @@ try {
         receiptValidation = mergeReceiptCapabilityGrowthResult(receiptValidation, growth);
       }
     }
-    process.stdout.write(`${JSON.stringify(formatHookResponse(event, {
+    await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
       decision: bound ? 'allow' : 'deny',
       reason: bound
         ? receiptValidation?.valid === true
@@ -1213,26 +1221,24 @@ try {
             reason = reason ?? `cd target ${parsedEvidence.cdTarget} resolves outside the governed project`;
           }
         }
-        outer: for (const [tokenIndex, token] of parsedEvidence.tokens.entries()) {
+        for (const { tokenIndex, candidate } of evidencePathOperands(parsedEvidence.tokens)) {
           if (!safe) break;
-          for (const candidate of evidenceOperandCandidates(token)) {
-            if (
-              evidenceOperandIsGitNoIndexDevNull(
-                parsedEvidence.tokens,
-                tokenIndex,
-                candidate,
-              )
-            ) {
-              continue;
-            }
-            if (!evidenceOperandNeedsRoot(candidate)) continue;
-            // The admitted leading cd relocates every remaining operand.
-            const absolute = path.resolve(executionCwd, candidate);
-            if (await pathResolvesOutsideProject(paths.root, absolute)) {
-              safe = false;
-              reason = reason ?? `evidence operand ${candidate} resolves outside the governed project`;
-              break outer;
-            }
+          if (
+            evidenceOperandIsGitNoIndexDevNull(
+              parsedEvidence.tokens,
+              tokenIndex,
+              candidate,
+            )
+          ) {
+            continue;
+          }
+          if (!evidenceOperandNeedsRoot(candidate)) continue;
+          // The admitted leading cd relocates every remaining operand.
+          const absolute = path.resolve(executionCwd, candidate);
+          if (await pathResolvesOutsideProject(paths.root, absolute)) {
+            safe = false;
+            reason = reason ?? `evidence operand ${candidate} resolves outside the governed project`;
+            break;
           }
         }
       }
@@ -1446,10 +1452,10 @@ try {
     ticket,
     claudeBindingDenialCause: dispatchBindingDenialCause,
   });
-  process.stdout.write(`${JSON.stringify(formatHookResponse(event, decision))}\n`);
+  await writeHookOutput(`${JSON.stringify(formatHookResponse(event, decision))}\n`);
 } catch (cause) {
   if (CANARY_ONLY) {
-    process.stdout.write('{}\n');
+    await writeHookOutput('{}\n');
     process.exit(0);
   }
   // The input may be unparseable (oversized or corrupt), so consult the
@@ -1534,5 +1540,5 @@ try {
       reason: `APE hook failed closed: ${cause?.message ?? String(cause)}`,
     };
   }
-  process.stdout.write(`${JSON.stringify(formatHookResponse(event, decision))}\n`);
+  await writeHookOutput(`${JSON.stringify(formatHookResponse(event, decision))}\n`);
 }

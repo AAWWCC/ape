@@ -194,6 +194,19 @@ describe('audited preflight answers', () => {
     expect(result.run.test_paths).toEqual(['tests/value.test.js']);
   });
 
+  it('accepts an older question hold with no audit field while refusing malformed audit data', async () => {
+    const dir = await heldProject();
+    const paths = runtimePaths(dir);
+    const held = await readJson(paths.active);
+    delete held.audit;
+    await atomicWriteJson(paths.active, { ...held, audit: {} });
+    await expect(service.answerPreflight(dir, valid())).rejects.toMatchObject({ code: 'APE_CORRUPT_ACTIVE_STATE' });
+    await atomicWriteJson(paths.active, held);
+    const answered = await service.answerPreflight(dir, valid());
+    expect(answered.ok).toBe(true);
+    expect(answered.run.audit).toEqual([expect.objectContaining({ type: 'preflight_answered' })]);
+  });
+
   it.each([
     {
       name: 'stale run while the active run is at another stage',
@@ -286,6 +299,11 @@ describe('audited preflight answers', () => {
     const afterFirst = await readJson(runtimePaths(dir).active);
     const replay = await service.answerPreflight(dir, valid()).catch((error) => ({ ok: false, error }));
     expect(replay.ok).toBe(false);
+    expect(replay.error?.message).toMatch(/valid only while preflight input is required/);
+    expect(replay.error?.code).not.toBe('APE_CORRUPT_ACTIVE_STATE');
+    await expect(service.answerPreflight(dir, { ...valid(), run_id: 'run-stale-answer' }))
+      .rejects.toThrow('answer-preflight run_id confirmation mismatch');
+    expect((await service.statusRun(dir)).run).toMatchObject({ status: 'running', stage: 'plan' });
     expect(await readJson(runtimePaths(dir).active)).toEqual(afterFirst);
 
     const second = await heldProject();

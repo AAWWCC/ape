@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -469,6 +469,45 @@ describe('APE v2 roadmap attestation (RM8)', () => {
     const store = await readJson(paths.roadmapAttestations, { schema_version: '2.0.0', attestations: [] });
     const matches = store.attestations.filter((a) => a.requirement_id === 'ATT-7' && a.run_id === 'run-att7');
     expect(matches).toHaveLength(1);
+  });
+
+  it.each(['audit', 'index'])('repairs an attestation interrupted before its %s effect without changing original authority', async (failedEffect) => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-retry'), storedEntry('ATT-after', { depends_on: ['ATT-retry'] })]);
+    await archiveRun(paths, archivedRun('run-att-retry', { requirements: [], completes: [] }));
+    const failedPath = failedEffect === 'audit' ? paths.overrideLog : paths.requirementIndex;
+    await rm(failedPath, { force: true });
+    await mkdir(failedPath);
+    await expect(attest(paths, { requirement_ids: ['ATT-retry'], run_id: 'run-att-retry', reason: 'original reason' })).rejects.toThrow();
+    const persisted = await readJson(paths.roadmapAttestations);
+    expect(persisted.attestations).toHaveLength(1);
+    await rm(failedPath, { recursive: true });
+
+    // Durable attestation pairs remain sufficient while the index lags.
+    expect(statusOf(await derive(paths), 'ATT-retry')).toBe('satisfied');
+    expect(statusOf(await derive(paths), 'ATT-after')).toBe('ready');
+    await attest(paths, { requirement_ids: ['ATT-retry'], run_id: 'run-att-retry', reason: 'retry prose must not replace authority' });
+    await attest(paths, { requirement_ids: ['ATT-retry'], run_id: 'run-att-retry', reason: 'repeat' });
+
+    expect(await readJson(paths.roadmapAttestations)).toEqual(persisted);
+    expect((await readJson(paths.requirementIndex)).requirements['ATT-retry']).toEqual(['run-att-retry']);
+    const audit = (await readFile(paths.overrideLog, 'utf8')).trim().split('\n').map(JSON.parse);
+    expect(audit.filter((entry) => entry.operation === 'roadmap-attest')).toEqual([
+      expect.objectContaining({ reason: 'original reason', mutation_id: persisted.attestations[0].mutation_id }),
+    ]);
+  });
+
+  it('repairs a legacy attestation index without duplicating its existing batch audit', async () => {
+    const paths = await tempPaths();
+    await seedRoadmap(paths, [storedEntry('ATT-legacy')]);
+    await archiveRun(paths, archivedRun('run-att-legacy', { requirements: [], completes: [] }));
+    const attestation = { requirement_id: 'ATT-legacy', run_id: 'run-att-legacy', reason: 'legacy reason', attested_at: '2026-07-01T00:02:00.000Z', mutation_id: 'legacy-pair' };
+    await atomicWriteJson(paths.roadmapAttestations, { schema_version: '2.0.0', attestations: [attestation] });
+    const audit = JSON.stringify({ operation: 'roadmap-attest', at: attestation.attested_at, requirement_ids: ['ATT-legacy'], run_id: attestation.run_id, reason: attestation.reason }) + '\n';
+    await writeFile(paths.overrideLog, audit);
+    await attest(paths, { requirement_ids: ['ATT-legacy'], run_id: attestation.run_id, reason: 'retry' });
+    expect(await readFile(paths.overrideLog, 'utf8')).toBe(audit);
+    expect((await readJson(paths.requirementIndex)).requirements['ATT-legacy']).toEqual(['run-att-legacy']);
   });
 
   it('requires a non-empty reason', async () => {

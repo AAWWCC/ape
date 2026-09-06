@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 async function read(relative) {
@@ -85,6 +86,36 @@ describe('public cross-platform CI and release contract', () => {
       expect(packageSmoke).toContain(command);
     }
     expect(packageSmoke).toContain("APE_PUBLIC_REQUIRE_FORBIDDEN_HASHES: '1'");
+  });
+
+  it('runs bounded native runtime coverage on all six supported OS/Node combinations using freshly checked packages', async () => {
+    const native = jobBlock(await read('.github/workflows/ci.yml'), 'native-runtime');
+    expect(native).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect([...native.matchAll(/version: (\d+\.\d+\.\d+)/gu)].map((entry) => entry[1])).toEqual(['22.12.0', '24.15.0']);
+    expect(native).toContain('runs-on: ${{ matrix.os }}');
+    expect(native).toContain('node-version: ${{ matrix.node.version }}');
+    expect(native).toContain('fail-fast: false');
+    expect(native).not.toMatch(/exclude:|continue-on-error:/u);
+    expect(native).toContain('node scripts/run-ci-tests.mjs native -- --maxWorkers=1');
+    expect(native.indexOf('npm run bundle')).toBeLessThan(native.indexOf('npm run package:plugins'));
+    expect(native.indexOf('npm run package:plugins')).toBeLessThan(native.indexOf('git diff --exit-code -- dist/ plugins/'));
+    expect(native.indexOf('git diff --exit-code -- dist/ plugins/')).toBeLessThan(native.indexOf('run-ci-tests.mjs native'));
+  });
+
+  it('keeps the required aggregate name and fails it for failed, cancelled or skipped native checks', async () => {
+    const full = jobBlock(await read('.github/workflows/ci.yml'), 'full-suite');
+    expect(full).toContain('name: Full suite aggregate');
+    expect(full).toContain('if: ${{ always() }}');
+    expect(full).toContain('CI_NEEDS: ${{ toJSON(needs) }}');
+    const dependencies = full.match(/needs: \[([^\]]+)\]/u)[1].split(',').map((entry) => entry.trim());
+    expect(dependencies).toEqual(['package-smoke', 'marketplace-install-smoke', 'smoke', 'shard-1', 'shard-2', 'shard-3', 'native-runtime']);
+    const command = full.match(/run: node -e "([^"\r\n]+)"/u)[1];
+    expect(full.indexOf(command)).toBeLessThan(full.indexOf('actions/checkout@'));
+    for (const status of ['success', 'failure', 'cancelled', 'skipped']) {
+      const needs = Object.fromEntries(dependencies.map((name) => [name, { result: name === 'native-runtime' ? status : 'success' }]));
+      const result = spawnSync(process.execPath, ['-e', command], { env: { ...process.env, CI_NEEDS: JSON.stringify(needs) }, encoding: 'utf8' });
+      expect(result.status, `native result ${status}: ${result.stderr}`).toBe(status === 'success' ? 0 : 1);
+    }
   });
 
   it('keeps automated lockfile installs free of lifecycle and incidental network side effects', async () => {

@@ -9,6 +9,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { configAction } from '../lib/runtime/service.js';
+import { parse as parseToml } from 'smol-toml';
 
 describe('ape v2 Codex-native statusline wiring', () => {
   let codexHome;
@@ -107,6 +108,29 @@ describe('ape v2 Codex-native statusline wiring', () => {
     expect(readFileSync(configFile(), 'utf8')).toBe(original);
   });
 
+  it.each([
+    ['"status_line"', '"status_line_use_colors"'],
+    ["'status_line'", "'status_line_use_colors'"],
+    ['"status\\u005fline"', '"status_line_use\\u005fcolors"'],
+  ])('rewrites and restores equivalent quoted TOML keys %s', async (lineKey, colorsKey) => {
+    const original = `[tui]\n${lineKey} = [\n  "weekly-limit",\n]\n${colorsKey} = false\ntheme = "dark"\n`;
+    writeFileSync(configFile(), original);
+    expect(parseToml(original).tui.status_line).toEqual(['weekly-limit']);
+
+    await configAction(project, 'wire', { host: 'codex' });
+    const installed = readFileSync(configFile(), 'utf8');
+    expect(parseToml(installed).tui).toMatchObject({
+      status_line_use_colors: true,
+      theme: 'dark',
+    });
+    expect(parseToml(installed).tui.status_line).toContain('task-progress');
+    expect((await configAction(project, 'wire', { host: 'codex' })).statusline.unchanged).toBe(true);
+
+    await configAction(project, 'unwire', { host: 'codex' });
+    expect(readFileSync(configFile(), 'utf8')).toBe(original);
+    expect(parseToml(readFileSync(configFile(), 'utf8')).tui.status_line).toEqual(['weekly-limit']);
+  });
+
   it('keeps a user key added to an APE-created [tui] table during unwire', async () => {
     writeFileSync(configFile(), 'model = "gpt-5.5"\n');
     await configAction(project, 'wire', { host: 'codex' });
@@ -124,6 +148,35 @@ describe('ape v2 Codex-native statusline wiring', () => {
     expect(restored).toContain('[tui]');
     expect(restored).toContain('theme = "dark"');
     expect(restored).not.toContain('status_line =');
+  });
+
+  it.each([
+    '[tui]\nnotes = """\n"status_line" = ["fake"]\n"""\n',
+    'notes = """\n[tui]\n"""\n',
+    '[tui]\nnotes = """\n# APE managed Codex-native status line\n"""\n',
+  ])('refuses edits that would change unrelated multiline string data', async (original) => {
+    writeFileSync(configFile(), original);
+    expect(() => parseToml(original)).not.toThrow();
+
+    await expect(configAction(project, 'wire', { host: 'codex' })).rejects.toThrow(/unrelated configuration would change/);
+
+    expect(readFileSync(configFile(), 'utf8')).toBe(original);
+    expect(existsSync(`${configFile()}.bak`)).toBe(false);
+    expect(existsSync(stateFile())).toBe(false);
+  });
+
+  it('refuses unwire when text removal would change an unrelated value added later', async () => {
+    writeFileSync(configFile(), '[tui]\n');
+    await configAction(project, 'wire', { host: 'codex' });
+    const backup = readFileSync(`${configFile()}.bak`, 'utf8');
+    const changed = `${readFileSync(configFile(), 'utf8')}notes = """\n# APE managed Codex-native status line\n"""\n`;
+    writeFileSync(configFile(), changed);
+
+    await expect(configAction(project, 'unwire', { host: 'codex' })).rejects.toThrow(/unrelated configuration would change/);
+
+    expect(readFileSync(configFile(), 'utf8')).toBe(changed);
+    expect(readFileSync(`${configFile()}.bak`, 'utf8')).toBe(backup);
+    expect(existsSync(stateFile())).toBe(true);
   });
 
   it('rewire is idempotent and does not destroy the original ownership record', async () => {
@@ -167,6 +220,8 @@ describe('ape v2 Codex-native statusline wiring', () => {
     'tui = { status_line = ["current-dir"] }\n',
     'tui.status_line = ["current-dir"]\n',
     '["tui"]\nstatus_line = ["current-dir"]\n',
+    '["t\\u0075i"]\nstatus_line = ["current-dir"]\n',
+    '"tui"."status_line" = ["current-dir"]\n',
   ])('fails safely for unsupported TOML shape: %s', async (config) => {
     writeFileSync(configFile(), config);
 
