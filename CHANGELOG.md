@@ -5,6 +5,11 @@
 Release candidate; fresh candidate-bound Codex live certification is required
 before tagged publication. Claude live operation remains unverified.
 
+- Carry validated source receipt trees across capability recovery so successor
+  test writers own only their authorized test changes. Reject inherited-content
+  edits and invalid provenance, and preserve exact receipts and published-crash
+  replay without rewriting historical ticket bases or generation lineage.
+
 - Replace separate plan, preflight, receipt and roadmap prose/count caps with
   their shared resource envelopes. New plans use 64 KiB; historical tickets keep
   their exact issued schemas and budgets. Capability growth checks actual commands
