@@ -47,6 +47,7 @@ try {
     await send({ type: 'created', response, pid: process.pid });
     await cancel;
     const cancelled = await taskCall('tasks/cancel', response.result.taskId);
+    await send({ type: 'cancel-returned' });
     await shutdownOwnedTasks('native fixture finished');
     await send({ type: 'cancelled', response: cancelled, task: await getTask(root, response.result.taskId) });
     process.disconnect();
@@ -158,7 +159,9 @@ async function messageFrom(worker, type) {
     const message = worker.messages.find((entry) => entry.type === type);
     if (!message && worker.exited) throw new Error(`Fixture exited before ${type}: ${worker.stderr}`);
     return message;
-  }, `fixture message ${type}`);
+  }, `fixture message ${type}`).catch((error) => {
+    throw new Error(`${error.message}; observed messages: ${worker.messages.map((entry) => entry.type).join(', ')}; stderr: ${worker.stderr}`, { cause: error });
+  });
 }
 
 async function stopWorker(worker) {
