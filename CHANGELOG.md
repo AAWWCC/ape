@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.25.0 — 2026-09-06
+## 2.25.1 — 2026-09-07
 
 Release candidate; fresh candidate-bound Codex live certification is required
 before tagged publication. Claude live operation remains unverified.
@@ -9,6 +9,15 @@ before tagged publication. Claude live operation remains unverified.
   test writers own only their authorized test changes. Reject inherited-content
   edits and invalid provenance, and preserve exact receipts and published-crash
   replay without rewriting historical ticket bases or generation lineage.
+- Allow verified read-only recovery successors to finish with an unchanged tree,
+  while rejecting unauthorized drift and invalid source evidence.
+- Register the recovery regression suite in the CI duration inventory and make
+  recovery horizon test timing deterministic.
+
+## 2.25.0 — 2026-09-06
+
+Release candidate; fresh candidate-bound Codex live certification is required
+before tagged publication. Claude live operation remains unverified.
 
 - Replace separate plan, preflight, receipt and roadmap prose/count caps with
   their shared resource envelopes. New plans use 64 KiB; historical tickets keep
