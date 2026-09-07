@@ -341,6 +341,30 @@ function maximalPlannerPlan(preflightHash, targetBytes = 16_384) {
 }
 
 describe('live receipt contract integration', () => {
+  it('rechecks production ownership after exact capability-draft attestation and before receipt persistence', async () => {
+    const value = await fixture();
+    await writeFile(path.join(value.directory, 'value.js'), 'export const value = 22;\n');
+    const payload = {
+      ...draft(value.ticket, value.capability, 'failed'),
+      evidence: {
+        summary: 'The implementation requires an independent test writer.',
+        failure_kind: 'capability',
+        required_claims: { required_role: 'test_writer', test_paths: ['tests/value.test.js'] },
+      },
+    };
+    expect(await validateReceiptForDispatch(value.directory, payload)).toMatchObject({ valid: true });
+    // A genuine draft attestation is not a tree-ownership exemption. Inject
+    // foreign production bytes after that check, immediately before the sink.
+    await writeFile(path.join(value.directory, 'foreign.js'), 'export const foreign = true;\n');
+    const before = await readJson(value.paths.active);
+    const result = await recordReceipt(value.directory, payload);
+    expect(result).toMatchObject({ ok: false, rejected: true });
+    expect(result.errors.join(' ')).toMatch(/unclaimed|attribution|boundary/i);
+    const after = await readJson(value.paths.active);
+    expect(after.receipts).toEqual(before.receipts);
+    expect(after.tickets).toEqual(before.tickets);
+  });
+
   it('uses the frozen three-worker four-submission contract through two expired-ticket recovery launches', async () => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.policy.max_physical_workers_per_ticket = 3;

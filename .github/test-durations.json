@@ -25,6 +25,7 @@
   "__tests__/runtime-v2-bundle-freshness.test.js": 61,
   "__tests__/runtime-v2-bundle-reachability.test.js": 638,
   "__tests__/runtime-v2-capability-block.test.js": 4,
+  "__tests__/runtime-v2-capability-recovery-tree-handoff.test.js": 115000,
   "__tests__/runtime-v2-capability-resource-contract.test.js": 86,
   "__tests__/runtime-v2-certification-prompt-preparation.test.js": 202,
   "__tests__/runtime-v2-certification-protection-policy.test.js": 9,

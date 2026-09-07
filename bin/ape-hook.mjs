@@ -78,6 +78,7 @@ import {
   RECEIPT_CONTRACT_VERSION,
   RECEIPT_VALIDATION_TOOL,
   validateReceiptDraft,
+  resolveReceiptBaseline,
 } from '../lib/runtime/receipt-validator.js';
 import {
   authenticatedReceiptBearer,
@@ -90,7 +91,7 @@ import {
 import {
   capabilityManifestGrowthEnabled,
   mergeReceiptCapabilityGrowthResult,
-  prospectiveReceiptCapabilityGrowthFromTree,
+  prospectiveReceiptCapabilityGrowth,
 } from '../lib/runtime/capability-manifest.js';
 import {
   formatSessionGuidanceResponse,
@@ -901,12 +902,9 @@ try {
         stopDraftResult.valid === true &&
         capabilityManifestGrowthEnabled(state)
       ) {
-        const growth = await prospectiveReceiptCapabilityGrowthFromTree(
-          paths.root,
-          state,
-          inspectedTicket,
-          normalizedDraft,
-        );
+        const baseline = await resolveReceiptBaseline({ project_dir: paths.root, state, ticket: inspectedTicket });
+        const growth = prospectiveReceiptCapabilityGrowth(state, inspectedTicket, normalizedDraft,
+          await diffFiles(paths.root, baseline, await currentTreeSha(paths.root)));
         stopDraftResult = mergeReceiptCapabilityGrowthResult(stopDraftResult, growth);
       }
       const persistedStopDraftResult = redactReceiptBearer(
@@ -1034,12 +1032,9 @@ try {
         receiptValidation.valid === true &&
         capabilityManifestGrowthEnabled(state)
       ) {
-        const growth = await prospectiveReceiptCapabilityGrowthFromTree(
-          paths.root,
-          state,
-          ticket,
-          normalizedReceipt,
-        );
+        const baseline = await resolveReceiptBaseline({ project_dir: paths.root, state, ticket });
+        const growth = prospectiveReceiptCapabilityGrowth(state, ticket, normalizedReceipt,
+          await diffFiles(paths.root, baseline, await currentTreeSha(paths.root)));
         receiptValidation = mergeReceiptCapabilityGrowthResult(receiptValidation, growth);
       }
     }
@@ -1391,21 +1386,42 @@ try {
     const changed = baseline && baseline !== tree
       ? await diffFiles(paths.root, baseline, tree)
       : [];
-    if (changed.length > 0) {
+    const hasRecovery = state.tickets.some((candidate) =>
+      (candidate.recovery_provenance || candidate.recovery_lineage) &&
+      !state.receipts?.some((receipt) => receipt.ticket_id === candidate.ticket_id) &&
+      !(state.expired_tickets ?? []).includes(candidate.ticket_id));
+    if (changed.length > 0 || hasRecovery) {
       // Expired tickets share stage/claims with their retry replacement; if
       // they stayed in the pending pool every post-expiry write would match
       // both and be denied as ambiguous (same exclusion as activeTickets).
+      // Read-only recovery successors still need independent source validation
+      // at result boundaries; evaluateTreePolicy permits only their empty diff.
       const expired = new Set(state.expired_tickets ?? []);
       const pending = state.tickets.filter((candidate) =>
-        candidate.writable &&
+        (candidate.writable || candidate.recovery_provenance || candidate.recovery_lineage) &&
         !expired.has(candidate.ticket_id) &&
         !state.receipts?.some((receipt) => receipt.ticket_id === candidate.ticket_id));
-      const candidates = pending.filter((candidate) =>
-        evaluateTreePolicy(
+      const candidateFiles = new Map();
+      const candidates = [];
+      let invalidRecovery = false;
+      for (const candidate of pending) {
+        try {
+          const recovery = candidate.recovery_provenance || candidate.recovery_lineage;
+          const candidateBaseline = recovery
+            ? await resolveReceiptBaseline({ project_dir: paths.root, state, ticket: candidate })
+            : baseline;
+          const files = recovery ? await diffFiles(paths.root, candidateBaseline, tree) : changed;
+          candidateFiles.set(candidate.ticket_id, files);
+          if (evaluateTreePolicy(
           { ...event, is_subagent: true },
           { state, ticket: candidate },
-          changed,
-        ).decision === 'allow');
+          files,
+          ).decision === 'allow') candidates.push(candidate);
+        } catch {
+          // Invalid recovery evidence is not an empty authorized diff.
+          invalidRecovery = true;
+        }
+      }
       // Friction #6/#15: the parent's Agent-result payload carries no agent
       // identity, so a successful writer stage's return always reaches this
       // guard unbound (ticket null) even though the diff is exactly the
@@ -1419,7 +1435,7 @@ try {
       // foreign subagents at SubagentStop, and a bound subagent whose sole
       // candidate is not its own ticket all keep the deny below.
       if (
-        candidates.length === 1 &&
+        !invalidRecovery && candidates.length === 1 &&
         !ticket &&
         !event.is_subagent &&
         isAgentDispatchTool(event.tool_name) &&
@@ -1429,7 +1445,7 @@ try {
           decision: 'allow',
           reason: `APE tree change attributed to sole pending ticket ${candidates[0].ticket_id}; receipt admission re-verifies the diff`,
         };
-      } else if (candidates.length !== 1 || !ticket || candidates[0].ticket_id !== ticket.ticket_id) {
+      } else if (invalidRecovery || candidates.length !== 1 || !ticket || candidates[0].ticket_id !== ticket.ticket_id) {
         decision = {
           decision: 'deny',
           reason: candidates.length > 1
@@ -1437,7 +1453,7 @@ try {
             : 'APE result denied: tree change has no exact active ticket attribution',
         };
       } else {
-        const treeDecision = evaluateTreePolicy(event, { state, ticket }, changed);
+        const treeDecision = evaluateTreePolicy(event, { state, ticket }, candidateFiles.get(ticket.ticket_id));
         if (
           treeDecision.decision === 'deny' ||
           !['PreToolUse', 'PostToolUse', 'PostToolUseFailure'].includes(event.event)

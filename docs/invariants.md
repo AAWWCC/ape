@@ -64,6 +64,20 @@ only needs recording, the parent retries that record without restarting the work
 
 ## Capability-recovery generations
 
+Fresh capability successors attribute writes from the validated source receipt's
+head tree. Receipt admission and live hooks independently resolve the exact
+source ticket, receipt, recovery transaction and provenance, recompute source
+ownership, and validate each recovery ancestor. Missing or inconsistent evidence
+fails closed even when the mutable active tree is current or no files changed.
+Each pending writer is checked against its own complete tree diff; inherited
+file names grant no exemption from successor role or test scope.
+
+Ticket base trees and sealed source receipts remain unchanged. Historical source
+receipts retain their sealed attribution, and an already published selector is
+replay authority even if a crash prevented installation of the active projection.
+Replay preserves generation lineage and does not make a published generation
+its own predecessor.
+
 A capability successor can add missing authority once for a receipt-contract-v1 ticket. It
 cannot reset counters, broaden scope arbitrarily, or treat a worker's draft as an authenticated
 receipt. Recovery authority comes from the immutable run contract, never mutable `active.json`

@@ -1202,6 +1202,53 @@ describe('APE v2 SCOPE_EXPANDED receipt atomicity across a crash (audit 1.3, inv
 });
 
 describe('APE v2 bounded capability-recovery publication', () => {
+  it.each(['prepared', 'published', 'concurrent'])(
+    'preserves a production-bearing source and retained-base test successor across %s recovery',
+    async (boundary) => {
+      const dir = await project();
+      const { ticket, capability } = await nativeCapabilityTicket(dir, {
+        behavioral: false, test_paths: [],
+      });
+      expect(ticket.role).toBe('implementer');
+      await writeFile(path.join(dir, 'src/value.js'), VALUE_V2);
+      const payload = capabilityReceipt(ticket, capability, {
+        required_role: 'test_writer', test_paths: ['tests/value.test.js'],
+      });
+      expect(await validateReceiptForDispatch(dir, payload)).toMatchObject({ valid: true });
+      const paths = runtimePaths(dir);
+      if (boundary === 'prepared') __crashControl.arm = { kind: 'prepared-transaction' };
+      if (boundary === 'published') __publicationFault.arm = { kind: 'crash-after-selector-publish' };
+      if (boundary !== 'concurrent') {
+        const crashed = await capturedRecord(dir, payload);
+        expect(crashed.error).toBeInstanceOf(Error);
+        expect(boundary === 'prepared' ? __crashControl.fired : __publicationFault.fired).toBe(1);
+      }
+      const results = await Promise.all([recordReceipt(dir, payload), recordReceipt(dir, payload)]);
+      expect(results.every((result) => result.ok)).toBe(true);
+      const active = await readJson(paths.active);
+      expect(active.receipts).toHaveLength(1);
+      expect(active.tickets).toHaveLength(2);
+      const source = active.receipts[0];
+      const successor = active.tickets.find((entry) => entry.ticket_id !== ticket.ticket_id);
+      expect(source.changed_files).toEqual(['src/value.js']);
+      expect(source.head_tree_sha).not.toBe(source.base_tree_sha);
+      expect(successor).toMatchObject({ role: 'test_writer', base_tree_sha: ticket.base_tree_sha,
+        parent_hash: source.receipt_hash });
+      const file = path.join(paths.receipts, `${source.receipt_id}.json`);
+      const bytes = await readFile(file, 'utf8');
+      const generation = structuredClone(active.recovery_generation);
+      const orchestration = structuredClone(active.orchestration);
+      expect((await recordReceipt(dir, payload)).ok).toBe(true);
+      const replay = await readJson(paths.active);
+      expect(await readFile(file, 'utf8')).toBe(bytes);
+      expect(rawSha256(await readFile(file))).toBe(rawSha256(bytes));
+      expect(replay.tickets).toEqual(active.tickets);
+      expect(replay.receipts).toEqual(active.receipts);
+      expect(replay.recovery_generation).toEqual(generation);
+      expect(replay.orchestration).toEqual(orchestration);
+    },
+  );
+
   it.each([
     [Array.from({ length: 64 }, (_, index) => `tests/generated-${index}.test.js`), 'tests/generated-64.test.js'],
     [testPathsAt4096Bytes(), 'tests/another.test.js'],
