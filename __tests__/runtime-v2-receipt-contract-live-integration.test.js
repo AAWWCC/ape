@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as dispatchIntents from '../lib/runtime/claude-dispatch.js';
 import { emptyOrchestrationTelemetry } from '../lib/runtime/orchestration-telemetry.js';
 import { observeCodexSubagentStop, readDispatchReceiptAttestation } from '../lib/runtime/claude-dispatch.js';
 import { codexBootstrapOrientation } from '../lib/runtime/codex-bootstrap.js';
@@ -2264,7 +2265,23 @@ describe('live receipt contract integration', () => {
     );
     expect(firstExhausted).toEqual({});
 
-    const recovery = await nextRun(value.directory);
+    // Recovery starts its deadline before the dispatch intent is prepared.
+    // Exercise elapsed preparation time without sleeps or scheduler dependence.
+    const recoveryStartedAt = Date.now();
+    const prepareCodexIntent = dispatchIntents.prepareCodexIntent;
+    vi.useFakeTimers({ toFake: ['Date'], now: recoveryStartedAt });
+    const preparation = vi.spyOn(dispatchIntents, 'prepareCodexIntent').mockImplementation((...args) => {
+      vi.setSystemTime(recoveryStartedAt + 25);
+      return prepareCodexIntent(...args);
+    });
+    let recovery;
+    try {
+      recovery = await nextRun(value.directory);
+      expect(preparation).toHaveBeenCalledTimes(1);
+    } finally {
+      preparation.mockRestore();
+      vi.useRealTimers();
+    }
     const recoveryDispatch = recovery.actions.find((entry) => entry.type === 'dispatch_agent');
     expect(recoveryDispatch).toMatchObject({
       ticket: { ticket_id: value.ticket.ticket_id },
@@ -2294,7 +2311,8 @@ describe('live receipt contract integration', () => {
       immutable_ticket_deadline_at: value.ticket.deadline_at,
     });
     expect(Date.parse(recoveryIntent.expires_at)).toBeGreaterThan(Date.now());
-    expect(Date.parse(recoveryIntent.expires_at) - Date.parse(recoveryIntent.prepared_at)).toBe(expectedDeadline);
+    expect(Date.parse(recoveryIntent.prepared_at)).toBeGreaterThan(recoveryStartedAt);
+    expect(Date.parse(recoveryIntent.expires_at) - recoveryStartedAt).toBe(expectedDeadline);
     expect(Date.parse(value.ticket.deadline_at)).toBeLessThanOrEqual(Date.now());
 
     // The recovery intent has its own bounded host-dispatch horizon, while the
