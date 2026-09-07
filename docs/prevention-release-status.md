@@ -1,9 +1,17 @@
 # Prevention-first reliability status
 
-**2.25.0 is a review candidate, not a certified release.** Reproduced blockers
+**2.25.1 is a review candidate, not a certified release.** Reproduced blockers
 have fixes and regression tests. The full live acceptance requirement is still
-incomplete. This page records the latest results as of September 6, 2026; it does
+incomplete. This page records the latest results as of September 7, 2026; it does
 not authorize more testing, installation, or publication.
+
+## 2.25.1 recovery patch
+
+The patch packages validated source-tree handoff across capability recovery,
+including unchanged read-only successors and exact published-generation replay.
+The recovery fix passed code and security review, 4,665 local tests with 87 skips,
+and post-merge CI and CodeQL before this version bump. Those results do not
+replace a fresh candidate-bound live certification campaign for 2.25.1.
 
 ## 2.25.0 limits audit
 
@@ -211,7 +219,7 @@ The 2.24.12 Claude worker-validator check could not authenticate on two authoriz
 attempts. No validator call or passing proof was produced. That check is optional
 under the 2.24.13 release policy; the retained failures remain failures.
 
-The current 2.25.0 packages require a fresh candidate-bound Codex live campaign.
+The current 2.25.1 packages require a fresh candidate-bound Codex live campaign.
 Earlier version evidence cannot certify them.
 
 The new native CI matrix must still run on the submitted candidate. Local macOS
