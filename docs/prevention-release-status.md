@@ -97,8 +97,8 @@ below retain their original version attribution.
 - The next blocking pass added complete Git branch inspection parsing, quoted
   working directories, informational-command prerequisite handling, and script
   argument boundaries. Recovery guidance now matches retry eligibility and
-  preserves existing gate/shipping polls. [Follow-up record](blocking-followup.md)
-  separates these reproduced fixes from documented limits and remaining work.
+  preserves existing gate/shipping polls. See [shell policy](hooks.md#bound-subagent-shell-policy)
+  for supported inspection forms and remaining shell limits.
 - Parent-tool refusals now retain their affected reference entries independently
   of active state. Result hooks and fresh/prepared receipt admission consult
   those observations; authorized repairs and reads stay available. Matched
