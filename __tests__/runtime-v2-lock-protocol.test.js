@@ -22,6 +22,7 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 // filesystem completely unchanged.
 const churn = vi.hoisted(() => ({ lockPath: null }));
 const releaseHold = vi.hoisted(() => ({ lockPath: null, gate: null, entered: 0 }));
+const releaseFault = vi.hoisted(() => ({ rename: null }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal();
@@ -32,6 +33,9 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const yieldToTimers = () => new Promise((resolve) => setImmediate(resolve));
   return {
     ...actual,
+    rename: async (...args) => releaseFault.rename
+      ? releaseFault.rename(actual, ...args)
+      : actual.rename(...args),
     mkdir: async (...args) => {
       const [target] = args;
       if (churn.lockPath !== null && target === churn.lockPath) {
@@ -65,6 +69,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 
 const cleanups = [];
 afterEach(async () => {
+  releaseFault.rename = null;
   releaseHold.lockPath = null;
   releaseHold.gate = null;
   releaseHold.entered = 0;
@@ -199,6 +204,61 @@ describe.skipIf(process.platform === 'win32')('APE v2 shared dir lock: stale ste
 });
 
 describe('APE v2 shared dir lock: release-window contention', () => {
+  it.each(['EPERM', 'EACCES', 'EBUSY'])('retries transient %s during release without orphaning the receipt lock', async (code) => {
+    const dir = await scratch();
+    const lockPath = path.join(dir, 'receipt-effects.lock');
+    const options = { staleMs: 60_000, heartbeatMs: 5_000, busyMs: 1_000, serializeLocal: true, busyMessage: 'busy' };
+    let failures = 0;
+    releaseFault.rename = async (actual, source, target) => {
+      if (source === lockPath && target.startsWith(`${lockPath}.release.`) && failures < 3) {
+        failures += 1;
+        throw Object.assign(new Error('transient release fault'), { code });
+      }
+      return actual.rename(source, target);
+    };
+    await withDirLock(lockPath, async () => 'first', options);
+    expect(existsSync(lockPath), 'a completed holder must not leave its retiring lock behind').toBe(false);
+    await expect(withDirLock(lockPath, async () => 'next', options)).resolves.toBe('next');
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('rechecks ownership after a failed release rename before retrying', async () => {
+    const dir = await scratch();
+    const lockPath = path.join(dir, 'receipt-effects.lock');
+    releaseFault.rename = async (actual, source, target) => {
+      if (source === lockPath && target.startsWith(`${lockPath}.release.`)) {
+        releaseFault.rename = null;
+        await actual.rename(source, path.join(dir, 'retired'));
+        await actual.mkdir(lockPath);
+        await actual.writeFile(path.join(lockPath, 'owner'), 'successor');
+        throw Object.assign(new Error('transient release fault'), { code: 'EPERM' });
+      }
+      return actual.rename(source, target);
+    };
+    await withDirLock(lockPath, async () => {}, {
+      staleMs: 60_000, heartbeatMs: 5_000, busyMs: 1_000, busyMessage: 'busy',
+    });
+    expect(readFileSync(path.join(lockPath, 'owner'), 'utf8')).toBe('successor');
+  });
+
+  it('bounds persistent release denial and leaves the unverifiable lock intact', async () => {
+    const dir = await scratch();
+    const lockPath = path.join(dir, 'receipt-effects.lock');
+    let attempts = 0;
+    releaseFault.rename = async (actual, source, target) => {
+      if (source === lockPath && target.startsWith(`${lockPath}.release.`)) {
+        attempts += 1;
+        throw Object.assign(new Error('persistent release denial'), { code: 'EPERM' });
+      }
+      return actual.rename(source, target);
+    };
+    await expect(withDirLock(lockPath, async () => 'done', {
+      staleMs: 60_000, heartbeatMs: 5_000, busyMs: 20, busyMessage: 'busy',
+    })).resolves.toBe('done');
+    expect(attempts).toBeGreaterThan(1);
+    expect(existsSync(path.join(lockPath, 'owner'))).toBe(true);
+  }, 5_000);
+
   it('does not extend one held release tombstone into a withdrawal chain', async () => {
     const dir = await scratch();
     const lockPath = path.join(dir, 'shared.lock');

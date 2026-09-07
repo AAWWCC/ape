@@ -552,7 +552,10 @@ describe('APE v2 service integration', () => {
     expect(projectedReplay.actions).toHaveLength(2);
     expect(Buffer.byteLength(JSON.stringify(projectedReplay), 'utf8'))
       .toBeLessThanOrEqual(RESPONSE_BUDGET_BYTES);
-  });
+    // This exercises 32 persisted launch groups plus pending-ticket replay,
+    // including real Git snapshots and disk journals on every NEXT. It is a
+    // bounded end-to-end correctness check, not a 15s performance contract.
+  }, 60_000);
 });
 
 describe('APE v2 resting shipping-watch levers (service)', () => {
