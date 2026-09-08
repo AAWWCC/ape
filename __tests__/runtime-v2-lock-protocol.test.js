@@ -477,7 +477,7 @@ describe('APE v2 atomic replace (D1)', () => {
     await atomicWriteJson(file, { generation: 0 });
     const reader = await open(file, 'r');
     // The reader stays open across every replace, so on win32 each rename-over
-    // hits the bounded retry-then-copy fallback; with GitHub-runner AV latency
+    // uses bounded atomic-rename retries; with GitHub-runner AV latency
     // per temp file, 50 rounds blew the default timeout. A dozen rounds still
     // proves the property — a delete-before-rename regression fails on the
     // FIRST stat — so keep the count low and the timeout generous.

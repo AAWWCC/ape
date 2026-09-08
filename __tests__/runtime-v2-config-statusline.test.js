@@ -1,12 +1,35 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync, statSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { configAction } from '../lib/runtime/service.js';
+import { wireStatusline, unwireStatusline, statuslineState } from '../lib/runtime/statusline.js';
 
-// statusline.js resolves the host config dir from os.homedir(), which reads
-// $HOME on posix and %USERPROFILE% on Windows — so a temp home must override
-// both to fully isolate these writes from the real ~/.claude/settings.json.
+const fixture = vi.hoisted(() => ({ home: null, failWrite: null }));
+vi.mock('node:os', async (importOriginal) => ({
+  ...await importOriginal(),
+  homedir: () => {
+    if (!fixture.home) throw new Error('statusline fixture home is not initialized');
+    return fixture.home;
+  },
+}));
+vi.mock('../lib/runtime/storage.js', async (importOriginal) => {
+  const original = await importOriginal();
+  return {
+    ...original,
+    atomicReplaceText: async (file, text, options) => {
+      if (file === fixture.failWrite) {
+        fixture.failWrite = null;
+        throw new Error('injected settings replacement failure');
+      }
+      return original.atomicReplaceText(file, text, options);
+    },
+  };
+});
+
+// Mock homedir directly and clear the alternate-profile override. Neither
+// HOME nor CODEX_HOME changes, and no actual host settings are reachable.
 // The wired PROJECT must be a throwaway too: wire resolves
 // statusline.refresh_interval_seconds from the project's .ape/runtime/config.json,
 // so wiring process.cwd() would couple these pins to the host repo's own
@@ -15,22 +38,20 @@ import { configAction } from '../lib/runtime/service.js';
 describe('ape v2 config statusline wiring', () => {
   let home;
   let project;
-  let prevHome;
-  let prevUserProfile;
   const settingsFile = () => join(home, '.claude', 'settings.json');
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'ape-home-'));
     project = mkdtempSync(join(tmpdir(), 'ape-proj-'));
-    prevHome = process.env.HOME;
-    prevUserProfile = process.env.USERPROFILE;
-    process.env.HOME = home;
-    process.env.USERPROFILE = home;
+    fixture.home = home;
+    fixture.failWrite = null;
+    vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);
     mkdirSync(join(home, '.claude'), { recursive: true });
   });
   afterEach(() => {
-    process.env.HOME = prevHome;
-    process.env.USERPROFILE = prevUserProfile;
+    vi.unstubAllEnvs();
+    fixture.home = null;
+    fixture.failWrite = null;
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
   });
@@ -97,15 +118,15 @@ describe('ape v2 config statusline wiring', () => {
     expect(settings.statusLine.command).toBe('echo hi');
   });
 
-  it('unwire backs up the wired settings and leaves no temp litter', async () => {
+  it('unwire preserves the original backup and leaves no temp litter', async () => {
     writeFileSync(settingsFile(), JSON.stringify({ model: 'opus' }, null, 2));
     await configAction(project, 'wire', { host: 'claude' });
     const res = await configAction(project, 'unwire', { host: 'claude' });
     expect(res.statusline.removed).toBe(true);
 
-    // The backup is the PRE-unwire (wired) state — same courtesy as wire.
+    // Rewires and unwire keep the original pre-wire recovery copy.
     const backup = JSON.parse(readFileSync(`${settingsFile()}.bak`, 'utf8'));
-    expect(backup.statusLine).toBeDefined();
+    expect(backup.statusLine).toBeUndefined();
     expect(backup.model).toBe('opus');
     // The rewritten settings survive as valid JSON with no orphaned temp file
     // from the atomic replace.
@@ -127,6 +148,134 @@ describe('ape v2 config statusline wiring', () => {
     await configAction(project, 'wire', { host: 'claude' });
     const res = await configAction(project, 'doctor', { host: 'claude' });
     expect(res.statusline.wired).toBe(true);
+  });
+
+  it('routes state, wire, unwire and backups to the selected Claude profile', async () => {
+    const profile = join(home, 'selected-profile');
+    mkdirSync(profile);
+    const defaultSettings = '{"theme":"default-profile"}\n';
+    writeFileSync(settingsFile(), defaultSettings);
+    const selectedFile = join(profile, 'settings.json');
+    const original = { theme: 'selected', statusLine: { type: 'command', command: 'printf custom' } };
+    writeFileSync(selectedFile, JSON.stringify(original));
+    vi.stubEnv('CLAUDE_CONFIG_DIR', profile);
+
+    const wire = await wireStatusline();
+    expect(wire.settings_path).toBe(selectedFile);
+    expect(wire.shim_path).toBe(join(profile, 'ape-statusline.sh'));
+    expect((await statuslineState()).settings_path).toBe(selectedFile);
+    await unwireStatusline();
+    expect(JSON.parse(readFileSync(selectedFile, 'utf8'))).toEqual(original);
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(defaultSettings);
+    expect(readdirSync(join(home, '.claude'))).toEqual(['settings.json']);
+    expect(JSON.parse(readFileSync(`${selectedFile}.bak`, 'utf8'))).toEqual(original);
+  });
+
+  it.skipIf(process.platform === 'win32')('quotes unusual profile paths and pins the renderer cache to that profile', async () => {
+    const profile = join(home, 'profile with \' " $ ` spaces');
+    vi.stubEnv('CLAUDE_CONFIG_DIR', profile);
+    const rendererDir = join(profile, 'plugins', 'cache', 'ape', 'ape', '2.0.0', 'bin');
+    mkdirSync(rendererDir, { recursive: true });
+    mkdirSync(join(profile, 'plugins', 'cache', 'ape', 'ape', '3.0.0'), { recursive: true });
+    writeFileSync(join(rendererDir, 'ape-statusline.mjs'), 'import { readFileSync } from "node:fs"; process.stdout.write("selected:" + readFileSync(0, "utf8"));');
+    const wired = await wireStatusline();
+    const rendered = execFileSync('bash', ['-c', wired.command], {
+      input: '{"fixture":true}', encoding: 'utf8',
+      env: { ...process.env, CLAUDE_CONFIG_DIR: join(home, 'different-profile') },
+    });
+    expect(rendered).toBe('selected:{"fixture":true}');
+  });
+
+  it('restores a custom statusline after rewires and cadence changes without replacing its original backup', async () => {
+    const original = { model: 'opus', statusLine: { type: 'command', command: 'printf original', padding: 3 } };
+    writeFileSync(settingsFile(), JSON.stringify(original));
+    await wireStatusline();
+    const backup = readFileSync(`${settingsFile()}.bak`, 'utf8');
+    expect((await wireStatusline()).unchanged).toBe(true);
+    await wireStatusline({ refreshIntervalSeconds: 12 });
+    const settings = JSON.parse(readFileSync(settingsFile(), 'utf8'));
+    settings.theme = 'later-user-edit';
+    writeFileSync(settingsFile(), JSON.stringify(settings));
+    expect((await unwireStatusline()).removed).toBe(true);
+    expect(JSON.parse(readFileSync(settingsFile(), 'utf8'))).toEqual({ ...original, theme: 'later-user-edit' });
+    expect(readFileSync(`${settingsFile()}.bak`, 'utf8')).toBe(backup);
+    expect(existsSync(join(home, '.claude', 'ape-statusline-wire.json'))).toBe(false);
+  });
+
+  it.each(['command', 'wrapper', 'cadence', 'removed'])('preserves later user statusline edits (%s)', async (edit) => {
+    await wireStatusline();
+    const settings = JSON.parse(readFileSync(settingsFile(), 'utf8'));
+    if (edit === 'command') settings.statusLine.command = 'printf user-selected';
+    if (edit === 'wrapper') settings.statusLine.command += ' | cat';
+    if (edit === 'cadence') settings.statusLine.refreshInterval = 19;
+    if (edit === 'removed') delete settings.statusLine;
+    const modified = `${JSON.stringify(settings)}\n`;
+    writeFileSync(settingsFile(), modified);
+    const result = await unwireStatusline();
+    // Removing an originally absent value already completed the restoration.
+    if (edit !== 'removed') {
+      expect(result).toMatchObject({ removed: false, modified: true });
+      expect(existsSync(join(home, '.claude', 'ape-statusline.sh'))).toBe(true);
+      expect((await wireStatusline()).modified).toBe(true);
+    }
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(modified);
+  });
+
+  it.each([false, true])('recovers interrupted settings replacement without losing the original (cadence update: %s)', async (update) => {
+    const original = { statusLine: { type: 'command', command: 'printf original' } };
+    writeFileSync(settingsFile(), JSON.stringify(original));
+    if (update) await wireStatusline();
+    fixture.failWrite = realpathSync(settingsFile());
+    await expect(wireStatusline({ refreshIntervalSeconds: 7 })).rejects.toThrow(/injected settings/);
+    const backup = readFileSync(`${settingsFile()}.bak`, 'utf8');
+    expect(JSON.parse(backup)).toEqual(original);
+    await wireStatusline({ refreshIntervalSeconds: 7 });
+    await unwireStatusline();
+    expect(JSON.parse(readFileSync(settingsFile(), 'utf8'))).toEqual(original);
+    expect(readFileSync(`${settingsFile()}.bak`, 'utf8')).toBe(backup);
+  });
+
+  it('does not mistake an intentional return to the original statusline for an interrupted wire', async () => {
+    const original = JSON.stringify({ statusLine: { type: 'command', command: 'printf original' } });
+    writeFileSync(settingsFile(), original);
+    await wireStatusline();
+    writeFileSync(settingsFile(), original);
+    expect((await wireStatusline()).modified).toBe(true);
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(original);
+    expect((await unwireStatusline()).removed).toBe(false);
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(original);
+  });
+
+  it.each([false, true])('recovers a legacy install from its intact backup (rewire: %s)', async (rewire) => {
+    const original = { statusLine: { type: 'command', command: 'printf original' } };
+    writeFileSync(`${settingsFile()}.bak`, JSON.stringify(original));
+    writeFileSync(settingsFile(), JSON.stringify({ statusLine: {
+      type: 'command', command: `bash "${join(home, '.claude', 'ape-statusline.sh')}"`, refreshInterval: 5,
+    } }));
+    if (rewire) await wireStatusline();
+    await unwireStatusline();
+    expect(JSON.parse(readFileSync(settingsFile(), 'utf8'))).toEqual(original);
+    expect(JSON.parse(readFileSync(`${settingsFile()}.bak`, 'utf8'))).toEqual(original);
+  });
+
+  it('never restores an APE command from an already overwritten legacy backup', async () => {
+    const wired = { statusLine: { type: 'command', command: `bash "${join(home, '.claude', 'ape-statusline.sh')}"` } };
+    writeFileSync(settingsFile(), JSON.stringify(wired));
+    writeFileSync(`${settingsFile()}.bak`, JSON.stringify(wired));
+    await wireStatusline();
+    await unwireStatusline();
+    expect(JSON.parse(readFileSync(settingsFile(), 'utf8'))).toEqual({});
+    expect(JSON.parse(readFileSync(`${settingsFile()}.bak`, 'utf8'))).toEqual(wired);
+  });
+
+  it('does not mutate settings or create a shim when ownership data is invalid', async () => {
+    const original = '{"statusLine":{"type":"command","command":"printf original"}}';
+    writeFileSync(settingsFile(), original);
+    writeFileSync(join(home, '.claude', 'ape-statusline-wire.json'), '{"version":99}');
+    await expect(wireStatusline()).rejects.toThrow(/ownership record/);
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(original);
+    expect(existsSync(join(home, '.claude', 'ape-statusline.sh'))).toBe(false);
+    expect(existsSync(`${settingsFile()}.bak`)).toBe(false);
   });
 
   // --- T12: raise the wired statusLine refresh interval to 5s and make it

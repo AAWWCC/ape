@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -251,6 +251,31 @@ async function detachedGate(project, paths, state, config) {
 }
 
 describe('detached gate runner coverage and cache identity', () => {
+  it.skipIf(process.platform === 'win32').each([true, false])('detects the full runner at its own root (root runner present: %s)', async (rootRunner) => {
+    const { project, paths } = await harness();
+    await mkdir(path.join(project, 'child/script'), {recursive:true});
+    const childScript = path.join(project, 'child/script/test');
+    await writeFile(childScript, '#!/bin/sh\nexit 1\n'); await chmod(childScript, 0o755);
+    if (rootRunner) {
+      await mkdir(path.join(project, 'script'));
+      const rootScript=path.join(project,'script/test');
+      await writeFile(rootScript,'#!/bin/sh\nexit 0\n'); await chmod(rootScript,0o755);
+    }
+    git(project,'add','.'); git(project,'commit','-qm','distinct root and child suites');
+    const treeSha=await currentTreeSha(project);
+    const state=stateFor(treeSha); state.receipts[0].changed_files=['child/script/test'];
+    const config={deadlines_ms:{mechanical:5000},runners:[{id:'child',root:'child',owns:['child/**'],profile:{full:null}}]};
+    const oldKey=`${treeSha}:${sha256({runner:'child',root:path.resolve(project,'child'),command:null})}`;
+    await writeFile(path.join(paths.runtime,'suite-cache.json'),JSON.stringify({results:{[oldKey]:{passed:true,result_hash:'wrong-root-old-pass'}}}));
+    const result=await detachedGate(project,paths,state,config);
+    expect(result.passed).toBe(false);
+    expect(result.checks.full_suite.runners).toEqual([expect.objectContaining({id:'child',passed:false,cached:false})]);
+    const cache=JSON.parse(await readFile(path.join(paths.runtime,'suite-cache.json'),'utf8'));
+    const newResult=Object.entries(cache.results).find(([key])=>key!==oldKey)?.[1];
+    expect(newResult.verification.exit_code).toBe(1);
+    expect(newResult.verification.tooling_failure).toBe(false);
+  });
+
   it('runs impacted operands relative to the runner root and discards old operand cache entries', async () => {
     const { project, paths } = await harness();
     await mkdir(path.join(project, 'web/tests'), { recursive: true });

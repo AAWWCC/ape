@@ -39,7 +39,7 @@ function jobBlock(yaml, jobName) {
 }
 
 function requireFullActionPins(yaml, consumer) {
-  const uses = yaml.split(/\r?\n/u).filter((line) => /^\s*- uses:/u.test(line));
+  const uses = yaml.split(/\r?\n/u).filter((line) => /^\s*(?:-\s+)?uses:/u.test(line));
   requireCondition(uses.length > 0, `${consumer} must use at least one pinned action`);
   for (const line of uses) {
     requireCondition(/@[0-9a-f]{40}(?:\s+#.*)?$/u.test(line), `${consumer} action is not pinned to a full SHA: ${line.trim()}`);
@@ -114,6 +114,7 @@ async function check(root) {
     requireContains(validation, value, '.github/workflows/release.yml host-validation');
   }
   requireContains(validation, 'npm run compatibility:check', '.github/workflows/release.yml host-validation');
+  requireContains(validation, 'npm audit --audit-level=high', '.github/workflows/release.yml host-validation');
   requireCondition(/permissions:\n      contents: read/u.test(validation), 'host-validation must be contents-read-only');
   requireCondition(!/contents: write|id-token: write|attestations: write|gh release|npm publish|secrets\./u.test(validation), 'host-validation reaches a privileged release sink');
   requireContains(publish, 'needs: host-validation', '.github/workflows/release.yml publish');

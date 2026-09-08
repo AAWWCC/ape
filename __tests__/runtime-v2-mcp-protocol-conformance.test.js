@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createToolCallQueue } from '../bin/ape-mcp.mjs';
+import { createToolCallQueue, handle } from '../bin/ape-mcp.mjs';
 
 // MCP 2026-07-28 protocol conformance for the public server (bin/ape-mcp.mjs).
 // Derivation of record: docs/research/2026-07-29-mcp-2026-07-28-stateless-spec.md
@@ -163,6 +163,31 @@ const toolCall = (id, args, params = {}) => ({
   id,
   method: 'tools/call',
   params: { name: 'ape_run', arguments: args, ...params },
+});
+
+describe('MCP invalid request recovery', () => {
+  const invalidFrames = [null, true, 42, 'text', [], {},
+    { jsonrpc: '1.0', id: 17, method: 'ping' },
+    { jsonrpc: '2.0', id: {}, method: 'tools/call' },
+    { jsonrpc: '2.0', id: 19, method: null },
+  ];
+
+  it('rejects malformed envelopes and answers every subsequent ping on the same source server', async () => {
+    const responses = await session(invalidFrames.flatMap((frame, index) => [
+      frame, { jsonrpc: '2.0', id: `alive-${index}`, method: 'ping' },
+    ]));
+    expect(responses).toHaveLength(invalidFrames.length * 2);
+    expect(responses.filter((response) => response.error).every((response) => response.error.code === -32600)).toBe(true);
+    for (let index = 0; index < invalidFrames.length; index += 1) {
+      expect(byId(responses, `alive-${index}`)).toEqual({ jsonrpc: '2.0', id: `alive-${index}`, result: {} });
+    }
+  });
+
+  it('applies the envelope guard to direct callers while preserving valid notification silence', async () => {
+    for (const frame of invalidFrames) expect((await handle(frame)).error.code).toBe(-32600);
+    expect(await handle({ jsonrpc: '2.0', method: 'notifications/initialized' })).toBeNull();
+    expect(await handle({ jsonrpc: '2.0', method: 'ping', id: null })).toEqual({ jsonrpc: '2.0', id: null, result: {} });
+  });
 });
 
 describe('MCP 2026-07-28: per-request protocol version negotiation (defect 1)', () => {

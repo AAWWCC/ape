@@ -2493,11 +2493,11 @@ describe('APE v2 frozen recovery authority and receipt-lock ownership', () => {
       })}\n`,
     ],
     [
-      'an untrusted retiring process record',
+      'a live retiring process record without local handoff proof',
       `${JSON.stringify({
         version: 1,
         token: 'legacy-owner-token',
-        pid: 2_147_483_647,
+        pid: process.pid,
         host: hostname(),
         state: 'retiring',
       })}\n`,

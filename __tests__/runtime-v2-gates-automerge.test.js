@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { currentTreeSha, remoteBranchTip, runGit } from '../lib/runtime/git.js';
+import { currentTreeSha, remoteBranchTip, runGit, workingTreeStatus } from '../lib/runtime/git.js';
 import { autoMergeGithub } from '../lib/runtime/gates.js';
 // Namespace import so the not-yet-implemented poll export resolves to undefined
 // (a red TypeError when called) instead of a module-link error that would
@@ -63,7 +63,7 @@ function frozenTarget(requiredRemoteChecks = false, base = 'main') {
   return { version: 1, provider: 'github', ...TARGET, base, required_remote_checks: requiredRemoteChecks };
 }
 function committedShippingState(state) {
-  const manifest = { version: 1, ready: true, shipping_target: structuredClone(state.shipping_target), repository: { base_branch: state.base_branch, base_commit: state.base_commit_sha } };
+  const manifest = { version: 1, ready: true, shipping_target: structuredClone(state.shipping_target), repository: { base_branch: state.base_branch, base_commit: state.base_commit_sha, ...(state.mode === 'land' ? { branch: state.base_branch, head: HEAD_SHA } : {}) } };
   state.admission = { version: 1, manifest, digest: sha256(manifest) };
   state.start_request_hash = 'a'.repeat(64);
   state.admitted_start_identity_version = 1;
@@ -137,11 +137,13 @@ describe('autoMergeGithub', () => {
   let ghCalls;
   let ghRouteCalls;
   let observedSuccessfulMerge;
+  let observedCreatedPr;
 
   beforeEach(() => {
     gitCalls = [];
     ghCalls = [];
     observedSuccessfulMerge = null;
+    observedCreatedPr = null;
     ghRouteCalls = { view: 0, create: 0, checks: 0, merge: 0, api: 0 };
     ghResponses = {
       // The probe emits `STATE URL MERGED_AT HEAD_OID` (mergedAt is `-` while
@@ -168,6 +170,8 @@ describe('autoMergeGithub', () => {
     };
     currentTreeSha.mockReset();
     currentTreeSha.mockResolvedValue(GATE_TREE);
+    workingTreeStatus.mockReset();
+    workingTreeStatus.mockResolvedValue([]);
     remoteBranchTip.mockReset();
     remoteBranchTip.mockResolvedValue(HEAD_SHA);
     runGit.mockReset();
@@ -175,6 +179,8 @@ describe('autoMergeGithub', () => {
       gitCalls.push(args);
       if (args[0] === 'ls-remote' && args[1] === '--get-url') return args[2];
       if (args[0] === 'remote') return 'git@github.com:acme/repo.git';
+      if (args[0] === 'for-each-ref') return `${args.at(-1)} ${gitResponses.featureHead ?? HEAD_SHA}`;
+      if (args[0] === 'worktree') return '';
       if (args[0] === 'write-tree') return GATE_TREE;
       if (args[0] === 'rev-parse' && args[1] === '--git-path') return path.join(dir, '.git', 'index');
       if (args[0] === 'rev-parse' && args[1] === 'HEAD^{tree}') return GATE_TREE;
@@ -184,6 +190,7 @@ describe('autoMergeGithub', () => {
       if (args[0] === 'rev-parse' && args[1] === 'refs/remotes/origin/main^{tree}') {
         return gitResponses.remoteBaseTree;
       }
+      if (args[0] === 'rev-parse' && args[1] === 'refs/remotes/origin/main') return MERGE_SHA;
       if (args[0] === 'rev-parse' && args[1] === `${MERGE_SHA}^{tree}`) return gitResponses.mergeTree;
       if (args[0] === 'rev-parse' && String(args[1]).endsWith('^{tree}')) return GATE_TREE;
       if (args[0] === 'rev-parse') return gitResponses.head;
@@ -215,6 +222,13 @@ describe('autoMergeGithub', () => {
       let result = Array.isArray(configured)
         ? configured[Math.min(ghRouteCalls[route], configured.length - 1)]
         : configured;
+      if (route === 'create' && result.code === 0) {
+        observedCreatedPr = result.output.trim();
+        ghResponses.base = args[args.indexOf('--base') + 1];
+      }
+      if (route === 'view' && observedCreatedPr && args[2] === observedCreatedPr) {
+        result = ghResponses.createdPrView ?? {code: 0, output: `OPEN ${observedCreatedPr} - ${HEAD_SHA} -`};
+      }
       // Ordinary successful merge fixtures must model GitHub's subsequent
       // MERGED observation, not leave the PR permanently OPEN while returning
       // the future merged tree. Queue/race fixtures explicitly opt out.
@@ -228,7 +242,13 @@ describe('autoMergeGithub', () => {
       setImmediate(() => {
         // Model the immutable mergeCommit.oid supplied by the native gh query.
         // Older scenario declarations omit only this common fixture field.
-        const output = result.output?.replace(/^(MERGED https:\/\/\S+ \S+ \S+)\s*$/gm, `$1 ${MERGE_SHA}`);
+        const output = result.output?.split('\n').map((line) => {
+          const words = line.trim().split(' ');
+          if (!['OPEN', 'MERGED', 'CLOSED'].includes(words[0])) return line;
+          if (words.length === 4) words.push(words[0] === 'MERGED' ? MERGE_SHA : '-');
+          if (words.length === 5 && !ghResponses.omitBase) words.push(ghResponses.base ?? 'main');
+          return words.join(' ');
+        }).join('\n');
         if (output) child.stdout.emit('data', output);
         child.emit('close', result.code);
       });
@@ -248,8 +268,8 @@ describe('autoMergeGithub', () => {
     // the PR state alongside the URL.
     expect(view).toEqual([
       'gh', 'pr', 'view', 'feat/thing',
-      '--json', 'url,state,mergedAt,headRefOid,mergeCommit',
-      '--jq', '[.state, .url, (.mergedAt // "-"), .headRefOid, (.mergeCommit.oid // "-")] | join(" ")',
+      '--json', 'url,state,mergedAt,headRefOid,mergeCommit,baseRefName',
+      '--jq', '[.state, .url, (.mergedAt // "-"), .headRefOid, (.mergeCommit.oid // "-"), .baseRefName] | join(" ")',
       '--repo', 'acme/repo',
     ]);
     expect(ghCalls.some((call) => call[2] === 'create')).toBe(false);
@@ -357,7 +377,9 @@ describe('autoMergeGithub', () => {
         gitCalls.push(args);
         if (args[0] === 'ls-remote' && args[1] === '--get-url') return args[2];
         if (args[0] === 'remote') return 'git@github.com:acme/repo.git';
-        if (args[0] === 'write-tree') return GATE_TREE;
+        if (args[0] === 'for-each-ref') return `${args.at(-1)} ${gitResponses.featureHead ?? HEAD_SHA}`;
+      if (args[0] === 'worktree') return '';
+      if (args[0] === 'write-tree') return GATE_TREE;
         if (args[0] === 'rev-parse' && args[1] === '--git-path') return path.join(dir, '.git', 'index');
         if (args[0] === 'rev-parse' && String(args[1]).endsWith('^{tree}')) return GATE_TREE;
         if (args[0] === 'branch' && args[1] === '--show-current') return gitResponses.branch;
@@ -411,6 +433,7 @@ describe('autoMergeGithub', () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
       mockGit({ symbolicRef: null, presentRefs: ['refs/remotes/origin/master'] });
+      ghResponses.base = 'master';
       const result = await autoMergeGithub(dir, stateFor(['src/kept.js'], false, 'master'), {
         shipping: { ...config.shipping, target: { ...TARGET, base: 'master' } },
       });
@@ -507,6 +530,7 @@ describe('autoMergeGithub', () => {
       // feat/thing; the local HEAD is now the squash commit, not the PR head.
       gitResponses.branch = 'main';
       gitResponses.head = 'a'.repeat(40);
+      gitResponses.featureHead = 'd'.repeat(40);
       ghResponses.view = {
         code: 0,
         output: `MERGED https://github.com/acme/repo/pull/7 2026-07-09T12:00:00Z ${'d'.repeat(40)}\n`,
@@ -516,7 +540,7 @@ describe('autoMergeGithub', () => {
       expect(result.branch).toBe('feat/thing');
       expect(gitCalls.some((args) => args[0] === 'push')).toBe(false);
       expect(gitCalls).toContainEqual(['pull', '--ff-only', TARGET.origin, 'main']);
-      expect(gitCalls).toContainEqual(['branch', '-D', 'feat/thing']);
+      expect(gitCalls).toContainEqual(['update-ref', '--no-deref', '-d', 'refs/heads/feat/thing', 'd'.repeat(40)]);
     });
 
     it('never adopts a stale merged PR from a previous life of a reused branch name', async () => {
@@ -568,6 +592,35 @@ describe('autoMergeGithub', () => {
   // zero-latency in-call merge for no-CI repos (unchanged).
   describe('non-blocking shipping watch handoff (autoMergeGithub)', () => {
     const checksConfig = { shipping: { ...config.shipping, required_remote_checks: true } };
+
+    it.each(['OPEN', 'MERGED', 'CLOSED'])('refuses an existing %s PR targeting another base before any shipping mutation', async (status) => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.view = { code: 0, output: `${status} ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA} ${MERGE_SHA} release` };
+      await expect(autoMergeGithub(dir, stateFor(['src/kept.js']), config)).rejects.toThrow(/base.*frozen/);
+      expect(gitCalls.some(args => ['push', 'commit', 'add', 'fetch', 'switch', 'update-ref'].includes(args[0]))).toBe(false);
+      expect(ghCalls.some(call => ['merge', 'create'].includes(call[2]))).toBe(false);
+    });
+
+    it('fails closed when the PR observation omits its actual base', async () => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.omitBase = true;
+      await expect(autoMergeGithub(dir, stateFor(['src/kept.js']), config)).rejects.toThrow(/base.*frozen/);
+      expect(ghCalls.some(call => call[2] === 'merge')).toBe(false);
+    });
+
+    it.each(['existing', 'created'])('rechecks a %s no-check PR base immediately before submitting the merge', async (source) => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.tracked = 'src/kept.js\0';
+      const retargeted = { code: 0, output: `OPEN ${source === 'created' ? 'https://github.com/acme/repo/pull/8' : WATCH_PR} - ${HEAD_SHA} - release` };
+      if (source === 'created') {
+        ghResponses.view = { code: 1, output: 'no pull requests found' };
+        ghResponses.createdPrView = retargeted;
+      } else {
+        ghResponses.view = [ghResponses.view, retargeted];
+      }
+      await expect(autoMergeGithub(dir, stateFor(['src/kept.js']), config)).rejects.toThrow(/frozen shipping URL, base/);
+      expect(ghCalls.some(call => call[2] === 'merge')).toBe(false);
+    });
 
     it('hands off a successful no-check enqueue without inventing CI or submitting twice', async () => {
       const dir = await project(['src/kept.js']);
@@ -631,6 +684,38 @@ describe('autoMergeGithub', () => {
     const carriesSelector = (call) => call.some(
       (argument) => argument === 'feat/thing' || argument === WATCH_PR,
     );
+
+    it.each([
+      ['OPEN', false, 'release'], ['MERGED', false, 'release'],
+      ['OPEN', true, 'release'], ['MERGED', true, 'release'],
+      ['OPEN', false, null], ['MERGED', true, null],
+    ])('refuses a %s observation with submitted=%s and actual base=%s', async (status, submitted, base) => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.omitBase = base === null;
+      ghResponses.view = { code: 0, output: `${status} ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA} ${MERGE_SHA}${base ? ` ${base}` : ''}` };
+      const state = watchState();
+      state.shipping_watch.merge_request_submitted = submitted;
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, state, checksConfig);
+      expect(result.failed).toMatch(/base.*frozen/);
+      expect(result.merged).toBeUndefined();
+      expect(ghCalls.some(call => call[2] === 'merge')).toBe(false);
+      expect(gitCalls.some(args => ['fetch', 'switch', 'update-ref'].includes(args[0]))).toBe(false);
+    });
+
+    it.each(['immediate-observation', 'failed-command', 'auto-fallback'])('refuses a late retarget during %s', async (route) => {
+      const dir = await project(['src/kept.js']);
+      ghResponses.mergeLeavesOpen = true;
+      const open = { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA} - main` };
+      const drift = { code: 0, output: `${route === 'auto-fallback' ? 'OPEN' : 'MERGED'} ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA} ${MERGE_SHA} release` };
+      ghResponses.view = route === 'auto-fallback' ? [open, open, drift] : [open, drift];
+      if (route !== 'immediate-observation') ghResponses.merge = { code: 1, output: 'branch policy prohibits the merge' };
+      const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
+      expect(result.failed).toMatch(/base/);
+      expect(result.merged).toBeUndefined();
+      expect(ghCalls.filter(call => call[2] === 'merge')).toHaveLength(1);
+      expect(ghCalls.some(call => call.includes('--auto') || call.includes('--delete-branch'))).toBe(false);
+      expect(gitCalls.some(args => ['fetch', 'switch', 'update-ref'].includes(args[0]))).toBe(false);
+    });
 
     it('keeps a successful enqueue pending across polls until the exact PR is observed merged', async () => {
       const dir = await project(['src/kept.js']);
@@ -919,8 +1004,9 @@ describe('autoMergeGithub', () => {
 
       expect(result.merged).toBeDefined();
       expect(gitCalls).toContainEqual(['pull', '--ff-only', TARGET.origin, 'main']);
-      expect(gitCalls).toContainEqual(['rev-parse', 'refs/remotes/origin/main^{tree}']);
-      expect(gitCalls).toContainEqual(['reset', '--hard', 'refs/remotes/origin/main']);
+      expect(result.merged.cleanup).toMatchObject({ cleaned: true });
+      expect(gitCalls).toContainEqual(['update-ref', '--no-deref', 'refs/heads/main', MERGE_SHA, HEAD_SHA]);
+      expect(gitCalls.some(args => args[0] === 'reset')).toBe(false);
     });
 
     it('never rewrites a divergent base when its checkout tree differs from the observed squash tree', async () => {
@@ -931,6 +1017,7 @@ describe('autoMergeGithub', () => {
       gitResponses.branch = 'main';
       gitResponses.pullBaseError = 'fatal: Not possible to fast-forward, aborting.';
       currentTreeSha.mockResolvedValue('e'.repeat(40));
+      workingTreeStatus.mockResolvedValue([' M src/kept.js']);
 
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState({ mode: 'land' }), checksConfig);
 

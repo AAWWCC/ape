@@ -333,7 +333,7 @@ unsatisfied or unknown dependencies.
 | Action | Rules |
 | --- | --- |
 | `roadmap-status` | Read-only; returns `roadmap: null` if absent. |
-| `roadmap-register` | Add up to 64 entries atomically. Each needs `id`, `title`, `description`, `acceptance`; `depends_on` and `discovered_by` are optional. An audit reason is required. Do not send `status`. |
+| `roadmap-register` | Add entries atomically within the shared 64 KiB input and structural guards. Each needs `id`, `title`, `description`, `acceptance`; `depends_on` and `discovered_by` are optional. An audit reason is required. Do not send `status`. |
 | `roadmap-supersede` | Mark live entries stale without deleting them. Requires a reason; `replaced_by` is optional. Targets and replacements must be unique, known, live, and disjoint. |
 | `roadmap-attest` | Satisfy known live requirements using an eligible run. Requires `requirement_ids`, `run_id`, and a non-empty audit `reason`. |
 

@@ -113,6 +113,8 @@ describe('host compatibility contract', () => {
     ['documentation index', 'docs/README.md', (text) => text.replace('compatibility.md', 'compatibility-broken.md')],
     ['pull-request CI', '.github/workflows/ci.yml', (text) => text.replace('0.147.0', '0.148.0')],
     ['tagged release', '.github/workflows/release.yml', (text) => text.replace('2.1.228', '2.1.229')],
+    ['named action pin', '.github/workflows/release.yml', (text) => text.replace(/actions\/attest-build-provenance@[0-9a-f]{40}/u, 'actions/attest-build-provenance@main')],
+    ['release dependency audit', '.github/workflows/release.yml', (text) => text.replace('npm audit --audit-level=high', 'npm --version')],
     ['edge authority', '.github/workflows/host-edge.yml', (text) => text.replace('contents: read', 'contents: write')],
     ['marketplace host shell isolation', 'scripts/marketplace-host-invocation.mjs', (text) => text.replace('shell: false', 'shell: true')],
     ['marketplace smoke', 'scripts/smoke-marketplace-install.mjs', (text) => text.replace('compatibility.json', 'compatibility-broken.json')],
@@ -172,7 +174,7 @@ describe('host compatibility contract', () => {
   it('pins every third-party action in every compatibility workflow to a full SHA', async () => {
     for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml', '.github/workflows/host-edge.yml']) {
       const yaml = await read(workflow);
-      const uses = yaml.split(/\r?\n/u).filter((line) => /^\s*- uses:/u.test(line));
+      const uses = yaml.split(/\r?\n/u).filter((line) => /^\s*(?:-\s+)?uses:/u.test(line));
       expect(uses.length, workflow).toBeGreaterThan(0);
       for (const line of uses) expect(line, workflow).toMatch(/@[0-9a-f]{40}(?:\s+#.*)?$/u);
     }
@@ -180,6 +182,13 @@ describe('host compatibility contract', () => {
 });
 
 describe('marketplace host executable resolution', () => {
+  it('rejects combining pinned installed hosts with informational edge mode before invoking hosts', async () => {
+    for (const flags of [['--edge', '--installed-hosts'], ['--installed-hosts', '--edge']]) {
+      await expect(run(process.execPath, [path.join(ROOT, 'scripts/smoke-marketplace-install.mjs'), ...flags]))
+        .rejects.toMatchObject({ stderr: expect.stringContaining('mutually exclusive') });
+    }
+  });
+
   async function installedPackage(packageName, identity, declaredBin) {
     const modulesRoot = await mkdtemp(path.join(tmpdir(), 'ape-host-modules-'));
     scratchRoots.push(modulesRoot);

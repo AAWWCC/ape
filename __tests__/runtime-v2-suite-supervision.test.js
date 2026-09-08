@@ -69,7 +69,9 @@ async function fixture(layout, mode) {
     });
     await writeFile(host, built.outputFiles[0].text);
     await mkdir(path.join(dir, 'lib', 'runtime'), { recursive: true });
-    await copyFile(path.join(runtimeDir, 'spawn.js'), path.join(dir, 'lib', 'runtime', 'spawn.js'));
+    for (const file of ['spawn.js', 'file-stats.js']) {
+      await copyFile(path.join(runtimeDir, file), path.join(dir, 'lib', 'runtime', file));
+    }
   } else {
     await writeFile(host, contents);
   }

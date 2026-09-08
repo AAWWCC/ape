@@ -42,6 +42,7 @@ function fixtureProject() {
   mkdirSync(join(root, '.github'), { recursive: true });
   mkdirSync(join(root, '__tests__'), { recursive: true });
   copyFileSync(UPDATE_SCRIPT, join(root, 'scripts', 'update-test-durations.mjs'));
+  copyFileSync(join(ROOT, 'scripts', 'tooling-snapshots.mjs'), join(root, 'scripts', 'tooling-snapshots.mjs'));
   writeFileSync(join(root, '__tests__', 'a.test.js'), 'export {}\n');
   writeFileSync(join(root, '__tests__', 'b.test.js'), 'export {}\n');
   writeFileSync(join(root, '.github', 'test-durations.json'), '{"sentinel":17}\n');

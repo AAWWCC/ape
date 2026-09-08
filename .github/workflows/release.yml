@@ -8,7 +8,47 @@ permissions:
   contents: read
 
 jobs:
+  source-tests:
+    name: Release full source suite (Ubuntu, Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22.12.0
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run test:agent
+
+  native-runtime:
+    name: Release native runtime (${{ matrix.os }}, Node ${{ matrix.node.version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node:
+          - version: 22.12.0
+          - version: 24.15.0
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - name: Disable automatic CRLF conversion
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node.version }}
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run bundle
+      - run: npm run package:plugins
+      - run: git diff --exit-code -- dist/ plugins/
+      - run: node scripts/run-ci-tests.mjs native -- --maxWorkers=1
+
   host-validation:
+    needs: [source-tests, native-runtime]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -37,6 +77,8 @@ jobs:
           test "$(node --version)" = "v24.15.0"
           test "$(npm --version)" = "11.12.1"
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Require the dependency vulnerability gate before publication
+        run: npm audit --audit-level=high
       - run: npm run compatibility:check
       - name: Verify release identity
         shell: bash
@@ -70,8 +112,8 @@ jobs:
         run: |
           test "$(codex --version)" = "codex-cli 0.147.0"
           claude --version | grep --extended-regexp '^2\.1\.228([[:space:]]|$)'
-      - run: npm run smoke:marketplaces
-      - run: npm run validate
+      - run: npm run smoke:marketplaces -- --installed-hosts
+      - run: npm run validate:claude
 
   publish:
     needs: host-validation

@@ -18,8 +18,8 @@ afterEach(async () => {
 
 const target = { origin: 'https://github.com/acme/project.git', repository: 'acme/project', base: 'main' };
 const config = { shipping: { provider: 'github', auto_merge: true, required_remote_checks: true, target } };
-function commitShippingFixture(state) {
-  const manifest = { version: 1, ready: true, shipping_target: structuredClone(state.shipping_target), repository: { base_branch: state.base_branch, base_commit: state.base_commit_sha } };
+function commitShippingFixture(state, repository = {}) {
+  const manifest = { version: 1, ready: true, shipping_target: structuredClone(state.shipping_target), repository: { base_branch: state.base_branch, base_commit: state.base_commit_sha, ...repository } };
   state.admission = { version: 1, manifest, digest: sha256(manifest) };
   state.start_request_hash ??= 'a'.repeat(64);
   state.admitted_start_identity_version = 1;
@@ -75,7 +75,7 @@ async function preparedShipping(directory) {
   vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
     if (command === 'gh') {
       events.push(['gh', ...args]);
-      return Promise.resolve({ exit_code: 0, timed_out: false, spawn_error: null, combined: `OPEN https://github.com/acme/project/pull/1 - ${head}\n` });
+      return Promise.resolve({ exit_code: 0, timed_out: false, spawn_error: null, combined: `OPEN https://github.com/acme/project/pull/1 - ${head} - main\n` });
     }
     return originalSpawn(command, args, options);
   });
@@ -90,6 +90,84 @@ async function preparedShipping(directory) {
 }
 
 describe('immutable observed merge evidence', () => {
+  it.each(['phase', 'admitted-land', 'advanced-land', 'racing-land', 'dirty-land'])('protects a same-tree divergent local base during %s cleanup', async (scenario) => {
+    const directory = await project();
+    const { state, originalGit } = await preparedShipping(directory);
+    await originalGit(directory, ['add', 'value.txt']);
+    await originalGit(directory, ['commit', '-m', 'attested feature']);
+    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD']);
+    const mergeCommit = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', state.base_commit_sha, '-m', 'remote squash']);
+    const admittedHead = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', state.base_commit_sha, '-m', 'admitted local land work']);
+    const uniqueHead = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', admittedHead, '-m', 'later unique local work']);
+    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', mergeCommit]);
+    const initialHead = scenario === 'advanced-land' ? uniqueHead : admittedHead;
+    await originalGit(directory, ['update-ref', 'refs/heads/main', initialHead, state.base_commit_sha]);
+    state.mode = scenario === 'phase' ? 'phase' : 'land';
+    commitShippingFixture(state, { branch: 'main', head: admittedHead });
+    const prUrl = 'https://github.com/acme/project/pull/1';
+    state.shipping_watch = { provider: 'github', pr_url: prUrl, branch: state.branch, base: 'main', head_oid: pushedHead, created_at: new Date().toISOString(), shipping_target: state.shipping_target };
+    if (scenario === 'dirty-land') await writeFile(path.join(directory, 'local-only.txt'), 'untracked local work\n');
+    const previousSpawn = spawning.spawnWithTimeout.getMockImplementation();
+    vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
+      if (command !== 'gh') return previousSpawn(command, args, options);
+      return Promise.resolve({ exit_code: 0, timed_out: false, combined: args[1] === 'checks' ? 'test pass' : `MERGED ${prUrl} 2026-09-07T00:00:00Z ${pushedHead} ${mergeCommit} main` });
+    });
+    const effects = [];
+    vi.spyOn(git, 'runGit').mockImplementation(async (root, args, options) => {
+      effects.push(args);
+      if (args[0] === 'fetch') return '';
+      if (args[0] === 'pull') return originalGit(root, ['merge', '--ff-only', 'refs/remotes/origin/main']);
+      if (args[0] === 'push' || (args[0] === 'ls-remote' && !args.includes('--get-url'))) throw Error('offline network intercepted');
+      if (scenario === 'racing-land' && args[0] === 'update-ref' && args[2] === 'refs/heads/main') {
+        await originalGit(root, ['update-ref', 'refs/heads/main', uniqueHead, admittedHead]);
+      }
+      return originalGit(root, args, options);
+    });
+    const result = await shipping.pollRemoteChecksAndMerge(directory, state, config);
+    expect(result.merged).toMatchObject({ head_oid: pushedHead, cleanup: { cleaned: scenario === 'admitted-land' } });
+    expect(effects.some(args => args[0] === 'reset')).toBe(false);
+    const expectedHead = scenario === 'admitted-land' ? mergeCommit : scenario === 'racing-land' ? uniqueHead : initialHead;
+    expect(await originalGit(directory, ['rev-parse', 'main'])).toBe(expectedHead);
+    if (scenario !== 'admitted-land') {
+      expect(await originalGit(directory, ['for-each-ref', '--contains', expectedHead, '--format=%(refname)'])).toBe('refs/heads/main');
+      expect(result.merged.cleanup.reason).toBeTruthy();
+    }
+    if (scenario === 'dirty-land') expect(await readFile(path.join(directory, 'local-only.txt'), 'utf8')).toBe('untracked local work\n');
+  });
+
+  it.each(['poll', 'phase-one-reentry'])('retains later unique local work after observing the attested remote merge (%s)', async (route) => {
+    const directory = await project();
+    const { state, originalGit } = await preparedShipping(directory);
+    await originalGit(directory, ['add', 'value.txt']);
+    await originalGit(directory, ['commit', '-m', 'attested feature']);
+    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD']);
+    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', pushedHead]);
+    await originalGit(directory, ['commit', '--allow-empty', '-m', 'unique later local work']);
+    const uniqueHead = await originalGit(directory, ['rev-parse', 'HEAD']);
+    const prUrl = 'https://github.com/acme/project/pull/1';
+    state.shipping_watch = { provider: 'github', pr_url: prUrl, branch: state.branch, base: 'main', head_oid: pushedHead, created_at: new Date().toISOString(), shipping_target: state.shipping_target };
+    const originalSpawn = spawning.spawnWithTimeout.getMockImplementation();
+    const calls = [];
+    vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
+      if (command !== 'gh') return originalSpawn(command, args, options);
+      calls.push(args);
+      return Promise.resolve({ exit_code: 0, timed_out: false, combined: args[1] === 'checks' ? 'test pass\n' : `MERGED ${prUrl} 2026-09-05T00:00:00Z ${pushedHead} ${pushedHead} main\n` });
+    });
+    vi.spyOn(git, 'runGit').mockImplementation((root, args, options) => {
+      if (args[0] === 'fetch') return Promise.resolve('');
+      if (['push', 'pull'].includes(args[0]) || (args[0] === 'ls-remote' && !args.includes('--get-url'))) throw Error('offline network intercepted');
+      return originalGit(root, args, options);
+    });
+    const result = route === 'poll' ? (await shipping.pollRemoteChecksAndMerge(directory, state, config)).merged
+      : await shipping.autoMergeGithub(directory, state, config);
+    expect(result).toMatchObject({ head_oid: pushedHead, cleanup: { cleaned: false, remote_branch_retained: true } });
+    expect(result.cleanup.reason).toMatch(/tip changed/);
+    expect(calls.some(args => args[1] === 'merge' || args.includes('--delete-branch'))).toBe(false);
+    expect(await originalGit(directory, ['branch', '--show-current'])).toBe(state.branch);
+    expect(await originalGit(directory, ['rev-parse', state.branch])).toBe(uniqueHead);
+    expect(await originalGit(directory, ['for-each-ref', '--contains', uniqueHead, '--format=%(refname)'])).toBe(`refs/heads/${state.branch}`);
+  });
+
   it.each(['already-merged', 'submitted', 'command-race'])('accepts the exact attested squash merge after an unrelated later base commit (%s)', async (observation) => {
     const directory = await project();
     const { state, originalGit } = await preparedShipping(directory);
@@ -111,8 +189,8 @@ describe('immutable observed merge evidence', () => {
       if (command !== 'gh') return originalSpawn(command, args, options);
       if (args[1] === 'merge') return Promise.resolve({ exit_code: 1, combined: 'Pull Request is not mergeable', timed_out: false });
       const output = args[1] === 'checks' ? 'test pass\n'
-        : observation === 'command-race' && probes++ === 0 ? `OPEN ${prUrl} - ${pushedHead} -\n`
-          : `MERGED ${prUrl} 2026-09-05T00:00:00Z ${pushedHead} ${mergeCommit}\n`;
+        : observation === 'command-race' && probes++ === 0 ? `OPEN ${prUrl} - ${pushedHead} - main\n`
+          : `MERGED ${prUrl} 2026-09-05T00:00:00Z ${pushedHead} ${mergeCommit} main\n`;
       return Promise.resolve({ exit_code: 0, combined: output, timed_out: false });
     });
     vi.spyOn(git, 'runGit').mockImplementation((root, args, options) => {
@@ -146,7 +224,7 @@ describe('immutable observed merge evidence', () => {
     const originalSpawn = spawning.spawnWithTimeout.getMockImplementation();
     vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
       if (command !== 'gh') return originalSpawn(command, args, options);
-      return Promise.resolve({ exit_code: 0, timed_out: false, combined: args[1] === 'checks' ? 'test pass\n' : `MERGED ${observedUrl} 2026-09-05T00:00:00Z ${observedHead} ${mergeCommit}\n` });
+      return Promise.resolve({ exit_code: 0, timed_out: false, combined: args[1] === 'checks' ? 'test pass\n' : `MERGED ${observedUrl} 2026-09-05T00:00:00Z ${observedHead} ${mergeCommit} main\n` });
     });
     const mutations = [];
     vi.spyOn(git, 'runGit').mockImplementation((root, args, options) => {

@@ -5,6 +5,28 @@ have fixes and regression tests. The full live acceptance requirement is still
 incomplete. This page records the latest results as of September 7, 2026; it does
 not authorize more testing, installation, or publication.
 
+## 2.25.1 codebase audit remediation
+
+All 13 reproduced audit findings now have source fixes and regression coverage.
+The changes repair task cancellation and error persistence, detached launch
+failures, bounded receipt and manifest parsing, interrupted statusline setup,
+targeted merge gates, globstar ownership, saved evaluation evidence, release
+auditing/action pins, worker proof parsing, and receipt-result budgets. The
+cleanup removes 11 unused exports and shares duplicate validation and tooling.
+State writes retain complete destinations after Windows retry exhaustion and
+sync file contents and supported directory entries.
+
+A fresh complete run on macOS ARM64 with Node 24.15.0 passed **4,856 tests across
+285 files**, with 86 platform/host skips and zero failures. All 693 operational
+canaries passed. Type checking, configuration documentation, host compatibility,
+offline prompt checks, public-safety checks, packaged MCP smoke tests, Claude
+manifest validation, package parity, and package/release reproducibility passed.
+The dependency audit reported zero vulnerabilities. Local 2.25.1 release archives
+were regenerated; these results do not replace native CI or live certification.
+A concurrent follow-up audit began further source changes after this passing run.
+The counts above describe the completed batch; the later edits need their own
+verification and regenerated packages.
+
 ## 2.25.1 recovery patch
 
 The patch packages validated source-tree handoff across capability recovery,

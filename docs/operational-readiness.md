@@ -233,6 +233,11 @@ rejects invalid ledgers, missing runs, wrong pins, host partitions, and incorrec
 source/tag relationships. Historical schema-v4 records remain readable but
 cannot pass the schema-v5 gate or be silently upgraded.
 
+Tagged-release publication also waits for the complete source suite on Node
+22.12.0 and the required native runtime selection on Linux, macOS, and Windows
+under both pinned Node versions. These jobs run against the tag's exact checkout;
+failed or skipped dependencies prevent host validation and publication.
+
 The operator creating the ledger attests that the recorded events happened.
 The verifier checks that attestation and its evidence bindings; it cannot
 independently prove external host or GitHub events. Retain the evidence for audit
@@ -251,9 +256,12 @@ npm run release:worker-validator-proof -- /secure/path/worker-validator-proof.js
 
 Run it from the exact candidate and retain the proof externally. It launches every
 packaged role without an injected tool allowlist and requires a real validator
-call to reach APE's no-active-run sentinel. The proof binds candidate manifests,
-MCP declaration, plugin identity, canary implementation, role/tool observations,
-and transcript hashes. Missing roles, changed evidence, or stale candidates fail.
+call to reach APE's no-active-run sentinel. The proof binds the complete regular-file
+package inventory, including runtime bundles, hooks, prompts, metadata and added files,
+plus canonical role manifests, canary implementation, role/tool observations, and
+transcript hashes. Symlinks and special files are refused. The candidate must retain
+the same digest throughout the checks. Missing roles, changed evidence, or stale
+candidates fail.
 
 Both commands must pass to record a successful validator-reachability proof.
 This optional check is not a release prerequisite and is not part of
@@ -275,12 +283,18 @@ Readiness also checks these runtime boundaries. See [pipeline](pipeline.md) and
   schemas, field/byte limits, commands, and capabilities before dispatch. Planning
   complexity is `production claims + test paths + 2*requirements + 4*risks +
   2*required verification profiles`. Scores above 48 or canonical inputs above
-  8192 UTF-8 bytes require acyclic, non-overlapping, scope-covering slices that
-  each pass admission.
+  8192 UTF-8 bytes recommend decomposition; these heuristics do not reject an
+  otherwise admissible task. Proposed slices must be acyclic, non-overlapping,
+  cover the scope, and each pass admission.
 - **Verification:** baseline inspection is read-only and does not run tests.
   Missing runners are different from legitimate failing tests. Generators and
   formatters do not belong in read-only `policy.evidence_scripts`; run approved
   maintenance before ticket issuance and review the resulting tree.
+  Aggregate `script/test` and npm scripts require an explicit
+  `test_commands.targeted_template` for red-test admission because arbitrary
+  scripts may ignore file arguments. Single-runner merge gates honor that same
+  template. Manifest discovery reads bounded regular files and refuses FIFOs,
+  symlinks, and oversized or changing manifests.
 - **Recovery advice:** tree-divergence and role-boundary refusals preserve state
   and do not identify the writer. Advice names cause, state, eligible actions,
   and operator decisions. Active runs cannot reset. An explicit audited abort
@@ -308,6 +322,11 @@ Readiness also checks these runtime boundaries. See [pipeline](pipeline.md) and
   Changed or rebound paths are rescanned. Locks, bounds, both sides of publication,
   and every later mutation are revalidated; live or permission-ambiguous owners
   are not evicted for an old heartbeat.
+  State replacements retain the old complete file if Windows sharing holds
+  outlast bounded retries. File contents and audit appends are synced before
+  return; directory entries are synced on POSIX filesystems that support it.
+  Windows and filesystems without directory fsync retain a power-loss durability
+  limitation. An interrupted audit append may leave a partial final line.
 - **Lineage:** immutable archives are never rewritten into success. Only complete,
   verified version-2 attestations may promote an existing successor relationship.
   New structured successor starts remain disabled because hook input does not

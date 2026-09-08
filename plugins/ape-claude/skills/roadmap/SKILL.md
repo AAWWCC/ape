@@ -15,7 +15,8 @@ and action; ask again only when a material change falls outside that approval.
 - `status`: call `ape_history` with `action: "roadmap-status"`. Optional `status_filter` narrows
   returned entries without changing aggregate counts. `roadmap: null` means no roadmap exists.
 - `register`: first draft cold-reader-complete entries and obtain explicit approval. Then call
-  `roadmap-register` with a non-empty audit `reason` and at most 64 entries. Each entry needs `id`,
+  `roadmap-register` with a non-empty audit `reason` and a batch within the shared input-byte and
+  structural guards. Keep same-batch dependencies together; do not split at a historical entry count. Each entry needs `id`,
   `title`, `description`, and observable `acceptance`; `depends_on` and `discovered_by` are optional.
   Same-batch forward references are allowed. Unknown or stale dependencies, duplicate edges,
   self-reference, cycles, or an otherwise-invalid live graph reject the entire batch.

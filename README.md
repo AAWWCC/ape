@@ -158,10 +158,21 @@ npm run public:check
 `npm test` uses six workers. `npm run test:agent -- <paths...>` uses three and is
 the preferred profile when other agents may also be testing.
 
+`public:check` scans both packaged plugins and the actual Git worktree inventory,
+including new nonignored source files. Tracked docs and tests remain checked even
+when ignore rules change. Negative tests construct their explicitly synthetic
+protected-looking inputs from fixture components; no source directory is exempt.
+Never place real private values in source, including split or encoded forms.
+
 Keep runtime changes, tests, and generated packages easy to review separately.
 The Git hooks check commit identities; verify the remote before pushing.
 A rebuild does not update an installed plugin. Reinstallation, pushes, and
 publication are separate actions.
+
+The package and release builders accept `--output-root` for a new or empty directory,
+or one containing only recognized APE output. They preserve unfamiliar files and refuse
+source directories. A package upgrade that removes an old generated filename may need
+a fresh output directory; inspect the retained files before removing them yourself.
 
 For the full checklists, see [Contributing](CONTRIBUTING.md),
 [release checks](docs/operational-readiness.md),

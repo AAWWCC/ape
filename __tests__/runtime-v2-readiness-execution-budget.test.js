@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +10,6 @@ import { configAction, previewRun, startRun } from '../lib/runtime/service.js';
 import { evaluateRunReadiness } from '../lib/runtime/readiness.js';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { projectRunState } from '../lib/runtime/projection.js';
-import * as capabilityContract from '../lib/runtime/capability-contract.js';
 
 function runInput(overrides = {}) {
   return RunStartInputSchema.parse({
@@ -178,10 +177,17 @@ describe('run readiness and capability manifests', () => {
       capability_contract_required: true,
     });
 
-    await expect(previewRun(dir, input)).rejects.toThrow('input exceeds 65536 UTF-8 bytes');
+    // This fixture exceeds loadRuntimeConfig's 1 MiB physical-file budget,
+    // so it must fail before parsing its already-oversized control payload.
+    expect(readFileSync(join(runtime, 'config.json')).byteLength).toBeGreaterThan(1024 * 1024);
+    const boundedFileError = {
+      code: 'APE_UNSAFE_FILE',
+      message: expect.stringContaining('bounded regular file'),
+    };
+    await expect(previewRun(dir, input)).rejects.toMatchObject(boundedFileError);
     expect(readdirSync(runtime).sort()).toEqual(['config.json']);
 
-    await expect(startRun(dir, input)).rejects.toThrow('input exceeds 65536 UTF-8 bytes');
+    await expect(startRun(dir, input)).rejects.toMatchObject(boundedFileError);
     expect(readdirSync(runtime).sort()).toEqual(['config.json']);
     expect(execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: dir, encoding: 'utf8' }).trim())
       .toBe('main');
@@ -196,20 +202,13 @@ describe('run readiness and capability manifests', () => {
     config.policy.command_profiles = Array.from({ length: 2_049 }, (_, index) => ({
       id: `command.${index}`, command: `tool verify-${index}`, roles: ['implementer'], effect: 'execute',
     }));
-    const expand = vi.spyOn(capabilityContract, 'worstCaseCapabilityTestPathSets');
-    try {
-      const rejected = readinessFor(runInput(), config);
-      expect(rejected.ready).toBe(false);
-      expect(rejected.blocking.map((entry) => entry.code)).toContain('capability-command-profiles-over-limit');
-      expect(expand).not.toHaveBeenCalled();
+    const rejected = readinessFor(runInput(), config);
+    expect(rejected.ready).toBe(false);
+    expect(rejected.blocking.map((entry) => entry.code)).toContain('capability-command-profiles-over-limit');
 
-      config.policy.command_profiles = config.policy.command_profiles.slice(0, 65);
-      const admitted = readinessFor(runInput(), config);
-      expect(expand).not.toHaveBeenCalled();
-      expect(admitted.ready).toBe(true);
-    } finally {
-      expand.mockRestore();
-    }
+    config.policy.command_profiles = config.policy.command_profiles.slice(0, 65);
+    const admitted = readinessFor(runInput(), config);
+    expect(admitted.ready).toBe(true);
   });
 
   it('rejects an over-limit derived command allowlist even when every source collection is within its count bound', () => {

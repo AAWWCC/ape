@@ -67,7 +67,7 @@
     "package:reproducible": "node scripts/check-plugin-reproducibility.mjs",
     "release:artifacts": "node scripts/build-release-artifacts.mjs",
     "release:reproducible": "node scripts/check-release-reproducibility.mjs",
-    "public:check": "node scripts/check-public-surface.mjs && node scripts/check-public-commit-identities.mjs",
+    "public:check": "node scripts/check-public-surface.mjs && node scripts/check-public-surface.mjs --tracked-source . && node scripts/check-public-commit-identities.mjs",
     "public:identity": "node scripts/check-public-commit-identities.mjs",
     "public:hooks": "node scripts/install-public-hooks.mjs",
     "public:export": "node scripts/export-public-tree.mjs",
@@ -85,11 +85,11 @@
     "@vitest/coverage-v8": "^4.1.10",
     "esbuild": "^0.28.1",
     "fast-check": "^4.9.0",
-    "smol-toml": "1.8.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "smol-toml": "1.8.0",
     "zod": "^4.4.3"
   }
 }

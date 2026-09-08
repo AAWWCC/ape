@@ -12,10 +12,8 @@ import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 //
 // Crash injection is structural: a partial `${file}.<pid>.<ts>.<rand>.tmp`
 // sibling stands in for a writer that died mid-write (temp staged, rename
-// never happened). By DOCUMENTED DISPOSITION the newest write may be LOST on
-// an OS/power crash (no parent-directory fsync) — so no property here asserts
-// newest-write durability, and appendJsonLine's unsynced append is asserted
-// nowhere: only never-torn, only-complete-values reads and debris inertness.
+// never happened). These process-level fixtures prove complete-value reads
+// and debris inertness; they do not simulate filesystem or hardware power loss.
 const SEED = 20260723;
 
 const FALLBACK = Object.freeze({ fallback: 'missing-file-sentinel' });

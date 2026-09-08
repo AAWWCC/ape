@@ -15,7 +15,7 @@ import { atomicWriteJson } from '../lib/runtime/storage.js';
 // Claude-managed subagent tool call with `!context.ticket` using ONE fixed
 // sentence: 'APE tool denied: Claude subagent has no exact active binding'.
 // bin/ape-hook.mjs:206-221 is the only thing that populates `context.ticket`
-// for a live Claude tool call, from resolveClaudeBinding
+// for a live Claude tool call, from resolveClaudeBindingOutcome
 // (lib/runtime/claude-dispatch.js:438-453), which returns a bare `null` on
 // at least these four operator-distinguishable grounds:
 //   (a) the payload carried no usable agent id;
@@ -39,7 +39,7 @@ import { atomicWriteJson } from '../lib/runtime/storage.js';
 // independently reachable techniques in
 // __tests__/runtime-v2-dispatch-binding-expiry.test.js
 // (supersedeTicketByRetry / expireTicketDeadline), applied here to the
-// ordinary tool-call resolveClaudeBinding path rather than the SubagentStart
+// ordinary tool-call resolveClaudeBindingOutcome path rather than the SubagentStart
 // resume path that file covers.
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -251,12 +251,12 @@ async function expireTicketDeadline(dir, ticketId) {
 }
 
 describe('APE v2 Claude subagent binding denial names its cause', () => {
-  it('surfaces four pairwise-distinct, non-leaking reasons for four independently reachable resolveClaudeBinding denial grounds', async () => {
+  it('surfaces four pairwise-distinct, non-leaking reasons for four independently reachable resolveClaudeBindingOutcome denial grounds', async () => {
     // GROUND (a): no usable agent id. bin/ape-hook.mjs enters the binding
     // branch on `event.agent_identity`, which normalizeLifecycleEvent derives
     // from a five-way fallback INCLUDING subagent_id — so a payload naming
     // only `subagent_id` (never `agent_id`/`agentId`, the fields
-    // resolveClaudeBinding actually reads) fools the branch guard into
+    // resolveClaudeBindingOutcome actually reads) fools the branch guard into
     // running the resolver, which then fails identity matching outright.
     const trapDir = await project('trap');
     const { action: trapAction } = await startClaude(trapDir);

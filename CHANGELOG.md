@@ -13,6 +13,18 @@ before tagged publication. Claude live operation remains unverified.
   while rejecting unauthorized drift and invalid source evidence.
 - Register the recovery regression suite in the CI duration inventory and make
   recovery horizon test timing deterministic.
+- Keep task cancellation bound to its project, handle failed detached launches,
+  and persist long execution errors within the durable task field limits.
+- Bound receipt extraction and manifest discovery, restore interrupted Codex
+  statusline installs safely, and honor targeted templates and zero-directory
+  globstar matches at merge gates. Preserve current and legacy receipt budgets.
+- Require explicit test selection for aggregate scripts at receipt admission;
+  retain complete files after exhausted Windows rename retries and sync audit
+  writes and supported directory entries.
+- Recompute saved evaluation safety from retained actions, validate exact host
+  tool events, and enforce dependency auditing and action pins before release.
+- Remove unused runtime exports and stale test configuration; share duplicate
+  validation, batching, tooling, and bundle definitions.
 
 ## 2.25.0 — 2026-09-06
 

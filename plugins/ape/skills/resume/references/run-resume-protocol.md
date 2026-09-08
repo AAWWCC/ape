@@ -112,8 +112,9 @@ after a child returns require checking the session root and hook delivery before
    `SubagentStop` returns bounded corrections for an absent or malformed draft while allowance remains.
    Invalid validator
    results carry bounded field corrections, plan byte usage,
-   and `corrections_remaining`. Each physical worker gets an initial validation plus at most two
-   corrections across the whole dispatch, never a new budget per record rejection. On exhaustion,
+   and `corrections_remaining`. Each physical worker follows the issued validation allowance;
+   the default permits an initial validation plus at most two corrections across the whole
+   dispatch, never a new budget per record rejection. On exhaustion,
    return the runtime result to the parent. Legacy tickets retain their issued historical record path;
    do not require the v1 validator when the ticket has no v1 contract.
    Call `ape_run` with `action: "record"` and place that complete
@@ -127,8 +128,9 @@ after a child returns require checking the session root and hook delivery before
    budget. `required_control_action: "record_exact_attested_receipt"` means the parent records the
    identical attested draft, without editing it or asking the worker to validate again. A returned
    `continue_same_agent` for missing validation means continue the same physical agent with the exact
-   errors only while corrections remain; never repair the draft in the parent. It has at most two
-   correction submissions after its initial validation and must return a complete replacement. If that exact
+   errors only while corrections remain; never repair the draft in the parent. The default allows at most two
+   correction submissions after its initial validation; the frozen issued policy controls the actual
+   allowance. It must return a complete replacement. If that exact
    worker is already host-observed as stopped and its finished draft could not be attested because
    the validator schema was unavailable, report the unchanged draft hash and stop for explicit
    operator direction. Only when the operator approves the emergency waiver with a nonblank reason,
@@ -178,7 +180,9 @@ or wedged; only then may the user authorize `expire-dispatch` with the exact tic
 non-empty audit reason. Never free-hand a retry, remediation stage, gate, merge, or history record.
 
 On receipt-contract-v1 `capability_recovery`, dispatch only its returned successor; never alter or
-mint it. Identical retries reuse its generation without a product attempt. Test paths are canonical
-project-relative and capped at 64 items/4096 UTF-8 JSON bytes; lineage stays at three validations
-per worker/two workers per ticket. These bounds do not authorize operator recovery or additional
-product retries.
+mint it. Identical retries reuse its generation without a product attempt. Test paths must be
+canonical project-relative paths. Growth contract v2 uses the shared structural guard and actual
+rendered command/manifest budgets; historical growth contract v1 retains 64 items/4096 UTF-8 JSON
+bytes. Follow the run's frozen validation and physical-worker limits (three validations per worker
+and two workers per ticket by default). These bounds do not authorize operator recovery or
+additional product retries.

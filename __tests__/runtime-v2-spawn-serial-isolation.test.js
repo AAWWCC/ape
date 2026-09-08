@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -28,32 +27,6 @@ const KNOWN_WEDGERS = [
   '__tests__/runtime-v2-round3-terminal-tree.test.js',
   '__tests__/runtime-v2-risk-trigger-receipt-surfacing.test.js',
 ];
-
-// The single quarantine member whose membership is PINNED by name, and
-// deliberately the only one. The discipline stated above is that these arms
-// resolve membership instead of hard-coding it, which is exactly why the three
-// MCP cold-spawn peers are named nowhere in this file: their cost announces
-// itself (every session spawns bin/ape-mcp.mjs as a fresh node child that
-// cold-imports the whole runtime), so a pin would buy nothing but a
-// change-detector on a decision no one is likely to reverse by accident.
-//
-// The audit sweep named below is the exception: its cost is INDIRECT while its
-// filename reads like a cheap assertion sweep, so a future pruning of "Keep
-// this set minimal" could plausibly drop it without anyone noticing what was
-// lost. Verified against the tree (line refs are into that file): it imports
-// execFileSync (:1) and drives real `git` children (:293-299) and a real
-// `mkfifo` (:1573); decisively, its fast-lane fixture
-// configures `targeted: 'node tests/value.test.js'` (:661), which the RUNTIME'S
-// OWN red-test observation spawns and AWAITS through walkToReview (:725-742).
-// And under contention the damage is not merely slowness: the item-13 arms
-// (:1593-1649) rendezvous with an in-flight `overrideRun('reset')` through a
-// FIFO under a hard 10s wall-clock deadline (:1546-1559, called at :1579) that
-// THROWS on expiry, so starving that file turns a scheduling accident into a
-// red run. It is NOT a KNOWN_WEDGER above — it never wedged the 2026-07-20
-// spike — and must not be added there; it is quarantined for the profile the
-// array's own header names, awaiting real child processes.
-const CONTENTION_PINNED_SERIAL_FILE = '__tests__/runtime-v2-audit-2026-07-24-nits.test.js';
-const HAS_PRIVATE_CONTENTION_AUDIT = existsSync(path.join(ROOT, CONTENTION_PINNED_SERIAL_FILE));
 
 /** Load the resolved vitest config object (supports the function form). */
 async function loadConfig() {
@@ -251,28 +224,4 @@ describe('spawn-serial vitest project isolates spawn-heavy gate-integration test
     ).toBe(20000);
   });
 
-  it.runIf(HAS_PRIVATE_CONTENTION_AUDIT)(
-    '(f) the private contention-pinned audit sweep runs in spawn-serial and not in default',
-    async () => {
-      const files = await listTestFiles();
-      expect(
-        files,
-        'sanity: the pinned file must still exist under __tests__ — if it was renamed, move this pin with it',
-      ).toContain(CONTENTION_PINNED_SERIAL_FILE);
-
-      const spawnSerial = await getProject('spawn-serial');
-      const defaultProject = await getProject('default');
-      expect(spawnSerial, "the 'spawn-serial' project must exist").toBeTruthy();
-      expect(defaultProject, "the 'default' project must exist").toBeTruthy();
-
-      expect(
-        resolveMembership(spawnSerial, files),
-        `${CONTENTION_PINNED_SERIAL_FILE} awaits real child processes: it must run in the serialized spawn-serial project`,
-      ).toContain(CONTENTION_PINNED_SERIAL_FILE);
-      expect(
-        resolveMembership(defaultProject, files),
-        `${CONTENTION_PINNED_SERIAL_FILE} must be excluded from the file-parallel default project, not run in both`,
-      ).not.toContain(CONTENTION_PINNED_SERIAL_FILE);
-    },
-  );
 });

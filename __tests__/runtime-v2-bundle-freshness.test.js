@@ -5,34 +5,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { BUNDLE_ENTRIES as BUNDLES, BUNDLE_OPTIONS } from '../scripts/bundle-definition.mjs';
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
-// These options and banners mirror scripts/bundle-mcp.mjs exactly: the test attests
-// that the committed dist/ artifacts are what that script would produce from the
-// current sources, so a lib/ or bin/ change shipped without `npm run bundle` fails
-// here instead of in CI's freshness check (`npm run bundle && git diff -- dist/`).
-const BUNDLES = [
-  {
-    entry: 'bin/ape-mcp.mjs',
-    committed: 'dist/ape-mcp.bundle.mjs',
-    banner:
-      '// @generated AUTO-GENERATED build artifact by scripts/bundle-mcp.mjs — DO NOT EDIT BY HAND; it mirrors the source tree (bin/ape-mcp.mjs, lib/runtime/) and a hand edit is LOST on the next build. Regenerate with `npm run bundle`.',
-  },
-  {
-    entry: 'bin/ape-hook.mjs',
-    committed: 'dist/ape-hooks.bundle.mjs',
-    banner:
-      '// @generated AUTO-GENERATED build artifact by scripts/bundle-mcp.mjs — DO NOT EDIT BY HAND; it mirrors bin/ape-hook.mjs and lib/runtime/. Regenerate with `npm run bundle`.',
-  },
-  {
-    entry: 'bin/ape-larp.mjs',
-    committed: 'dist/ape-larp.bundle.mjs',
-    banner:
-      '// @generated AUTO-GENERATED build artifact by scripts/bundle-mcp.mjs — DO NOT EDIT BY HAND; it mirrors bin/ape-larp.mjs and lib/runtime/. Regenerate with `npm run bundle`.',
-  },
-];
-
+// Rebuild the generator's shared contract outside the tree and compare bytes.
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 // The rebuild happens strictly out-of-tree (an os.tmpdir mkdtemp directory): this
@@ -56,24 +33,20 @@ describe('committed dist bundles are fresh', () => {
   });
 
   for (const bundle of BUNDLES) {
-    it(`${bundle.committed} is byte-identical to a fresh build of ${bundle.entry}`, async () => {
-      const outfile = path.join(scratch, path.basename(bundle.committed));
+    it(`${bundle.artifact} is byte-identical to a fresh build of ${bundle.entry}`, async () => {
+      const outfile = path.join(scratch, path.basename(bundle.artifact));
       await build({
         entryPoints: [path.join(REPO_ROOT, bundle.entry)],
         outfile,
-        bundle: true,
-        platform: 'node',
-        format: 'esm',
-        target: 'node22',
-        minifyWhitespace: true,
+        ...BUNDLE_OPTIONS,
         banner: { js: bundle.banner },
         logLevel: 'silent',
       });
       const fresh = await readFile(outfile);
-      const committed = await readFile(path.join(REPO_ROOT, bundle.committed));
+      const committed = await readFile(path.join(REPO_ROOT, bundle.artifact));
       expect(
         { bytes: committed.length, sha256: sha256(committed) },
-        `${bundle.committed} is stale — regenerate with \`npm run bundle\``,
+        `${bundle.artifact} is stale — regenerate with \`npm run bundle\``,
       ).toEqual({ bytes: fresh.length, sha256: sha256(fresh) });
     });
   }

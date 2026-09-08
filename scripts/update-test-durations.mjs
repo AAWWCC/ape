@@ -8,6 +8,7 @@ import { link, lstat, mkdtemp, open, readdir, rename, rm } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sameIdentity, sameSnapshot, sameLockSnapshot, sameReclaimableLock } from './tooling-snapshots.mjs';
 
 const REPORT_BYTES = 16 * 1024 * 1024;
 const OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -17,17 +18,6 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const scratch = await mkdtemp(join(tmpdir(), 'ape-test-timings-'));
 const report = join(scratch, 'vitest.json');
 const destination = join(root, '.github', 'test-durations.json');
-
-function sameIdentity(left, right) {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
-function sameSnapshot(left, right) {
-  return sameIdentity(left, right)
-    && left.size === right.size
-    && left.mtimeMs === right.mtimeMs
-    && left.ctimeMs === right.ctimeMs;
-}
 
 async function acquireWriterLock() {
   const file = join(dirname(destination), '.test-durations.lock');
@@ -133,24 +123,6 @@ async function readLockSnapshot(file) {
   } finally {
     await handle.close();
   }
-}
-
-function sameLockSnapshot(left, right) {
-  return left && right
-    && sameSnapshot(left.stats, right.stats)
-    && (left.bytes === null || right.bytes === null
-      ? left.bytes === right.bytes
-      : left.bytes.equals(right.bytes));
-}
-
-function sameReclaimableLock(left, right) {
-  return left && right
-    && sameIdentity(left.stats, right.stats)
-    && left.stats.size === right.stats.size
-    && left.stats.mtimeMs === right.stats.mtimeMs
-    && (left.bytes === null || right.bytes === null
-      ? left.bytes === right.bytes
-      : left.bytes.equals(right.bytes));
 }
 
 async function tryReclaimWriterLock(file) {

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -45,10 +45,11 @@ vi.mock('../lib/runtime/gates.js', async (importOriginal) => {
 });
 import { pollRemoteChecksAndMerge, autoMergeGithub } from '../lib/runtime/gates.js';
 import { nextRun } from '../lib/runtime/service.js';
-import { queryHistory, selectEffectiveRecord } from '../lib/runtime/history.js';
+import { archiveRun, queryHistory, selectEffectiveRecord } from '../lib/runtime/history.js';
 import { currentTreeSha } from '../lib/runtime/git.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
+import { validatedArchiveSnapshot } from '../lib/runtime/diagnostics.js';
 
 // Real filesystem + git work; keep the slow-but-honest tests off the 15s
 // default, and let teardown ride out win32 EBUSY.
@@ -217,6 +218,53 @@ async function mergeThenCrash(runId, preCrashMerge) {
 }
 
 describe('APE v2 MERGED archive chain crash-idempotency (audit 1.2, invariants 7/8)', () => {
+  it('converges after an upgrade adds pushed-head evidence to a legacy archived merge', async () => {
+    const runId = 'run-merged-idem-upgrade';
+    const { dir, paths, primaryBefore } = await mergeThenCrash(runId, runtimePerformedMerge());
+    const enriched = { ...observedExternalMerge(), head_oid: HEAD_OID, cleanup: { cleaned: false, remote_branch_retained: true } };
+    pollRemoteChecksAndMerge.mockResolvedValueOnce({ merged: enriched });
+    expect(await callNext(dir)).toMatchObject({ ok: true, run: { status: 'completed' } });
+    expect(await readJson(path.join(paths.history, `${runId}.json`))).toEqual(primaryBefore);
+    expect(validatedArchiveSnapshot(primaryBefore)?.hashVerified).toBe(true);
+  });
+
+  it('retains a legacy superseding completion without creating a duplicate on head enrichment', async () => {
+    const { paths, state } = await seedShippingRun('run-merged-idem-upgrade-superseded');
+    const completed = { ...state, status: 'completed', stage: 'complete', merge: runtimePerformedMerge() };
+    const options = { supersedes: 'a'.repeat(64) };
+    const before = await archiveRun(paths, completed, options);
+    const files = await readdir(paths.history);
+    const enriched = { ...completed, merge: { ...completed.merge, head_oid: HEAD_OID, cleanup: { cleaned: true, remote_branch_retained: true } } };
+    expect(await archiveRun(paths, enriched, options)).toEqual(before);
+    expect(await readdir(paths.history)).toEqual(files);
+  });
+
+  it('archives the exact pushed head and converges when local cleanup succeeds on a crash retry', async () => {
+    const runId = 'run-merged-idem-cleanup';
+    const initial = { ...runtimePerformedMerge(), head_oid: HEAD_OID, cleanup: { cleaned: false, reason: 'local branch retained', remote_branch_retained: true } };
+    const { dir, paths, primaryBefore } = await mergeThenCrash(runId, initial);
+    expect(primaryBefore.merge).toEqual(initial);
+    expect(validatedArchiveSnapshot(primaryBefore)).toMatchObject({ hashVerified: true, snapshot: { merge: initial } });
+
+    const retried = { ...observedExternalMerge(), head_oid: HEAD_OID, cleanup: { cleaned: true, remote_branch_retained: true } };
+    pollRemoteChecksAndMerge.mockResolvedValueOnce({ merged: retried });
+    const retry = await callNext(dir);
+    expect(retry).toMatchObject({ ok: true, run: { status: 'completed' } });
+    expect(await readJson(path.join(paths.history, `${runId}.json`))).toEqual(primaryBefore);
+    expect((await queryHistory(paths, { run_id: runId }))[0].merge).toMatchObject({ head_oid: HEAD_OID });
+  });
+
+  it('refuses a crash retry carrying a different pushed head even when cleanup matches', async () => {
+    const runId = 'run-merged-idem-head';
+    const initial = { ...runtimePerformedMerge(), head_oid: HEAD_OID, cleanup: { cleaned: false, remote_branch_retained: true } };
+    const { dir, paths, primaryBefore } = await mergeThenCrash(runId, initial);
+    pollRemoteChecksAndMerge.mockResolvedValueOnce({ merged: { ...initial, head_oid: 'd'.repeat(40) } });
+    const retry = await callNext(dir);
+    expect(retry.ok === true && retry.run?.status === 'completed').toBe(false);
+    expect(await readJson(path.join(paths.history, `${runId}.json`))).toEqual(primaryBefore);
+    expect(validatedArchiveSnapshot({ ...primaryBefore, merge: { ...initial, head_oid: 'd'.repeat(40) } })).toBeNull();
+  });
+
   it('converges a crash-retry that re-observes the merged PR (observed-external provenance) instead of wedging on the immutable record', async () => {
     const runId = 'run-merged-idem-a';
     const { dir, paths, primaryBefore } = await mergeThenCrash(runId, runtimePerformedMerge());

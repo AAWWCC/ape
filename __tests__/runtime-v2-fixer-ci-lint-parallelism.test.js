@@ -135,6 +135,27 @@ describe('public cross-platform CI and release contract', () => {
     }
   });
 
+  it('gates tagged publication on the complete source suite and every native platform cell', async () => {
+    const release = await read('.github/workflows/release.yml');
+    const full = jobBlock(release, 'source-tests');
+    const native = jobBlock(release, 'native-runtime');
+    const validation = jobBlock(release, 'host-validation');
+    expect(full).toContain('npm run test:agent');
+    expect(full).toContain('node-version: 22.12.0');
+    expect(JSON.parse(await read('package.json')).scripts['test:agent'])
+      .toBe('vitest run --maxWorkers=3');
+    expect(native).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect([...native.matchAll(/version: (\d+\.\d+\.\d+)/gu)].map((match) => match[1]))
+      .toEqual(['22.12.0', '24.15.0']);
+    expect(native).toContain('node scripts/run-ci-tests.mjs native -- --maxWorkers=1');
+    expect(native).toContain('git diff --exit-code -- dist/ plugins/');
+    expect(validation).toContain('needs: [source-tests, native-runtime]');
+    expect(jobBlock(release, 'publish')).toContain('needs: host-validation');
+    for (const block of [full, native, validation, jobBlock(release, 'publish')]) {
+      expect(block).not.toMatch(/continue-on-error:|if:.*always\(\)|exclude:/u);
+    }
+  });
+
   it('keeps audit and both credential-free release gates while the full-suite aggregate depends on every partition', async () => {
     const yaml = await read('.github/workflows/ci.yml');
     const full = jobBlock(yaml, 'full-suite');
@@ -223,9 +244,11 @@ describe('public cross-platform CI and release contract', () => {
     expect(release).toMatch(/^permissions:\n  contents: read$/mu);
     expect(release).not.toContain('APE_PUBLIC_FORBIDDEN_HASHES:');
     expect(hostValidation).toMatch(/permissions:\n      contents: read/u);
+    expect(hostValidation).toContain('npm audit --audit-level=high');
     expect(hostValidation).toContain('npm install --global @openai/codex@0.147.0 @anthropic-ai/claude-code@2.1.228');
-    expect(hostValidation).toContain('npm run smoke:marketplaces');
-    expect(hostValidation).toContain('npm run validate');
+    expect(hostValidation).toContain('npm run smoke:marketplaces -- --installed-hosts');
+    expect(hostValidation).toContain('npm run validate:claude');
+    expect(hostValidation).not.toMatch(/npm run validate\s*$/mu);
     expect(hostValidation).not.toContain('contents: write');
     expect(hostValidation).not.toContain('attest-build-provenance');
     expect(hostValidation).not.toContain('gh release create');

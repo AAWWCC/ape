@@ -35,6 +35,7 @@ const FIXTURES = [
   { id: 'complete-manifest', manifest: COMPLETE, pass: true, strictPass: true },
   { id: 'unknown-top-level-field', manifest: { ...COMPLETE, bogusField: true }, pass: true, strictPass: false },
   { id: 'invalid-name', manifest: { ...COMPLETE, name: 'Bad Name' }, pass: false, strictPass: false },
+  { id: 'array-name', manifest: { ...COMPLETE, name: ['my-plugin'] }, pass: false, strictPass: false },
   { id: 'author-missing-name', manifest: { ...COMPLETE, author: {} }, pass: false, strictPass: false },
   { id: 'inline-mcp-servers', manifest: { ...COMPLETE, mcpServers: { srv: { command: 'node', args: [] } } }, pass: true, strictPass: true },
   { id: 'hooks-file-valid', ...hooksFile({}, { hooks: GOOD_EVENTS }), pass: true, strictPass: true },

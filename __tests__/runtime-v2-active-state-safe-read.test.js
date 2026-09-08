@@ -54,14 +54,17 @@ vi.mock('node:fs/promises', async (importOriginal) => {
           return result;
         };
       }
-      return handle;
-    },
-    writeFile: async (...args) => {
-      const result = await actual.writeFile(...args);
-      if (!replacementRace.fired && replacementRace.point === 'audit' && args[0] === replacementRace.audit) {
-        await replace();
+      if (args[0] === replacementRace.audit && replacementRace.point === 'audit') {
+        // Durable audit appends now write through a handle so they can fsync.
+        // Inject the same replacement after the append, before quarantine.
+        const write = handle.writeFile.bind(handle);
+        handle.writeFile = async (...writeArgs) => {
+          const result = await write(...writeArgs);
+          if (!replacementRace.fired) await replace();
+          return result;
+        };
       }
-      return result;
+      return handle;
     },
     rename: async (...args) => {
       if (!replacementRace.fired && replacementRace.point === 'rename' && args[0] === replacementRace.active) {

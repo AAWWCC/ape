@@ -46,7 +46,7 @@ import { codexBootstrapStatus } from '../lib/runtime/claude-dispatch.js';
 import { projectHistoryResponse, projectRunResponse } from '../lib/runtime/projection.js';
 import { attachRuntimeGuidance } from '../lib/runtime/session-guidance.js';
 import { LANES } from '../lib/runtime/constants.js';
-import { ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA, START_MODES } from '../lib/runtime/schemas.js';
+import { ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA, START_MODES, TaskErrorSchema } from '../lib/runtime/schemas.js';
 import { TERMINAL_REASON_CODES } from '../lib/runtime/terminal-telemetry.js';
 import { STRUCTURED_SUCCESSOR_UNAVAILABLE_ERROR } from '../lib/runtime/successor-guidance.js';
 
@@ -853,11 +853,17 @@ export async function withProgressHeartbeat(progressToken, label, work, options 
   const startedAt = Date.now();
   const timer = setInterval(() => {
     const seconds = Math.round((Date.now() - startedAt) / 1000);
-    writeLine({
-      jsonrpc: '2.0',
-      method: 'notifications/progress',
-      params: { progressToken, progress: seconds, message: `${label} in progress (${seconds}s)` },
-    });
+    try {
+      writeLine({
+        jsonrpc: '2.0',
+        method: 'notifications/progress',
+        params: { progressToken, progress: seconds, message: `${label} in progress (${seconds}s)` },
+      });
+    } catch {
+      // A disconnected progress sink cannot abandon an entered mutation or
+      // throw from an unrelated timer. Await its ordinary completion below.
+      clearInterval(timer);
+    }
   }, intervalMs);
   timer.unref?.();
   try {
@@ -917,10 +923,27 @@ async function settleCancelledTask(projectDir, task, attribution = null, reason 
     allowedStatuses: ['working', 'input_required'],
     status: 'cancelled',
     statusMessage: reason,
-  }).catch(() => getTask(projectDir, task.taskId));
+  }).catch(async (cause) => {
+    const latest = await getTask(projectDir, task.taskId);
+    // A concurrent terminal result is already durable. Any nonterminal
+    // fallback still represents failed persistence and must remain observable.
+    if (latest && ['cancelled', 'completed', 'failed'].includes(latest.status)) return latest;
+    throw cause;
+  });
 }
 
-async function runCreatedTask(projectDir, task, name, args) {
+function reportTaskPersistenceFailure(taskId, cause) {
+  // Task execution runs outside the request/response plane. Storage failures
+  // cannot be returned on that completed request, but must remain observable.
+  const diagnostic = {
+    event: 'ape_task_terminal_persistence_failed',
+    ...(taskId ? { task_id: String(taskId).slice(0, 128) } : {}),
+    code: String(cause?.code ?? 'UNKNOWN').slice(0, 64),
+  };
+  try { process.stderr.write(`${JSON.stringify(diagnostic)}\n`); } catch { /* stderr may already be closed */ }
+}
+
+async function runCreatedTask(projectDir, task, _name, args) {
   let attribution = null;
   const runtime = runningTasks.get(task.taskId);
   try {
@@ -932,7 +955,7 @@ async function runCreatedTask(projectDir, task, name, args) {
       // any already-entered effect and gives it a chance to persist an exact
       // gate watch that can be attributed and cleaned; the empty attribution
       // itself never authorizes a signal.
-      await settleCancelledTask(projectDir, requested ?? initial, {});
+      if (requested) await settleCancelledTask(projectDir, requested, {});
       return;
     }
     const serviceValue = await executeApeRunTaskOperation(projectDir, {
@@ -968,30 +991,41 @@ async function runCreatedTask(projectDir, task, name, args) {
       statusMessage: payload.isError ? 'tool execution completed with an error result' : 'tool execution completed',
     });
   } catch (cause) {
-    if (runtime?.cancelRequested) {
-      const requested = await runtime.cancellationPromise;
-      if (requested) await settleCancelledTask(projectDir, requested, attribution);
-      return;
+    try {
+      if (runtime?.cancelRequested) {
+        const requested = await runtime.cancellationPromise;
+        if (requested) await settleCancelledTask(projectDir, requested, attribution);
+        return;
+      }
+      const latest = await getTask(projectDir, task.taskId);
+      if (!latest) {
+        reportTaskPersistenceFailure(task.taskId, { code: 'APE_TASK_MISSING' });
+        return;
+      }
+      if (latest.cancellation) {
+        await settleCancelledTask(projectDir, latest, attribution);
+        return;
+      }
+      // A JSON-RPC execution error is not a successful tool result. Preserve
+      // valid error objects and bound unexpected exceptions to their contract.
+      const suppliedError = TaskErrorSchema.safeParse(cause?.jsonRpcError);
+      const rpcError = suppliedError.success ? suppliedError.data : {
+        code: -32603,
+        message: String(cause?.jsonRpcError?.message ?? cause?.message ?? cause)
+          .slice(0, 8_192) || 'tool execution failed',
+      };
+      await appendTaskGeneration(projectDir, task.taskId, {
+        expectedGeneration: latest.generation,
+        allowedStatuses: ['working', 'input_required'],
+        status: 'failed',
+        error: rpcError,
+        // The detailed error has an 8192-character contract; this summary has
+        // a separate 2048-character bound and must not prevent terminalization.
+        statusMessage: 'tool execution failed',
+      });
+    } catch (persistenceCause) {
+      reportTaskPersistenceFailure(task.taskId, persistenceCause);
     }
-    const latest = await getTask(projectDir, task.taskId).catch(() => null);
-    if (!latest) return;
-    if (latest.cancellation) {
-      await settleCancelledTask(projectDir, latest, attribution);
-      return;
-    }
-    // A JSON-RPC execution error is not a successful tool result. Preserve its
-    // error object verbatim and expose it through the failed task variant.
-    const rpcError = cause?.jsonRpcError ?? {
-      code: -32603,
-      message: cause?.message ?? String(cause),
-    };
-    await appendTaskGeneration(projectDir, task.taskId, {
-      expectedGeneration: latest.generation,
-      allowedStatuses: ['working', 'input_required'],
-      status: 'failed',
-      error: rpcError,
-      statusMessage: rpcError.message,
-    }).catch(() => {});
   } finally {
     runningTasks.delete(task.taskId);
   }
@@ -1091,40 +1125,59 @@ export async function shutdownOwnedTasks(reason = 'MCP server shutdown requested
     running.cancellationPromise = requestTaskCancellation(running.projectDir, running.task.taskId, {
       requester: TASK_OWNER,
       reason,
-    }).catch(() => null);
+    }).catch((cause) => { reportTaskPersistenceFailure(running.task.taskId, cause); return null; });
+  }
+  // Every checkpoint now has its own durable cancellation promise before any
+  // awaited store access can block another project or let its timer enter.
+  for (const running of live) {
     const requested = await running.cancellationPromise;
     if (requested) requestedLive.push({ running, requested });
+    else if (!running.started) {
+      // Stop an unentered operation even when cancellation cannot be written.
+      // Its durable record stays unchanged; never invent a cancelled result.
+      clearTimeout(running.timer);
+      runningTasks.delete(running.task.taskId);
+      running.resolve?.();
+    }
   }
   // Phase two performs attributable cleanup for entered runners. Deferred
   // runners observe the cancellation at their
   // first checkpoint and cross the service-lock barrier there.
   for (const { running, requested } of requestedLive) {
     if (running.started) {
-      await cancelRunningTask(running.projectDir, requested, running, reason);
+      try { await cancelRunningTask(running.projectDir, requested, running, reason); }
+      catch (cause) { reportTaskPersistenceFailure(requested.taskId, cause); }
     } else if (!running.started) {
       clearTimeout(running.timer);
       // Keep the request observably working+cancellation until the cleanup
       // turn, then publish cancelled and resolve shutdown. This mirrors an
       // already-running task's cooperative two-phase ordering.
       running.timer = setTimeout(async () => {
-        await settleCancelledTask(running.projectDir, requested, {}, reason);
-        runningTasks.delete(requested.taskId);
-        running.resolve?.();
+        try { await settleCancelledTask(running.projectDir, requested, {}, reason); }
+        catch (cause) { reportTaskPersistenceFailure(requested.taskId, cause); }
+        finally {
+          runningTasks.delete(requested.taskId);
+          running.resolve?.();
+        }
       }, 0);
     }
   }
   // Recover process-owned tasks whose in-memory runner already disappeared.
   for (const projectDir of ownedTaskRoots) {
-    const tasks = await listOwnedTasks(projectDir, TASK_OWNER).catch(() => []);
+    const tasks = await listOwnedTasks(projectDir, TASK_OWNER).catch((cause) => {
+      reportTaskPersistenceFailure(null, cause);
+      return [];
+    });
     for (const task of tasks) {
       if (!['working', 'input_required'].includes(task.status)) continue;
       if (runningTasks.has(task.taskId)) continue;
       const requested = await requestTaskCancellation(projectDir, task.taskId, {
         requester: TASK_OWNER,
         reason,
-      }).catch(() => null);
+      }).catch((cause) => { reportTaskPersistenceFailure(task.taskId, cause); return null; });
       if (requested) {
-        await settleCancelledTask(projectDir, requested, null, reason);
+        try { await settleCancelledTask(projectDir, requested, null, reason); }
+        catch (cause) { reportTaskPersistenceFailure(task.taskId, cause); }
       }
     }
   }
@@ -1163,7 +1216,22 @@ export async function executeToolCall(message) {
 // tool call runs a multi-minute gate suite. main() routes id-bearing
 // tools/call messages onto the FIFO queue before consulting this handler, so
 // the tools/call arm here only serves direct callers (tests, embedding).
+function invalidRequest(message) {
+  if (message === null || typeof message !== 'object' || Array.isArray(message)) {
+    return error(null, -32600, 'invalid request');
+  }
+  const hasId = Object.hasOwn(message, 'id');
+  const validId = !hasId || message.id === null || typeof message.id === 'string' ||
+    (typeof message.id === 'number' && Number.isFinite(message.id));
+  if (message.jsonrpc !== '2.0' || typeof message.method !== 'string' || !validId) {
+    return error(hasId && validId ? message.id : null, -32600, 'invalid request');
+  }
+  return null;
+}
+
 export async function handle(message) {
+  const invalid = invalidRequest(message);
+  if (invalid) return invalid;
   if (!Object.hasOwn(message, 'id')) return null;
   // Negotiation first: a declared version this server does not implement is a
   // protocol error, answered before any method runs. (main() applies the same
@@ -1242,15 +1310,20 @@ export async function handle(message) {
       if (!task) return error(message.id, -32602, 'Failed to update task: Task not found');
       return completeResult(message.id, {});
     }
-    const running = runningTasks.get(taskId);
-    if (running) running.cancelRequested = true;
-    const cancellationPromise = requestTaskCancellation(projectDir, taskId, {
+    const task = await requestTaskCancellation(projectDir, taskId, {
       requester: TASK_OWNER,
       reason: 'client requested task cancellation',
     });
-    if (running) running.cancellationPromise = cancellationPromise;
-    const task = await cancellationPromise;
     if (!task) return error(message.id, -32602, 'Failed to cancel task: Task not found');
+    const candidate = runningTasks.get(taskId);
+    const running = candidate?.task.rootBinding === task.rootBinding ? candidate : null;
+    // Only a successfully persisted cancellation of this exact canonical
+    // project/task may affect its runner. Missing/wrong-root requests and
+    // journal failures leave the original operation able to publish a result.
+    if (running && task.cancellation) {
+      running.cancellationPromise = Promise.resolve(task);
+      running.cancelRequested = true;
+    }
     if (running) {
       await cancelRunningTask(projectDir, task, running, 'client requested task cancellation');
     } else if (!running) {
@@ -1360,46 +1433,72 @@ function isToolCall(message) {
 
 async function main() {
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
-  const queue = createToolCallQueue();
   const stop = () => lines.close();
+  let outputDisconnected = false;
+  const disconnectOutput = () => { outputDisconnected = true; stop(); };
+  const writeLine = (payload) => {
+    if (outputDisconnected) return false;
+    try { return process.stdout.write(`${JSON.stringify(payload)}\n`); }
+    catch { disconnectOutput(); return false; }
+  };
+  // Stream failures are asynchronous too: a try around write() alone misses
+  // EPIPE. Stop ingress, drain accepted FIFO calls, and durably settle owned
+  // tasks through the same shutdown path as EOF. Keep these handlers for the
+  // process lifetime because buffered writes can fail after main has drained.
+  process.stdout.on('error', disconnectOutput);
+  process.stdout.on('close', disconnectOutput);
+  process.stdin.on('error', stop);
+  process.stderr.on('error', () => {});
+  const queue = createToolCallQueue({ writeLine });
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
-  for await (const line of lines) {
-    let message;
-    try {
-      message = JSON.parse(line);
-    } catch {
-      process.stdout.write(`${JSON.stringify(error(null, -32700, 'parse error'))}\n`);
-      continue;
-    }
-    try {
-      if (isToolCall(message)) {
-        // Version negotiation happens BEFORE the queue: a mismatched call is a
-        // protocol error, so the tool must not run at all (no result frame, no
-        // state touched) and the refusal must not wait behind a long gate.
-        const refusal = protocolVersionRefusal(message);
-        if (refusal) {
-          process.stdout.write(`${JSON.stringify(refusal)}\n`);
-          continue;
-        }
-        // Enqueue without awaiting: the read loop stays free to answer
-        // protocol messages while the call (and any queued behind it) runs.
-        queue.enqueue(message);
+  try {
+    for await (const line of lines) {
+      let message;
+      try {
+        message = JSON.parse(line);
+      } catch {
+        writeLine(error(null, -32700, 'parse error'));
         continue;
       }
-      const response = await handle(message);
-      if (response) process.stdout.write(`${JSON.stringify(response)}\n`);
-    } catch (cause) {
-      process.stdout.write(`${JSON.stringify(error(message.id ?? null, -32603, cause?.message ?? String(cause)))}\n`);
+      try {
+        const invalid = invalidRequest(message);
+        if (invalid) {
+          writeLine(invalid);
+          continue;
+        }
+        if (isToolCall(message)) {
+          // Version negotiation happens BEFORE the queue: a mismatched call is a
+          // protocol error, so the tool must not run at all (no result frame, no
+          // state touched) and the refusal must not wait behind a long gate.
+          const refusal = protocolVersionRefusal(message);
+          if (refusal) {
+            writeLine(refusal);
+            continue;
+          }
+          // Enqueue without awaiting: the read loop stays free to answer
+          // protocol messages while the call (and any queued behind it) runs.
+          queue.enqueue(message);
+          continue;
+        }
+        const response = await handle(message);
+        if (response) writeLine(response);
+      } catch (cause) {
+        writeLine(error(message?.id ?? null, -32603, cause?.message ?? String(cause)));
+      }
     }
+  } catch {
+    // A broken input stream rejects the readline iterator. It still owes
+    // every already-accepted mutation the ordinary drain and task cleanup.
+    stop();
+  } finally {
+    // EOF/disconnection with calls still in flight: finish accepted calls
+    // before cancelling process-owned tasks, even when responses are lost.
+    await queue.drain();
+    await shutdownOwnedTasks('MCP server input closed or process shutdown requested');
+    process.removeListener('SIGINT', stop);
+    process.removeListener('SIGTERM', stop);
   }
-  // stdin closed with calls still in flight: finish and answer them all
-  // before exiting — dropping a queued mutation's response would leave the
-  // caller unable to distinguish "not run" from "response lost".
-  await queue.drain();
-  await shutdownOwnedTasks('MCP server input closed or process shutdown requested');
-  process.removeListener('SIGINT', stop);
-  process.removeListener('SIGTERM', stop);
 }
 
 // Importable for unit tests without starting the stdio loop; realpath both

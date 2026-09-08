@@ -1,11 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalJson, sha256 } from '../lib/runtime/canonical.js';
+import { ReceiptValidationResultSchema } from '../lib/runtime/schemas.js';
+import { LEGACY_PLAN_CONTRACT_MAX_BYTES, PLAN_CONTRACT_MAX_BYTES } from '../lib/runtime/plan-contract.js';
 import {
   receiptOutputSchemaForTicket,
   validateReceiptDraft,
 } from '../lib/runtime/receipt-validator.js';
 
 const HASH = 'a'.repeat(64);
+
+describe('receipt validation result budget compatibility', () => {
+  it.each([LEGACY_PLAN_CONTRACT_MAX_BYTES, PLAN_CONTRACT_MAX_BYTES])('accepts an actual validator result for a %i-byte ticket', (maxBytes) => {
+    const ticket = contractTicket({ role: 'debugger', stage_id: 'debug' });
+    ticket.capability_manifest.byte_budgets.candidate_plan_utf8_bytes = maxBytes;
+    ticket.output_schema = receiptOutputSchemaForTicket(ticket);
+    ticket.capability_manifest.receipt_schema.hash = sha256(ticket.output_schema);
+    const result = validateReceiptDraft(ticket, draft(ticket, { summary: 'Inspection complete' }));
+    expect(result.valid).toBe(true);
+    expect(result.budgets.candidate_plan_utf8_bytes.max_bytes).toBe(maxBytes);
+    expect(ReceiptValidationResultSchema.safeParse(result).success).toBe(true);
+  });
+
+  it('rejects remaining bytes exceeding a legacy ticket allowance', () => {
+    expect(ReceiptValidationResultSchema.safeParse({
+      valid: true, corrections: [], budgets: { candidate_plan_utf8_bytes: {
+        used_bytes: 0, max_bytes: LEGACY_PLAN_CONTRACT_MAX_BYTES, remaining_bytes: PLAN_CONTRACT_MAX_BYTES,
+      } },
+    }).success).toBe(false);
+  });
+});
 
 function contractTicket(overrides = {}, capabilityManifestOverrides = {}) {
   const objective = overrides.objective ?? 'Produce a complete exact contract artifact';

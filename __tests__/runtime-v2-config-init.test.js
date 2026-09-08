@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { configAction } from '../lib/runtime/service.js';
 import { doctor } from '../lib/runtime/doctor.js';
 import { INPUT_LIMITS } from '../lib/runtime/input-guard.js';
+import { splitCommand } from '../lib/runtime/runner.js';
 
 // Foreign-repo onboarding (`ape_config init`): a project that has never used
 // APE inspects its own manifests and proposes grounded gate commands, then
@@ -217,6 +218,31 @@ describe('ape v2 config init onboarding', () => {
     expect(config.test_commands.full).toBe('node --test');
   });
 
+  it.each(['ts', 'mts', 'cts'])('bootstraps .%s tests with executable targeted and full commands on the supported Node runtime', async (extension) => {
+    const dir = emptyProject();
+    const testPath = `test/value.test.${extension}`;
+    const r = initResult(await configAction(dir, 'init', {
+      behavioral: true, test_paths: [testPath, 'test/other.test.cjs'],
+    }));
+    expect(r.proposal.proposal_complete).toBe(true);
+    expect(r.proposal.detected_runner.family).toBe('node-test-typescript-bootstrap');
+    const commands = r.proposal.test_commands;
+    expect(commands.targeted_template.value).toBe('node --experimental-strip-types --test {paths}');
+    expect(commands.full.value).toBe('node --experimental-strip-types --test');
+    mkdirSync(join(dir, 'test'));
+    const imports = extension === 'cts'
+      ? "const { test } = require('node:test'); const { strictEqual } = require('node:assert');"
+      : "import { test } from 'node:test'; import { strictEqual } from 'node:assert';";
+    writeFileSync(join(dir, testPath), `${imports}\nconst value: number = 1; test('typed value', () => strictEqual(value, 1));\n`);
+    writeFileSync(join(dir, 'test/other.test.cjs'), "require('node:test').test('other', () => {});\n");
+    for (const command of [commands.targeted_template.value.replace('{paths}', testPath), commands.full.value]) {
+      const [, ...args] = splitCommand(command);
+      const output = execFileSync(process.execPath, args, { cwd: dir, encoding: 'utf8', timeout: 10_000 });
+      expect(output).toContain('typed value');
+      expect(output).toContain('fail 0');
+    }
+  });
+
   it('treats repository-owned CLAUDE.md as blank-repository metadata without changing it', async () => {
     const dir = emptyProject();
     const instructions = '# Project instructions\n\nKeep this text.\n';
@@ -256,6 +282,8 @@ describe('ape v2 config init onboarding', () => {
     for (const test_paths of [
       ['test/value.test.js', 'tests/test_value.py'],
       ['tests/value_spec.rb'],
+      ['test/value.test.tsx'],
+      ['test/value.test.jsx'],
     ]) {
       const r = initResult(await configAction(dir, 'init', { behavioral: true, test_paths }));
       expect(r.proposal.proposal_complete).toBe(false);

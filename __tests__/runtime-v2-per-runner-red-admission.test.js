@@ -42,10 +42,9 @@ import { atomicWriteJson } from '../lib/runtime/storage.js';
 //     routed authored-test set (or zero participants) MUST refuse
 //     (/found no runtime-verifiable authored test files/), never admit with
 //     nothing run.
-//   AMENDMENT 2 (subdir derived-scoping at the runner's own root): a runner whose
-//     root is a SUBDIR with no profile.targeted_template but a manifest under that
-//     subdir is scoped by detectTestRunner AT THAT SUBDIR and run against its own
-//     root — the observed command is scoped to the runner-root-relative path.
+//   AMENDMENT 2 (subdir scoping at the runner's own root): native file-selecting
+//     runners may derive their invocation at that root. Arbitrary scripts need
+//     an explicit template, rendered against runner-root-relative paths.
 //
 // RED anchors (fail at base, pass post-fix): cases 1, 2, 5, 6 (also 3, 7).
 // GREEN guards (green before and after): cases 4, 8.
@@ -319,17 +318,16 @@ describe('per-runner red-test admission (fail-closed refusals)', () => {
   }, 30_000);
 });
 
-describe('per-runner red-test admission (subdir derived scoping)', () => {
-  // CASE 5 (RED anchor, AMENDMENT 2). A subdir runner with no profile.targeted_template
-  // but a `script/test` manifest under its root is scoped by detectTestRunner AT
-  // THAT SUBDIR and admitted red — the observed command is scoped to the
-  // runner-root-relative path, proving the run happened at the runner's own root.
-  it.skipIf(process.platform === 'win32')('AMENDMENT 2: a subdir runner scoped at its own root admits red scoped to the runner-root-relative path (RED)', async () => {
+describe('per-runner red-test admission (subdir scoping)', () => {
+  it.each([false, true])('a subdir aggregate runner requires explicit file selection (template: %s)', async (useTemplate) => {
     const dir = await project({
       executables: { 'packages/js/script/test': '#!/usr/bin/env node\nprocess.exit(1);\n' },
       config: {
         runners: [
-          { id: 'js', owns: ['packages/js/**'], root: 'packages/js', profile: { full: 'node --test' } },
+          { id: 'js', owns: ['packages/js/**'], root: 'packages/js', profile: {
+            full: 'node --test',
+            ...(useTemplate ? { targeted_template: 'node --test {paths}' } : {}),
+          } },
         ],
       },
     });
@@ -339,6 +337,12 @@ describe('per-runner red-test admission (subdir derived scoping)', () => {
 
     await writeTest(dir, 'packages/js/thing.test.js', THROW_TEST);
     const result = await recordReceipt(dir, rawReceipt(ticket));
+    if (!useTemplate) {
+      expect(result).toMatchObject({ ok: false, rejected: true });
+      expect(result.errors.join(' ')).toMatch(/cannot scope|unscoped|unscopeable/);
+      expect(result.errors.join(' ')).toContain('targeted_template');
+      return;
+    }
     expect(result.ok).toBe(true);
     const obs = result.receipt.evidence.red_test;
     expect(obs.observed).toBe(true);

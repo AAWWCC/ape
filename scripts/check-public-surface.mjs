@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { readFile, readdir, lstat, realpath, stat } from 'node:fs/promises';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { allowedEmail } from './public-text-policy.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = dirname(SCRIPT_DIR);
@@ -32,24 +34,27 @@ function compareNames(left, right) {
 }
 
 function usage() {
-  return 'usage: node scripts/check-public-surface.mjs [--root <path>]... [--forbidden-hash-file <path>]...\n';
+  return 'usage: node scripts/check-public-surface.mjs [--root <path>]... [--forbidden-hash-file <path>]... [--tracked-source <repository>]\n';
 }
 
 function parseArgs(argv) {
   const roots = [];
   const forbiddenHashFiles = [];
+  let sourceRoot = null;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
-    if (!['--root', '--forbidden-hash-file'].includes(flag)) {
+    if (!['--root', '--forbidden-hash-file', '--tracked-source'].includes(flag)) {
       throw new SurfaceError(`unknown argument: ${flag}`);
     }
     const value = argv[index + 1];
     if (!value || value.startsWith('--')) throw new SurfaceError(`${flag} requires a path`);
-    if (flag === '--root') roots.push(resolve(value));
+    if (flag === '--tracked-source') sourceRoot = resolve(value);
+    else if (flag === '--root') roots.push(resolve(value));
     else forbiddenHashFiles.push(resolve(value));
     index += 1;
   }
-  return { roots: roots.length > 0 ? roots : [DEFAULT_ROOT], forbiddenHashFiles };
+  if (sourceRoot && roots.length) throw new SurfaceError('--tracked-source cannot be combined with --root');
+  return { roots: sourceRoot ? [] : roots.length > 0 ? roots : [DEFAULT_ROOT], forbiddenHashFiles, sourceRoot };
 }
 
 function parseForbiddenHashes(value, source) {
@@ -129,17 +134,6 @@ function audioMagic(bytes) {
   );
 }
 
-function allowedEmail(value) {
-  if (value.toLowerCase() === 'git@github.com') return true;
-  const domain = value.slice(value.lastIndexOf('@') + 1).toLowerCase();
-  return (
-    ['example.com', 'example.net', 'example.org'].includes(domain) ||
-    domain.endsWith('.test') ||
-    domain.endsWith('.invalid') ||
-    domain === 'users.noreply.github.com'
-  );
-}
-
 function contentFindings(text, forbiddenHashes, forbiddenFingerprints) {
   const findings = [];
   for (const match of text.matchAll(new RegExp(EMAIL.source, `${EMAIL.flags}g`))) {
@@ -191,7 +185,7 @@ async function validateMcp(path, failures) {
   try {
     config = JSON.parse(await readFile(path, 'utf8'));
   } catch (error) {
-    failures.push(`${path}: invalid MCP JSON (${error.message})`);
+    failures.push(`${path}: invalid MCP JSON`);
     return;
   }
   const servers = config?.mcpServers;
@@ -219,7 +213,7 @@ async function validateManifest(path, failures) {
   try {
     manifest = JSON.parse(await readFile(path, 'utf8'));
   } catch (error) {
-    failures.push(`${path}: invalid manifest JSON (${error.message})`);
+    failures.push(`${path}: invalid manifest JSON`);
     return;
   }
   if (manifest?.author && 'email' in manifest.author) failures.push(`${path}: author email is forbidden`);
@@ -250,7 +244,7 @@ async function validateMarketplaces(root, failures) {
         failures.push(`${path}: Claude source must be ./plugins/ape-claude`);
       }
     } catch (error) {
-      if (error?.code !== 'ENOENT') failures.push(`${path}: invalid marketplace (${error.message})`);
+      if (error?.code !== 'ENOENT') failures.push(`${path}: invalid marketplace JSON`);
     }
   }
 }
@@ -309,8 +303,70 @@ async function scanRoot(root, forbiddenHashes, forbiddenFingerprints) {
   return files;
 }
 
+// Scan the real publishable worktree, including newly added nonignored files.
+// Git's inventory excludes local ignored runtime/dependency data; tracked files
+// remain included even if an ignore rule is later added. Never sanitize a copy
+// or exempt docs/tests: synthetic negative fixtures assemble protected-looking
+// values from explicit fixture components instead of storing real secrets.
+async function scanTrackedSource(root, forbiddenHashes, forbiddenFingerprints) {
+  let names;
+  try {
+    root = await realpath(root);
+    const top = execFileSync('git', ['-C', root, 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    if (await realpath(top) !== root) throw new Error('not repository root');
+    names = [...new Set(execFileSync('git', [
+      '-C', root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z',
+    ], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
+      .split('\0').filter(Boolean))].sort(compareNames);
+  } catch {
+    throw new SurfaceError('public source inventory requires a readable Git repository root');
+  }
+  const failures = [];
+  for (const [index, name] of names.entries()) {
+    // Diagnostics contain finding kinds and inventory ordinals, never source
+    // text, private basenames, or parser excerpts from a malformed secret file.
+    const label = `source entry ${index + 1}`;
+    const reasons = new Set(pathFailures(name));
+    if (isAbsolute(name) || name.split('/').some((part) => !part || part === '.' || part === '..')) {
+      reasons.add('invalid source path');
+    } else {
+      try {
+        let current = root;
+        for (const part of name.split('/')) {
+          current = join(current, part);
+          if ((await lstat(current)).isSymbolicLink()) throw new SurfaceError('symlink');
+        }
+        const metadata = await lstat(current);
+        if (!metadata.isFile()) reasons.add('special file or submodule');
+        else if (metadata.size > MAX_PUBLIC_FILE_BYTES) reasons.add('exceeds 5 MiB');
+        else {
+          const bytes = await readFile(current);
+          if (audioMagic(bytes)) reasons.add('audio file signature');
+          const digest = createHash('sha256').update(bytes).digest('hex');
+          if (forbiddenHashes.has(digest) || forbiddenFingerprints.has(fingerprint(digest))) reasons.add('forbidden private blob hash');
+          for (const reason of contentFindings(bytes.toString('utf8'), forbiddenHashes, forbiddenFingerprints)) reasons.add(reason);
+          const contractFailures = [];
+          if (basename(name) === '.mcp.json') await validateMcp(current, contractFailures);
+          if (name.endsWith('/plugin.json')) await validateManifest(current, contractFailures);
+          if (contractFailures.length) reasons.add('invalid public MCP or plugin contract');
+        }
+      } catch (error) {
+        reasons.add(error instanceof SurfaceError ? 'symlink' : 'unreadable source entry');
+      }
+    }
+    for (const reason of reasons) failures.push(`${label}: ${reason}`);
+  }
+  const marketplaceFailures = [];
+  await validateMarketplaces(root, marketplaceFailures);
+  if (marketplaceFailures.length) failures.push('source marketplace declarations are invalid');
+  if (failures.length) throw new SurfaceError(`public tracked source failed with ${failures.length} finding(s):\n${failures.map((failure) => `- ${failure}`).join('\n')}`);
+  return names.length;
+}
+
 async function main(argv) {
-  const { roots, forbiddenHashFiles } = parseArgs(argv);
+  const { roots, forbiddenHashFiles, sourceRoot } = parseArgs(argv);
   const [forbiddenHashes, forbiddenFingerprints] = await Promise.all([
     loadForbiddenHashes(forbiddenHashFiles),
     loadForbiddenFingerprints(),
@@ -323,6 +379,11 @@ async function main(argv) {
     throw new SurfaceError('no forbidden private blob protections are configured');
   }
   let files = 0;
+  if (sourceRoot) {
+    files = await scanTrackedSource(sourceRoot, forbiddenHashes, forbiddenFingerprints);
+    process.stdout.write(`public tracked source passed: ${files} files\n`);
+    return;
+  }
   for (const root of roots) files += await scanRoot(root, forbiddenHashes, forbiddenFingerprints);
   process.stdout.write(`public surface passed: ${files} files across ${roots.length} root(s)\n`);
 }

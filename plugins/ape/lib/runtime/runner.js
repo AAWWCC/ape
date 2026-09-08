@@ -1,8 +1,8 @@
-import { access, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { access, mkdir, open, rename, rm } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { spawnWithTimeout } from './spawn.js';
+import { readBoundedRegularFileUtf8, spawnWithTimeout } from './spawn.js';
 
 async function exists(file) {
   try {
@@ -31,7 +31,7 @@ export async function detectTestRunner(projectDir, options = {}) {
   const packageJson = path.join(projectDir, 'package.json');
   if (await exists(packageJson)) {
     try {
-      const pkg = JSON.parse(await readFile(packageJson, 'utf8'));
+      const pkg = JSON.parse(await readBoundedRegularFileUtf8(packageJson));
       if (pkg.scripts?.test) return descriptor('javascript', win ? 'npm.cmd' : 'npm', ['test'], 'package.json');
     } catch {
       // A malformed manifest is not a confident runner signal.
@@ -73,8 +73,8 @@ export async function detectTestRunner(projectDir, options = {}) {
 // Derive a bounded, deterministic targeted invocation from a detected runner
 // and a set of runtime-validated test paths. Runners with per-path selection
 // get exactly those paths appended and return scoped:true. Runners without a
-// path-selection syntax (cargo/rake/maven/gradle select by test NAME, not
-// file path) fall back to their default suite invocation with scoped:false:
+// path-selection syntax (go selects packages; cargo/rake/maven/gradle select
+// by test NAME, not file path) return an invocation with scoped:false:
 // the superset is sound evidence ONLY for pass-required gates — a passing
 // superset implies the targeted subset passed — never for red admission,
 // where a failing superset proves nothing about the authored tests (any
@@ -85,39 +85,26 @@ export function targetedInvocation(runner, testPaths) {
   const paths = [...new Set(testPaths)].sort();
   if (paths.length === 0) return null;
   switch (runner.runner) {
-    // FAITH-BASED SCOPING (T7) — `script/test <paths>` (here) and `npm test --
-    // <paths>` (the javascript case below) are marked scoped:true ON THE
-    // ASSUMPTION that the aggregate script forwards its file arguments to a
-    // path-filtering runner. If the script ignores its positional arguments it
-    // runs the WHOLE suite, and an unrelated pre-existing failure can seal a
-    // VACUOUS red at red-test admission. This is a documented limitation, NOT a
-    // demotion: demoting scoped:true would break every correctly-forwarding
-    // script/test (and npm→vitest/jest) project. The remedy for an aggregate
-    // script is test_commands.targeted_template ('{paths}' receives the authored
-    // test files); redTestNotice() in service.js warns the test writer at
-    // issuance. (python-uv/python share this return but are genuinely sound:
-    // `-m pytest <paths>` selects by path natively — no forwarding assumption.)
     case 'script-test':
+      // An arbitrary script may ignore arguments and run unrelated tests.
+      // Keep its invocation available for passing gates, but require an
+      // explicit targeted_template before treating a failure as authored red.
+      return { command: runner.command, args: [...runner.args, ...paths], scoped: false };
     case 'python-uv':
     case 'python':
       return { command: runner.command, args: [...runner.args, ...paths], scoped: true };
     case 'javascript':
-      // `npm test -- <paths>` forwards the paths to the underlying script — see
-      // the faith-based scoping note above: scoped:true here TRUSTS the npm/pnpm/
-      // yarn/bun test script to forward its arguments to a path-filtering runner.
-      // An aggregate script that ignores them runs the whole suite (possible
-      // vacuous red at admission); remedy is test_commands.targeted_template.
-      return { command: runner.command, args: [...runner.args, '--', ...paths], scoped: true };
+      return { command: runner.command, args: [...runner.args, '--', ...paths], scoped: false };
     case 'go': {
-      // Package-level is the finest path scope go offers. A root-level
-      // *_test.go maps to `.` — the root package only — never `./...`,
-      // which silently widens to the entire module (whole-suite-equivalent,
-      // exactly what scoped:true must exclude).
+      // Preserve the smallest package superset for passing gates. Even one
+      // package runs every sibling *_test.go, so an unrelated existing
+      // failure cannot attest that the authored files are red. Selecting
+      // only their test names requires explicit project-specific routing.
       const dirs = [...new Set(paths.map((file) => {
         const dir = path.posix.dirname(file.replaceAll('\\', '/'));
         return dir === '.' ? '.' : `./${dir}`;
       }))].sort();
-      return { command: runner.command, args: ['test', ...dirs], scoped: true };
+      return { command: runner.command, args: ['test', ...dirs], scoped: false };
     }
     default:
       return { command: runner.command, args: [...runner.args], scoped: false };
@@ -168,6 +155,7 @@ export function splitCommand(command) {
   const tokens = [];
   let current = '';
   let quote = null;
+  let tokenStarted = false;
   for (let index = 0; index < command.length; index += 1) {
     const char = command[index];
     if (quote) {
@@ -175,16 +163,29 @@ export function splitCommand(command) {
       else current += char;
     } else if (char === '"' || char === "'") {
       quote = char;
+      tokenStarted = true;
     } else if (/\s/.test(char)) {
-      if (current) tokens.push(current);
+      if (tokenStarted) tokens.push(current);
       current = '';
+      tokenStarted = false;
     } else {
       current += char;
+      tokenStarted = true;
     }
   }
   if (quote) throw new Error('unterminated quote in test command');
-  if (current) tokens.push(current);
+  if (tokenStarted) tokens.push(current);
   return tokens;
+}
+
+// Preserve process argv when publishing an executable command as text. A bare
+// join loses spaces, empty arguments and quoting, and can turn literal paths
+// into shell expansions. Adjacent quoted segments preserve an apostrophe for
+// both POSIX shells and splitCommand without relying on backslash escapes.
+export function renderCommand(argv) {
+  return argv.map((value) => /^[A-Za-z0-9_./:=@+,-]+$/u.test(value) && !/(?:^|[=:])=/u.test(value)
+    ? value
+    : `'${value.replaceAll("'", "'\"'\"'")}'`).join(' ');
 }
 
 // Windows cannot spawn .cmd/.bat batch scripts with shell:false — Node's
@@ -312,6 +313,7 @@ function quoteForCmd(token) {
 // spawn. Extend this set as new shim-shaped launchers appear.
 const WINDOWS_SHIM_LAUNCHERS = new Set([
   'npm', 'npx', 'yarn', 'pnpm', 'pnpx', 'bunx',
+  'codex', 'claude',
   'vitest', 'jest', 'mocha', 'ava', 'tap', 'playwright', 'cypress', 'tsc', 'eslint', 'prettier', 'biome',
   'mvn', 'gradle', 'bundle', 'rake',
 ]);
@@ -499,7 +501,9 @@ export async function runGateJob(options = {}) {
   if (!jobFile) return;
   let job;
   try {
-    job = JSON.parse(await readFile(jobFile, 'utf8'));
+    // Read before arming the suite deadline, so special files must fail
+    // promptly here too. The allowance covers the bounded runtime job data.
+    job = JSON.parse(await readBoundedRegularFileUtf8(jobFile, { maxBytes: 8 * 1024 * 1024 }));
   } catch {
     // No readable job: nothing to run. The parent's respawn fence recovers.
     return;

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import {
   mkdirSync,
   mkdtempSync,
+  lstatSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -43,9 +44,21 @@ export function canonicalWorkerRoles(agentsDir = path.join(ROOT, 'agents')) {
 }
 
 function hashLabeledFiles(entries) {
-  const digest = createHash('sha256');
-  for (const [label, file] of [...entries].sort(([left], [right]) => left.localeCompare(right))) {
+  const digest = createHash('sha256').update('APE worker validator candidate inventory v2\n');
+  let totalBytes = 0;
+  for (const [label, file] of [...entries].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {
+    const before = lstatSync(file);
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
+        || before.size > 64 * 1024 * 1024 || (totalBytes += before.size) > 256 * 1024 * 1024) {
+      throw new WorkerValidatorReachabilityError('candidate inventory requires bounded regular files without links');
+    }
     const bytes = readFileSync(file);
+    const after = lstatSync(file);
+    if (!after.isFile() || after.dev !== before.dev || after.ino !== before.ino
+        || after.size !== before.size || after.mtimeMs !== before.mtimeMs
+        || after.ctimeMs !== before.ctimeMs || bytes.length !== before.size) {
+      throw new WorkerValidatorReachabilityError('candidate inventory changed during inspection');
+    }
     digest.update(`${Buffer.byteLength(label, 'utf8')}:${label}`);
     digest.update(`${bytes.length}:`);
     digest.update(bytes);
@@ -53,8 +66,29 @@ function hashLabeledFiles(entries) {
   return digest.digest('hex');
 }
 
-// Bind the retained proof to the exact role manifests, packaged MCP server
-// declaration, plugin identity, and canary implementation that produced it.
+function packageInventory(pluginDir) {
+  const entries = [];
+  let count = 0;
+  function visit(relative = '', depth = 0) {
+    const directory = path.join(pluginDir, relative);
+    const metadata = lstatSync(directory);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || depth > 32) {
+      throw new WorkerValidatorReachabilityError('candidate inventory requires bounded directories without symlinks');
+    }
+    for (const child of readdirSync(directory, { withFileTypes: true })) {
+      if (++count > 10_000) throw new WorkerValidatorReachabilityError('candidate inventory exceeds its entry bound');
+      const name = relative ? `${relative}/${child.name}` : child.name;
+      if (child.isDirectory() && !child.isSymbolicLink()) visit(name, depth + 1);
+      else if (child.isFile() && !child.isSymbolicLink()) entries.push([`package/${name}`, path.join(pluginDir, name)]);
+      else throw new WorkerValidatorReachabilityError('candidate inventory refuses symlinks and special files');
+    }
+  }
+  visit();
+  return entries;
+}
+
+// Bind every packaged file, including executable bundles, hooks, prompts and
+// added files, plus canonical role manifests and this canary's implementation.
 // Logical labels keep the digest independent of the checkout's absolute path.
 export function candidateValidatorSurfaceHash({
   pluginDir = path.join(ROOT, 'plugins', 'ape-claude'),
@@ -71,21 +105,25 @@ export function candidateValidatorSurfaceHash({
       `canonical/agents/${role}.md`,
       path.join(ROOT, 'agents', `${role}.md`),
     ]),
-    ...packaged.map((role) => [
-      `package/agents/${role}.md`,
-      path.join(pluginDir, 'agents', `${role}.md`),
-    ]),
-    ['package/.mcp.json', path.join(pluginDir, '.mcp.json')],
-    ['package/.claude-plugin/plugin.json', path.join(pluginDir, '.claude-plugin', 'plugin.json')],
+    ...packageInventory(pluginDir),
     ['canary/run-worker-validator-reachability.mjs', fileURLToPath(import.meta.url)],
   ]);
 }
 
-function textFromToolResult(value) {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.map(textFromToolResult).join('\n');
-  if (!value || typeof value !== 'object') return '';
-  return Object.values(value).map(textFromToolResult).join('\n');
+function isNoActiveRunResult(block) {
+  if (block.is_error !== undefined && typeof block.is_error !== 'boolean') return false;
+  const content = block.content;
+  const text = typeof content === 'string' ? content
+    : Array.isArray(content) && content.length === 1 && content[0]?.type === 'text'
+      ? content[0].text : null;
+  if (typeof text !== 'string') return false;
+  try {
+    const result = JSON.parse(text);
+    return result !== null && typeof result === 'object' && !Array.isArray(result)
+      && Object.keys(result).sort().join(',') === 'errors,ok'
+      && result.ok === false && Array.isArray(result.errors)
+      && result.errors.length === 1 && result.errors[0] === 'no active run';
+  } catch { return false; }
 }
 
 // Validate host-emitted stream-json, not the model's final prose. A passing
@@ -106,23 +144,26 @@ export function inspectWorkerValidatorTranscript(raw, expected) {
         `role ${expected.role} returned non-JSON stream output`,
       );
     }
-    const visit = (value) => {
-      if (!value || typeof value !== 'object') return;
+    // Only complete host message content blocks carry tool events. Tool
+    // arguments, structured data and nested result content carry no authority.
+    if (!['assistant', 'user'].includes(event?.type) || !Array.isArray(event.message?.content)) continue;
+    if (event.message.role !== undefined && event.message.role !== event.type) continue;
+    for (const value of event.message.content) {
+      if (!value || typeof value !== 'object') continue;
       if (
+        event.type === 'assistant' &&
         value.type === 'tool_use' &&
-        typeof value.id === 'string' &&
+        typeof value.id === 'string' && value.id.length > 0 &&
         VALIDATOR_NAME_SET.has(value.name)
       ) {
+        if (calls.has(value.id)) throw new WorkerValidatorReachabilityError(`role ${expected.role} repeated a validator call identifier`);
         calls.set(value.id, { name: value.name, input: value.input });
       }
-      if (value.type === 'tool_result' && typeof value.tool_use_id === 'string') {
-        results.set(value.tool_use_id, textFromToolResult(value.content));
+      if (event.type === 'user' && value.type === 'tool_result' && typeof value.tool_use_id === 'string') {
+        if (results.has(value.tool_use_id)) throw new WorkerValidatorReachabilityError(`role ${expected.role} repeated a validator result identifier`);
+        results.set(value.tool_use_id, calls.has(value.tool_use_id) && isNoActiveRunResult(value));
       }
-      for (const child of Object.values(value)) {
-        if (child && typeof child === 'object') visit(child);
-      }
-    };
-    visit(event);
+    }
   }
 
   const matching = [...calls.entries()].filter(([, call]) => (
@@ -130,13 +171,13 @@ export function inspectWorkerValidatorTranscript(raw, expected) {
     call.input?.ticket_id === expected.ticket_id &&
     call.input?.draft?.ticket_id === expected.ticket_id
   ));
-  if (matching.length !== 1) {
+  if (calls.size !== 1 || matching.length !== 1) {
     throw new WorkerValidatorReachabilityError(
       `role ${expected.role} did not emit exactly one exact validator call`,
     );
   }
   const [[toolUseId, call]] = matching;
-  if (!results.get(toolUseId)?.includes('no active run')) {
+  if (results.get(toolUseId) !== true) {
     throw new WorkerValidatorReachabilityError(
       `role ${expected.role} validator call did not return the sentinel APE service response`,
     );
@@ -217,6 +258,7 @@ export function runWorkerValidatorReachability({
         'packaged Claude worker roles do not match the canonical role set',
       );
     }
+    const candidateHash = candidateValidatorSurfaceHash({ pluginDir });
     const observations = [];
     for (const role of canonical) {
       const invocation = buildWorkerValidatorInvocation({
@@ -250,11 +292,14 @@ export function runWorkerValidatorReachability({
       }
       observations.push(inspectWorkerValidatorTranscript(child.stdout, invocation.expected));
     }
+    if (candidateValidatorSurfaceHash({ pluginDir }) !== candidateHash) {
+      throw new WorkerValidatorReachabilityError('candidate package changed during validator reachability checks');
+    }
     return Object.freeze({
       version: 1,
       host: 'claude',
       checked_at: new Date().toISOString(),
-      candidate_validator_surface_sha256: candidateValidatorSurfaceHash({ pluginDir }),
+      candidate_validator_surface_sha256: candidateHash,
       validator_names: VALIDATOR_NAMES,
       roles: Object.freeze(observations),
     });

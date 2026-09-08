@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // union of every receipt.changed_files (missing → []), including deletions, sorted ascending. Missing files keep their owners in
 // the full suite; only impacted command operands require existing files.
 import { resolveRunnerSet } from '../lib/runtime/gates.js';
+import { runnerOwnsFile } from '../lib/runtime/gate-evaluation.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures. Every fixture dir is created with os.tmpdir()+mkdtemp so the project
@@ -66,6 +67,29 @@ function makeRunner(id, owns, { root, full = `${id}-full`, impacted_template = n
 }
 
 const byRunner = (result, id) => result.participants.find((p) => p.runner === id);
+
+describe('runner ownership globstar directory matching', () => {
+  it('routes both direct and nested files without orphaning direct children', async () => {
+    const files = ['index.js', 'src/index.js', 'src/nested/index.js'];
+    const dir = await makeProjectDir(files);
+    const result = await resolveRunnerSet(dir, stateWith(receiptsFrom(files)), {
+      runners: [makeRunner('js', ['**/*.js'], { root: '.' })],
+      gates: { block_on_orphan: true },
+    });
+    expect(result.blocked).toBe(false);
+    expect(result.orphans).toEqual([]);
+    expect(byRunner(result, 'js').changedSubset).toEqual(files);
+  });
+
+  it('applies zero-directory matching to prefixed globstars and exclusions', () => {
+    const runner = { owns: ['src/**/*.js', '!src/**/excluded.js'] };
+    for (const file of ['src/index.js', 'src/nested/index.js']) expect(runnerOwnsFile(runner, file)).toBe(true);
+    for (const file of ['index.js', 'src/excluded.js', 'src/nested/excluded.js', 'src/index.ts']) {
+      expect(runnerOwnsFile(runner, file)).toBe(false);
+    }
+    expect(runnerOwnsFile({ owns: ['src/*.js'] }, 'src/nested/index.js')).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // 1. single-owner routing

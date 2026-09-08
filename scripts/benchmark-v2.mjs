@@ -18,7 +18,6 @@ import {
   lstatSync,
   openSync,
   opendirSync,
-  readFileSync,
   readdirSync,
   readSync,
   renameSync,
@@ -27,6 +26,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sameIdentity, sameSnapshot, sameLockSnapshot, sameReclaimableLock } from './tooling-snapshots.mjs';
 import { selectEffectiveRecord } from '../lib/runtime/history.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { DEFAULT_DEADLINES_MS } from '../lib/runtime/constants.js';
@@ -48,17 +48,6 @@ export const BENCHMARK_LIMITS = Object.freeze({
   historyEntryBytes: 256 * 1024,
   historyTotalBytes: 16 * 1024 * 1024,
 });
-
-function sameIdentity(left, right) {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
-function sameSnapshot(left, right) {
-  return sameIdentity(left, right)
-    && left.size === right.size
-    && left.mtimeMs === right.mtimeMs
-    && left.ctimeMs === right.ctimeMs;
-}
 
 function lockPath(file) {
   return path.join(path.dirname(file), '.benchmark-ledger.lock');
@@ -83,24 +72,6 @@ function readLockSnapshot(file) {
   } finally {
     closeSync(fd);
   }
-}
-
-function sameLockSnapshot(left, right) {
-  return left && right
-    && sameSnapshot(left.stats, right.stats)
-    && (left.bytes === null || right.bytes === null
-      ? left.bytes === right.bytes
-      : left.bytes.equals(right.bytes));
-}
-
-function sameReclaimableLock(left, right) {
-  return left && right
-    && sameIdentity(left.stats, right.stats)
-    && left.stats.size === right.stats.size
-    && left.stats.mtimeMs === right.stats.mtimeMs
-    && (left.bytes === null || right.bytes === null
-      ? left.bytes === right.bytes
-      : left.bytes.equals(right.bytes));
 }
 
 function writeLockMetadata(fd) {
