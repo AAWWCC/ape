@@ -175,7 +175,7 @@ const INTERNAL_OWNER_ASSERTIONS = [
   {
     domain: 'bounded native Codex bootstrap identity evidence and orientation',
     owner: 'lib/runtime/codex-bootstrap.js',
-    exports: ['BOOTSTRAP_TOOL_PATTERN', 'codexBootstrapOrientation', 'recordCodexBootstrapCandidate', 'resolveCodexBootstrapCandidate'],
+    exports: ['BOOTSTRAP_TOOL_PATTERN', 'codexBootstrapOrientation', 'codexProbeReservationOrientation', 'recordCodexBootstrapCandidate', 'resolveCodexBootstrapCandidate'],
     dependencies: [
       'lib/runtime/constants.js',
       'lib/runtime/file-stats.js',

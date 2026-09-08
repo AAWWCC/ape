@@ -61,6 +61,7 @@ import {
   validateAndAttestDispatchReceiptDraftAtStop,
 } from '../lib/runtime/claude-dispatch.js';
 import {
+  BINDING_PROBE_RESERVATION_DENIED,
   bindBindingProbe,
   bootstrapBindingProbe,
   isBindingProbeTaskName,
@@ -787,11 +788,13 @@ try {
     let probeIdentity;
     try {
       probeIdentity = await resolvesBindingProbeIdentity(paths, input);
-    } catch {
+    } catch (error) {
       if (!productionRunActive) {
         await writeHookOutput(`${JSON.stringify(formatHookResponse(event, {
           decision: 'deny',
-          reason: 'APE binding canary tool call denied: probe identity state validation failed',
+          reason: error?.code === BINDING_PROBE_RESERVATION_DENIED
+            ? 'APE binding probe tool call denied: a live binding probe reserves the pre-run child tool window; follow only the reservation bootstrap guidance'
+            : 'APE binding canary tool call denied: probe identity state validation failed',
         }))}\n`);
         process.exit(0);
       }

@@ -1767,7 +1767,11 @@ describe('APE v2 mandatory pre-run native binding proof', () => {
         toolCall.hookSpecificOutput?.permissionDecisionReason ??
           toolCall.reason ??
           toolCall.systemMessage,
-      ).toMatch(/binding canary may not call tools|probe identity state validation failed/i);
+      ).toMatch(childEvidence.is_subagent
+        ? /probe identity state validation failed/i
+        : childEvidence.subagent_id
+          ? /live binding probe reserves the pre-run child tool window/i
+          : /binding canary may not call tools/i);
     }
   });
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.25.2 — 2026-09-08
+
+Release candidate; fresh candidate-bound Codex live certification is required.
+The failed 2.25.1 campaign remains failed; Claude live operation is unverified.
+
+- Align native binding-probe guidance with the existing reserved child window:
+  repository commands cannot substitute for the exact assigned bootstrap, and
+  missing bootstrap input must stop without inferred authority.
+- Distinguish an intentional reserved-probe tool denial from unreadable or
+  malformed identity evidence while preserving both enforcement boundaries.
+
 ## 2.25.1 — 2026-09-07
 
 Release candidate; fresh candidate-bound Codex live certification is required

@@ -16,7 +16,7 @@ import {
   resolvesExactBindingProbeIdentity,
 } from '../lib/runtime/binding-probe.js';
 import { bootstrapCodexSubagent } from '../lib/runtime/claude-dispatch.js';
-import { codexBootstrapOrientation } from '../lib/runtime/codex-bootstrap.js';
+import { codexProbeReservationOrientation } from '../lib/runtime/codex-bootstrap.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 
@@ -141,7 +141,7 @@ describe('native probe bootstrap protocol 1', () => {
     })).rejects.toThrow(/cannot be acknowledged while launched/);
   });
 
-  it('delivers only conditional capability-free orientation through the real SubagentStart hook', async () => {
+  it('delivers only reservation-specific capability-free orientation through the real SubagentStart hook', async () => {
     const paths = await fixture();
     const action = await prepare(paths);
     await launch(paths, action);
@@ -161,7 +161,7 @@ describe('native probe bootstrap protocol 1', () => {
       agent_type: 'default', model: model.model,
     });
     expect(result).toEqual({ hookSpecificOutput: {
-      hookEventName: 'SubagentStart', additionalContext: codexBootstrapOrientation(),
+      hookEventName: 'SubagentStart', additionalContext: codexProbeReservationOrientation('launched'),
     } });
     const context = result.hookSpecificOutput.additionalContext;
     expect(context).not.toContain(action.dispatch.bootstrap_args.bootstrap_capability);

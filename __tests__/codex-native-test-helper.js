@@ -5,7 +5,7 @@ import {
   prepareBindingProbe,
 } from '../lib/runtime/binding-probe.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
-import { codexBootstrapOrientation } from '../lib/runtime/codex-bootstrap.js';
+import { codexBootstrapOrientation, codexProbeReservationOrientation } from '../lib/runtime/codex-bootstrap.js';
 export function invokeCodexHook(root, input, args = []) {
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
@@ -122,7 +122,7 @@ export async function completeCodexBindingProbe(root, projectDir) {
     agent_type: 'default',
     model: action.dispatch.model.model,
   });
-  if (started.hookSpecificOutput?.additionalContext !== codexBootstrapOrientation()) {
+  if (started.hookSpecificOutput?.additionalContext !== codexProbeReservationOrientation('launched')) {
     throw new Error('Provisional probe start must receive only capability-free orientation');
   }
   const bootstrapped = await invokeCodexHook(root, {

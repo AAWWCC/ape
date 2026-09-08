@@ -1,9 +1,52 @@
 # Prevention-first reliability status
 
-**2.25.1 is a review candidate, not a certified release.** Reproduced blockers
-have fixes and regression tests. The full live acceptance requirement is still
-incomplete. This page records the latest results as of September 7, 2026; it does
-not authorize more testing, installation, or publication.
+**2.25.2 is a review candidate, not a certified release.** The first formal
+2.25.1 attempt failed before run start. This follow-up corrects a reproduced
+probe-guidance contradiction and misleading denial classification; it does not
+establish why the live child failed to bind or certify the new version. This
+page records results as of September 8, 2026 and does not authorize testing,
+installation, or publication.
+
+## 2.25.2 native probe follow-up
+
+The probe hook previously told a child without bootstrap arguments to continue
+its non-APE assignment while the same reserved probe window denied ordinary
+child tools. Probe-specific guidance now describes that existing restriction
+without assigning a ticket or disclosing bootstrap authority. A missing or
+unreadable assignment stops; it must not become repository inspection or a
+request for replacement arguments. Healthy reservation denials also receive
+a distinct diagnostic instead of being described as damaged identity state.
+
+A complete macOS ARM64 run on Node 24.15.0 passed **5,124 tests across 308
+files**, with zero failures and 87 skips. The focused probe and bootstrap tests
+also passed on Node 22.12.0. Type checking, host compatibility, all 52 offline
+prompt scenarios, public-safety checks, fresh bundles and package parity passed.
+Both Node pins passed packaged MCP smoke, clean marketplace installs on pinned
+Codex 0.147.0 and Claude 2.1.228, and package/release reproducibility under each
+runtime. The two local runtimes produced different gzip bytes but identical
+uncompressed archive bytes; publication uses its separately pinned Ubuntu
+toolchain. These local results do not replace fresh candidate-bound platform
+CI or the four ordered live certification workflows.
+
+## 2.25.1 remote validation and failed formal campaign
+
+Commit `5c63369826f6e8cc073a88941d3894773164884a` passed all 18 jobs in
+[CI 34181947640](https://github.com/AAWWCC/ape/actions/runs/34181947640), including
+both Windows Node pins. Its complete source suite passed 5,117 tests across
+308 files, with zero failures and 87 skips. Both earlier failed CI runs remain
+retained.
+
+The first formal mechanical parent ended after the probe child attempted shell
+inspection before `ape_bind`. The hook denied it; the last authoritative state
+remained `launched / awaiting_binding`. No run, acknowledgement, receipt, PR or
+merge occurred. The campaign stopped with zero qualifying completions. The
+same host/model/bootstrap instructions had passed a separate rehearsal; that
+rehearsal cannot replace the formal failure. Encrypted assignment storage does
+not establish the exact decoded input seen by the child.
+
+Fresh offline fixtures on both Node pins reproduced the generic denial against
+a healthy reservation and showed that exact bootstrap binding remained possible.
+Those disposable checks diagnose enforcement; they do not repair the campaign.
 
 ## 2.25.1 codebase audit remediation
 
@@ -241,11 +284,9 @@ The 2.24.12 Claude worker-validator check could not authenticate on two authoriz
 attempts. No validator call or passing proof was produced. That check is optional
 under the 2.24.13 release policy; the retained failures remain failures.
 
-The current 2.25.1 packages require a fresh candidate-bound Codex live campaign.
-Earlier version evidence cannot certify them.
-
-The new native CI matrix must still run on the submitted candidate. Local macOS
-results and static Windows portability review do not certify its other cells.
+The current 2.25.2 packages require fresh exact-candidate CI and a separately
+approved Codex live campaign. The successful 2.25.1 CI and failed formal attempt
+remain evidence about that earlier candidate; neither certifies 2.25.2.
 
 The fast, full, and protected-land live scenarios on 2.24.11 remain unverified.
 The campaign stopped at the operator's request, and its disposable setup was

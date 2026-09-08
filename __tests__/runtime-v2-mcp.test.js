@@ -10,7 +10,7 @@ import { GENERAL_INPUT_MAX_BYTES, INPUT_LIMITS } from '../lib/runtime/input-guar
 import { RESPONSE_BUDGET_BYTES } from '../lib/runtime/projection.js';
 import { receiptInputHash } from '../lib/runtime/receipt-input.js';
 import { ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA } from '../lib/runtime/schemas.js';
-import { codexBootstrapOrientation } from '../lib/runtime/codex-bootstrap.js';
+import { codexProbeReservationOrientation } from '../lib/runtime/codex-bootstrap.js';
 import { invokeCodexHook } from './codex-native-test-helper.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -277,7 +277,7 @@ describe('APE v2 MCP public surface', () => {
         hook_event_name: 'SubagentStart', session_id: 'contract-parent', turn_id: 'child-turn',
         agent_id: 'contract-child', agent_type: 'default', model: dispatch.model.model,
       });
-      expect(observed.hookSpecificOutput.additionalContext).toBe(codexBootstrapOrientation());
+      expect(observed.hookSpecificOutput.additionalContext).toBe(codexProbeReservationOrientation('launched'));
       expect(observed.hookSpecificOutput.additionalContext).not.toContain(dispatch.bootstrap_args.bootstrap_capability);
       expect(await call(registeredName, dispatch.bootstrap_args)).toMatchObject({ ok: false, bound: false });
       expect(await call('ape_run', { action: 'probe-status' })).toMatchObject({

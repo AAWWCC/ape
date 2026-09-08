@@ -9,10 +9,11 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.25.1** is a release candidate awaiting a new live certification
-campaign and tagged publication. The 2.24.12 campaign stopped
-before an APE run started because Codex exposed an incompatible native agent
-schema. The earlier 2.24.11 mechanical run does not certify this candidate. See the
+Version **2.25.2** is a release candidate awaiting exact-candidate CI and a new
+live certification campaign. The first 2.25.1 attempt stopped before a run began
+when its native child attempted repository work before binding. This follow-up
+corrects conflicting probe guidance and a misleading denial diagnostic; live
+reliability remains unverified. See the
 [current release status](docs/prevention-release-status.md) for the exact limits.
 
 Codex CLI is the primary host. The Claude Code package is included, but
