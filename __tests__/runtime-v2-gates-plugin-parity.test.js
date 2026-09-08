@@ -136,8 +136,8 @@ function officialVerdict(dir, { strict }) {
 // The complete official-CLI corpus is intentionally an explicit calibration:
 // it starts one vendor process per fixture/mode and added ~39s to every local
 // suite whenever Claude happened to be installed. The in-process fixtures
-// above remain the always-on structural contract; scheduled/manual CI sets
-// this opt-in to detect upstream schema drift.
+// above remain the always-on structural contract. Run npm run test:claude-schema
+// explicitly to calibrate against the installed Claude CLI and detect schema drift.
 const CALIBRATE_OFFICIAL_CLAUDE = process.env.APE_CLAUDE_SCHEMA_CALIBRATION === '1';
 describe.skipIf(!CALIBRATE_OFFICIAL_CLAUDE || !officialValidatorAvailable())('official `claude plugin validate` agrees (F13)', () => {
   it.concurrent.each(FIXTURES)('$id matches the official verdicts', async (fixture) => {

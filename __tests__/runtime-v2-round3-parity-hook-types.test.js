@@ -163,8 +163,8 @@ function officialVerdict(dir, { strict }) {
 }
 
 // Keep the large vendor-process corpus out of ordinary developer/PR runs. The
-// in-process fixtures above remain always-on; scheduled/manual calibration CI
-// opts in and compares every case against the currently installed Claude CLI.
+// in-process fixtures above remain always-on. Run npm run test:claude-schema
+// explicitly to compare every case against the currently installed Claude CLI.
 const CALIBRATE_OFFICIAL_CLAUDE = process.env.APE_CLAUDE_SCHEMA_CALIBRATION === '1';
 describe.skipIf(!CALIBRATE_OFFICIAL_CLAUDE || !officialValidatorAvailable())('official `claude plugin validate` agrees (F13 round 3)', () => {
   it.concurrent.each(FIXTURES)('$id matches the official verdicts', async (fixture) => {

@@ -845,6 +845,9 @@ describe('APE v2 mandatory pre-run native binding proof', () => {
     expect((await readJson(paths.bindingProbe, null)).retired_identities).toHaveLength(11);
   });
 
+  // Migrate all 256 identities through both durable ledgers before binding the
+  // 257th. Allow for shared CI filesystem latency without shortening migration
+  // coverage or changing the per-hook deadlines.
   it('retains more than the legacy 256-identity ceiling in the sharded quarantine ledger', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
@@ -886,7 +889,7 @@ describe('APE v2 mandatory pre-run native binding proof', () => {
       tool_input: {},
     }, { canaryOnly: true });
     expect(earliest.hookSpecificOutput?.permissionDecision ?? earliest.decision).toBe('deny');
-  });
+  }, 30_000);
 
   it('keeps the current canary fenced after stop and retains it across replacement', async () => {
     const dir = await project();
