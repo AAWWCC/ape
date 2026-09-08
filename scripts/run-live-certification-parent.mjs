@@ -222,8 +222,12 @@ function requireDeterministicConfig(codexHome) {
       'isolated Codex model_provider must select its own declared model_providers table with explicit transport settings',
     );
   }
-  if (typeof ownConfigValue(provider, 'name') !== 'string' || provider.name.trim().length === 0) {
-    throw new LiveCertificationParentError('the selected Codex model_providers table must declare a non-empty name');
+  // The pinned host uses this exact display name to preserve native call
+  // encryption markers and internal metadata in outgoing request history.
+  if (ownConfigValue(provider, 'name') !== 'OpenAI') {
+    throw new LiveCertificationParentError(
+      'the selected Codex model_providers table must declare name = "OpenAI" to preserve native request metadata',
+    );
   }
   const requirements = [
     { key: 'request_max_retries', value: 0n, description: 'request_max_retries = 0 (TOML integer)' },

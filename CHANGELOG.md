@@ -1,8 +1,25 @@
 # Changelog
 
+## 2.25.3 — 2026-09-08
+
+Release candidate; exact-candidate CI and a new authorized Codex live campaign
+remain required. The failed 2.25.2 campaign remains failed, and its underlying
+native-child bootstrap cause is not established.
+
+- Require the exact `OpenAI` provider display name during pinned Codex
+  certification. Codex 0.147.0 uses this name to preserve OpenAI request metadata;
+  arbitrary nonempty labels silently select a different serialization path.
+  The custom provider ID and explicit zero-retry settings remain required.
+  This corrects demonstrated request fidelity, without claiming to resolve the
+  earlier live child failure or establish endpoint/authentication identity.
+
 ## 2.25.2 — 2026-09-08
 
-Release candidate; fresh candidate-bound Codex live certification is required.
+Release blocked after the first formal 2.25.2 mechanical attempt failed before
+binding or run start. Exact-candidate CI passed all 18 jobs, but the delivered
+guidance did not prevent the prohibited pre-binding shell call. The campaign
+has zero qualifying completions; fast, full, and protected-land were not started.
+No additional source fix is claimed. See [release status](docs/prevention-release-status.md).
 The failed 2.25.1 campaign remains failed; Claude live operation is unverified.
 
 - Align native binding-probe guidance with the existing reserved child window:

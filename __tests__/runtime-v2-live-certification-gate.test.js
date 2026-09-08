@@ -91,7 +91,7 @@ function certificationParentFixture({
     [
       'model_provider = "openai-zero-retry"',
       '[model_providers.openai-zero-retry]',
-      'name = "OpenAI zero retry"',
+      'name = "OpenAI"',
       'wire_api = "responses"',
       'requires_openai_auth = true',
       zeroRetry ? 'request_max_retries = 0' : 'request_max_retries = 5',
@@ -622,6 +622,20 @@ describe('live certification Codex parent launcher', () => {
   });
 
   it.each([
+    'OpenAI zero retry',
+    'OpenAI certification with no transport retries',
+    'Another compatible provider',
+    'openai',
+    ' OpenAI',
+    'OpenAI ',
+  ])('rejects provider display name %j before it can strip native request metadata', (name) => {
+    const fixture = certificationParentWithConfig((config) =>
+      config.replace('name = "OpenAI"', `name = ${JSON.stringify(name)}`));
+    const failure = expectCertificationConfigRefusal(fixture);
+    expect(failure.message).toMatch(/name = "OpenAI".*native.*metadata/iu);
+  });
+
+  it.each([
     ['selected retries are nonzero', (config) => config.replace('request_max_retries = 0', 'request_max_retries = 5')],
     ['selected retry fields are absent', (config) => config.replace(/^(?:request_max_retries|stream_max_retries|supports_websockets) = .*\n/gmu, '')],
     ['selected provider is absent', (config) => config.replace('[model_providers.openai-zero-retry]', '[model_providers.another-provider]')],
@@ -679,9 +693,9 @@ describe('live certification Codex parent launcher', () => {
     ['numeric model_provider', (config) => config.replace('model_provider = "openai-zero-retry"', 'model_provider = 7')],
     ['missing model_provider', (config) => config.replace('model_provider = "openai-zero-retry"\n', '')],
     ['empty model_provider', (config) => config.replace('model_provider = "openai-zero-retry"', 'model_provider = ""')],
-    ['missing selected provider name', (config) => config.replace('name = "OpenAI zero retry"\n', '')],
-    ['numeric selected provider name', (config) => config.replace('name = "OpenAI zero retry"', 'name = 7')],
-    ['empty selected provider name', (config) => config.replace('name = "OpenAI zero retry"', 'name = "  "')],
+    ['missing selected provider name', (config) => config.replace('name = "OpenAI"\n', '')],
+    ['numeric selected provider name', (config) => config.replace('name = "OpenAI"', 'name = 7')],
+    ['empty selected provider name', (config) => config.replace('name = "OpenAI"', 'name = "  "')],
     ['string request retry count', (config) => config.replace('request_max_retries = 0', 'request_max_retries = "0"')],
     ['boolean request retry count', (config) => config.replace('request_max_retries = 0', 'request_max_retries = false')],
     ['float zero request retry count', (config) => config.replace('request_max_retries = 0', 'request_max_retries = 0.0')],
@@ -717,7 +731,7 @@ describe('live certification Codex parent launcher', () => {
       .replace(/^([a-z_][a-z0-9_]*)(\s*=)/gmu, '"$1"$2')],
     ['dotted keys and literal strings', () => [
       "model_provider = 'openai-zero-retry'",
-      "model_providers.openai-zero-retry.name = 'OpenAI zero retry'",
+      "model_providers.openai-zero-retry.name = 'OpenAI'",
       "model_providers.openai-zero-retry.wire_api = 'responses'",
       'model_providers.openai-zero-retry.requires_openai_auth = true',
       'model_providers.openai-zero-retry.request_max_retries = 0',
@@ -733,7 +747,7 @@ describe('live certification Codex parent launcher', () => {
     ].join('\n')],
     ['inline tables', () => [
       'model_provider = "openai-zero-retry"',
-      'model_providers = { openai-zero-retry = { name = "OpenAI zero retry", wire_api = "responses", requires_openai_auth = true, request_max_retries = 0, stream_max_retries = 0, supports_websockets = false } }',
+      'model_providers = { openai-zero-retry = { name = "OpenAI", wire_api = "responses", requires_openai_auth = true, request_max_retries = 0, stream_max_retries = 0, supports_websockets = false } }',
       'analytics = { enabled = false }',
       'features = { multi_agent_v2 = true, plugins = true, apps = false, remote_plugin = true }',
       'plugins = { "ape@ape" = { enabled = true, mcp_servers = { ape = { default_tools_approval_mode = "approve" } } } }',

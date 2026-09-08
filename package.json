@@ -1,6 +1,6 @@
 {
   "name": "ape",
-  "version": "2.25.2",
+  "version": "2.25.3",
   "type": "module",
   "private": true,
   "description": "APE \u2014 durable, evidence-gated engineering runs for AI coding agents",

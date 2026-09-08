@@ -97,8 +97,12 @@ Before launch, APE checks:
 - **Package:** the isolated home must contain the complete candidate package.
 - **Transport:** the selected custom `model_providers` table must contain TOML
   integer-zero request and stream retry counts, and boolean-false
-  `supports_websockets`. Inactive providers, comments, misplaced fields, quoted
-  zeroes, and floats cannot satisfy this check.
+  `supports_websockets`. Its display name must be exactly `name = "OpenAI"`:
+  the pinned host uses that name to preserve native encryption markers and
+  internal metadata in outgoing request history. Keep the custom provider ID;
+  endpoint and authentication settings still need separate effective preflight
+  review. Inactive providers, comments, misplaced fields, quoted zeroes, and
+  floats cannot satisfy this check.
 - **Configuration:** analytics/features values must be parsed booleans. Reserved
   built-in provider definitions and profile overrides are refused; use reviewed,
   flattened isolated settings.

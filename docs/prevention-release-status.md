@@ -1,21 +1,47 @@
 # Prevention-first reliability status
 
-**2.25.2 is a review candidate, not a certified release.** The first formal
-2.25.1 attempt failed before run start. This follow-up corrects a reproduced
-probe-guidance contradiction and misleading denial classification; it does not
-establish why the live child failed to bind or certify the new version. This
-page records results as of September 8, 2026 and does not authorize testing,
-installation, or publication.
+**2.25.3 is a review candidate, not a certified release.** This follow-up fixes
+an independently reproduced certification request-fidelity discrepancy. It does
+not establish the cause of the failed 2.25.2 native-child bootstrap. Fresh
+exact-candidate CI and a new authorized four-workflow campaign remain required.
+This page records results as of September 8, 2026 and does not authorize testing,
+installation or publication.
 
-## 2.25.2 native probe follow-up
+## 2.25.3 certification provider request fidelity
 
-The probe hook previously told a child without bootstrap arguments to continue
-its non-APE assignment while the same reserved probe window denied ordinary
-child tools. Probe-specific guidance now describes that existing restriction
-without assigning a ticket or disclosing bootstrap authority. A missing or
-unreadable assignment stops; it must not become repository inspection or a
-request for replacement arguments. Healthy reservation denials also receive
-a distinct diagnostic instead of being described as damaged identity state.
+Pinned Codex 0.147.0 identifies OpenAI request handling by the selected provider's
+exact display name, `OpenAI`. Other labels remove internal message metadata and
+function encryption metadata from outgoing history. The launcher previously
+accepted any nonempty label; it now rejects labels that select that different
+request path. A separate custom provider ID and explicit zero-retry settings
+remain required. Endpoint and authentication identity remain separately reviewed
+preflight requirements; the name alone does not establish them.
+
+Two offline controls using the exact pinned binary reproduced this difference
+with a scripted loopback endpoint and synthetic assignments. Both delivered the
+synthetic plaintext assignment correctly. They made no real model or credential
+calls and do not prove an explanation or fix for the earlier live failure.
+Historical validation below retains its exact version and source attribution.
+
+## 2.25.2 validation and failed formal campaign
+
+Frozen commit `b16941eae308554395505c5592bf81a489ef3f1a` passed all 18 jobs in
+[CI 34186530890](https://github.com/AAWWCC/ape/actions/runs/34186530890), including
+both Windows Node pins. Its complete source suite passed **5,124 tests across
+308 files**, with zero failures and 87 skips. These CI results cover that frozen
+commit; this status documentation was updated afterward.
+
+The first formal mechanical attempt failed after **100.247 seconds**, before
+`ape_bind` or run start. Its native child attempted a prohibited shell call,
+which the hook denied. No PR or merge occurred; remote main and protection
+remained unchanged. The campaign stopped with zero qualifying completions,
+and fast, full, and protected-land were not started.
+
+The exact revised reserved-probe guidance was delivered before the prohibited
+call. Its delivery did not prevent the failure, so an explanation based only
+on omitted guidance is unsupported. The child's exact decoded assignment input
+remains unknown. Version 2.25.2 corrected conflicting guidance and a misleading
+denial diagnostic; no additional source fix is claimed for this formal failure.
 
 A complete macOS ARM64 run on Node 24.15.0 passed **5,124 tests across 308
 files**, with zero failures and 87 skips. The focused probe and bootstrap tests
@@ -25,8 +51,8 @@ Both Node pins passed packaged MCP smoke, clean marketplace installs on pinned
 Codex 0.147.0 and Claude 2.1.228, and package/release reproducibility under each
 runtime. The two local runtimes produced different gzip bytes but identical
 uncompressed archive bytes; publication uses its separately pinned Ubuntu
-toolchain. These local results do not replace fresh candidate-bound platform
-CI or the four ordered live certification workflows.
+toolchain. These local checks and the subsequent CI result do not replace the
+required four ordered live certification workflows; the formal campaign failed.
 
 ## 2.25.1 remote validation and failed formal campaign
 
@@ -284,9 +310,14 @@ The 2.24.12 Claude worker-validator check could not authenticate on two authoriz
 attempts. No validator call or passing proof was produced. That check is optional
 under the 2.24.13 release policy; the retained failures remain failures.
 
-The current 2.25.2 packages require fresh exact-candidate CI and a separately
-approved Codex live campaign. The successful 2.25.1 CI and failed formal attempt
-remain evidence about that earlier candidate; neither certifies 2.25.2.
+The tested 2.25.2 candidate passed exact-commit CI, then failed its first formal
+mechanical attempt before binding or run start. It has zero qualifying live
+completions; fast, full, and protected-land remain unstarted. Confirmed delivery
+of the revised guidance did not prevent the prohibited call, and the exact
+decoded assignment input remains unknown. No additional source fix or release
+certificate is claimed. The successful 2.25.1 CI and failed formal attempt remain
+evidence about that earlier candidate; neither certifies 2.25.2. The current
+2.25.3 candidate requires its own exact-source CI and authorized live campaign.
 
 The fast, full, and protected-land live scenarios on 2.24.11 remain unverified.
 The campaign stopped at the operator's request, and its disposable setup was
