@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, open, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -468,31 +468,104 @@ describe('APE v2 atomic replace (D1)', () => {
     expect(existsSync(temporary)).toBe(false);
   });
 
-  // Win32-only (D1): the pre-fix fallback deleted the target before renaming,
-  // so a reader holding the file open could observe the state path absent (or
-  // permanently lose it on a crash between the rm and the rename).
+  it('concurrent readers only observe complete published JSON while replacements are pending', async () => {
+    const dir = await scratch();
+    const file = path.join(dir, 'state.json');
+    const versions = Array.from({ length: 13 }, (_, generation) => ({
+      generation, payload: `${generation}:`.repeat(32 * 1024),
+    }));
+    const documents = versions.map((value) => `${JSON.stringify(value, null, 2)}\n`);
+    const completeDocuments = new Set(documents);
+    await atomicWriteJson(file, versions[0]);
+    let watching = true;
+    let publicationPending = false;
+    let observations = 0;
+    let overlappingObservations = 0;
+    let observerError = null;
+    const observer = (async () => {
+      while (watching) {
+        const overlapped = publicationPending;
+        const bytes = await readFile(file, 'utf8');
+        expect(completeDocuments.has(bytes), `reader observed a partial or unknown ${bytes.length}-byte document`).toBe(true);
+        observations += 1;
+        if (overlapped) overlappingObservations += 1;
+        // Close each read handle and leave reader gaps for Windows rename.
+        await sleep(1);
+      }
+    })().catch((error) => { observerError = error; });
+    try {
+      await waitFor(() => observations > 0 || observerError !== null);
+      for (let generation = 1; generation < versions.length; generation += 1) {
+        publicationPending = true;
+        try { await atomicWriteJson(file, versions[generation]); }
+        finally { publicationPending = false; }
+        expect(await readFile(file, 'utf8')).toBe(documents[generation]);
+      }
+    } finally {
+      watching = false;
+      await observer;
+    }
+    expect(observerError).toBeNull();
+    expect(overlappingObservations).toBeGreaterThan(0);
+    expect(await readdir(dir)).toEqual(['state.json']);
+  }, 30_000);
+
+  // Pinned libuv uses MoveFileExW rather than POSIX replacement semantics.
+  // An open destination can therefore deny all bounded rename attempts. That
+  // denial must retain the old bytes and descriptor, not copy over or unlink
+  // the target. A separate concurrent-publication test covers successful writes.
   it.runIf(process.platform === 'win32')('win32: the target path is never observable-absent under a concurrent open handle', async () => {
     const dir = await scratch();
     const file = path.join(dir, 'state.json');
-    await atomicWriteJson(file, { generation: 0 });
+    const original = { generation: 0, payload: 'original'.repeat(16 * 1024) };
+    const replacement = { generation: 1, payload: 'replacement'.repeat(16 * 1024) };
+    await atomicWriteJson(file, original);
+    const originalBytes = await readFile(file, 'utf8');
     const reader = await open(file, 'r');
-    // The reader stays open across every replace, so on win32 each rename-over
-    // uses bounded atomic-rename retries; with GitHub-runner AV latency
-    // per temp file, 50 rounds blew the default timeout. A dozen rounds still
-    // proves the property — a delete-before-rename regression fails on the
-    // FIRST stat — so keep the count low and the timeout generous.
-    const ROUNDS = 12;
-    try {
-      for (let generation = 1; generation <= ROUNDS; generation += 1) {
-        await atomicWriteJson(file, { generation });
-        // stat throws ENOENT if the delete-before-rename window reopens.
-        await stat(file);
+    let attempts = 0;
+    releaseFault.rename = async (actual, temporary, destination) => {
+      if (destination === file) attempts += 1;
+      return actual.rename(temporary, destination);
+    };
+    let watching = true;
+    let publicationPending = false;
+    let overlappingObservations = 0;
+    let observerError = null;
+    const observer = (async () => {
+      while (watching) {
+        const overlapped = publicationPending;
+        expect(await readFile(file, 'utf8')).toBe(originalBytes);
+        if (overlapped) overlappingObservations += 1;
+        await sleep(1);
       }
+    })().catch((error) => { observerError = error; });
+    try {
+      const started = Date.now();
+      publicationPending = true;
+      try {
+        await expect(atomicWriteJson(file, replacement)).rejects.toMatchObject({
+          code: expect.stringMatching(/^(?:EPERM|EACCES|EBUSY)$/u), syscall: 'rename', dest: file,
+        });
+      } finally { publicationPending = false; }
+      expect(attempts).toBe(11);
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(await readFile(file, 'utf8')).toBe(originalBytes);
+      expect(await reader.readFile('utf8')).toBe(originalBytes);
+      expect(await readdir(dir)).toEqual(['state.json']);
     } finally {
+      watching = false;
+      await observer;
+      releaseFault.rename = null;
       await reader.close();
     }
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ generation: ROUNDS });
-  }, 60_000);
+    expect(observerError).toBeNull();
+    expect(overlappingObservations).toBeGreaterThan(0);
+    // Closing the conflicting reader must restore real publication, not leave
+    // a test that passes when every write is broken or silently ignored.
+    await atomicWriteJson(file, replacement);
+    expect(await readFile(file, 'utf8')).toBe(`${JSON.stringify(replacement, null, 2)}\n`);
+    expect(await readdir(dir)).toEqual(['state.json']);
+  }, 30_000);
 });
 
 describe('APE v2 shared dir lock: busyMs bounds the acquisition spin (invariant 7 timeout guarantee)', () => {
