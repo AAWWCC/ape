@@ -20,34 +20,31 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 // specific lock dir into the pathological create/remove race by setting
 // `churn.lockPath` — so every other test in this file exercises the real
 // filesystem completely unchanged.
-const churn = vi.hoisted(() => ({ lockPath: null }));
+const churn = vi.hoisted(() => ({ lockPath: null, onMissing: null }));
 const releaseHold = vi.hoisted(() => ({ lockPath: null, gate: null, entered: 0 }));
 const releaseFault = vi.hoisted(() => ({ rename: null }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal();
   const codedError = (code, message) => Object.assign(new Error(message), { code });
-  // Yield a macrotask before throwing so a buggy acquisition loop cannot starve
-  // the timer queue: a genuine hang must stay observable to the wall-clock bound
-  // (and to vitest's own test timeout), never wedge the entire worker.
+  // Keep timer scheduling live while exercising asynchronous contention; even
+  // a broken acquisition loop must remain observable to the test runner.
   const yieldToTimers = () => new Promise((resolve) => setImmediate(resolve));
   return {
     ...actual,
-    rename: async (...args) => releaseFault.rename
-      ? releaseFault.rename(actual, ...args)
-      : actual.rename(...args),
-    mkdir: async (...args) => {
-      const [target] = args;
+    rename: async (...args) => {
+      const [, target] = args;
       if (churn.lockPath !== null && target === churn.lockPath) {
         await yieldToTimers();
-        throw codedError('EEXIST', `EEXIST: file already exists, mkdir '${target}'`);
+        throw codedError('EEXIST', `EEXIST: file already exists, rename to '${target}'`);
       }
-      return actual.mkdir(...args);
+      return releaseFault.rename ? releaseFault.rename(actual, ...args) : actual.rename(...args);
     },
     stat: async (...args) => {
       const [target] = args;
       if (churn.lockPath !== null && target === churn.lockPath) {
         await yieldToTimers();
+        churn.onMissing?.();
         throw codedError('ENOENT', `ENOENT: no such file or directory, stat '${target}'`);
       }
       return actual.stat(...args);
@@ -475,39 +472,60 @@ describe('APE v2 atomic replace (D1)', () => {
       generation, payload: `${generation}:`.repeat(32 * 1024),
     }));
     const documents = versions.map((value) => `${JSON.stringify(value, null, 2)}\n`);
-    const completeDocuments = new Set(documents);
     await atomicWriteJson(file, versions[0]);
-    let watching = true;
-    let publicationPending = false;
-    let observations = 0;
     let overlappingObservations = 0;
-    let observerError = null;
-    const observer = (async () => {
-      while (watching) {
-        const overlapped = publicationPending;
-        const bytes = await readFile(file, 'utf8');
-        expect(completeDocuments.has(bytes), `reader observed a partial or unknown ${bytes.length}-byte document`).toBe(true);
-        observations += 1;
-        if (overlapped) overlappingObservations += 1;
-        // Close each read handle and leave reader gaps for Windows rename.
-        await sleep(1);
-      }
-    })().catch((error) => { observerError = error; });
-    try {
-      await waitFor(() => observations > 0 || observerError !== null);
-      for (let generation = 1; generation < versions.length; generation += 1) {
+    for (let generation = 1; generation < versions.length; generation += 1) {
+      const completeDocuments = new Set([documents[generation - 1], documents[generation]]);
+      let watching = true;
+      let publicationPending = false;
+      let observations = 0;
+      let observerError = null;
+      let publicationError = null;
+      let attempts = 0;
+      releaseFault.rename = async (actual, temporary, destination) => {
+        if (destination === file) attempts += 1;
+        return actual.rename(temporary, destination);
+      };
+      const observer = (async () => {
+        while (watching) {
+          const overlapped = publicationPending;
+          const bytes = await readFile(file, 'utf8');
+          expect(completeDocuments.has(bytes), `reader observed a partial or unknown ${bytes.length}-byte document`).toBe(true);
+          observations += 1;
+          if (overlapped) overlappingObservations += 1;
+          await sleep(1);
+        }
+      })().catch((error) => { observerError = error; });
+      try {
+        await waitFor(() => observations > 0 || observerError !== null);
         publicationPending = true;
         try { await atomicWriteJson(file, versions[generation]); }
+        catch (error) { publicationError = error; }
         finally { publicationPending = false; }
-        expect(await readFile(file, 'utf8')).toBe(documents[generation]);
+      } finally {
+        // Repeatedly opening readers can exhaust Windows' bounded rename
+        // attempts too. Await every read handle closing before recovery.
+        watching = false;
+        await observer;
+        releaseFault.rename = null;
       }
-    } finally {
-      watching = false;
-      await observer;
+      expect(observerError).toBeNull();
+      if (publicationError !== null) {
+        expect(process.platform, 'only a native Windows sharing denial is permitted').toBe('win32');
+        expect(publicationError).toMatchObject({
+          code: expect.stringMatching(/^(?:EPERM|EACCES|EBUSY)$/u), syscall: 'rename', dest: file,
+        });
+        expect(attempts).toBe(11);
+        expect(await readFile(file, 'utf8')).toBe(documents[generation - 1]);
+        expect(await readdir(dir)).toEqual(['state.json']);
+        // Recovery must publish this exact generation after the observer has
+        // stopped; it cannot pass by accepting denial or dropped writes forever.
+        await atomicWriteJson(file, versions[generation]);
+      }
+      expect(await readFile(file, 'utf8')).toBe(documents[generation]);
+      expect(await readdir(dir)).toEqual(['state.json']);
     }
-    expect(observerError).toBeNull();
     expect(overlappingObservations).toBeGreaterThan(0);
-    expect(await readdir(dir)).toEqual(['state.json']);
   }, 30_000);
 
   // Pinned libuv uses MoveFileExW rather than POSIX replacement semantics.
@@ -573,6 +591,7 @@ describe('APE v2 shared dir lock: busyMs bounds the acquisition spin (invariant 
     // Disable churn interception between tests; the module mock reverts to a
     // transparent passthrough whenever churn.lockPath is null.
     churn.lockPath = null;
+    churn.onMissing = null;
   });
 
   it('caps scheduler-inflated filesystem calibration while preserving the Windows floor', () => {
@@ -582,55 +601,43 @@ describe('APE v2 shared dir lock: busyMs bounds the acquisition spin (invariant 
     expect(computeFsLatencyMultiplier(100_000, 'win32')).toBe(8);
   });
 
-  // Under pathological create/remove churn on the lock dir — mkdir perpetually
-  // reports EEXIST while stat perpetually reports ENOENT — the acquisition loop
-  // in withDirLock must still honour its busyMs timeout. On the current tree the
-  // ENOENT `continue` jumps back to the loop top and SKIPS both the late
-  // deadline check and the sleep throttle, so the loop hot-spins without ever
-  // timing out (the busyMs guarantee is defeated). This test drives that exact
-  // churn against a faked fs and asserts withDirLock REJECTS with busyMessage
-  // within a small multiple of busyMs — RED today (it never settles, so the
-  // wall-clock bound elapses), GREEN once the deadline check is hoisted to the
-  // top of the loop so every path (including the ENOENT continue) is bounded.
-  it('rejects with busyMessage within the busyMs bound under mkdir->EEXIST / stat->ENOENT churn', async () => {
+  // Drive the current staged-rename acquisition through EEXIST -> ENOENT.
+  // Advancing the observed contention clock isolates the budget from cold
+  // calibration and scheduler/filesystem latency outside the acquisition loop.
+  it('rejects with busyMessage within the busyMs bound under rename->EEXIST / stat->ENOENT churn', async () => {
     const dir = await scratch();
     const lockPath = path.join(dir, 'churn.lock');
     const busyMs = 150;
     const busyMessage = 'lock acquisition timed out';
     const options = { staleMs: 10_000, heartbeatMs: 50, busyMs, busyMessage };
-
-    // Opt this lock dir into the faked churn: mkdir always EEXIST, stat always
-    // ENOENT (the exact codes lock.js branches on).
-    churn.lockPath = lockPath;
-
+    const maximumBudget = busyMs * 8;
+    const clockStep = busyMs;
     const started = Date.now();
-    const lockPromise = withDirLock(lockPath, async () => 'acquired', options);
-    // `.then(onFulfilled, onRejected)` fully handles the promise, so a loop that
-    // only settles later on a buggy tree never surfaces as an unhandled rejection.
-    const settled = lockPromise.then(
-      (value) => ({ kind: 'resolved', value }),
-      (error) => ({ kind: 'rejected', message: error?.message }),
-    );
-    // Hard wall-clock ceiling well above busyMs: if the loop escapes its deadline
-    // it would spin forever, so cap the observation and treat an overrun as the
-    // failure (a clean FAIL rather than an infinite hang that stalls the suite).
-    const outcome = await Promise.race([
-      settled,
-      sleep(busyMs * 12).then(() => ({ kind: 'timeout' })),
-    ]);
-    const elapsed = Date.now() - started;
-
+    let now = started;
+    let missingObservations = 0;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const callback = vi.fn(async () => 'acquired');
+    churn.lockPath = lockPath;
+    churn.onMissing = () => {
+      missingObservations += 1;
+      now += clockStep;
+      // A removed/bypassed loop deadline gets one observation beyond the
+      // maximum budget, then fails explicitly instead of leaving a live spin.
+      if (now - started > maximumBudget + clockStep) {
+        throw new Error('churn crossed the maximum acquisition deadline');
+      }
+    };
     try {
-      // The callback never runs (the lock is never acquired), so the only correct
-      // outcome is a bounded rejection carrying busyMessage.
-      expect(outcome.kind, 'withDirLock must settle within the busyMs bound, not hot-spin past its deadline').toBe('rejected');
-      expect(outcome.message).toBe(busyMessage);
-      expect(elapsed, 'the rejection must land within a small multiple of busyMs').toBeLessThan(busyMs * 10);
+      await expect(withDirLock(lockPath, callback, options)).rejects.toThrow(busyMessage);
+      expect(callback).not.toHaveBeenCalled();
+      expect(missingObservations).toBeGreaterThan(0);
+      expect(now - started).toBeGreaterThan(busyMs);
+      expect(now - started).toBeLessThanOrEqual(maximumBudget + clockStep);
+      expect(await readdir(dir)).toEqual([]);
     } finally {
-      // Turn churn off and let any background loop (buggy tree) terminate cleanly
-      // via the now-passthrough fs, so no stray temp lock survives the test.
       churn.lockPath = null;
-      await lockPromise.catch(() => {});
+      churn.onMissing = null;
+      clock.mockRestore();
     }
   }, 6_000);
 });
