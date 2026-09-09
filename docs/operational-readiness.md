@@ -236,6 +236,17 @@ signature or policy evaluator.
 
 ### Certificate and release
 
+Version 2.25.8 has a single, explicit owner-authorized publication exception,
+recorded in [the bounded release record](../evals/release-owner-exception-2.25.8.json).
+Its four workflows completed, but the full workflow's interruptions and
+expired-ticket retry prevent first-pass certification. For exactly tag
+`v2.25.8`, both release validation jobs run the separate exception verifier.
+That verifier pins the record and every file outside a fixed release-only
+allowlist to the tested candidate, including all runtime/plugin bytes and the
+unchanged strict verifier. Normal CI, package/public-safety checks, dependency
+auditing, and provenance attestations still apply. Every other version follows
+the strict certificate procedure below; there is no general bypass option.
+
 Use [the ledger schema](../evals/live-certification.schema.json) only for real
 qualifying runs. It permits bounded identifiers, versions, counters, reason
 codes, booleans, and hashes—not objectives, ticket/receipt prose, output, provider

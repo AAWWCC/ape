@@ -1,18 +1,25 @@
 # Changelog
 
-## 2.25.8 — 2026-09-08
+## 2.25.8 — 2026-09-09
 
-Release candidate; exact-candidate CI and a newly authorized four-workflow
-Codex campaign remain required. Version 2.25.7 passed all 18 CI jobs and
-qualified its mechanical workflow; its fast launch failed before model work
-when cached model metadata expired during preflight. That campaign remains
-failed.
+Owner-approved release with disclosed certification exceptions. The exact
+candidate passed all 18 CI jobs and all four Codex workflows completed.
+The full workflow required connection recovery and a supported expired-ticket
+retry; it remains ineligible for an uninterrupted schema-v5 certificate.
+Earlier failed attempts remain failed. See [release notes](docs/releases/2.25.8.md).
 
-- Document the pinned host's cached `model/list` behavior and require actual
-  cache-lifetime verification at the final certification launch handoff.
-- Bind this candidate to the separately reviewed external supervisor timing
-  correction. The product's 300-second catalog guard and runtime behavior
-  remain unchanged.
+- Consolidate reliability fixes since the original 2.25.1 snapshot: durable
+  state and task recovery, lifecycle locking, test-evidence scoping, safe
+  post-merge cleanup, configuration updates, and statusline preservation.
+- Default Codex worker tiers to GPT-6 Astra with low, medium, and high effort;
+  preserve explicit model selections and Claude defaults. Pin tested Codex to 0.153.4.
+- Preserve tracked APE configuration in shipping-tree evidence and explicitly
+  identify the governed project during worker receipt validation.
+- Correct certification catalog routes, request metadata, and launch timing.
+  The product's 300-second catalog guard remains unchanged.
+- Publish the exact release exception and checksums alongside the normal
+  packages, SBOM, manifest, and GitHub provenance attestations. The exception
+  is restricted to 2.25.8 and does not change the strict certificate verifier.
 
 ## 2.25.7 — 2026-09-08
 

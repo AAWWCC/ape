@@ -1,4 +1,5 @@
 import childProcess, { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -35,6 +36,12 @@ import {
   writeLiveCertificationPrompts,
 } from '../scripts/prepare-live-certification-prompts.mjs';
 import { catalogResponseFor } from '../scripts/live-certification-catalog-stub.mjs';
+import {
+  protectedSourceInventorySha256,
+  validateReleaseOwnerExceptionProof,
+  validateReleaseOwnerExceptionRecord,
+  verifyReleaseOwnerExceptionRepository,
+} from '../scripts/verify-release-owner-exception.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
@@ -1835,5 +1842,151 @@ describe('tagged certification-only commit gate', () => {
     ]);
     expect(schema.$defs.terminal_reason_code.enum).toEqual(TERMINAL_REASON_CODES);
     expect(LiveCertificationError).toBeTypeOf('function');
+  });
+});
+
+
+describe('owner-authorized 2.25.8 publication exception', () => {
+  const exceptionRecord = readFileSync(new URL('../evals/release-owner-exception-2.25.8.json', import.meta.url));
+  const authorizedInventory = '79dafcbd0fc68911ea5f6629d1f7b6e6a6d9292b5acf6acf448bea928f95c002';
+  const tag = 'v2.25.8';
+
+  function exceptionRepository({ annotated = true, record = exceptionRecord } = {}) {
+    const fixture = sourceRepository();
+    writeFileSync(path.join(fixture.repo, 'package.json'), canonical({ name: 'ape', version: '2.25.8' }));
+    writeFileSync(path.join(fixture.repo, 'evals', 'release-owner-exception-2.25.8.json'), record);
+    git(fixture.repo, 'add', 'package.json', 'evals/release-owner-exception-2.25.8.json');
+    git(fixture.repo, 'commit', '-m', 'publish with disclosed exceptions');
+    const head = git(fixture.repo, 'rev-parse', 'HEAD');
+    if (annotated) git(fixture.repo, 'tag', '-a', tag, '-m', 'Owner-authorized release exception');
+    else git(fixture.repo, 'tag', tag);
+    return { ...fixture, head, tag };
+  }
+
+  function committedProof(fixture) {
+    return {
+      head: fixture.head,
+      checkedOutHead: git(fixture.repo, 'rev-parse', 'HEAD'),
+      tag,
+      tagType: git(fixture.repo, 'cat-file', '-t', `refs/tags/${tag}`),
+      tagCommit: git(fixture.repo, 'rev-parse', `${tag}^{commit}`),
+      packageVersion: JSON.parse(git(fixture.repo, 'show', `${fixture.head}:package.json`)).version,
+      rawRecord: execFileSync('git', ['show', `${fixture.head}:evals/release-owner-exception-2.25.8.json`], { cwd: fixture.repo }),
+      // The pure proof boundary models the authorized product inventory. The
+      // synthetic repository is deliberately not the real tested product.
+      inventorySha256: authorizedInventory,
+    };
+  }
+
+  it('accepts the exact record and committed annotated identities without claiming strict certification', () => {
+    const fixture = exceptionRepository();
+    writeFileSync(path.join(fixture.repo, 'evals', 'release-owner-exception-2.25.8.json'), '{"fabricated":true}\n');
+    expect(validateReleaseOwnerExceptionProof(committedProof(fixture))).toEqual({
+      version: '2.25.8',
+      source_commit: '2b902080bd6842adb185c3d17d68f323875f3859',
+      authorization: 'owner_authorized_release_exception',
+      strict_v5_uninterrupted_first_pass_qualified: false,
+    });
+    expect(() => verifyReleaseOwnerExceptionRepository(fixture))
+      .toThrow(/protected source inventory differs/iu);
+  });
+
+  it.each([
+    ['tag', 'v2.25.9', /only for v2\.25\.8/iu],
+    ['head', 'HEAD', /full lowercase commit hash/iu],
+    ['checkedOutHead', 'f'.repeat(40), /checked-out HEAD/iu],
+    ['tagType', 'commit', /must be annotated/iu],
+    ['tagCommit', 'f'.repeat(40), /does not point/iu],
+    ['packageVersion', '2.25.9', /version must be 2\.25\.8/iu],
+    ['inventorySha256', 'f'.repeat(64), /protected source inventory differs/iu],
+  ])('rejects a mismatched %s in the fixed authorization proof', (field, value, reason) => {
+    const proof = committedProof(exceptionRepository());
+    proof[field] = value;
+    expect(() => validateReleaseOwnerExceptionProof(proof)).toThrow(reason);
+  });
+
+  it('rejects record edits, different allowlists, changed evidence claims, and oversized records', () => {
+    for (const mutate of [
+      (record) => { record.version = '2.25.9'; },
+      (record) => { record.tested_source_commit = 'f'.repeat(40); },
+      (record) => { record.release_only_paths.push('lib/runtime/runner.js'); },
+      (record) => { record.strict_v5_uninterrupted_first_pass_qualified = true; },
+      (record) => { record.functional_evidence_sha256 = 'f'.repeat(64); },
+    ]) {
+      const record = JSON.parse(exceptionRecord.toString('utf8'));
+      mutate(record);
+      expect(() => validateReleaseOwnerExceptionRecord(Buffer.from(canonical(record))))
+        .toThrow(/authorized digest/iu);
+    }
+    expect(() => validateReleaseOwnerExceptionRecord(Buffer.concat([exceptionRecord, Buffer.from(' ')])))
+      .toThrow(/authorized digest/iu);
+    expect(() => validateReleaseOwnerExceptionRecord(Buffer.alloc(64 * 1024 + 1)))
+      .toThrow(/size limit/iu);
+    expect(() => validateReleaseOwnerExceptionRecord(Buffer.alloc(0))).toThrow(/empty/iu);
+  });
+
+  it('hashes exact Git inventory bytes and exempts only the nine exact publication paths', () => {
+    const product = `100644 blob ${'a'.repeat(40)}\tlib/runtime/runner.js`;
+    const baseline = Buffer.from(`${product}\0`);
+    const digest = protectedSourceInventorySha256(baseline);
+    expect(digest).toBe(createHash('sha256').update(baseline).digest('hex'));
+    const record = JSON.parse(exceptionRecord.toString('utf8'));
+    for (const publicationPath of record.release_only_paths) {
+      expect(protectedSourceInventorySha256(Buffer.from(`${product}\0` +
+        `100644 blob ${'b'.repeat(40)}\t${publicationPath}\0`))).toBe(digest);
+      expect(protectedSourceInventorySha256(Buffer.from(`${product}\0` +
+        `100644 blob ${'b'.repeat(40)}\t${publicationPath}.extra\0`))).not.toBe(digest);
+    }
+    for (const changed of [
+      product.replace('100644', '100755'),
+      product.replace('a'.repeat(40), 'b'.repeat(40)),
+      product.replace('runner.js', 'other.js'),
+      `${product}\0${product.replace('runner.js', 'added.js')}`,
+    ]) {
+      expect(protectedSourceInventorySha256(Buffer.from(`${changed}\0`))).not.toBe(digest);
+    }
+    const second = product.replace('runner.js', 'second.js');
+    expect(protectedSourceInventorySha256(Buffer.from(`${product}\0${second}\0`)))
+      .not.toBe(protectedSourceInventorySha256(Buffer.from(`${second}\0${product}\0`)));
+    expect(() => protectedSourceInventorySha256(Buffer.from(product))).toThrow(/NUL-terminated/iu);
+    expect(() => protectedSourceInventorySha256(Buffer.from('malformed\0'))).toThrow(/invalid Git entry/iu);
+    expect(() => protectedSourceInventorySha256(Buffer.from([0xff, 0]))).toThrow(/valid UTF-8/iu);
+  });
+
+  it('rejects missing or lightweight tags before reading release authority', () => {
+    const missing = exceptionRepository();
+    git(missing.repo, 'tag', '-d', tag);
+    expect(() => verifyReleaseOwnerExceptionRepository(missing)).toThrow(/annotated release tag/iu);
+    expect(() => verifyReleaseOwnerExceptionRepository(exceptionRepository({ annotated: false })))
+      .toThrow(/must be annotated/iu);
+  });
+
+  it('rejects mismatched tag targets and checked-out heads using committed Git objects', () => {
+    const movedTag = exceptionRepository();
+    git(movedTag.repo, 'tag', '-f', '-a', tag, movedTag.source, '-m', 'Wrong commit');
+    expect(() => verifyReleaseOwnerExceptionRepository(movedTag)).toThrow(/does not point/iu);
+    const movedHead = exceptionRepository();
+    git(movedHead.repo, 'commit', '--allow-empty', '-m', 'Different checkout');
+    expect(() => verifyReleaseOwnerExceptionRepository(movedHead)).toThrow(/checked-out HEAD/iu);
+    expect(() => verifyReleaseOwnerExceptionRepository({ ...movedHead, head: 'HEAD' }))
+      .toThrow(/full lowercase commit hash/iu);
+    expect(() => verifyReleaseOwnerExceptionRepository({ ...movedHead, tag: 'v2.25.9' }))
+      .toThrow(/only for v2\.25\.8/iu);
+  });
+
+  it('rejects an executable committed exception record even when its content is authorized', () => {
+    const fixture = exceptionRepository();
+    git(fixture.repo, 'update-index', '--chmod=+x', 'evals/release-owner-exception-2.25.8.json');
+    git(fixture.repo, 'commit', '-m', 'Invalid executable evidence');
+    const head = git(fixture.repo, 'rev-parse', 'HEAD');
+    git(fixture.repo, 'tag', '-f', '-a', tag, '-m', 'Invalid executable evidence');
+    expect(() => verifyReleaseOwnerExceptionRepository({ ...fixture, head }))
+      .toThrow(/regular non-executable file/iu);
+  });
+
+  it('cannot replace a changed committed record with an authorized working-tree record', () => {
+    const fixture = exceptionRepository({ record: Buffer.from('{}\n') });
+    writeFileSync(path.join(fixture.repo, 'evals', 'release-owner-exception-2.25.8.json'), exceptionRecord);
+    expect(() => verifyReleaseOwnerExceptionRepository(fixture)).toThrow(/authorized digest/iu);
   });
 });

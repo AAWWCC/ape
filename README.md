@@ -9,12 +9,14 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.25.8** is a release candidate awaiting exact-candidate CI and a new
-live certification campaign. Version 2.25.7 passed all 18 CI jobs and qualified
-its mechanical workflow. Its fast launch stopped before model work because a
-cached model catalog expired during preflight. The certification setup now
-checks actual catalog lifetime at the final launch handoff. See the
-[current release status](docs/prevention-release-status.md) for the exact limits.
+Version **2.25.8** is approved for release with a documented owner exception.
+The tested candidate passed all 18 CI jobs and completed the mechanical, fast,
+full, and protected-land Codex workflows. The full workflow required recovery
+after two host stream interruptions and an expired, unspawned test ticket;
+this is not an uninterrupted schema-v5 first-pass certificate. Runtime and
+plugin package bytes are preserved from the tested candidate. See the
+[release notes](docs/releases/2.25.8.md) and
+[evidence and limits](docs/prevention-release-status.md).
 
 Codex CLI is the primary host. The Claude Code package is included, but
 Claude live operation is unverified. Codex IDE integrations and ChatGPT web,

@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "record_type": "owner_authorized_release_exception",
+  "version": "2.25.8",
+  "tag": "v2.25.8",
+  "tested_source_commit": "2b902080bd6842adb185c3d17d68f323875f3859",
+  "tested_source_tree": "96c1198985b39c71c7e491ffdd984f381306fdd7",
+  "protected_source_inventory_sha256": "79dafcbd0fc68911ea5f6629d1f7b6e6a6d9292b5acf6acf448bea928f95c002",
+  "release_only_paths": [
+    ".github/workflows/release.yml",
+    "CHANGELOG.md",
+    "README.md",
+    "__tests__/runtime-v2-live-certification-gate.test.js",
+    "docs/operational-readiness.md",
+    "docs/prevention-release-status.md",
+    "docs/releases/2.25.8.md",
+    "evals/release-owner-exception-2.25.8.json",
+    "scripts/verify-release-owner-exception.mjs"
+  ],
+  "decision": "publish_verified_functional_release_with_disclosed_exceptions",
+  "authorized_by": "AAWWCC",
+  "authorized_at": "2026-09-09T15:24:46.612369+00:00",
+  "strict_v5_uninterrupted_first_pass_qualified": false,
+  "functional_campaign_complete": true,
+  "source_ci": {
+    "run_id": 34309635302,
+    "passed_jobs": 18,
+    "total_jobs": 18,
+    "url": "https://github.com/AAWWCC/ape/actions/runs/34309635302",
+    "evidence_sha256": "59f2245cd1648eddbbbf1baa18d1a2a320e0ed3a354c6f6b20d18bdce83f362f"
+  },
+  "functional_evidence_sha256": "a7b84623b2053af459576fcd881597be2011fc0ae3c015ec65d70a527ab1b384",
+  "live_host": {
+    "name": "codex",
+    "version": "0.153.4"
+  },
+  "unverified_live_hosts": [
+    "claude"
+  ],
+  "workflows": [
+    {
+      "workflow": "mechanical",
+      "status": "completed_and_independently_verified",
+      "pull_request": "https://github.com/AAWWCC/ape-release-validation-20260908/pull/3",
+      "run_record_sha256": "c121fb77bbe297e3f360b44c3fd35efa994f9c1083df824eef129359fc4f5d46",
+      "review_sha256": "d6db9171fc530f49223d466558405b2113d1d08276b67b79bdaaf4cf8f318300",
+      "uninterrupted_first_attempt_qualified": true
+    },
+    {
+      "workflow": "fast",
+      "status": "completed_and_independently_verified",
+      "pull_request": "https://github.com/AAWWCC/ape-release-validation-20260908/pull/4",
+      "run_record_sha256": "c3e83c606ebf6dcc97ca19b3c132c240efda1f461b6f434943c5e5495e165339",
+      "review_sha256": "fcf5d03a7004342574ea9735795f322ae769a724dda7b8ff632ad08b99be82a3",
+      "uninterrupted_first_attempt_qualified": true
+    },
+    {
+      "workflow": "full",
+      "status": "completed_and_independently_verified",
+      "pull_request": "https://github.com/AAWWCC/ape-release-validation-20260908/pull/5",
+      "run_record_sha256": "65160aad17d7cfabf5e62a21800d49e3c9116f228e0478af183c67046780db7f",
+      "review_sha256": "e8da493ad3df4b57b8d2d7d5df9baed323e178ffb8363247a39a01a5fb27b1ff",
+      "uninterrupted_first_attempt_qualified": false
+    },
+    {
+      "workflow": "land",
+      "status": "completed_and_independently_verified",
+      "pull_request": "https://github.com/AAWWCC/ape-release-validation-20260908/pull/6",
+      "run_record_sha256": "3a3ac9830c0562dc0cbd330a7916f99e93a3408d631b1309f3785aed6fb1d4d7",
+      "review_sha256": "ce28fcdd7116ca6fee49a7f66cc267a84718343199971ae6770b84588f28c472",
+      "uninterrupted_first_attempt_qualified": true
+    }
+  ],
+  "exceptions": [
+    "Full original native parent failed with response-stream transport error; user reported disconnecting Ethernet.",
+    "First same-parent continuation failed with the same response-stream error; exact cause is not established.",
+    "Second user-directed continuation recovered expired unspawned test ticket via supported same-run resume, attempt1 to2 within unchanged budget2.",
+    "Incidental full-worker command errors are disclosed in the native review; all APE controls and validated receipt handoffs succeeded."
+  ],
+  "constraints": [
+    "Only tag v2.25.8 may use this record.",
+    "Every file outside the listed release-only paths must match the tested source inventory.",
+    "The strict schema-v5 verifier and all runtime/plugin/package files remain unchanged.",
+    "All normal protected-merge CI and tagged-release validation, public-safety, packaging and provenance checks remain required."
+  ]
+}

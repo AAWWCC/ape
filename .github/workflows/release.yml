@@ -85,8 +85,14 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${version}"
-      - name: Require committed live Codex certification
-        run: npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+      - name: Require committed certification or the exact 2.25.8 owner exception
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == "v2.25.8" ]]; then
+            node scripts/verify-release-owner-exception.mjs --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+          else
+            npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+          fi
       - run: npm run typecheck
       - run: npm run bundle
       - name: Require fresh committed bundles
@@ -165,8 +171,14 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${version}"
-      - name: Require committed live Codex certification
-        run: npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+      - name: Require committed certification or the exact 2.25.8 owner exception
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == "v2.25.8" ]]; then
+            node scripts/verify-release-owner-exception.mjs --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+          else
+            npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+          fi
       - run: npm run typecheck
       - run: npm run bundle
       - name: Require fresh committed bundles
@@ -186,16 +198,26 @@ jobs:
         run: npm run public:export -- --out "${RUNNER_TEMP}/ape-public-${GITHUB_SHA}"
       - run: npm run release:artifacts
       - run: npm run release:reproducible
+      - name: Include the disclosed owner exception with this release
+        if: github.ref_name == 'v2.25.8'
+        shell: bash
+        run: |
+          cp evals/release-owner-exception-2.25.8.json release/release-owner-exception-2.25.8.json
+          (cd release && sha256sum release-owner-exception-2.25.8.json >> SHA256SUMS)
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: |
             release/ape-*.tar.gz
-            release/ape-*.spdx.json
-            release/release-manifest.json
+            release/*.json
             release/SHA256SUMS
       - name: Publish immutable GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: gh release create "${GITHUB_REF_NAME}" release/* --verify-tag --generate-notes --title "APE ${GITHUB_REF_NAME#v}"
+        run: |
+          notes_args=(--generate-notes)
+          if [[ "${GITHUB_REF_NAME}" == "v2.25.8" ]]; then
+            notes_args=(--notes-file docs/releases/2.25.8.md)
+          fi
+          gh release create "${GITHUB_REF_NAME}" release/* --verify-tag "${notes_args[@]}" --title "APE ${GITHUB_REF_NAME#v}"

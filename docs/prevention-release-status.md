@@ -1,11 +1,34 @@
 # Prevention-first reliability status
 
-**2.25.8 is a review candidate, not a certified release.** Its certification
-setup addresses a model-catalog timing gap. The product's 300-second native
-catalog guard remains unchanged. Codex remains pinned to 0.153.4 with GPT-6
-Astra low/medium/high defaults. Exact-candidate CI and a newly authorized
-four-workflow campaign remain required. Earlier failed campaigns retain their
-original classification.
+**2.25.8 is approved for release with an explicit owner exception; it is not
+schema-v5 first-pass certified.** Tested source
+`2b902080bd6842adb185c3d17d68f323875f3859` passed all 18 jobs in
+[CI 34309635302](https://github.com/AAWWCC/ape/actions/runs/34309635302).
+All four Codex workflows completed and were independently reviewed:
+[mechanical](https://github.com/AAWWCC/ape-release-validation-20260908/pull/3),
+[fast](https://github.com/AAWWCC/ape-release-validation-20260908/pull/4),
+[full](https://github.com/AAWWCC/ape-release-validation-20260908/pull/5), and
+[protected-land](https://github.com/AAWWCC/ape-release-validation-20260908/pull/6).
+
+The full run retained its original parent and run identity through two host
+response-stream failures. The owner reported disconnecting Ethernet for the
+first; the second's specific cause is undetermined. On the next requested
+continuation, an unspawned test ticket had expired. Normal runtime resume
+issued attempt 2 within the unchanged budget of 2. Incidental worker command
+errors remain disclosed; all 38 APE operations and seven native validated
+receipt handoffs succeeded. Mechanical, fast, and protected-land individually
+qualified without those exceptions. All owned processes stopped and temporary
+authentication was removed.
+
+The [bounded owner exception](../evals/release-owner-exception-2.25.8.json)
+records the completed workflows, exact retained evidence hashes, and failed
+first-pass qualification. Publication adds only reviewed release metadata,
+documentation, workflow wiring, and exception-verifier coverage. All other
+source files, runtime bundles, plugin packages, dependencies, and the strict
+certificate verifier must match the tested source inventory. All normal
+tagged-release checks and artifact attestations remain required. Earlier
+campaign failures below retain their original classification. Claude live
+operation remains unverified.
 
 ## 2.25.7 validation and failed formal campaign
 
