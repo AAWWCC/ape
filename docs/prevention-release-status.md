@@ -1,19 +1,36 @@
 # Prevention-first reliability status
 
-**2.25.4 is a review candidate, not a certified release.** It includes corrected
-CLI entry guards, phase-specific guidance for existing probes, an accurate
-completed-proof expiry reason, and GPT-6 Astra defaults at low/medium/high effort
-for the Codex fast/balanced/deep tiers. Claude defaults and explicit model choices
-remain intact. Exact-candidate CI and a new four-workflow certification campaign
-are pending; local tests and package checks do not replace those requirements.
-This page records results as of September 8, 2026 and does not authorize testing,
-installation or publication.
+**2.25.5 is a review candidate, not a certified release.** It explicitly updates
+the Codex CLI pin to 0.153.4, adds a native child-model catalog preflight, and
+updates affected development tooling to Vitest 4.1.11. The Codex defaults remain
+GPT-6 Astra with low/medium/high effort for fast/balanced/deep. Exact-candidate CI
+and a newly authorized four-workflow campaign remain required. These changes do
+not repair or reclassify any earlier failed campaign.
 
-The first 2.25.4 CI run, [34296408215](https://github.com/AAWWCC/ape/actions/runs/34296408215),
-failed three benchmark CLI checks on Windows/Node 22; the other 16 jobs passed.
-The follow-up applies the existing Windows file-identity compatibility helpers
-to benchmark, certification-launcher, and duration tooling. A new exact-source
-CI run is required. No 2.25.4 live certification attempt has started.
+## 2.25.4 validation and failed formal campaign
+
+Frozen commit `16c9deb9559b88447bf0366094388f160fd0ad01` passed all 18 jobs in
+[CI 34298522391](https://github.com/AAWWCC/ape/actions/runs/34298522391), including
+both Windows Node versions and 701 operational canaries. The high-severity audit
+gate passed while reporting three moderate entries for one Vitest development-
+server advisory; 2.25.5 updates that development tooling.
+
+The first live mechanical attempt failed after 78.877 seconds. Doctor, config,
+preview and probe preparation succeeded, but the pinned Codex 0.147.0 host
+rejected `gpt-6-astra` at native child launch. Its freshly retrieved model catalog
+omitted Astra even though the parent could use the model. No child, binding,
+APE run, receipt, branch push, PR or merge occurred. Remote main and protection
+remained unchanged. The campaign stopped with zero qualifying completions;
+fast, full and protected-land were not started. Exact decoded bootstrap-message
+equality was not established from the opaque transport records.
+
+The source fixes retain their narrower validation: the earlier
+[Windows CI failure](https://github.com/AAWWCC/ape/actions/runs/34296408215) led to
+consistent file-identity helpers, and the subsequent
+[cleanup CI failure](https://github.com/AAWWCC/ape/actions/runs/34297564805) led to
+bounded temporary-directory removal retries. Both failed runs remain recorded.
+The latter error did not reproduce locally; its originating writer or filesystem
+condition remains unknown. The successful CI does not establish live completion.
 
 ## 2.25.3 validation and failed formal campaign
 

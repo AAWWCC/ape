@@ -172,7 +172,7 @@ describe('public cross-platform CI and release contract', () => {
     const yaml = await read('.github/workflows/ci.yml');
     const marketplace = jobBlock(yaml, 'marketplace-install-smoke');
     expect(marketplace).toContain('node-version: 24.15.0');
-    expect(marketplace).toContain('@openai/codex@0.147.0');
+    expect(marketplace).toContain('@openai/codex@0.153.4');
     expect(marketplace).toContain('@anthropic-ai/claude-code@2.1.228');
     expect(marketplace).toContain('npm run smoke:marketplaces');
   });
@@ -219,7 +219,7 @@ describe('public cross-platform CI and release contract', () => {
     for (const marker of [
       'node-version: 24.15.0',
       'test "$(npm --version)" = "11.12.1"',
-      '@openai/codex@0.147.0',
+      '@openai/codex@0.153.4',
       '@anthropic-ai/claude-code@2.1.228',
       'GH_CLI_VERSION: 2.76.2',
       'sha256sum --check --strict',
@@ -245,7 +245,7 @@ describe('public cross-platform CI and release contract', () => {
     expect(release).not.toContain('APE_PUBLIC_FORBIDDEN_HASHES:');
     expect(hostValidation).toMatch(/permissions:\n      contents: read/u);
     expect(hostValidation).toContain('npm audit --audit-level=high');
-    expect(hostValidation).toContain('npm install --global @openai/codex@0.147.0 @anthropic-ai/claude-code@2.1.228');
+    expect(hostValidation).toContain('npm install --global @openai/codex@0.153.4 @anthropic-ai/claude-code@2.1.228');
     expect(hostValidation).toContain('npm run smoke:marketplaces -- --installed-hosts');
     expect(hostValidation).toContain('npm run validate:claude');
     expect(hostValidation).not.toMatch(/npm run validate\s*$/mu);

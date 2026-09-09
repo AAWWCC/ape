@@ -85,7 +85,7 @@ describe('host compatibility contract', () => {
     expect(manifest.version).toBe(2);
     expect(manifest.hosts.codex.live_certification).toBe('required');
     expect(manifest.hosts.claude.live_certification).toBe('unverified');
-    for (const value of ['22.12.0', '24.15.0', '0.147.0', '2.1.228']) {
+    for (const value of ['22.12.0', '24.15.0', '0.153.4', '2.1.228']) {
       expect(serialized).toContain(value);
     }
     for (const identity of ['node', 'codex', 'claude', 'linux', 'macos', 'windows']) {
@@ -93,7 +93,7 @@ describe('host compatibility contract', () => {
     }
     expect((serialized.match(/22\.12\.0/gu) ?? [])).toHaveLength(1);
     expect((serialized.match(/24\.15\.0/gu) ?? [])).toHaveLength(1);
-    expect((serialized.match(/0\.147\.0/gu) ?? [])).toHaveLength(1);
+    expect((serialized.match(/0\.153\.4/gu) ?? [])).toHaveLength(1);
     expect((serialized.match(/2\.1\.228/gu) ?? [])).toHaveLength(1);
   });
 
@@ -111,7 +111,7 @@ describe('host compatibility contract', () => {
     ['README', 'README.md', (text) => text.replace('22.12.0', '22.13.0')],
     ['compatibility documentation', 'docs/compatibility.md', (text) => text.replace('24.15.0', '24.16.0')],
     ['documentation index', 'docs/README.md', (text) => text.replace('compatibility.md', 'compatibility-broken.md')],
-    ['pull-request CI', '.github/workflows/ci.yml', (text) => text.replace('0.147.0', '0.148.0')],
+    ['pull-request CI', '.github/workflows/ci.yml', (text) => text.replace('0.153.4', '0.153.5')],
     ['tagged release', '.github/workflows/release.yml', (text) => text.replace('2.1.228', '2.1.229')],
     ['named action pin', '.github/workflows/release.yml', (text) => text.replace(/actions\/attest-build-provenance@[0-9a-f]{40}/u, 'actions/attest-build-provenance@main')],
     ['release dependency audit', '.github/workflows/release.yml', (text) => text.replace('npm audit --audit-level=high', 'npm --version')],
@@ -134,8 +134,8 @@ describe('host compatibility contract', () => {
     const validation = jobBlock(release, 'host-validation');
     const publish = jobBlock(release, 'publish');
 
-    for (const value of ['22.12.0', '24.15.0', '0.147.0', '2.1.228']) expect(ci).toContain(value);
-    for (const value of ['24.15.0', '0.147.0', '2.1.228']) expect(validation).toContain(value);
+    for (const value of ['22.12.0', '24.15.0', '0.153.4', '2.1.228']) expect(ci).toContain(value);
+    for (const value of ['24.15.0', '0.153.4', '2.1.228']) expect(validation).toContain(value);
     for (const platform of ['ubuntu-latest', 'macos-latest', 'windows-latest']) expect(ci).toContain(platform);
     expect(ci).toContain('name: Package smoke (${{ matrix.os }}, Node ${{ matrix.node.major }})');
     expect(ci).toContain('node-version: ${{ matrix.node.version }}');

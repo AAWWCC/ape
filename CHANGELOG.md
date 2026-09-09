@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.25.5 — 2026-09-08
+
+Release candidate; exact-candidate CI and a newly authorized four-workflow
+Codex campaign remain required. The failed 2.25.4 campaign remains failed.
+
+- Update the tested Codex CLI pin to 0.153.4 for GPT-6 Astra native agents.
+  The prior host accepted Astra for the parent while its child catalog omitted
+  the model; a successful parent request did not establish child eligibility.
+- Require a fresh, matching native child-model catalog before certification
+  launch, including configured Codex tier and role selections with V2 support.
+- Update Vitest and coverage tooling to 4.1.11, which fixes the development-server
+  advisory GHSA-82fw-gwwq-j7x9 reported by the prior dependency audit.
+
 ## 2.25.4 — 2026-09-08
 
 Release candidate; exact-candidate CI and a new authorized four-workflow Codex

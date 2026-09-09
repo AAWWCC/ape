@@ -9,7 +9,7 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.25.4** is a release candidate awaiting exact-candidate CI and a new
+Version **2.25.5** is a release candidate awaiting exact-candidate CI and a new
 live certification campaign. It includes CLI entry guards, probe recovery
 diagnostics, and GPT-6 Astra defaults with tier-specific reasoning efforts.
 The first 2.25.3 live mechanical attempt remains failed; these changes do not
@@ -30,7 +30,7 @@ Node.js 22.12.0 or newer is required.
 
 ### Codex CLI
 
-Use the pinned Codex CLI **0.147.0**. Install the plugin and enable the native V2
+Use the pinned Codex CLI **0.153.4**. Install the plugin and enable the native V2
 worker tools in the Codex home you use for APE:
 
 ```bash

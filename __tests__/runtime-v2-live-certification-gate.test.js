@@ -38,13 +38,21 @@ import {
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
 const SOURCE = 'a'.repeat(40);
-const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
+const HOST_VERSIONS = Object.freeze({ codex: '0.153.4', claude: '2.1.228' });
 const temporaryRepositories = [];
 const realSpawnSync = spawnSync;
 
 function codexVersionResult(overrides = {}) {
   return { status: 0, signal: null, stdout: Buffer.from(`codex-cli ${HOST_VERSIONS.codex}\n`),
     stderr: Buffer.alloc(0), ...overrides };
+}
+
+function modelCatalog(models = [{ slug: 'gpt-6-astra', multi_agent_version: 'v2' }]) {
+  return { client_version: HOST_VERSIONS.codex, fetched_at: new Date().toISOString(), models };
+}
+
+function writeModelCatalog(fixture, catalog) {
+  writeFileSync(path.join(fixture.codexHome, 'models_cache.json'), JSON.stringify(catalog));
 }
 
 function certificationParentFixture({
@@ -114,6 +122,7 @@ function certificationParentFixture({
   );
   cpSync(fileURLToPath(new URL('../plugins/ape', import.meta.url)),
     path.join(codexHome, 'plugins', 'cache', 'ape', 'ape', VERSION), { recursive: true });
+  writeModelCatalog({ codexHome }, modelCatalog());
   vi.spyOn(childProcess, 'spawnSync').mockReturnValue(codexVersionResult());
   return {
     projectDir: exactProject,
@@ -460,6 +469,104 @@ describe('live certification Codex parent launcher', () => {
     expect(invocation.host_version).toBe(HOST_VERSIONS.codex);
   });
 
+  it('admits the fresh pinned V2 catalog without changing the sparse governed defaults or cache', () => {
+    const fixture = certificationParentFixture();
+    const configPath = path.join(fixture.projectDir, '.ape', 'runtime', 'config.json');
+    const cachePath = path.join(fixture.codexHome, 'models_cache.json');
+    const before = [readFileSync(configPath), readFileSync(cachePath)];
+    expect(buildCodexParentInvocation(fixture).host_version).toBe(HOST_VERSIONS.codex);
+    expect([readFileSync(configPath), readFileSync(cachePath)]).toEqual(before);
+  });
+
+  it('rejects a parent-only model catalog even when the parent model and host version are supported', () => {
+    const fixture = certificationParentWithConfig((config) => `model = "parent-only"\n${config}`);
+    writeModelCatalog(fixture, modelCatalog([{ slug: 'parent-only', multi_agent_version: 'v2' }]));
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/child model catalog prerequisite/iu);
+  });
+
+  it.each([
+    ['wrong client', (catalog) => { catalog.client_version = '0.147.0'; }],
+    ['missing client', (catalog) => { delete catalog.client_version; }],
+    ['stale', (catalog) => { catalog.fetched_at = new Date(Date.now() - 300_001).toISOString(); }],
+    ['future timestamp', (catalog) => { catalog.fetched_at = new Date(Date.now() + 60_000).toISOString(); }],
+    ['invalid date', (catalog) => { catalog.fetched_at = '2026-02-30T12:00:00Z'; }],
+    ['missing timestamp', (catalog) => { delete catalog.fetched_at; }],
+    ['missing models', (catalog) => { delete catalog.models; }],
+    ['empty models', (catalog) => { catalog.models = []; }],
+    ['missing slug', (catalog) => { delete catalog.models[0].slug; }],
+    ['non-string slug', (catalog) => { catalog.models[0].slug = 42; }],
+    ['duplicate identity', (catalog) => { catalog.models.push({ ...catalog.models[0] }); }],
+    ['legacy backend', (catalog) => { catalog.models[0].multi_agent_version = 'v1'; }],
+    ['missing backend', (catalog) => { delete catalog.models[0].multi_agent_version; }],
+    ['malformed backend', (catalog) => { catalog.models[0].multi_agent_version = true; }],
+  ])('refuses a %s native child catalog without leaking or rewriting its contents', (_name, update) => {
+    const fixture = certificationParentFixture();
+    const catalog = modelCatalog();
+    catalog.unrelated_annotation = 'SYNTHETIC_PRIVATE_CATALOG_TEXT';
+    update(catalog);
+    writeModelCatalog(fixture, catalog);
+    const cachePath = path.join(fixture.codexHome, 'models_cache.json');
+    const before = readFileSync(cachePath);
+    let failure;
+    try { buildCodexParentInvocation(fixture); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(LiveCertificationParentError);
+    expect(failure.message).toMatch(/child model catalog prerequisite/iu);
+    expect(failure.message).not.toContain('SYNTHETIC_PRIVATE_CATALOG_TEXT');
+    expect(readFileSync(cachePath)).toEqual(before);
+  });
+
+  it('uses the pinned 300-second freshness boundary with a fixed clock', () => {
+    const now = Date.parse('2026-09-09T01:00:00Z');
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    const fixture = certificationParentFixture();
+    const catalog = { ...modelCatalog(), fetched_at: new Date(now - 300_000).toISOString() };
+    writeModelCatalog(fixture, catalog);
+    expect(buildCodexParentInvocation(fixture).command).toBe(fixture.codexBin);
+    catalog.fetched_at = new Date(now - 300_001).toISOString();
+    writeModelCatalog(fixture, catalog);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/child model catalog prerequisite/iu);
+  });
+
+  it.each(['tier', 'role'])('checks explicit %s model pins while preserving partial default inheritance', (kind) => {
+    const fixture = certificationParentFixture();
+    const configPath = path.join(fixture.projectDir, '.ape', 'runtime', 'config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    config.models = { codex: { balanced: { reasoning_effort: 'high' } } };
+    if (kind === 'tier') config.models.codex.fast = { model: 'explicit-worker' };
+    else config.role_models = { security_reviewer: { codex: { model: 'explicit-worker', reasoning_effort: 'high' } } };
+    writeFileSync(configPath, JSON.stringify(config));
+    const before = readFileSync(configPath);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/child model catalog prerequisite/iu);
+    writeModelCatalog(fixture, modelCatalog([
+      { slug: 'gpt-6-astra', multi_agent_version: 'v2' },
+      { slug: 'explicit-worker', multi_agent_version: 'v2' },
+    ]));
+    expect(buildCodexParentInvocation(fixture).command).toBe(fixture.codexBin);
+    expect(readFileSync(configPath)).toEqual(before);
+  });
+
+  it.each(['missing', 'directory', 'symlink', 'oversized', 'invalid UTF-8', 'duplicate key'])('rejects a %s model cache before launch', (kind) => {
+    const fixture = certificationParentFixture();
+    const file = path.join(fixture.codexHome, 'models_cache.json');
+    rmSync(file);
+    if (kind === 'directory') mkdirSync(file);
+    if (kind === 'symlink') {
+      const target = path.join(path.dirname(fixture.codexHome), 'external-cache.json');
+      writeFileSync(target, JSON.stringify(modelCatalog()));
+      symlinkSync(target, file);
+    }
+    if (kind === 'oversized') writeFileSync(file, Buffer.alloc(8 * 1024 * 1024 + 1, 0x20));
+    if (kind === 'invalid UTF-8') writeFileSync(file, Buffer.from([0xff]));
+    if (kind === 'duplicate key') writeFileSync(file, JSON.stringify(modelCatalog()).replace('{', '{"client_version":"old",'));
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/child model catalog prerequisite/iu);
+  });
+
+  it('rejects an overriding static model catalog without invoking the host', () => {
+    const fixture = certificationParentWithConfig((config) => `model_catalog_json = "/synthetic/static.json"\n${config}`);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/static model_catalog_json override/iu);
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, '', 'codex', './codex', 7, null])('host pin rejects missing or non-absolute executable %s without running it', (codexBin) => {
     const fixture = certificationParentFixture();
     expect(() => buildCodexParentInvocation({ ...fixture, codexBin })).toThrow(/absolute.*--codex-bin/iu);
@@ -481,8 +588,8 @@ describe('live certification Codex parent launcher', () => {
   it.each([
     ['wrong pin', { stdout: Buffer.from('codex-cli 0.148.0\n') }],
     ['missing version', { stdout: Buffer.alloc(0) }],
-    ['malformed version', { stdout: Buffer.from('0.147.0\n') }],
-    ['extra version lines', { stdout: Buffer.from('codex-cli 0.147.0\ncodex-cli 0.148.0\n') }],
+    ['malformed version', { stdout: Buffer.from('0.153.4\n') }],
+    ['extra version lines', { stdout: Buffer.from('codex-cli 0.153.4\ncodex-cli 0.148.0\n') }],
     ['invalid UTF-8', { stdout: Buffer.from([0xff]) }],
     ['failed process', { status: 1 }],
     ['terminated process', { status: null, signal: 'SIGKILL' }],
@@ -498,7 +605,7 @@ describe('live certification Codex parent launcher', () => {
     let failure;
     try { buildCodexParentInvocation(fixture); } catch (error) { failure = error; }
     expect(failure).toBeInstanceOf(LiveCertificationParentError);
-    expect(failure.message).toMatch(/Codex.*version|Codex.*0\.147\.0/iu);
+    expect(failure.message).toMatch(/Codex.*version|Codex.*0\.153\.4/iu);
     expect(failure.message.length).toBeLessThan(400);
     expect(failure.message).not.toContain('SYNTHETIC_SECRET');
     expect(failure.message).not.toContain(fixture.codexBin);
@@ -528,7 +635,7 @@ describe('live certification Codex parent launcher', () => {
     expect(checked.error).toBeUndefined();
     expect(checked.status).toBe(1);
     expect(checked.stdout).toBe('');
-    expect(checked.stderr).toMatch(/Codex.*0\.147\.0/iu);
+    expect(checked.stderr).toMatch(/Codex.*0\.153\.4/iu);
   });
 
   it('host pin rejects executable metadata drift during the version check', () => {

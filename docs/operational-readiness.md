@@ -39,7 +39,7 @@ Passing these checks is not proof of a working live host.
 ## Live certification
 
 Codex is the sole required live host from APE 2.23.0 onward, as defined in
-[`compatibility.json`](../compatibility.json). Keep its exact Codex CLI 0.147.0 pin.
+[`compatibility.json`](../compatibility.json). Keep its exact Codex CLI 0.153.4 pin.
 A host failure requires a compatibility decision, not an implicit upgrade.
 
 Installation, hook trust, repository creation, pushes, PRs, and merges each need
@@ -56,9 +56,10 @@ repository, and base. Never use APE's public source repository as the test targe
 3. Use an isolated host profile and supported permission/trust workflows. Project
    trust is not hook trust. Stop if permissions or trusted hooks are missing;
    do not change them implicitly or use bypass flags.
-   In that profile, set `[features] multi_agent_v2 = true`. The pinned CLI's
-   older default agent interface cannot accept APE's `task_name` and `fork_turns`
-   launch fields. Verify the effective host setting as well as hook trust;
+   In that profile, set `[features] multi_agent_v2 = true` to select the required
+   interface independently of model metadata. The older V1 interface cannot
+   accept APE's `task_name` and `fork_turns` launch fields. Verify the effective
+   host setting as well as hook trust;
    `multi_agent = true` alone does not select the required interface.
 4. Set this exact identity in each test repository's local Git config:
    `APE Certification <ape-certification@users.noreply.github.com>`.
@@ -118,6 +119,15 @@ Before launch, APE checks:
   approved through `approval_mode = "approve"` or an approving
   `default_tools_approval_mode`. Per-tool settings override defaults.
   `auto`, `prompt`, and `writes` do not meet this headless requirement.
+
+The launcher also checks the isolated profile's normally discovered child-model
+catalog. Its client version must match the pinned host, its age must not exceed
+the host's 300-second cache lifetime, and every effective Codex tier and role
+model must support native V2 agents. Refresh stale or missing metadata through
+normal host model discovery before an attempt; do not copy another client's
+cache or use a static catalog override. A working parent model does not establish
+child eligibility. This local snapshot check does not prove provider identity,
+authentication, or availability of a future backend request.
 
 Configuration must be a stable regular UTF-8 file, at most 256 KiB, 32 nesting
 levels, and 10,000 parsed values. Symlinks and special files are refused. Errors

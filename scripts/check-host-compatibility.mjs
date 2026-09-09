@@ -53,7 +53,7 @@ async function check(root) {
   requireCondition(manifest.node?.minimum === '22.12.0', 'Node.js minimum must be 22.12.0');
   requireCondition(manifest.node?.blocking === '24.15.0', 'blocking Node.js must be 24.15.0');
   requireCondition(manifest.hosts?.codex?.package === '@openai/codex', 'Codex package identity mismatch');
-  requireCondition(manifest.hosts?.codex?.version === '0.147.0', 'Codex CLI pin mismatch');
+  requireCondition(manifest.hosts?.codex?.version === '0.153.4', 'Codex CLI pin mismatch');
   requireCondition(
     manifest.hosts?.codex?.live_certification === 'required',
     'Codex must be the required live-certification host',

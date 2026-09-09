@@ -175,6 +175,6 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run compatibility:check
       - name: Install pinned host CLIs
-        run: npm install --global @openai/codex@0.147.0 @anthropic-ai/claude-code@2.1.228
+        run: npm install --global @openai/codex@0.153.4 @anthropic-ai/claude-code@2.1.228
       - run: npm run package:check
       - run: npm run smoke:marketplaces
