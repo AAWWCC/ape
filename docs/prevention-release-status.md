@@ -1,11 +1,35 @@
 # Prevention-first reliability status
 
-**2.25.6 is a review candidate, not a certified release.** It addresses the
-shipping-tree mismatch, catalog-route incompatibility, and incomplete worker
-receipt-validation guidance observed during the failed 2.25.5 campaign. Codex
-remains pinned to 0.153.4 with GPT-6 Astra low/medium/high defaults. Exact-candidate
-CI and a newly authorized four-workflow campaign remain required. Earlier
-failed campaigns retain their original classification.
+**2.25.7 is a review candidate, not a certified release.** It corrects the
+catalog request contract used by the certification runner. Codex remains pinned
+to 0.153.4 with GPT-6 Astra low/medium/high defaults. Exact-candidate CI and a
+newly authorized four-workflow campaign remain required. Earlier failed
+campaigns retain their original classification.
+
+## 2.25.6 validation and failed formal campaign
+
+Frozen commit `ed89d972f870a3dbe3c63e252c6c0b58103cc591` passed all 18 jobs in
+[CI 34303931274](https://github.com/AAWWCC/ape/actions/runs/34303931274), including
+both Windows Node versions. The mechanical workflow completed: all 13 APE
+control results succeeded, the worker's sole receipt validation passed, gates
+passed, and [synthetic PR #1](https://github.com/AAWWCC/ape-release-validation-20260908/pull/1)
+merged under the unchanged protection policy. The exact PR head's required
+`Synthetic tests` check succeeded, and its merge rule suite passed. Synthetic
+main advanced to `21b23fe7e35383f8f4186a66d6699484ce2159e7`.
+
+The launcher nevertheless exited with code 1 after rejecting the pinned host's
+`GET /ps/plugins/installed?limit=200` catalog request. Its stub required a scope
+and omitted the host's all-scopes request form. This runner failure disqualifies
+the formal campaign; fast, full, and protected-land were not attempted. Owned
+processes exited and temporary authentication was removed. The native receipt
+handoff and original-child association were verified; equality of decoded
+bootstrap-message plaintext remains unverified in the opaque transport records.
+
+The offline correction compares all six allowed routes against the same pinned
+host source, including the mutually exclusive installed-plugin query forms,
+featured-platform values, and rejection of duplicate query keys. Response
+bodies remain deterministic, typed empty results; unknown routes and methods
+remain rejected.
 
 ## 2.25.5 validation and failed formal campaign
 

@@ -14,7 +14,8 @@ function parseArgs(argv) {
 
 function hasOnly(searchParams, names) {
   const allowed = new Set(names);
-  return [...searchParams.keys()].every((name) => allowed.has(name));
+  const keys = [...searchParams.keys()];
+  return keys.length === new Set(keys).size && keys.every((name) => allowed.has(name));
 }
 
 function directoryPage() {
@@ -32,6 +33,9 @@ export function catalogResponseFor(method, requestUrl) {
     return { known: false, status: 405, body: { error: 'method not allowed' } };
   }
 
+  // Pinned Codex 0.153.4, commit 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a:
+  // core-plugins/src/remote.rs and remote_legacy.rs construct each query key
+  // once; backend-client/src/client.rs uses the root-base user-settings route.
   const { pathname, searchParams } = url;
   if (pathname === '/api/codex/settings/user') {
     const valid = hasOnly(searchParams, []) && [...searchParams.keys()].length === 0;
@@ -58,10 +62,14 @@ export function catalogResponseFor(method, requestUrl) {
   }
   if (pathname === '/ps/plugins/installed') {
     const scope = searchParams.get('scope');
+    const limit = searchParams.get('limit');
     const includeDownloadUrls = searchParams.get('includeDownloadUrls');
-    const valid = hasOnly(searchParams, ['scope', 'includeDownloadUrls', 'pageToken'])
-      && scope !== null
-      && ['GLOBAL', 'USER', 'WORKSPACE'].includes(scope)
+    // remote.rs get_remote_plugin_installed_page: All emits only limit=200;
+    // Single emits only scope. Never combine or omit both selectors.
+    const validScope = (scope === null && limit === '200')
+      || (scope !== null && limit === null && ['GLOBAL', 'USER', 'WORKSPACE'].includes(scope));
+    const valid = hasOnly(searchParams, ['scope', 'limit', 'includeDownloadUrls', 'pageToken'])
+      && validScope
       && (includeDownloadUrls === null || includeDownloadUrls === 'true');
     return valid
       ? { known: true, status: 200, body: directoryPage() }
@@ -78,7 +86,9 @@ export function catalogResponseFor(method, requestUrl) {
     const platform = searchParams.get('platform');
     const valid = hasOnly(searchParams, ['platform'])
       && platform !== null
-      && ['codex', 'chat'].includes(platform);
+      // protocol/src/protocol.rs Product::to_app_platform, consumed by
+      // remote_legacy.rs fetch_remote_featured_plugin_ids.
+      && ['codex', 'chat', 'atlas'].includes(platform);
     return valid
       ? { known: true, status: 200, body: [] }
       : { known: false, status: 400, body: { error: 'unexpected featured-plugin query' } };

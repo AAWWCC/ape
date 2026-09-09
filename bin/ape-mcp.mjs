@@ -537,7 +537,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.25.6' };
+    return { name: 'ape', version: '2.25.7' };
   }
 }
 

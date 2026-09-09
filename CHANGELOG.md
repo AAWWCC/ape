@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.25.7 — 2026-09-08
+
+Release candidate; exact-candidate CI and a newly authorized four-workflow
+Codex campaign remain required. Version 2.25.6 passed all 18 CI jobs and its
+mechanical workflow completed a protected synthetic merge, but its launcher
+failed on an installed-plugin catalog query; that campaign remains failed.
+
+- Match the pinned host's all-scopes and single-scope installed-plugin requests.
+- Cover all six catalog routes against Codex 0.153.4's request builders and empty
+  response types, including the supported featured-platform values.
+- Reject duplicate catalog query keys while retaining the existing route and
+  method restrictions. No model endpoint or runtime authority changes.
+
 ## 2.25.6 — 2026-09-08
 
 Release candidate; exact-candidate CI and a newly authorized four-workflow

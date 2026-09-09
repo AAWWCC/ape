@@ -34,6 +34,7 @@ import {
   buildLiveCertificationPrompt,
   writeLiveCertificationPrompts,
 } from '../scripts/prepare-live-certification-prompts.mjs';
+import { catalogResponseFor } from '../scripts/live-certification-catalog-stub.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
@@ -1069,26 +1070,94 @@ describe('live certification Codex parent launcher', () => {
     const auditPath = path.join(root, 'requests.jsonl');
     const stub = await startCertificationCatalogStub(auditPath);
     try {
+      // Source-derived contracts at Codex 0.153.4 immutable commit
+      // 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a: core-plugins/src/remote.rs
+      // list/shared/installed/suggested builders and response structs;
+      // remote_legacy.rs featured Vec<String>; protocol.rs Product enum;
+      // backend-client/src/{client,types}.rs root-base user settings.
+      const page = { plugins: [], pagination: { next_page_token: null } };
+      const scopes = ['GLOBAL', 'USER', 'WORKSPACE'];
       const requests = [
-        '/api/codex/settings/user',
-        '/ps/plugins/suggested/codex?scope=GLOBAL',
-        '/ps/plugins/list?scope=GLOBAL&limit=200',
-        '/ps/plugins/installed?scope=GLOBAL&includeDownloadUrls=true',
-        '/ps/plugins/workspace/shared?limit=200',
-        '/plugins/featured?platform=codex',
+        ['/api/codex/settings/user', { commit_attribution_enabled: false }],
+        ['/ps/plugins/suggested/codex?scope=GLOBAL', { enabled: true, plugins: [] }],
+        ...scopes.flatMap((scope) => [
+          [`/ps/plugins/list?scope=${scope}&limit=200`, page],
+          [`/ps/plugins/list?scope=${scope}&limit=200&pageToken=next%2Bpage`, page],
+        ]),
+        ['/ps/plugins/list?scope=GLOBAL&limit=200&collection=vertical', page],
+        ['/ps/plugins/list?scope=GLOBAL&limit=200&collection=vertical&pageToken=next%2Bpage', page],
+        ...['limit=200', ...scopes.map((scope) => `scope=${scope}`)].flatMap((selector) =>
+          ['', '&includeDownloadUrls=true', '&pageToken=next%2Bpage', '&includeDownloadUrls=true&pageToken=next%2Bpage']
+            .map((optional) => [`/ps/plugins/installed?${selector}${optional}`, page])),
+        ['/ps/plugins/workspace/shared?limit=200', page],
+        ['/ps/plugins/workspace/shared?limit=200&pageToken=next%2Bpage', page],
+        ...['codex', 'chat', 'atlas'].map((platform) => [`/plugins/featured?platform=${platform}`, []]),
       ];
-      const responses = await Promise.all(requests.map((request) => fetch(`${stub.baseUrl}${request}`)));
-      expect(responses.every((response) => response.status === 200)).toBe(true);
-      expect(await responses[0].json()).toEqual({ commit_attribution_enabled: false });
-      expect(await responses[1].json()).toEqual({ enabled: true, plugins: [] });
-      expect(await responses[2].json()).toEqual({
-        plugins: [],
-        pagination: { next_page_token: null },
-      });
-      expect(await responses[5].json()).toEqual([]);
-      expect(validateCertificationCatalogAudit(auditPath)).toEqual({ request_count: 6 });
+      await Promise.all(requests.map(async ([request, body]) => {
+        const response = await fetch(`${stub.baseUrl}${request}`);
+        expect(response.status, request).toBe(200);
+        expect(await response.json(), request).toEqual(body);
+      }));
+      expect(validateCertificationCatalogAudit(auditPath)).toEqual({ request_count: requests.length });
     } finally {
       await stopCertificationCatalogStub(stub);
+    }
+  });
+
+  it('rejects duplicate catalog query keys and extra keys on every route', () => {
+    const requests = [
+      '/api/codex/settings/user',
+      '/ps/plugins/suggested/codex?scope=GLOBAL',
+      '/ps/plugins/list?scope=GLOBAL&limit=200&collection=vertical&pageToken=next',
+      '/ps/plugins/installed?scope=GLOBAL&includeDownloadUrls=true&pageToken=next',
+      '/ps/plugins/installed?limit=200&includeDownloadUrls=true&pageToken=next',
+      '/ps/plugins/workspace/shared?limit=200&pageToken=next',
+      '/plugins/featured?platform=codex',
+    ];
+    for (const request of requests) {
+      const url = new URL(request, 'http://127.0.0.1');
+      const extra = new URL(url);
+      extra.searchParams.append('extra', 'true');
+      expect(catalogResponseFor('GET', `${extra.pathname}${extra.search}`), request)
+        .toMatchObject({ known: false, status: 400 });
+      for (const [key, value] of url.searchParams) {
+        for (const duplicate of [value, 'conflicting']) {
+          const repeated = new URL(url);
+          repeated.searchParams.append(key, duplicate);
+          expect(catalogResponseFor('GET', `${repeated.pathname}${repeated.search}`), `${request}: ${key}`)
+            .toMatchObject({ known: false, status: 400 });
+        }
+      }
+      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']) {
+        expect(catalogResponseFor(method, request), `${method} ${request}`)
+          .toMatchObject({ known: false, status: 405 });
+      }
+    }
+  });
+
+  it('rejects invalid catalog selectors without accepting an ambiguous installed scope', () => {
+    for (const request of [
+      '/ps/plugins/suggested/codex',
+      '/ps/plugins/suggested/codex?scope=USER',
+      '/ps/plugins/list?limit=200',
+      '/ps/plugins/list?scope=GLOBAL',
+      '/ps/plugins/list?scope=ALL&limit=200',
+      '/ps/plugins/list?scope=GLOBAL&limit=201',
+      '/ps/plugins/installed',
+      '/ps/plugins/installed?pageToken=next',
+      '/ps/plugins/installed?scope=GLOBAL&limit=200',
+      '/ps/plugins/installed?scope=&limit=200',
+      '/ps/plugins/installed?scope=ALL',
+      '/ps/plugins/installed?limit=201',
+      '/ps/plugins/installed?limit=0200',
+      '/ps/plugins/installed?scope=GLOBAL&includeDownloadUrls=false',
+      '/ps/plugins/installed?limit=200&includeDownloadUrls=TRUE',
+      '/ps/plugins/workspace/shared',
+      '/ps/plugins/workspace/shared?limit=201',
+      '/plugins/featured',
+      '/plugins/featured?platform=unknown',
+    ]) {
+      expect(catalogResponseFor('GET', request), request).toMatchObject({ known: false, status: 400 });
     }
   });
 
