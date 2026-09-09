@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.25.8 — 2026-09-08
+
+Release candidate; exact-candidate CI and a newly authorized four-workflow
+Codex campaign remain required. Version 2.25.7 passed all 18 CI jobs and
+qualified its mechanical workflow; its fast launch failed before model work
+when cached model metadata expired during preflight. That campaign remains
+failed.
+
+- Document the pinned host's cached `model/list` behavior and require actual
+  cache-lifetime verification at the final certification launch handoff.
+- Bind this candidate to the separately reviewed external supervisor timing
+  correction. The product's 300-second catalog guard and runtime behavior
+  remain unchanged.
+
 ## 2.25.7 — 2026-09-08
 
 Release candidate; exact-candidate CI and a newly authorized four-workflow

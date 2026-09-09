@@ -154,6 +154,19 @@ follows its acknowledgement-only exception: no synthetic-ticket reads or receipt
 validation. Missing injected context or an unbound child fails the attempt.
 Never replace the child or reconstruct its authority from transcripts.
 
+### Model-catalog lifetime at launch
+
+Codex 0.153.4 `model/list` uses a valid cached catalog and has no force-refresh
+parameter. A successful response alone does not prove a refreshed
+`models_cache.json` timestamp. Finish remote preflight before the final metadata
+handoff. If the actual cache has too little lifetime remaining, wait until after
+expiry before acquiring temporary authentication and performing normal metadata
+discovery. Verify the actual exact-client cache, native model capabilities and
+at least 60 seconds of remaining lifetime after metadata cleanup and immediately
+before formal launch. Keep the launcher's 300-second guard unchanged; never
+rewrite cache timestamps, delete cache data to force a fetch, or synthesize
+catalog entries. Retain any failure without replaying a claimed attempt.
+
 ### Four runs, in order
 
 Run at most four approved parents, sequentially:

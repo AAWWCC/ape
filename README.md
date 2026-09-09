@@ -9,11 +9,11 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.25.7** is a release candidate awaiting exact-candidate CI and a new
-live certification campaign. Version 2.25.6 passed all 18 CI jobs, completed its
-mechanical workflow, and merged its synthetic PR under protected checks. Its
-certification runner failed on an incompatible catalog request. This
-candidate corrects the pinned host's catalog request handling. See the
+Version **2.25.8** is a release candidate awaiting exact-candidate CI and a new
+live certification campaign. Version 2.25.7 passed all 18 CI jobs and qualified
+its mechanical workflow. Its fast launch stopped before model work because a
+cached model catalog expired during preflight. The certification setup now
+checks actual catalog lifetime at the final launch handoff. See the
 [current release status](docs/prevention-release-status.md) for the exact limits.
 
 Codex CLI is the primary host. The Claude Code package is included, but

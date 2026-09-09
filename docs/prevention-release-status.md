@@ -1,10 +1,42 @@
 # Prevention-first reliability status
 
-**2.25.7 is a review candidate, not a certified release.** It corrects the
-catalog request contract used by the certification runner. Codex remains pinned
-to 0.153.4 with GPT-6 Astra low/medium/high defaults. Exact-candidate CI and a
-newly authorized four-workflow campaign remain required. Earlier failed
-campaigns retain their original classification.
+**2.25.8 is a review candidate, not a certified release.** Its certification
+setup addresses a model-catalog timing gap. The product's 300-second native
+catalog guard remains unchanged. Codex remains pinned to 0.153.4 with GPT-6
+Astra low/medium/high defaults. Exact-candidate CI and a newly authorized
+four-workflow campaign remain required. Earlier failed campaigns retain their
+original classification.
+
+## 2.25.7 validation and failed formal campaign
+
+Frozen commit `68925304dde665a287507e7d81aea27cef49c853` passed all 18 jobs in
+[CI 34306159445](https://github.com/AAWWCC/ape/actions/runs/34306159445), including
+both Windows Node versions. Its first mechanical workflow qualified: all 13
+APE results succeeded, the sole worker receipt matched its validated draft and
+parent submission, gates passed, and the launcher exited 0 with clean process
+and temporary-authentication cleanup. [Synthetic PR #2](https://github.com/AAWWCC/ape-release-validation-20260908/pull/2)
+merged after its exact head's required check passed; all 11 active merge-rule
+evaluations passed and protection remained unchanged. Synthetic main advanced
+to `d6b42811ce26fd00a6f29cb3865791e33caac4d9`.
+
+The fast launch then failed its catalog prerequisite before native model or
+APE work began. Normal `model/list` returned eight models while its cached
+catalog was about 294 seconds old. Remote launch checks consumed another
+17 seconds, so the unchanged 300-second guard correctly refused the catalog.
+The API uses valid cached data and has no force-refresh parameter; a successful
+metadata response does not prove that the on-disk timestamp advanced. The safe
+post-failure cache observation, original failed attempt and unchanged provider
+state remain retained. No fast run ID, ticket, receipt, PR or merge was created.
+Full and protected-land were not attempted. The mechanical qualification stands;
+the four-workflow campaign remains failed.
+
+The correction belongs to the external certification supervisor and metadata
+helper: complete remote preflight first, check actual remaining catalog
+lifetime, wait past expiry when necessary before acquiring authentication,
+perform normal metadata discovery, and verify adequate remaining lifetime
+immediately before formal launch. It preserves the product guard and genuine
+host-owned cache. Offline validation must cover the observed clock and transport timing boundary
+without replaying the failed campaign before a new campaign is approved.
 
 ## 2.25.6 validation and failed formal campaign
 
