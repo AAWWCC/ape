@@ -55,8 +55,8 @@ from this evidence summary.
 
 Disagreement can add one additional deep-tier judge dispatch without spending a retry or remediation cycle.
 The judge receives bounded `review_findings` and advances, requests a directed replan, or blocks.
-There are at most two directed replans. After the first, the normalized assurance identities must
-strictly shrink. Preview includes the initial plan and both possible replans. The judge never
+The frozen policy permits two directed replans by default. After the first, the normalized assurance identities must
+strictly shrink. Preview includes the initial plan and the configured possible replans. The judge never
 writes code.
 
 ### Tests and plan contracts
@@ -73,7 +73,7 @@ are rejected before branch creation. `green-maintenance` is also phase-only.
 
 ## Retries and remediation
 
-A failed stage gets at most one retry. A blocking code review instead enters remediation:
+A failed stage gets one retry by default, according to the run's frozen execution policy. A blocking code review instead enters remediation:
 
 An implementer's test-contradiction report first receives independent read-only reconciliation.
 If confirmed, one `test-recheck` ticket narrows writes to the confirmed test paths. Its
@@ -109,9 +109,10 @@ remediation-test tickets use `test_scope: "exact"`; sibling test writes are deni
   in that stage. A second denial fails it. `failure_kind: command-shape` uses the ordinary stage
   retry; `prior_attempts` supplies the denied command without granting more authority.
 - `failure_kind: capability` means the ticket lacks required authority. Receipt-contract-v1
-  allows one runtime-derived additive successor, not a product retry. It keeps the same limits:
-  three validations per worker, two workers per ticket lineage, and a test-path union of at most
-  64 unique project-relative paths and 4096 serialized UTF-8 JSON bytes.
+  allows a runtime-derived additive successor, not a product retry. It preserves the run's
+  frozen validation and physical-worker limits. New growth contract v2 checks canonical unique
+  test paths against the shared structural guard and actual rendered command/manifest budgets.
+  Historical growth contract v1 retains its 64-path and 4096-byte union bounds.
 - `failure_kind: test-contradiction` blocks immediately. It is the implementer's claim, not an
   independent runtime finding. It does not authorize rewriting tests or inventing a recovery path.
 

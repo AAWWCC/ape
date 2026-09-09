@@ -35,12 +35,13 @@
  * Degrades to `model · dir · branch · ctx%` outside APE projects, so it is safe
  * to wire globally.
  */
-import { constants as fsConstants, openSync, closeSync, fstatSync, readSync, readFileSync, readdirSync, existsSync, lstatSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { constants as fsConstants, openSync, closeSync, fstatSync, readSync, readFileSync, readdirSync, existsSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostname, tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolveGovernedRoot } from '../lib/runtime/paths.js';
+import { lstatFileSync, statFileDescriptor } from '../lib/runtime/file-stats.js';
 import { RUNTIME_STATE_MAX_BYTES } from '../lib/runtime/resource-limits.js';
 import { projectRunDiagnostic, safeDiagnosticText, strictIsoMs } from '../lib/runtime/diagnostics.js';
 
@@ -151,6 +152,37 @@ function boundedJsonFile(file, maxBytes = RUNTIME_STATE_MAX_BYTES) {
         after.ctimeMs !== before.ctimeMs) throw new Error('status artifact changed during read');
     return JSON.parse(buffer.subarray(0, offset).toString('utf8'));
   } finally { if (descriptor !== undefined) closeSync(descriptor); }
+}
+
+
+// A status render never owns a preexisting temporary name. Exclusive creation
+// prevents a symlink or hardlink from redirecting the write; random names also
+// keep concurrent renders independent. Only remove the exact inode we created.
+function writeJsonCache(file, value) {
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  let descriptor;
+  let identity;
+  const ownsTemporary = () => {
+    try {
+      const current = lstatFileSync(temporary);
+      return identity && current.isFile() && current.nlink === 1 &&
+        current.dev === identity.dev && current.ino === identity.ino;
+    } catch { return false; }
+  };
+  try {
+    descriptor = openSync(temporary, fsConstants.O_WRONLY | fsConstants.O_CREAT |
+      fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0), 0o600);
+    identity = statFileDescriptor(descriptor);
+    writeFileSync(descriptor, JSON.stringify(value));
+    closeSync(descriptor);
+    descriptor = undefined;
+    if (!ownsTemporary()) return;
+    renameSync(temporary, file);
+  } catch { /* an advisory cache must not interrupt rendering */ }
+  finally {
+    if (descriptor !== undefined) { try { closeSync(descriptor); } catch { /* advisory */ } }
+    if (ownsTemporary()) { try { rmSync(temporary); } catch { /* owned leaked temp is inert */ } }
+  }
 }
 
 let activeStateCorrupt = false;
@@ -294,18 +326,12 @@ const branchCachePath = (dir) =>
   join(tmpdir(), `ape-statusline-branch-${createHash('sha256').update(dir).digest('hex')}.json`);
 const readCachedBranch = (dir) => {
   try {
-    const cached = JSON.parse(readFileSync(branchCachePath(dir), 'utf8'));
+    const cached = boundedJsonFile(branchCachePath(dir), 16 * 1024);
     return typeof cached?.branch === 'string' ? cached.branch : '';
   } catch { return ''; }
 };
 const writeCachedBranch = (dir, branch) => {
-  const temp = `${branchCachePath(dir)}.${process.pid}.tmp`;
-  try {
-    writeFileSync(temp, JSON.stringify({ branch }), { mode: 0o600 });
-    renameSync(temp, branchCachePath(dir));
-  } catch {
-    try { rmSync(temp, { force: true }); } catch { /* leaked temp is inert */ }
-  }
+  writeJsonCache(branchCachePath(dir), { branch });
 };
 const gitBranch = (dir) => {
   /** @type {import('node:child_process').ExecFileSyncOptionsWithStringEncoding} */
@@ -343,7 +369,7 @@ const markersCachePath = (dir) =>
   join(tmpdir(), `ape-statusline-markers-${createHash('sha256').update(dir).digest('hex')}.json`);
 const readCachedMarkers = (dir) => {
   try {
-    const cached = JSON.parse(readFileSync(markersCachePath(dir), 'utf8'));
+    const cached = boundedJsonFile(markersCachePath(dir), 16 * 1024);
     const valid = cached && typeof cached === 'object' &&
       typeof cached.dirty === 'boolean' &&
       Number.isInteger(cached.ahead) && cached.ahead >= 0 &&
@@ -354,13 +380,7 @@ const readCachedMarkers = (dir) => {
   } catch { return { dirty: false, ahead: 0, behind: 0 }; }
 };
 const writeCachedMarkers = (dir, markers) => {
-  const temp = `${markersCachePath(dir)}.${process.pid}.tmp`;
-  try {
-    writeFileSync(temp, JSON.stringify(markers), { mode: 0o600 });
-    renameSync(temp, markersCachePath(dir));
-  } catch {
-    try { rmSync(temp, { force: true }); } catch { /* leaked temp is inert */ }
-  }
+  writeJsonCache(markersCachePath(dir), markers);
 };
 
 // Probe of working-tree + remote state. The porcelain branch header
@@ -788,13 +808,7 @@ function historySamples(dir) {
     for (const f of files.slice(-20)) {
       try { collectReceiptTimings(samples, boundedJsonFile(join(hist, f)).receipts); } catch { /* skip */ }
     }
-    const temp = `${cachePath(dir)}.${process.pid}.tmp`;
-    try {
-      writeFileSync(temp, JSON.stringify({ version: STATUSLINE_CACHE_VERSION, key, samples }), { mode: 0o600 });
-      renameSync(temp, cachePath(dir));
-    } catch {
-      try { rmSync(temp, { force: true }); } catch { /* leaked temp is inert */ }
-    }
+    writeJsonCache(cachePath(dir), { version: STATUSLINE_CACHE_VERSION, key, samples });
   } catch { /* no history yet */ }
   return samples;
 }

@@ -15,7 +15,7 @@ afterEach(async () => {
   );
 });
 
-async function fixture({ fail = false, omitRuntimeFile = false, omitGateRunner = false } = {}) {
+async function fixture({ fail = false, omitRuntimeFile = false, omitGateRunner = false, omitFileStats = false } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'ape-cache-retention-test-'));
   temporaryRoots.push(root);
   const pluginRoot = path.join(root, 'plugin');
@@ -58,7 +58,10 @@ async function fixture({ fail = false, omitRuntimeFile = false, omitGateRunner =
   if (!omitGateRunner) {
     await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'runner.js'), "import './spawn.js';\n");
   }
-  await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'spawn.js'), 'export const fixture = true;\n');
+  await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'spawn.js'), "import './file-stats.js';\nexport const fixture = true;\n");
+  if (!omitFileStats) {
+    await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'file-stats.js'), 'export const fixture = true;\n');
+  }
   await writeFile(path.join(pluginRoot, 'package.json'), '{"name":"ape-fixture","type":"module"}\n');
   await writeFile(path.join(pluginRoot, 'hooks', 'hooks.json'), '{}\n');
   await writeFile(path.join(pluginRoot, 'prompts', 'common.md'), 'common\n');
@@ -166,6 +169,7 @@ describe('Codex plugin cache retention reinstall', () => {
     expect(await readFile(path.join(installed, 'lib', 'runtime', 'runner.js'), 'utf8')).toBe(
       "import './spawn.js';\n",
     );
+    expect(await readFile(path.join(installed, 'lib', 'runtime', 'file-stats.js'), 'utf8')).toBe('export const fixture = true;\n');
     expect(JSON.parse(await readFile(path.join(installed, 'package.json'), 'utf8')).type).toBe('module');
     expect((await readdir(installed)).sort()).toEqual(
       ['.codex-plugin', '.mcp.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'dist', 'hooks', 'lib', 'package.json', 'prompts', 'skills'].sort(),
@@ -220,4 +224,19 @@ describe('Codex plugin cache retention reinstall', () => {
       JSON.parse(await readFile(path.join(context.pluginRoot, '.codex-plugin', 'plugin.json'), 'utf8')).version,
     ).toBe(context.oldVersion);
   });
+
+  it('fails preflight before invoking Codex when the shared file-stat dependency is absent', async () => {
+    const context = await fixture({ omitFileStats: true });
+    const result = await runFixture(context);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('staged plugin is missing required runtime file: lib/runtime/file-stats.js');
+    await expect(readFile(context.fakeCodexLog, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(
+      JSON.parse(await readFile(path.join(context.pluginRoot, '.codex-plugin', 'plugin.json'), 'utf8')).version,
+    ).toBe(context.oldVersion);
+    expect(await readFile(path.join(context.oldRoot, 'old-task-sentinel.txt'), 'utf8')).toBe('still available\n');
+    await expect(readFile(path.join(context.cacheRoot, '2.13.0+codex.retained-test', '.codex-plugin', 'plugin.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
 });

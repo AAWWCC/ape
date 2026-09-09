@@ -2,6 +2,7 @@
 
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import {
   access,
   chmod,
@@ -11,14 +12,15 @@ import {
   readdir,
   writeFile,
 } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { allowedEmail } from './public-text-policy.mjs';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = dirname(SCRIPT_DIR);
-const PUBLIC_VERSION = '2.25.1';
+const PUBLIC_VERSION = '2.25.8';
 const PUBLIC_FILES = Object.freeze([
   '.gitattributes',
   'compatibility.json',
@@ -107,24 +109,12 @@ function includePath(normalized) {
   if (/^__tests__\/runtime-v2-audit-/u.test(normalized)) return false;
   if (normalized === '__tests__/runtime-v2-private-sound-overlay.test.js') return false;
   if (normalized === '__tests__/runtime-v2-shipped-surface-truthfulness.test.js') return false;
-  if (normalized === '.github/test-durations.json') return false;
   if (normalized === '.claude-plugin/plugin.json') return false;
   return true;
 }
 
 function stableFixture(value) {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
-}
-
-function allowedEmail(value) {
-  if (value.toLowerCase() === 'git@github.com') return true;
-  const domain = value.slice(value.lastIndexOf('@') + 1).toLowerCase();
-  return (
-    ['example.com', 'example.net', 'example.org'].includes(domain) ||
-    domain.endsWith('.test') ||
-    domain.endsWith('.invalid') ||
-    domain === 'users.noreply.github.com'
-  );
 }
 
 function sanitizePublicText(text) {
@@ -187,6 +177,26 @@ async function publicChangelog() {
   return `# Changelog\n\n${section.trim()}\n`;
 }
 
+// The exported tree can intentionally omit private historical tests. Rebuild
+// its timing inventory from the files actually copied, retaining measurements
+// where available and using the CI scheduler's size estimate for new tests.
+export async function writeExportedTestDurations(output) {
+  const snapshotPath = join(output, '.github', 'test-durations.json');
+  const snapshot = JSON.parse(await readFile(snapshotPath, 'utf8'));
+  const tests = (await readdir(join(output, '__tests__'), { recursive: true }))
+    .map((name) => `__tests__/${String(name).split(sep).join('/')}`)
+    .filter((name) => name.endsWith('.test.js'))
+    .sort(compareNames);
+  const durations = {};
+  for (const name of tests) {
+    const measured = snapshot[name];
+    durations[name] = Number.isFinite(measured) && measured > 0
+      ? measured
+      : Math.max(50, Math.round((await lstat(join(output, name))).size / 16));
+  }
+  await writeFile(snapshotPath, `${JSON.stringify(durations, null, 2)}\n`, 'utf8');
+}
+
 async function assertClean() {
   const { stdout } = await run('git', ['status', '--porcelain=v1'], { cwd: REPO_ROOT });
   if (stdout.trim()) {
@@ -220,6 +230,7 @@ async function main(argv) {
   for (const directory of PUBLIC_DIRECTORIES) {
     await copyRegularTree(join(REPO_ROOT, directory), join(args.output, directory));
   }
+  await writeExportedTestDurations(args.output);
   await writeFile(join(args.output, '.gitignore'), [
     'node_modules/',
     '.ape/',
@@ -250,7 +261,16 @@ async function main(argv) {
   process.stdout.write(`exported verified public ${PUBLIC_VERSION} tree to ${args.output}\n`);
 }
 
-main(process.argv.slice(2)).catch((error) => {
+function invokedDirectly(argvPath) {
+  if (!argvPath) return false;
+  try {
+    return realpathSync(argvPath) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly(process.argv[1])) main(process.argv.slice(2)).catch((error) => {
   if (error instanceof ExportError) process.stderr.write(usage());
   process.stderr.write(`export-public-tree: ${error?.message ?? String(error)}\n`);
   process.exitCode = 1;

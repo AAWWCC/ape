@@ -19,31 +19,16 @@ import { fileURLToPath } from 'node:url';
 const sha256Hex = (buf) => createHash('sha256').update(buf).digest('hex');
 
 // ===========================================================================
-// Residual (1) -- doctor.js:65-78 (review of run-fixture-40cc7402c031,
-// acme PR #378). captureLoadedBundleStamp reads the candidate bundle's bytes
-// (readFileSync) and its size/mtime (statSync) as TWO separate syscalls. A
-// concurrent same-length rewrite landing between them makes the size/mtime
-// hint describe the file AFTER the rewrite while the sha256 still describes
-// the file BEFORE it -- a hash strictly OLDER than its own hint. That pairing
-// is the exact defect acme PR #378 exists to close: loadedBundleDrift's fast path
-// trusts an unchanged size+mtime pair and skips re-hashing, so it reports "no
-// drift" forever even though the hash it never rechecks no longer matches
-// what a rebuild put on disk.
+// captureLoadedBundleStamp captures size/mtime with statSync and bytes with
+// readBoundedFileSync. Reading bytes first would let a concurrent same-length
+// rewrite pair the old hash with a newer hint. loadedBundleDrift could then
+// trust that unchanged hint and miss the hash mismatch indefinitely.
 //
-// A real sub-millisecond race at module init cannot be summoned on demand, so
-// the two syscalls the defect hinges on are interposed deterministically.
-// Critically, the interposition does NOT decide which physical call (read or
-// stat) sees which state -- it hands out "the file as it stood before the
-// concurrent rewrite" to whichever of the two syscalls doctor.js issues
-// FIRST, and "the file as it stood after" to whichever it issues SECOND. The
-// assertion below is then read off doctor.js's OWN observed call order
-// (recorded in `observedCallOrder`), never assumed by the test -- so a fix
-// that reorders the two syscalls (stat first, so the hint is the OLDER state
-// and can never claim to be newer than an unrefreshed hash) and a fix that
-// fuses them into one atomic read both satisfy it the same natural way; only
-// a fix that keeps reading bytes before stat-ing them would still trip it.
-// This mirrors the same-file interposition technique already used for a
-// different TOCTOU in __tests__/runtime-v2-importer-determinism-toctou.test.js.
+// Interpose those two capture boundaries deterministically: whichever runs
+// first sees the file before the rewrite; whichever runs second sees it
+// afterward. This exercises the actual capture order without assuming it.
+// The bounded reader's descriptor checks are tested separately; this fixture
+// pins the ordering and hash of the bytes it returns to doctor.js.
 const concurrentRewrite = vi.hoisted(() => {
   const byteLength = 512;
   return {
@@ -53,52 +38,50 @@ const concurrentRewrite = vi.hoisted(() => {
     // writer landing between doctor.js's read and its stat, in either order.
     afterRewrite: { bytes: Buffer.alloc(byteLength, 0x22), mtimeMs: 1_700_000_120_000 },
     observedCallOrder: [],
-    // Populated by the mocked readFileSync below with whatever bytes it
-    // actually returned to doctor.js's own call -- the unconditional
-    // invariant below is pinned against this, never against an assumption
-    // about which physical call (read or stat) went first.
-    readFileSyncReturnedBytes: null,
+    returnedBytes: null,
+    // realpathSync resolves the source fallback URL to a string before its
+    // metadata and bytes are captured. Accept both forms of that candidate.
+    isRacedCandidate: (target) => /[\\/]dist[\\/]ape-mcp\.bundle\.mjs$/.test(
+      target instanceof URL ? target.pathname : typeof target === 'string' ? target : '',
+    ),
+    nextObservedState(label) {
+      const state = this.observedCallOrder.length === 0 ? this.beforeRewrite : this.afterRewrite;
+      this.observedCallOrder.push(label);
+      return state;
+    },
   };
 });
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal();
-  // The one URL captureLoadedBundleStamp's source-execution fallback
-  // resolves to when THIS test file is the first thing to import doctor.js
-  // (this repository's own dist/ape-mcp.bundle.mjs). The sibling
-  // bundled-execution candidate (lib/runtime/ape-mcp.bundle.mjs) is passed
-  // straight through and genuinely does not exist, so the real syscalls
-  // throw ENOENT for it exactly as they would unmocked, and the candidate
-  // loop falls through to the one faked below. No file on disk is ever read
-  // or written by this mock -- it answers entirely from memory.
-  const isRacedCandidate = (target) => target instanceof URL && /\/dist\/ape-mcp\.bundle\.mjs$/.test(target.href);
-  const nextObservedState = (label) => {
-    const state = concurrentRewrite.observedCallOrder.length === 0 ? concurrentRewrite.beforeRewrite : concurrentRewrite.afterRewrite;
-    concurrentRewrite.observedCallOrder.push(label);
-    return state;
-  };
+  // Keep real path resolution, including the nonexistent sibling candidate.
+  // Only the fallback candidate's hint is supplied from the race fixture.
   return {
     ...actual,
-    readFileSync: (target, ...rest) => {
-      if (!isRacedCandidate(target)) return actual.readFileSync(target, ...rest);
-      const state = nextObservedState('read');
-      // Recorded unconditionally (never assumed) so the test below can pin
-      // the hash against exactly the bytes doctor.js's OWN readFileSync call
-      // received, regardless of call order.
-      concurrentRewrite.readFileSyncReturnedBytes = state.bytes;
-      return state.bytes;
-    },
     statSync: (target, ...rest) => {
-      if (!isRacedCandidate(target)) return actual.statSync(target, ...rest);
-      const state = nextObservedState('stat');
+      if (!concurrentRewrite.isRacedCandidate(target)) return actual.statSync(target, ...rest);
+      const state = concurrentRewrite.nextObservedState('stat');
       return { size: state.bytes.length, mtimeMs: state.mtimeMs };
+    },
+  };
+});
+
+vi.mock('../lib/runtime/bounded-file.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    readBoundedFileSync: (target, ...rest) => {
+      if (!concurrentRewrite.isRacedCandidate(target)) return actual.readBoundedFileSync(target, ...rest);
+      const state = concurrentRewrite.nextObservedState('read');
+      concurrentRewrite.returnedBytes = state.bytes;
+      return state.bytes;
     },
   };
 });
 
 // The only place in this file that first evaluates '../lib/runtime/doctor.js'
 // -- its top-level captureLoadedBundleStamp() call is what races the two
-// mocked syscalls above.
+// mocked capture boundaries above.
 import { LOADED_BUNDLE_STAMP } from '../lib/runtime/doctor.js';
 
 describe('doctor.js LOADED_BUNDLE_STAMP: hash/hint pairing under a same-length concurrent rewrite (residual 1)', () => {
@@ -116,24 +99,15 @@ describe('doctor.js LOADED_BUNDLE_STAMP: hash/hint pairing under a same-length c
     // sha256 (the authority the hint is only ever a shortcut for) can.
     expect(LOADED_BUNDLE_STAMP.size).toBe(concurrentRewrite.beforeRewrite.bytes.length);
 
-    // UNCONDITIONAL invariant (not gated on hintSaysAfterRewrite below, which
-    // this fixture's own [stat, read] call order leaves false, so the guarded
-    // block beneath is unreached on the current tree): the recorded sha256
-    // must match bytes ACTUALLY READ by doctor.js's own readFileSync call --
-    // never merely bytes it could have re-derived some other way. Today's
-    // fixture proves the mock's readFileSync branch genuinely fired (it is
-    // this module's only source of the raced candidate's bytes), and pins
-    // the hash to exactly what that call returned. An implementation that
-    // statSync'd the candidate twice and never called readFileSync at all
-    // (e.g. deriving a hash from a cached read done elsewhere) would leave
-    // `readFileSyncReturnedBytes` null and fail the first assertion; one
-    // that reads but hashes different bytes than it recorded would fail the
-    // second.
+    // Both boundaries must fire, and the hash must match the exact bytes
+    // returned by the bounded reader, regardless of their observed order.
+    expect(concurrentRewrite.observedCallOrder).toContain('stat');
     expect(
       concurrentRewrite.observedCallOrder,
-      'doctor.js never called the mocked readFileSync on the raced candidate at all',
+      'doctor.js never called the mocked bounded reader on the raced candidate at all',
     ).toContain('read');
-    expect(LOADED_BUNDLE_STAMP.sha256).toBe(sha256Hex(concurrentRewrite.readFileSyncReturnedBytes));
+    expect(concurrentRewrite.returnedBytes).not.toBeNull();
+    expect(LOADED_BUNDLE_STAMP.sha256).toBe(sha256Hex(concurrentRewrite.returnedBytes));
 
     const hintSaysAfterRewrite = LOADED_BUNDLE_STAMP.mtime_ms === concurrentRewrite.afterRewrite.mtimeMs;
     const hashSaysAfterRewrite = LOADED_BUNDLE_STAMP.sha256 === sha256Hex(concurrentRewrite.afterRewrite.bytes);
@@ -148,7 +122,7 @@ describe('doctor.js LOADED_BUNDLE_STAMP: hash/hint pairing under a same-length c
     if (hintSaysAfterRewrite) {
       expect(
         hashSaysAfterRewrite,
-        `doctor.js issued its two syscalls in order [${concurrentRewrite.observedCallOrder.join(', ')}]: the ` +
+        `doctor.js issued its two capture calls in order [${concurrentRewrite.observedCallOrder.join(', ')}]: the ` +
           'resulting mtime_ms hint already reflects the post-rewrite file, but sha256 still reflects the ' +
           'pre-rewrite bytes -- a hash strictly OLDER than its own hint, exactly the pairing that lets ' +
           'loadedBundleDrift mask a real hash mismatch as "no drift"',

@@ -2,7 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as locks from '../lib/runtime/lock.js';
 import { historyAction, nextRun, startRun, withReceiptLock } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicReplaceText, atomicWriteJson } from '../lib/runtime/storage.js';
@@ -20,8 +21,57 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function behindReceiptLock(dir, operation, completedEvent) {
+  const paths = runtimePaths(dir);
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const requested = Promise.withResolvers();
+  const events = [];
+  let receiptHeld = false;
+  const holder = withReceiptLock(paths, async () => {
+    receiptHeld = true;
+    events.push('receipt-start');
+    entered.resolve();
+    await release.promise;
+    receiptHeld = false;
+    events.push('receipt-end');
+  });
+  holder.catch((error) => entered.reject(error));
+  let writer;
+  let observedLock;
+  try {
+    // An elapsed delay cannot establish which contender acquired the lock.
+    // Wait for the actual holder, then observe the writer's request while
+    // delegating to the real lock; release only after that request arrives.
+    await entered.promise;
+    const withDirLock = locks.withDirLock;
+    observedLock = vi.spyOn(locks, 'withDirLock').mockImplementation((lockPath, callback, options) => {
+      if (lockPath !== paths.receiptLock) return withDirLock(lockPath, callback, options);
+      requested.resolve();
+      return withDirLock(lockPath, (lease) => {
+        expect(receiptHeld, 'writer entered while receipt effects still held the lock').toBe(false);
+        return callback(lease);
+      }, options);
+    });
+    writer = operation().then((result) => {
+      events.push(completedEvent);
+      return result;
+    });
+    await Promise.race([
+      requested.promise,
+      writer.then(() => { throw new Error('writer completed without requesting the receipt-effects lock'); }),
+    ]);
+    expect(events).toEqual(['receipt-start']);
+    release.resolve();
+    const result = await writer;
+    await holder;
+    expect(events).toEqual(['receipt-start', 'receipt-end', completedEvent]);
+    return result;
+  } finally {
+    release.resolve();
+    await Promise.allSettled([holder, writer]);
+    observedLock?.mockRestore();
+  }
 }
 
 function git(cwd, ...args) {
@@ -69,20 +119,7 @@ describe('APE v2 NEXT serialization on the receipt-effects lock', () => {
     const dir = await project();
     const started = await startRun(dir, startInput());
     expect(started.ok).toBe(true);
-    const paths = runtimePaths(dir);
-    const events = [];
-    const holder = withReceiptLock(paths, async () => {
-      events.push('receipt-start');
-      await sleep(400);
-      events.push('receipt-end');
-    });
-    await sleep(50);
-    const next = await nextRun(dir).then((result) => {
-      events.push('next-done');
-      return result;
-    });
-    await holder;
-    expect(events).toEqual(['receipt-start', 'receipt-end', 'next-done']);
+    const next = await behindReceiptLock(dir, () => nextRun(dir), 'next-done');
     expect(next.ok).toBe(true);
   });
 });
@@ -96,20 +133,7 @@ describe('APE v2 history import serialization on the receipt-effects lock', () =
       path.join(dir, '.planning', '1-1-PLAN.md'),
       '# Plan 1-1\n\nDelivers R5.\n\nStatus: shipped\n',
     );
-    const paths = runtimePaths(dir);
-    const events = [];
-    const holder = withReceiptLock(paths, async () => {
-      events.push('receipt-start');
-      await sleep(400);
-      events.push('receipt-end');
-    });
-    await sleep(50);
-    const imported = await historyAction(dir, 'import', {}).then((result) => {
-      events.push('import-done');
-      return result;
-    });
-    await holder;
-    expect(events).toEqual(['receipt-start', 'receipt-end', 'import-done']);
+    const imported = await behindReceiptLock(dir, () => historyAction(dir, 'import', {}), 'import-done');
     expect(imported.ok).toBe(true);
     expect(imported.migration.record_count).toBe(1);
   });

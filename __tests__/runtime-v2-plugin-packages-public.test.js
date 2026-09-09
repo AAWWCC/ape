@@ -1,9 +1,11 @@
 import { execFile } from 'node:child_process';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
+import { verifyInstalledPackage } from '../scripts/smoke-marketplace-install.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -35,6 +37,49 @@ function body(markdown) {
 }
 
 describe('2.17 public plugin packages', () => {
+  it('preserves unrelated ape output directories and supports repeat builds of recognized packages', async () => {
+    const scratch = await mkdtemp(path.join(tmpdir(), 'ape-package-output-'));
+    const build = () => run(process.execPath, [path.join(ROOT, 'scripts', 'build-plugin-packages.mjs'),
+      '--output-root', scratch]);
+    try {
+      await mkdir(path.join(scratch, 'ape'));
+      await writeFile(path.join(scratch, 'ape', 'notes.txt'), 'keep my notes');
+      await expect(build()).rejects.toMatchObject({ stderr: expect.stringContaining('not recognized APE plugin artifacts') });
+      expect(await readFile(path.join(scratch, 'ape', 'notes.txt'), 'utf8')).toBe('keep my notes');
+      await rm(path.join(scratch, 'ape'), { recursive: true });
+      await build();
+      const manifestPath = path.join(scratch, 'ape', '.codex-plugin', 'plugin.json');
+      const oldManifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+      await writeFile(manifestPath, JSON.stringify({ ...oldManifest, version: '1.0.0' }));
+      await build();
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+      expect(manifest.name).toBe('ape');
+      expect(manifest.version).toBe(oldManifest.version);
+      await writeFile(path.join(scratch, 'ape', 'notes.txt'), 'keep added notes');
+      await expect(build()).rejects.toMatchObject({ stderr: expect.stringContaining('not recognized APE plugin artifacts') });
+      expect(await readFile(path.join(scratch, 'ape', 'notes.txt'), 'utf8')).toBe('keep added notes');
+      await rm(path.join(scratch, 'ape', 'notes.txt'));
+      for (const [directory, host] of [['ape', 'codex'], ['ape-claude', 'claude']]) {
+        const file = path.join(scratch, directory, `.${host}-plugin`, 'plugin.json');
+        const value = JSON.parse(await readFile(file, 'utf8'));
+        await writeFile(file, JSON.stringify({ ...value, version: '1.0.0' }));
+      }
+      await writeFile(path.join(scratch, 'ape-claude', 'notes.txt'), 'preserve both previous packages');
+      await expect(build()).rejects.toMatchObject({ stderr: expect.stringContaining('not recognized APE plugin artifacts') });
+      for (const [directory, host] of [['ape', 'codex'], ['ape-claude', 'claude']]) {
+        const value = JSON.parse(await readFile(path.join(scratch, directory, `.${host}-plugin`, 'plugin.json'), 'utf8'));
+        expect(value.version).toBe('1.0.0');
+      }
+    } finally { await rm(scratch, { recursive: true, force: true }); }
+  });
+
+  it('refuses package output inside a source directory', async () => {
+    await expect(run(process.execPath, [path.join(ROOT, 'scripts', 'build-plugin-packages.mjs'),
+      '--output-root', path.join(ROOT, 'scripts')])).rejects.toMatchObject({
+      stderr: expect.stringContaining('must not replace the source'),
+    });
+  });
+
   it('pins repository marketplaces to the two generated local package roots', async () => {
     const codex = await json('.agents/plugins/marketplace.json');
     expect(codex).toMatchObject({
@@ -152,5 +197,91 @@ describe('2.17 public plugin packages', () => {
       env: { ...process.env, SOURCE_DATE_EPOCH: '0', LC_ALL: 'C' },
     });
     expect(result.stdout).toContain('byte-identical');
+  });
+});
+
+
+describe('installed marketplace package integrity', () => {
+  it.each([false, true])('rejects invalid CLI options when the checkout is linked: %s', async (linked) => {
+    const scratch = await mkdtemp(path.join(tmpdir(), 'ape-marketplace-entry-'));
+    try {
+      const checkout = linked ? path.join(scratch, 'checkout') : ROOT;
+      if (linked) await symlink(ROOT, checkout, process.platform === 'win32' ? 'junction' : 'dir');
+      await expect(run(process.execPath, [path.join(checkout, 'scripts', 'smoke-marketplace-install.mjs'), '--invalid-option']))
+        .rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('usage: node scripts/smoke-marketplace-install.mjs') });
+    } finally { await rm(scratch, { recursive: true, force: true }); }
+  });
+
+  const hosts = [
+    ['codex', CODEX, 'hooks/hooks.json'],
+    ['claude', CLAUDE, 'hooks/claude-hooks.json'],
+  ];
+
+  async function installedCopy(source, check) {
+    const scratch = await mkdtemp(path.join(tmpdir(), 'ape-installed-package-'));
+    const installed = path.join(scratch, 'installed');
+    try {
+      await cp(source, installed, { recursive: true });
+      await check(installed, scratch);
+    } finally { await rm(scratch, { recursive: true, force: true }); }
+  }
+
+  it.each(hosts)('accepts a complete %s package and initializes its MCP server', async (host, source) => {
+    await installedCopy(source, async (installed) => {
+      await expect(verifyInstalledPackage(host, installed)).resolves.toBeUndefined();
+    });
+  });
+
+  const damagedFiles = hosts.flatMap(([host, source, hooks]) =>
+    [hooks, 'skills/run/SKILL.md'].flatMap((relative) =>
+      ['missing', 'modified'].map((damage) => [host, source, relative, damage]),
+    ),
+  );
+
+  it.each(damagedFiles)('rejects %s %s %s %s while its manifest version is unchanged', async (host, source, relative, damage) => {
+    await installedCopy(source, async (installed) => {
+      const manifest = path.join(`.${host}-plugin`, 'plugin.json');
+      const before = await readFile(path.join(installed, manifest), 'utf8');
+      const target = path.join(installed, relative);
+      if (damage === 'missing') await rm(target);
+      else {
+        const bytes = await readFile(target);
+        bytes[0] ^= 1;
+        await writeFile(target, bytes);
+      }
+      expect(await readFile(path.join(installed, manifest), 'utf8')).toBe(before);
+      await expect(verifyInstalledPackage(host, installed)).rejects.toThrow(relative);
+    });
+  });
+
+  it.each(hosts)('rejects an additional file in the %s installed package', async (host, source) => {
+    await installedCopy(source, async (installed) => {
+      await writeFile(path.join(installed, 'unexpected.txt'), 'unexpected installed content');
+      await expect(verifyInstalledPackage(host, installed)).rejects.toThrow('unexpected.txt');
+    });
+  });
+
+  it.each(hosts)('rejects an additional empty directory in the %s installed package', async (host, source) => {
+    await installedCopy(source, async (installed) => {
+      await mkdir(path.join(installed, 'unexpected-directory'));
+      await expect(verifyInstalledPackage(host, installed)).rejects.toThrow('unexpected-directory');
+    });
+  });
+
+  it.each(hosts)('rejects linked hooks in the %s installed package even when bytes match', async (host, source) => {
+    await installedCopy(source, async (installed) => {
+      const target = path.join(installed, 'hooks');
+      await rm(target, { recursive: true });
+      await symlink(path.join(source, 'hooks'), target, process.platform === 'win32' ? 'junction' : 'dir');
+      await expect(verifyInstalledPackage(host, installed)).rejects.toThrow('hooks');
+    });
+  });
+
+  it.each(hosts)('rejects a linked %s package root even when bytes match', async (host, source) => {
+    await installedCopy(source, async (installed) => {
+      await rm(installed, { recursive: true });
+      await symlink(source, installed, process.platform === 'win32' ? 'junction' : 'dir');
+      await expect(verifyInstalledPackage(host, installed)).rejects.toThrow('package root');
+    });
   });
 });

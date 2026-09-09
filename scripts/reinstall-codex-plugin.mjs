@@ -48,8 +48,8 @@ const STAGED_DIRECTORIES = Object.freeze([
   'skills',
 ]);
 // The MCP bundle launches the detached merge-gate runner as a sibling runtime
-// process. Keep that small ESM closure in the lean cache too: runner.js imports
-// only spawn.js, and package.json supplies the `type: module` boundary Node
+// process. Keep its small ESM closure in the lean cache too: runner.js uses
+// spawn.js and its file-stats.js leaf. package.json supplies the `type: module` boundary Node
 // needs when the files are executed from an immutable plugin snapshot.
 const STAGED_FILES = Object.freeze([
   '.mcp.json',
@@ -66,6 +66,7 @@ const REQUIRED_RUNTIME_FILES = Object.freeze([
   'hooks/hooks.json',
   'lib/runtime/runner.js',
   'lib/runtime/spawn.js',
+  'lib/runtime/file-stats.js',
   'package.json',
   'prompts/common.md',
   'skills/run/SKILL.md',

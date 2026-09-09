@@ -2,21 +2,20 @@
 
 import { createHash } from 'node:crypto';
 import {
-  cp,
   chmod,
   lstat,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
-  rename,
   rm,
   utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertGeneratedOutputLocation, generatedOutputInventory, replaceGeneratedDirectory, validateGeneratedOutputContents } from './generated-output-directory.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = dirname(SCRIPT_DIR);
@@ -31,7 +30,7 @@ const DIST_FILES = Object.freeze([
   'ape-larp.bundle.mjs',
   'ape-mcp.bundle.mjs',
 ]);
-const RUNTIME_FILES = Object.freeze(['runner.js', 'spawn.js']);
+const RUNTIME_FILES = Object.freeze(['runner.js', 'spawn.js', 'file-stats.js']);
 const CLAUDE_STATUSLINE_FILES = Object.freeze([
   ['lib/runtime', 'input-guard.js'],
   ['lib/runtime', 'pipeline-limits.js'],
@@ -415,17 +414,33 @@ async function treeDigest(root) {
   return hash.digest('hex');
 }
 
-async function replaceDirectory(source, destination) {
-  await ensureDirectory(dirname(destination));
-  const temporary = join(dirname(destination), `.${basename(destination)}.next-${process.pid}`);
-  await rm(temporary, { recursive: true, force: true });
-  await cp(source, temporary, { recursive: true, preserveTimestamps: true });
-  await rm(destination, { recursive: true, force: true });
-  await rename(temporary, destination);
+async function publicationOptions(source, host) {
+  const expected = await generatedOutputInventory(source);
+  return {
+    sourceRoot: REPO_ROOT,
+    allowedOutputs: HOSTS.map((target) => join(DEFAULT_OUTPUT_ROOT, target.directory)),
+    async validateExisting(directory, inventory) {
+      const manifestPath = host === 'codex' ? '.codex-plugin/plugin.json' : '.claude-plugin/plugin.json';
+      if (inventory.get(manifestPath) !== 'file' || [...inventory].some(([name, kind]) => expected.get(name) !== kind)) {
+        throw new PackageError('existing output contains files that are not recognized APE plugin artifacts');
+      }
+      const manifest = await readJson(join(directory, manifestPath));
+      if (manifest?.name !== 'ape' || manifest.repository !== 'https://github.com/AAWWCC/ape' ||
+          typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?$/u.test(manifest.version)) {
+        throw new PackageError('existing output is not a recognized APE plugin package');
+      }
+    },
+  };
 }
 
 async function build(argv) {
   const args = parseArgs(argv);
+  if (!args.check) {
+    for (const target of HOSTS) {
+      await assertGeneratedOutputLocation(join(args.outputRoot, target.directory), REPO_ROOT,
+        HOSTS.map((host) => join(DEFAULT_OUTPUT_ROOT, host.directory)));
+    }
+  }
   const packageJson = await readJson(join(REPO_ROOT, 'package.json'));
   const version = packageJson.version;
   if (!/^\d+\.\d+\.\d+$/.test(version ?? '')) {
@@ -456,11 +471,18 @@ async function build(argv) {
       process.stdout.write('plugin packages are byte-identical to a fresh deterministic build\n');
       return;
     }
+    const publications = [];
     for (const target of HOSTS) {
-      await replaceDirectory(
-        join(generated, target.directory),
-        join(args.outputRoot, target.directory),
-      );
+      const source = join(generated, target.directory);
+      const destination = join(args.outputRoot, target.directory);
+      const options = await publicationOptions(source, target.host);
+      // A predictable refusal in the second package must not leave the
+      // first package upgraded. Each publisher repeats these checks too.
+      await validateGeneratedOutputContents(destination, options.validateExisting);
+      publications.push({ source, destination, options });
+    }
+    for (const publication of publications) {
+      await replaceGeneratedDirectory(publication.source, publication.destination, publication.options);
     }
     process.stdout.write(`wrote deterministic plugin packages for ${version} under ${args.outputRoot}\n`);
   } finally {

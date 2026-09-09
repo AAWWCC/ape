@@ -18,7 +18,7 @@ import { atomicWriteJson } from '../lib/runtime/storage.js';
 // launch_expires_at (~60s after launched_at) that governs only the window in
 // which a fresh Agent-tool nonce may be claimed and a fresh SubagentStart may
 // consume it. That window closing is NOT the ticket's authorization horizon —
-// deadline_at is — and resolveClaudeBinding (the read path every ordinary
+// deadline_at is — and resolveClaudeBindingOutcome (the read path every ordinary
 // bound tool call resolves through) already agrees: it filters only on the
 // intent's own `expires_at` (mirrors the TICKET deadline), never on
 // launch_expires_at. bindClaudeSubagent's SubagentStart handler disagrees with
@@ -28,7 +28,7 @@ import { atomicWriteJson } from '../lib/runtime/storage.js';
 // record (the one it consumed already moved to 'bound') and denies with a
 // stale-sounding "no unique active launched intent", even though the SAME
 // identity's ordinary tool calls keep resolving fine through
-// resolveClaudeBinding the whole time. That is the untruthful half (invariant
+// resolveClaudeBindingOutcome the whole time. That is the untruthful half (invariant
 // 8): the intent reads 'bound' and IS live by the read path's own account, yet
 // probing it via the one channel a resuming host actually has — SubagentStart
 // — gets denied.

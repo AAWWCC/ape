@@ -7,15 +7,15 @@ import {
   mkdtemp,
   readFile,
   readdir,
-  rename,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
+import { assertGeneratedOutputLocation, replaceGeneratedDirectory } from './generated-output-directory.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = dirname(SCRIPT_DIR);
@@ -23,6 +23,10 @@ const DEFAULT_OUTPUT = join(REPO_ROOT, 'release');
 const PACKAGE_NAMES = Object.freeze([
   ['ape', 'codex'],
   ['ape-claude', 'claude'],
+]);
+const BUNDLED_DEPENDENCIES = Object.freeze([
+  { name: 'zod', id: 'Zod', license: 'MIT', copyright: 'Copyright (c) 2025 Colin McDonnell' },
+  { name: 'smol-toml', id: 'SmolToml', license: 'BSD-3-Clause', copyright: 'Copyright (c) Squirrel Chat et al., All rights reserved.' },
 ]);
 
 class ReleaseError extends Error {}
@@ -89,6 +93,27 @@ async function inventory(root) {
   return entries;
 }
 
+async function releaseInputs(version) {
+  const inputs = new Map();
+  for (const [directory, host] of PACKAGE_NAMES) {
+    const entries = await inventory(join(REPO_ROOT, 'plugins', directory));
+    for (const name of [`.${host}-plugin/plugin.json`, 'package.json']) {
+      const source = `plugins/${directory}/${name}`;
+      const entry = entries.find((candidate) => candidate.name === name);
+      if (entry?.type !== 'file') throw new ReleaseError(`${source} must be a regular JSON manifest`);
+      let manifest;
+      try { manifest = JSON.parse(entry.bytes.toString('utf8')); }
+      catch { throw new ReleaseError(`${source} is not valid JSON`); }
+      if (manifest?.version !== version) {
+        throw new ReleaseError(`${source} version must equal package.json version ${version}; rebuild plugin packages before creating release artifacts`);
+      }
+    }
+    // Archive and describe the exact bytes whose identities were validated.
+    inputs.set(directory, entries);
+  }
+  return inputs;
+}
+
 function writeString(buffer, offset, length, value) {
   const bytes = Buffer.from(value, 'utf8');
   if (bytes.length > length) throw new ReleaseError(`tar field is too long: ${value}`);
@@ -133,9 +158,9 @@ function tarHeader(name, type, size, epoch) {
   return header;
 }
 
-async function archivePackage(packageRoot, archiveRoot, epoch) {
+function archivePackage(entries, archiveRoot, epoch) {
   const chunks = [tarHeader(`${archiveRoot}/`, 'directory', 0, epoch)];
-  for (const entry of await inventory(packageRoot)) {
+  for (const entry of entries) {
     const archiveName = `${archiveRoot}/${entry.name}`;
     const size = entry.bytes?.length ?? 0;
     chunks.push(tarHeader(archiveName, entry.type, size, epoch));
@@ -158,18 +183,20 @@ function spdxId(host, name) {
   return `SPDXRef-File-${host}-${sha256(Buffer.from(name)).slice(0, 16)}`;
 }
 
-async function spdx(version, epoch) {
+async function spdx(version, epoch, inputs) {
   const packageLock = JSON.parse(await readFile(join(REPO_ROOT, 'package-lock.json'), 'utf8'));
-  const zodVersion = packageLock.packages?.['node_modules/zod']?.version;
-  if (typeof zodVersion !== 'string' || !zodVersion) {
-    throw new ReleaseError('package-lock.json has no pinned node_modules/zod version');
+  for (const dependency of BUNDLED_DEPENDENCIES) {
+    const pinned = packageLock.packages?.[`node_modules/${dependency.name}`];
+    if (typeof pinned?.version !== 'string' || !pinned.version || pinned.license !== dependency.license) {
+      throw new ReleaseError(`package-lock.json has no matching version/license for ${dependency.name}`);
+    }
   }
   const packages = [];
   const files = [];
   const relationships = [];
   for (const [directory, host] of PACKAGE_NAMES) {
     const packageId = `SPDXRef-Package-APE-${host}`;
-    const packageFiles = (await inventory(join(REPO_ROOT, 'plugins', directory)))
+    const packageFiles = inputs.get(directory)
       .filter((entry) => entry.type === 'file');
     packages.push({
       SPDXID: packageId,
@@ -189,11 +216,13 @@ async function spdx(version, epoch) {
       relationshipType: 'DESCRIBES',
       relatedSpdxElement: packageId,
     });
-    relationships.push({
-      spdxElementId: packageId,
-      relationshipType: 'DEPENDS_ON',
-      relatedSpdxElement: 'SPDXRef-Package-Zod',
-    });
+    for (const dependency of BUNDLED_DEPENDENCIES) {
+      relationships.push({
+        spdxElementId: packageId,
+        relationshipType: 'DEPENDS_ON',
+        relatedSpdxElement: `SPDXRef-Package-${dependency.id}`,
+      });
+    }
     for (const entry of packageFiles) {
       const fileId = spdxId(host, entry.name);
       files.push({
@@ -213,16 +242,18 @@ async function spdx(version, epoch) {
       });
     }
   }
-  packages.push({
-    SPDXID: 'SPDXRef-Package-Zod',
-    name: 'zod',
-    versionInfo: zodVersion,
-    downloadLocation: 'NOASSERTION',
-    filesAnalyzed: false,
-    licenseConcluded: 'MIT',
-    licenseDeclared: 'MIT',
-    copyrightText: 'Copyright (c) 2025 Colin McDonnell',
-  });
+  for (const dependency of BUNDLED_DEPENDENCIES) {
+    packages.push({
+      SPDXID: `SPDXRef-Package-${dependency.id}`,
+      name: dependency.name,
+      versionInfo: packageLock.packages[`node_modules/${dependency.name}`].version,
+      downloadLocation: 'NOASSERTION',
+      filesAnalyzed: false,
+      licenseConcluded: dependency.license,
+      licenseDeclared: dependency.license,
+      copyrightText: dependency.copyright,
+    });
+  }
   return {
     spdxVersion: 'SPDX-2.3',
     dataLicense: 'CC0-1.0',
@@ -247,20 +278,31 @@ async function writeArtifact(root, name, bytes) {
   return { name, bytes: metadata.size, sha256: sha256(bytes) };
 }
 
-async function replaceDirectory(source, destination) {
-  await mkdir(dirname(destination), { recursive: true });
-  const temporary = join(dirname(destination), `.${basename(destination)}.next-${process.pid}`);
-  await rm(temporary, { recursive: true, force: true });
-  await rename(source, temporary);
-  await rm(destination, { recursive: true, force: true });
-  await rename(temporary, destination);
+async function validateExistingOutput(directory, inventory) {
+  const refuse = () => { throw new ReleaseError('existing output contains files that are not recognized APE release artifacts'); };
+  if (inventory.get('release-manifest.json') !== 'file') refuse();
+  const manifest = JSON.parse(await readFile(join(directory, 'release-manifest.json'), 'utf8'));
+  if (manifest?.version !== 1 || manifest.transport !== 'local-stdio' ||
+      typeof manifest.release !== 'string' || !/^\d+\.\d+\.\d+$/u.test(manifest.release)) refuse();
+  const names = [`ape-codex-${manifest.release}.tar.gz`, `ape-claude-${manifest.release}.tar.gz`,
+    `ape-${manifest.release}.spdx.json`];
+  if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length !== names.length ||
+      manifest.artifacts.some((artifact, index) => artifact?.name !== names[index])) refuse();
+  const expected = new Set([...names, 'release-manifest.json', 'SHA256SUMS']);
+  if (inventory.size !== expected.size || [...inventory].some(([name, kind]) =>
+    kind !== 'file' || !expected.has(name))) refuse();
 }
 
 async function main(argv) {
   const output = parseArgs(argv);
+  await assertGeneratedOutputLocation(output, REPO_ROOT, [DEFAULT_OUTPUT]);
   const epoch = sourceDateEpoch();
   const packageJson = JSON.parse(await readFile(join(REPO_ROOT, 'package.json'), 'utf8'));
-  const version = packageJson.version;
+  const version = packageJson?.version;
+  if (typeof version !== 'string' || !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(version)) {
+    throw new ReleaseError('package.json version must be a bare semantic version');
+  }
+  const inputs = await releaseInputs(version);
   const scratch = await mkdtemp(join(tmpdir(), 'ape-release-artifacts-'));
   const generated = join(scratch, 'release');
   await mkdir(generated, { recursive: true });
@@ -271,14 +313,14 @@ async function main(argv) {
       artifacts.push(await writeArtifact(
         generated,
         name,
-        await archivePackage(join(REPO_ROOT, 'plugins', directory), directory, epoch),
+        archivePackage(inputs.get(directory), directory, epoch),
       ));
     }
     const sbomName = `ape-${version}.spdx.json`;
     artifacts.push(await writeArtifact(
       generated,
       sbomName,
-      Buffer.from(`${JSON.stringify(await spdx(version, epoch), null, 2)}\n`),
+      Buffer.from(`${JSON.stringify(await spdx(version, epoch, inputs), null, 2)}\n`),
     ));
     const manifest = {
       version: 1,
@@ -300,7 +342,9 @@ async function main(argv) {
       'SHA256SUMS',
       Buffer.from(checksummed.map((artifact) => `${artifact.sha256}  ${artifact.name}`).join('\n') + '\n'),
     );
-    await replaceDirectory(generated, output);
+    await replaceGeneratedDirectory(generated, output, {
+      sourceRoot: REPO_ROOT, allowedOutputs: [DEFAULT_OUTPUT], validateExisting: validateExistingOutput,
+    });
     process.stdout.write(`wrote deterministic ${version} release artifacts to ${output}\n`);
   } finally {
     await rm(scratch, { recursive: true, force: true });

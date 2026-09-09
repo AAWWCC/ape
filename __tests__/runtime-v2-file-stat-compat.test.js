@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { activeState } from '../lib/runtime/active-state.js';
 import { inspectAdmissionCommandPrerequisites } from '../lib/runtime/admission-command-prerequisites.js';
 import { lstatFile, statFileHandle } from '../lib/runtime/file-stats.js';
+import { readBoundedRegularFileUtf8 } from '../lib/runtime/spawn.js';
 
 const scenario = vi.hoisted(() => ({ root: null, otherDevice: false, otherInode: false,
   zeroDevice: false, swappedHandle: false, opens: 0, disappearOnce: null }));
@@ -144,5 +145,21 @@ describe('Windows descriptor and pathname file identity compatibility', () => {
       [{ id: 'fixture', command: 'fixture', root: '.' }],
       [{ id: 'fixture', resolved: path.join(value.root, 'fixture') }],
     )).toContainEqual(expect.objectContaining({ cause: 'executable-changed' }));
+  });
+});
+
+
+describe('standalone runner bounded manifest reader uses normalized file identities', () => {
+  it.each([false, true])('reads exact bytes with zero pathname device=%s', async (zeroDevice) => {
+    const value = await fixture();
+    scenario.zeroDevice = zeroDevice;
+    expect(JSON.parse(await readBoundedRegularFileUtf8(value.file))).toEqual(value.state);
+  });
+
+  it.each(['otherDevice', 'otherInode', 'swappedHandle'])('rejects substituted %s', async (field) => {
+    const value = await fixture();
+    scenario.zeroDevice = field === 'swappedHandle';
+    scenario[field] = true;
+    await expect(readBoundedRegularFileUtf8(value.file)).rejects.toThrow();
   });
 });

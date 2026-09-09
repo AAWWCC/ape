@@ -67,11 +67,11 @@ checked byte-for-byte by `npm run docs:check`.
 | `models.claude.fast.model` | string | `"haiku"` | Claude fast-tier model. |
 | `models.claude.balanced.model` | string | `"sonnet"` | Claude balanced-tier model. |
 | `models.claude.deep.model` | string | `"opus"` | Claude deep-tier model. |
-| `models.codex.fast.model` | string | `"gpt-5.4-mini"` | Codex fast-tier model. |
+| `models.codex.fast.model` | string | `"gpt-6-astra"` | Codex fast-tier model. |
 | `models.codex.fast.reasoning_effort` | string | `"low"` | Codex fast-tier reasoning effort. |
-| `models.codex.balanced.model` | string | `"gpt-5.5"` | Codex balanced-tier model. |
+| `models.codex.balanced.model` | string | `"gpt-6-astra"` | Codex balanced-tier model. |
 | `models.codex.balanced.reasoning_effort` | string | `"medium"` | Codex balanced-tier reasoning effort. |
-| `models.codex.deep.model` | string | `"gpt-5.5"` | Codex deep-tier model. |
+| `models.codex.deep.model` | string | `"gpt-6-astra"` | Codex deep-tier model. |
 | `models.codex.deep.reasoning_effort` | string | `"high"` | Codex deep-tier reasoning effort. |
 | `role_models.security_reviewer.claude.model` | string | `"opus"` | Role override, applied before the tier default. |
 | `verification.profiles` | object array | `[]` | Unique shell-free verification commands frozen at start and required as assigned merge gates. |
@@ -112,7 +112,9 @@ run, the parent applies a complete proposal that fills required empty slots.
 
 For a blank repository containing only Git/APE state and conventional metadata, supply the run's
 exact `behavioral` and `test_paths`. A single JavaScript/TypeScript or Python extension family
-can use dependency-free `node --test` or `python -m unittest`. Mixed or unsupported extensions
+can use dependency-free `node --test` or `python -m unittest`. TypeScript commands explicitly
+enable `--experimental-strip-types` for Node 22.12 compatibility; this supports erasable types,
+including mixed JS/TS projects, but does not add JSX or a TypeScript compiler. Mixed or unsupported extensions
 need an explicit toolchain choice. For a clean unborn Git repository, start creates an empty root
 commit under the run lock before creating the run branch.
 
@@ -123,6 +125,10 @@ commit under the run lock before creating the run branch.
   are identical.
 - `targeted_template` must contain `{paths}`. If a runner cannot select files, provide a wrapper
   that maps paths to its selectors. A whole-suite failure does not prove the authored tests fail.
+  Arbitrary npm and `script/test` scripts also need an explicit template for receipt admission;
+  passing file arguments alone does not establish that the script selects those tests.
+  Behavioral single-runner merge gates use the template when no explicit static
+  `targeted` command is configured. Mechanical work keeps its full-suite policy.
 - `impacted_template` may replace the local full suite only when remote checks are required.
   Invalid or empty impacted input falls back to full. Re-gate and `ship` always use the full suite.
 - `full_serial` overrides `serialize`; `targeted_shuffle_template` overrides `shuffle`.
@@ -229,12 +235,21 @@ always runs a fresh full suite.
 Pass `host` explicitly to `wire` and `unwire`.
 
 - Claude gets APE's command-backed renderer: model, directory, branch, mode/lane, stage,
-  milestones, progress, and context use. Existing settings are backed up.
+  milestones, progress, and context use. `CLAUDE_CONFIG_DIR` selects the profile;
+  otherwise APE uses `~/.claude`. Settings, the shim, its renderer cache and the
+  ownership record all use that same profile. The first `settings.json.bak` is
+  preserved across rewires and unwire. The ownership record retains the previous
+  `statusLine`, including when the configured refresh interval changes.
 - Codex gets native `[tui].status_line` items: model, directory, branch, `task-progress`,
   and context. It does not support APE's custom renderer; the response says
   `renderer: "codex-native"` and `custom_renderer: false`.
 
 `unwire` restores only APE-owned values and refuses to overwrite later user edits.
+For Claude, a changed command, wrapper or refresh interval also prevents rewiring
+from overwriting it; `modified: true` explains the refusal. Interrupted writes can
+be retried safely. Older Claude installs without ownership records recover from
+an intact pre-wire backup when available; values already lost by older versions
+cannot be reconstructed.
 
 Progress estimates use receipt timings from at most the newest 20 history files plus the active
 run. Valid numeric samples are cached locally in `.ape/runtime/statusline-cache.json`; there

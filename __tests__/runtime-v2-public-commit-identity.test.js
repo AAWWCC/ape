@@ -141,6 +141,13 @@ describe('public commit identity gate', () => {
     ], { cwd: ROOT, encoding: 'utf8' });
     expect(exportResult.status, `${exportResult.stderr}\n${exportResult.stdout}`).toBe(0);
 
+    // Public export must retain enough source to execute every exported CI
+    // shard, not merely pass the plugin and content checks during export.
+    const shardPlan = spawnSync(process.execPath, ['--input-type=module', '-e',
+      "import {selectCiTests} from './scripts/run-ci-tests.mjs'; for (let n=1;n<=3;n++) { const files=await selectCiTests('shard',n,3); if (!files.length) process.exit(1); }",
+    ], { cwd: exported, encoding: 'utf8' });
+    expect(shardPlan.status, shardPlan.stderr).toBe(0);
+
     const result = spawnSync(process.execPath, [
       path.join(exported, 'scripts', 'check-public-commit-identities.mjs'),
       '--project-dir',

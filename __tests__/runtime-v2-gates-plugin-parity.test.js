@@ -35,6 +35,7 @@ const FIXTURES = [
   { id: 'complete-manifest', manifest: COMPLETE, pass: true, strictPass: true },
   { id: 'unknown-top-level-field', manifest: { ...COMPLETE, bogusField: true }, pass: true, strictPass: false },
   { id: 'invalid-name', manifest: { ...COMPLETE, name: 'Bad Name' }, pass: false, strictPass: false },
+  { id: 'array-name', manifest: { ...COMPLETE, name: ['my-plugin'] }, pass: false, strictPass: false },
   { id: 'author-missing-name', manifest: { ...COMPLETE, author: {} }, pass: false, strictPass: false },
   { id: 'inline-mcp-servers', manifest: { ...COMPLETE, mcpServers: { srv: { command: 'node', args: [] } } }, pass: true, strictPass: true },
   { id: 'hooks-file-valid', ...hooksFile({}, { hooks: GOOD_EVENTS }), pass: true, strictPass: true },
@@ -135,8 +136,8 @@ function officialVerdict(dir, { strict }) {
 // The complete official-CLI corpus is intentionally an explicit calibration:
 // it starts one vendor process per fixture/mode and added ~39s to every local
 // suite whenever Claude happened to be installed. The in-process fixtures
-// above remain the always-on structural contract; scheduled/manual CI sets
-// this opt-in to detect upstream schema drift.
+// above remain the always-on structural contract. Run npm run test:claude-schema
+// explicitly to calibrate against the installed Claude CLI and detect schema drift.
 const CALIBRATE_OFFICIAL_CLAUDE = process.env.APE_CLAUDE_SCHEMA_CALIBRATION === '1';
 describe.skipIf(!CALIBRATE_OFFICIAL_CLAUDE || !officialValidatorAvailable())('official `claude plugin validate` agrees (F13)', () => {
   it.concurrent.each(FIXTURES)('$id matches the official verdicts', async (fixture) => {

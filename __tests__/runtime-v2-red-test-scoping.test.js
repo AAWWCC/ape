@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { recordReceipt } from '../lib/runtime/service.js';
 import { seedLegacyRun as startRun } from './legacy-run-test-helper.js';
 
@@ -12,9 +12,10 @@ import { seedLegacyRun as startRun } from './legacy-run-test-helper.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
 import { isPytestInvocation, targetedInvocation, templateInvocation } from '../lib/runtime/runner.js';
+import * as runnerRuntime from '../lib/runtime/runner.js';
 
 // D2 (red-test strict): a whole-suite failure is never proof an authored test
-// is red. Runners without per-path selection (cargo/rake/maven/gradle) used to
+// is red. Runners without per-path selection (go/cargo/rake/maven/gradle) used to
 // fall back to the entire default suite at red admission, so any unrelated
 // pre-existing or flaky failure admitted a vacuous authored test as an
 // observed red phase. Admission now refuses those runners unless the operator
@@ -106,6 +107,8 @@ function expectStructuredRedTestTicket(ticket, expectedTestPaths) {
 
 describe('red-test admission refuses runners it cannot scope (D2)', () => {
   it.each([
+    ['javascript', 'package.json', '{"scripts":{"test":"node unrelated-failure.js"}}', 'tests/value.test.js'],
+    ['go', 'go.mod', 'module fixture\n\ngo 1.22\n', 'tests/value_test.go'],
     ['rust', 'Cargo.toml', '[package]\nname = "fixture"\nversion = "0.0.0"\n', 'tests/it.rs'],
     ['ruby', 'Gemfile', 'source "https://rubygems.org"\n', 'tests/it_test.rb'],
     ['maven', 'pom.xml', '<project/>\n', 'tests/ItTest.java'],
@@ -133,6 +136,41 @@ describe('red-test admission refuses runners it cannot scope (D2)', () => {
     const paths = runtimePaths(dir);
     expect(await readdir(paths.receipts).catch(() => [])).toHaveLength(0);
     expect(await readdir(paths.receiptTransactions).catch(() => [])).toHaveLength(0);
+  });
+
+  it.each([false, true])('refuses Go package failure as authored-file evidence (per-runner=%s)', async (multiRunner) => {
+    const dir = await project({
+      files: {
+        'go.mod': 'module fixture\n\ngo 1.22\n',
+        'tests/existing_test.go': 'package fixture\nimport "testing"\nfunc TestExisting(t *testing.T) { t.Fatal("unrelated failure") }\n',
+      },
+      config: multiRunner ? {
+        runners: [{ id: 'go-tests', owns: ['tests/**'], root: '.', profile: { full: 'go test ./...' } }],
+      } : {},
+    });
+    const authored = 'tests/authored_test.go';
+    const started = await startRun(dir, startInput({ test_paths: [authored] }));
+    await writeFile(path.join(dir, authored), 'package fixture\nimport "testing"\nfunc TestAuthored(t *testing.T) {}\n');
+    // Model the documented package verdict at the execution seam: go test
+    // ./tests selects every *_test.go sibling, including the unchanged failure.
+    // This regression requires no installed Go toolchain and must refuse
+    // before any such wider invocation can become sealed red evidence.
+    const run = vi.spyOn(runnerRuntime, 'runTestSuite').mockImplementation(async (_root, options) => {
+      expect(options.override).toMatchObject({ command: 'go', args: ['test', './tests'] });
+      return { passed: false, runner: { runner: 'override', ...options.override },
+        exit_code: 1, duration_ms: 1, output: '--- FAIL: TestExisting\nPASS: TestAuthored\n', tooling_failure: false };
+    });
+    try {
+      const result = await recordReceipt(dir, rawReceipt(started.run.tickets[0]));
+      expect(result).toMatchObject({ ok: false, rejected: true });
+      expect(result.errors.join(' ')).toMatch(/cannot scope/);
+      expect(result.errors.join(' ')).toMatch(/targeted_template/);
+      expect(run).not.toHaveBeenCalled();
+      expect(await readdir(runtimePaths(dir).receipts).catch(() => [])).toHaveLength(0);
+      expect(await readdir(runtimePaths(dir).receiptTransactions).catch(() => [])).toHaveLength(0);
+    } finally {
+      run.mockRestore();
+    }
   });
 
   it('keeps an unscopeable runner ticket structured and the objective immutable', async () => {
@@ -181,7 +219,7 @@ describe('red-test tickets keep runner-independent structured transport', () => 
   it.each([
     ['python', 'pytest.ini', '[pytest]\n', 'tests/test_it.py'],
     ['go', 'go.mod', 'module fixture\n\ngo 1.22\n', 'tests/it_test.go'],
-  ])('uses the same contract for the per-path %s runner', async (family, marker, content, authored) => {
+  ])('uses the same contract for the detected %s runner', async (family, marker, content, authored) => {
     const dir = await project({ files: { [marker]: content } });
     const started = await startRun(dir, startInput({ test_paths: [authored] }));
     expect(started.ok).toBe(true);
@@ -333,15 +371,16 @@ describe('pytest non-verdict exit codes are refused, scoped to pytest only', () 
 describe('invocation derivation units', () => {
   it('marks per-path runners scoped and suite-only runners unscoped', () => {
     const scoped = [
-      { runner: 'script-test', command: 'script/test', args: [] },
       { runner: 'python', command: 'python3', args: ['-m', 'pytest'] },
       { runner: 'python-uv', command: 'uv', args: ['run', 'pytest'] },
-      { runner: 'javascript', command: 'npm', args: ['test'] },
     ];
     for (const runner of scoped) {
       expect(targetedInvocation(runner, ['tests/a.test.js']).scoped).toBe(true);
     }
     const unscoped = [
+      { runner: 'script-test', command: 'script/test', args: [] },
+      { runner: 'javascript', command: 'npm', args: ['test'] },
+      { runner: 'go', command: 'go', args: ['test', './...'] },
       { runner: 'rust', command: 'cargo', args: ['test'] },
       { runner: 'ruby', command: 'bundle', args: ['exec', 'rake', 'test'] },
       { runner: 'maven', command: 'mvn', args: ['test'] },
@@ -355,15 +394,15 @@ describe('invocation derivation units', () => {
     }
   });
 
-  it('go maps a root-level test to the root package, never the whole module', () => {
+  it('retains Go package selection for passing gates without claiming authored-file scope', () => {
     const runner = { runner: 'go', command: 'go', args: ['test', './...'] };
     expect(targetedInvocation(runner, ['main_test.go'])).toMatchObject({
       args: ['test', '.'],
-      scoped: true,
+      scoped: false,
     });
     expect(targetedInvocation(runner, ['pkg/util/util_test.go'])).toMatchObject({
       args: ['test', './pkg/util'],
-      scoped: true,
+      scoped: false,
     });
   });
 

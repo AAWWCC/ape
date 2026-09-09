@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { mkdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -54,9 +54,9 @@ async function project(prefix = 'ape-git-plumbing-') {
   return dir;
 }
 
-// Independent oracle: the pre-cache currentTreeSha algorithm, verbatim
-// (throwaway index, plain read-tree, unrestricted add -A). The warm path must
-// be output-identical to this for every worktree shape.
+// Independent oracle: stage the whole worktree into a throwaway index, then
+// restore only reserved paths from HEAD. The warm path must be output-identical
+// while never staging live runtime state or deleting tracked baseline config.
 function referenceTreeSha(dir) {
   const temp = mkdtempSync(path.join(tmpdir(), 'ape-ref-index-'));
   try {
@@ -64,7 +64,7 @@ function referenceTreeSha(dir) {
     const ref = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', env });
     ref('read-tree', 'HEAD');
     ref('add', '-A');
-    ref('rm', '-r', '--cached', '--ignore-unmatch', '-q', '--', '.ape');
+    ref('reset', '-q', 'HEAD', '--', '.ape');
     return ref('write-tree').trim();
   } finally {
     rmSync(temp, { recursive: true, force: true });
@@ -252,6 +252,60 @@ describe('receipt claims comparison end-to-end', () => {
 });
 
 describe('currentTreeSha persistent-index warm path', () => {
+  it.each([false, true])('observes projects that ignore the entire reserved directory (warm: %s)', async (warm) => {
+    const dir = await project();
+    await writeFile(path.join(dir, '.gitignore'), '.ape/\n');
+    git(dir, 'add', '.gitignore');
+    git(dir, 'commit', '-qm', 'ignore local runtime');
+    await mkdir(path.join(dir, '.ape'));
+    if (warm) await mkdir(path.join(dir, '.ape', 'runtime'));
+    await writeFile(path.join(dir, '.ape', 'config.json'), '{"local":true}\n');
+    const indexBefore = await readFile(path.join(dir, '.git', 'index'));
+    expect(await currentTreeSha(dir)).toBe(git(dir, 'rev-parse', 'HEAD^{tree}'));
+    await writeFile(path.join(dir, 'docs', 'approved.md'), '# Approved\n');
+    const changedTree = await currentTreeSha(dir);
+    expect(changedTree).toBe(referenceTreeSha(dir));
+    expect(git(dir, 'ls-tree', '-r', '--name-only', changedTree, '--', '.ape')).toBe('');
+    expect(git(dir, 'show', `${changedTree}:docs/approved.md`)).toBe('# Approved');
+    await writeFile(path.join(dir, '.ape', 'config.json'), '{"local":"changed"}\n');
+    expect(await currentTreeSha(dir)).toBe(changedTree);
+    expect(await readFile(path.join(dir, '.git', 'index'))).toEqual(indexBefore);
+  });
+
+  it.each([false, true])('preserves tracked reserved baseline bytes while ignoring live .ape changes (warm: %s)', async (warm) => {
+    const dir = await project();
+    await mkdir(path.join(dir, '.ape'));
+    await writeFile(path.join(dir, '.ape', 'config.json'), '{"baseline":true}\n');
+    git(dir, 'add', '.ape/config.json');
+    git(dir, 'commit', '-qm', 'tracked project configuration');
+    if (warm) {
+      await mkdir(path.join(dir, '.ape', 'runtime'));
+      // A persisted cache from the prior implementation omitted tracked .ape
+      // paths. The first read after upgrade must restore them from HEAD.
+      const env = { ...GIT_ENV, GIT_INDEX_FILE: runtimePaths(dir).treeIndex };
+      execFileSync('git', ['read-tree', 'HEAD'], { cwd: dir, env });
+      execFileSync('git', ['rm', '-r', '--cached', '-q', '--', '.ape'], { cwd: dir, env });
+      const oldTree = execFileSync('git', ['write-tree'], { cwd: dir, env, encoding: 'utf8' }).trim();
+      expect(git(dir, 'ls-tree', '-r', '--name-only', oldTree, '--', '.ape')).toBe('');
+    }
+    const baselineTree = git(dir, 'rev-parse', 'HEAD^{tree}');
+    expect(await currentTreeSha(dir)).toBe(baselineTree);
+    await writeFile(path.join(dir, '.ape', 'config.json'), '{"live":true}\n');
+    await writeFile(path.join(dir, '.ape', 'untracked.json'), '{"runtime":true}\n');
+    git(dir, 'add', '.ape/config.json', '.ape/untracked.json');
+    const indexBefore = await readFile(path.join(dir, '.git', 'index'));
+    expect(await currentTreeSha(dir)).toBe(baselineTree);
+    expect(await currentTreeSha(dir)).toBe(referenceTreeSha(dir));
+    expect(await readFile(path.join(dir, '.git', 'index'))).toEqual(indexBefore);
+    git(dir, 'rm', '-f', '.ape/config.json');
+    expect(await currentTreeSha(dir)).toBe(baselineTree);
+    await writeFile(path.join(dir, 'docs', 'new.md'), '# Approved change\n');
+    const changedTree = await currentTreeSha(dir);
+    expect(changedTree).toBe(referenceTreeSha(dir));
+    expect(await diffFiles(dir, baselineTree, changedTree)).toEqual(['docs/new.md']);
+    expect(git(dir, 'show', `${changedTree}:.ape/config.json`)).toBe('{"baseline":true}');
+  });
+
   it('matches the throwaway-index reference across staged/unstaged/untracked/deleted/UTF-8/space mixes', async () => {
     const dir = await project();
     await mkdir(path.join(dir, '.ape', 'runtime'), { recursive: true });
@@ -336,6 +390,47 @@ describe('currentTreeSha persistent-index warm path', () => {
     await mkdir(path.join(dir, '.ape', 'runtime'), { recursive: true });
     await writeFile(`${runtimePaths(dir).treeIndex}.lock`, '');
     await writeFile(path.join(dir, 'café.js'), 'export const roast = 2;\n');
+    expect(await currentTreeSha(dir)).toBe(referenceTreeSha(dir));
+  });
+
+  it.skipIf(process.platform === 'win32')('treats a FIFO cache as a miss without blocking tree observation', async () => {
+    const dir = await project();
+    await mkdir(runtimePaths(dir).runtime, { recursive: true });
+    execFileSync('mkfifo', [runtimePaths(dir).treeIndex]);
+    const entry = new URL('../lib/runtime/git.js', import.meta.url).href;
+    // A finite child boundary makes the pre-fix blocked open a test failure,
+    // without leaving a stuck libuv filesystem worker in the Vitest process.
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `import { currentTreeSha } from ${JSON.stringify(entry)}; console.log(await currentTreeSha(process.argv[1]));`, dir],
+    { encoding: 'utf8', timeout: 5000, killSignal: 'SIGKILL' });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe(referenceTreeSha(dir));
+    expect(await currentTreeSha(dir)).toBe(referenceTreeSha(dir));
+  });
+
+  it.skipIf(process.platform === 'win32')('drops a symlink cache without changing its external target', async () => {
+    const dir = await project();
+    await mkdir(runtimePaths(dir).runtime, { recursive: true });
+    const outside = mkdtempSync(path.join(tmpdir(), 'ape-index-target-'));
+    cleanups.push(outside);
+    const target = path.join(outside, 'index');
+    await writeFile(target, 'external content\n');
+    await symlink(target, runtimePaths(dir).treeIndex);
+    expect(await currentTreeSha(dir)).toBe(referenceTreeSha(dir));
+    expect(await readFile(target, 'utf8')).toBe('external content\n');
+    expect(existsSync(runtimePaths(dir).treeIndex)).toBe(false);
+  });
+
+  it('treats an oversized cache as a miss and still computes the complete tree', async () => {
+    const dir = await project();
+    await mkdir(runtimePaths(dir).runtime, { recursive: true });
+    const handle = await open(runtimePaths(dir).treeIndex, 'w');
+    try { await handle.truncate(64 * 1024 * 1024 + 1); }
+    finally { await handle.close(); }
+    await writeFile(path.join(dir, 'café.js'), 'export const roast = 9;\n');
+    expect(await currentTreeSha(dir)).toBe(referenceTreeSha(dir));
+    expect(existsSync(runtimePaths(dir).treeIndex)).toBe(false);
     expect(await currentTreeSha(dir)).toBe(referenceTreeSha(dir));
   });
 

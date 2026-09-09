@@ -8,7 +8,47 @@ permissions:
   contents: read
 
 jobs:
+  source-tests:
+    name: Release full source suite (Ubuntu, Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22.12.0
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run test:agent
+
+  native-runtime:
+    name: Release native runtime (${{ matrix.os }}, Node ${{ matrix.node.version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node:
+          - version: 22.12.0
+          - version: 24.15.0
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - name: Disable automatic CRLF conversion
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node.version }}
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run bundle
+      - run: npm run package:plugins
+      - run: git diff --exit-code -- dist/ plugins/
+      - run: node scripts/run-ci-tests.mjs native -- --maxWorkers=1
+
   host-validation:
+    needs: [source-tests, native-runtime]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -37,14 +77,22 @@ jobs:
           test "$(node --version)" = "v24.15.0"
           test "$(npm --version)" = "11.12.1"
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Require the dependency vulnerability gate before publication
+        run: npm audit --audit-level=high
       - run: npm run compatibility:check
       - name: Verify release identity
         shell: bash
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${version}"
-      - name: Require committed live Codex certification
-        run: npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+      - name: Require committed certification or the exact 2.25.8 owner exception
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == "v2.25.8" ]]; then
+            node scripts/verify-release-owner-exception.mjs --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+          else
+            npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+          fi
       - run: npm run typecheck
       - run: npm run bundle
       - name: Require fresh committed bundles
@@ -64,14 +112,14 @@ jobs:
         run: npm run public:export -- --out "${RUNNER_TEMP}/ape-public-${GITHUB_SHA}"
       - run: npm run release:reproducible
       - name: Install pinned host CLIs in the unprivileged validation job
-        run: npm install --global @openai/codex@0.147.0 @anthropic-ai/claude-code@2.1.228
+        run: npm install --global @openai/codex@0.153.4 @anthropic-ai/claude-code@2.1.228
       - name: Assert host CLI versions
         shell: bash
         run: |
-          test "$(codex --version)" = "codex-cli 0.147.0"
+          test "$(codex --version)" = "codex-cli 0.153.4"
           claude --version | grep --extended-regexp '^2\.1\.228([[:space:]]|$)'
-      - run: npm run smoke:marketplaces
-      - run: npm run validate
+      - run: npm run smoke:marketplaces -- --installed-hosts
+      - run: npm run validate:claude
 
   publish:
     needs: host-validation
@@ -123,8 +171,14 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${version}"
-      - name: Require committed live Codex certification
-        run: npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+      - name: Require committed certification or the exact 2.25.8 owner exception
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == "v2.25.8" ]]; then
+            node scripts/verify-release-owner-exception.mjs --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+          else
+            npm run release:live-certification -- --head "${GITHUB_SHA}" --tag "${GITHUB_REF_NAME}"
+          fi
       - run: npm run typecheck
       - run: npm run bundle
       - name: Require fresh committed bundles
@@ -144,16 +198,26 @@ jobs:
         run: npm run public:export -- --out "${RUNNER_TEMP}/ape-public-${GITHUB_SHA}"
       - run: npm run release:artifacts
       - run: npm run release:reproducible
+      - name: Include the disclosed owner exception with this release
+        if: github.ref_name == 'v2.25.8'
+        shell: bash
+        run: |
+          cp evals/release-owner-exception-2.25.8.json release/release-owner-exception-2.25.8.json
+          (cd release && sha256sum release-owner-exception-2.25.8.json >> SHA256SUMS)
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: |
             release/ape-*.tar.gz
-            release/ape-*.spdx.json
-            release/release-manifest.json
+            release/*.json
             release/SHA256SUMS
       - name: Publish immutable GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: gh release create "${GITHUB_REF_NAME}" release/* --verify-tag --generate-notes --title "APE ${GITHUB_REF_NAME#v}"
+        run: |
+          notes_args=(--generate-notes)
+          if [[ "${GITHUB_REF_NAME}" == "v2.25.8" ]]; then
+            notes_args=(--notes-file docs/releases/2.25.8.md)
+          fi
+          gh release create "${GITHUB_REF_NAME}" release/* --verify-tag "${notes_args[@]}" --title "APE ${GITHUB_REF_NAME#v}"

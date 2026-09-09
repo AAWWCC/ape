@@ -1,5 +1,109 @@
 # Changelog
 
+## 2.25.8 — 2026-09-09
+
+Owner-approved release with disclosed certification exceptions. The exact
+candidate passed all 18 CI jobs and all four Codex workflows completed.
+The full workflow required connection recovery and a supported expired-ticket
+retry; it remains ineligible for an uninterrupted schema-v5 certificate.
+Earlier failed attempts remain failed. See [release notes](docs/releases/2.25.8.md).
+
+- Consolidate reliability fixes since the original 2.25.1 snapshot: durable
+  state and task recovery, lifecycle locking, test-evidence scoping, safe
+  post-merge cleanup, configuration updates, and statusline preservation.
+- Default Codex worker tiers to GPT-6 Astra with low, medium, and high effort;
+  preserve explicit model selections and Claude defaults. Pin tested Codex to 0.153.4.
+- Preserve tracked APE configuration in shipping-tree evidence and explicitly
+  identify the governed project during worker receipt validation.
+- Correct certification catalog routes, request metadata, and launch timing.
+  The product's 300-second catalog guard remains unchanged.
+- Publish the exact release exception and checksums alongside the normal
+  packages, SBOM, manifest, and GitHub provenance attestations. The exception
+  is restricted to 2.25.8 and does not change the strict certificate verifier.
+
+## 2.25.7 — 2026-09-08
+
+Release candidate; exact-candidate CI and a newly authorized four-workflow
+Codex campaign remain required. Version 2.25.6 passed all 18 CI jobs and its
+mechanical workflow completed a protected synthetic merge, but its launcher
+failed on an installed-plugin catalog query; that campaign remains failed.
+
+- Match the pinned host's all-scopes and single-scope installed-plugin requests.
+- Cover all six catalog routes against Codex 0.153.4's request builders and empty
+  response types, including the supported featured-platform values.
+- Reject duplicate catalog query keys while retaining the existing route and
+  method restrictions. No model endpoint or runtime authority changes.
+
+## 2.25.6 — 2026-09-08
+
+Release candidate; exact-candidate CI and a newly authorized four-workflow
+Codex campaign remain required. The failed 2.25.5 campaign remains failed.
+
+- Preserve the committed APE control subtree in gate tree identities so a
+  repository with tracked APE configuration can pass exact shipping-tree checks.
+  Working runtime state remains excluded; staged control-file drift still fails.
+- Match Codex 0.153.4's exact suggested-plugin catalog route and strict query.
+- Include the governed project root in native worker receipt-validation guidance,
+  preserving the optional API for callers already rooted in the project.
+
+## 2.25.5 — 2026-09-08
+
+Release candidate; exact-candidate CI and a newly authorized four-workflow
+Codex campaign remain required. The failed 2.25.4 campaign remains failed.
+
+- Update the tested Codex CLI pin to 0.153.4 for GPT-6 Astra native agents.
+  The prior host accepted Astra for the parent while its child catalog omitted
+  the model; a successful parent request did not establish child eligibility.
+- Require a fresh, matching native child-model catalog before certification
+  launch, including configured Codex tier and role selections with V2 support.
+- Update Vitest and coverage tooling to 4.1.11, which fixes the development-server
+  advisory GHSA-82fw-gwwq-j7x9 reported by the prior dependency audit.
+
+## 2.25.4 — 2026-09-08
+
+Release candidate; exact-candidate CI and a new authorized four-workflow Codex
+campaign remain required. The failed 2.25.3 mechanical attempt remains failed.
+
+- Correct CLI entry detection so canonical and symlinked invocations execute
+  while imports remain passive; retain coverage in the native CI selection.
+- Refresh existing native probes with phase-specific session guidance instead
+  of restarting the handshake. Describe completed-proof expiry as expiry before
+  consumption, preserving the recorded acknowledgement and all expiry gates.
+- Use `gpt-6-astra` for all Codex default tiers: low effort for fast, medium for
+  balanced, and high for deep. Preserve Claude defaults and explicit model pins;
+  diagnose materialized 2.25.3 model defaults without silently rewriting them.
+- Use the existing Windows file-identity compatibility helpers in benchmark,
+  certification-launcher, and test-duration tooling, preserving replacement and
+  ownership checks when Node 22 pathname and handle device identifiers differ.
+
+## 2.25.3 — 2026-09-08
+
+Release candidate; exact-candidate CI and a new authorized Codex live campaign
+remain required. The failed 2.25.2 campaign remains failed, and its underlying
+native-child bootstrap cause is not established.
+
+- Require the exact `OpenAI` provider display name during pinned Codex
+  certification. Codex 0.147.0 uses this name to preserve OpenAI request metadata;
+  arbitrary nonempty labels silently select a different serialization path.
+  The custom provider ID and explicit zero-retry settings remain required.
+  This corrects demonstrated request fidelity, without claiming to resolve the
+  earlier live child failure or establish endpoint/authentication identity.
+
+## 2.25.2 — 2026-09-08
+
+Release blocked after the first formal 2.25.2 mechanical attempt failed before
+binding or run start. Exact-candidate CI passed all 18 jobs, but the delivered
+guidance did not prevent the prohibited pre-binding shell call. The campaign
+has zero qualifying completions; fast, full, and protected-land were not started.
+No additional source fix is claimed. See [release status](docs/prevention-release-status.md).
+The failed 2.25.1 campaign remains failed; Claude live operation is unverified.
+
+- Align native binding-probe guidance with the existing reserved child window:
+  repository commands cannot substitute for the exact assigned bootstrap, and
+  missing bootstrap input must stop without inferred authority.
+- Distinguish an intentional reserved-probe tool denial from unreadable or
+  malformed identity evidence while preserving both enforcement boundaries.
+
 ## 2.25.1 — 2026-09-07
 
 Release candidate; fresh candidate-bound Codex live certification is required
@@ -13,6 +117,18 @@ before tagged publication. Claude live operation remains unverified.
   while rejecting unauthorized drift and invalid source evidence.
 - Register the recovery regression suite in the CI duration inventory and make
   recovery horizon test timing deterministic.
+- Keep task cancellation bound to its project, handle failed detached launches,
+  and persist long execution errors within the durable task field limits.
+- Bound receipt extraction and manifest discovery, restore interrupted Codex
+  statusline installs safely, and honor targeted templates and zero-directory
+  globstar matches at merge gates. Preserve current and legacy receipt budgets.
+- Require explicit test selection for aggregate scripts at receipt admission;
+  retain complete files after exhausted Windows rename retries and sync audit
+  writes and supported directory entries.
+- Recompute saved evaluation safety from retained actions, validate exact host
+  tool events, and enforce dependency auditing and action pins before release.
+- Remove unused runtime exports and stale test configuration; share duplicate
+  validation, batching, tooling, and bundle definitions.
 
 ## 2.25.0 — 2026-09-06
 

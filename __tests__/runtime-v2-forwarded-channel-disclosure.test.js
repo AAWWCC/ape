@@ -304,7 +304,7 @@ function readOwnerFile(owner) {
 // against pinning a count that can go stale). Tolerant of the numeric-
 // separator underscores this codebase's constants use (`1_000`, `10_000`).
 function deriveIntConst(sourceText, constName) {
-  const match = sourceText.match(new RegExp(`^export const ${constName}\\s*=\\s*([0-9_]+)`, 'm'));
+  const match = sourceText.match(new RegExp(`^(?:export )?const ${constName}\\s*=\\s*([0-9_]+)`, 'm'));
   expect(match, `genuine owner directly declares ${constName}`).not.toBeNull();
   return Number(match[1].replaceAll('_', ''));
 }
@@ -534,19 +534,15 @@ describe('the structured review_findings field stays within the scheduler bounds
 
 describe('test remediation uses structured review evidence with an immutable objective', () => {
   it('routes to remediation-test without objective decoration', async () => {
-    const lifecycleSource = readOwnerFile('lifecycle-service.js');
-    const cutMatch = lifecycleSource.match(
-      /^function testRemediationNotice\s*\([^)]*\)\s*\{[\s\S]*?boundedGateSummary\(declaration\.reason,\s*(\d+)\)/m,
-    );
-    expect(cutMatch, 'expected to find the reason-bounding call inside testRemediationNotice').not.toBeNull();
-    const cutLength = Number(cutMatch[1]);
-    expect(cutLength).toBeGreaterThan(0);
+    const cutLength = deriveIntConst(readOwnerFile('review-evidence.js'), 'REVIEW_FINDING_LIMIT');
+    const detail = 'The correction belongs in the authored assertion. '.repeat(Math.ceil((cutLength + 200) / 50));
+    expect(detail.length).toBeGreaterThan(cutLength);
 
     const dir = await reviewFlowProject();
     const { reviewTicket } = await walkToReviewFlow(dir);
     const reviewed = await recordReceipt(dir, receipt(reviewTicket, {
       tests: flowGreenTest,
-      findings: [flowTestFinding('the correction belongs in the authored test')],
+      findings: [flowTestFinding(detail)],
       evidence: { verdict: 'fail', summary: 'the correction belongs in the authored test' },
     }));
     expect(reviewed.ok, JSON.stringify(reviewed.errors ?? [])).toBe(true);
@@ -555,6 +551,12 @@ describe('test remediation uses structured review evidence with an immutable obj
 
     expect(remediationTest.objective).toBe(FLOW_RUN_OBJECTIVE);
     expect(remediationTest.review_findings.length).toBeGreaterThan(0);
+    expect(remediationTest.review_findings.every(entry => entry.length <= cutLength)).toBe(true);
+    expect(remediationTest.review_findings.join(' ')).toMatch(/chars cut/);
+    expect(remediationTest.review_findings.join(' ')).toContain('tests/value.test.js:1');
+    expect(remediationTest.review_finding_evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source_stage: 'review', evidence_anchor: 'tests/value.test.js:L1', blocking: true }),
+    ]));
     expect(remediationTest.claimed_paths).toEqual(['tests/value.test.js']);
   }, 60_000);
 });

@@ -39,7 +39,7 @@ function jobBlock(yaml, jobName) {
 }
 
 function requireFullActionPins(yaml, consumer) {
-  const uses = yaml.split(/\r?\n/u).filter((line) => /^\s*- uses:/u.test(line));
+  const uses = yaml.split(/\r?\n/u).filter((line) => /^\s*(?:-\s+)?uses:/u.test(line));
   requireCondition(uses.length > 0, `${consumer} must use at least one pinned action`);
   for (const line of uses) {
     requireCondition(/@[0-9a-f]{40}(?:\s+#.*)?$/u.test(line), `${consumer} action is not pinned to a full SHA: ${line.trim()}`);
@@ -53,7 +53,7 @@ async function check(root) {
   requireCondition(manifest.node?.minimum === '22.12.0', 'Node.js minimum must be 22.12.0');
   requireCondition(manifest.node?.blocking === '24.15.0', 'blocking Node.js must be 24.15.0');
   requireCondition(manifest.hosts?.codex?.package === '@openai/codex', 'Codex package identity mismatch');
-  requireCondition(manifest.hosts?.codex?.version === '0.147.0', 'Codex CLI pin mismatch');
+  requireCondition(manifest.hosts?.codex?.version === '0.153.4', 'Codex CLI pin mismatch');
   requireCondition(
     manifest.hosts?.codex?.live_certification === 'required',
     'Codex must be the required live-certification host',
@@ -114,6 +114,7 @@ async function check(root) {
     requireContains(validation, value, '.github/workflows/release.yml host-validation');
   }
   requireContains(validation, 'npm run compatibility:check', '.github/workflows/release.yml host-validation');
+  requireContains(validation, 'npm audit --audit-level=high', '.github/workflows/release.yml host-validation');
   requireCondition(/permissions:\n      contents: read/u.test(validation), 'host-validation must be contents-read-only');
   requireCondition(!/contents: write|id-token: write|attestations: write|gh release|npm publish|secrets\./u.test(validation), 'host-validation reaches a privileged release sink');
   requireContains(publish, 'needs: host-validation', '.github/workflows/release.yml publish');

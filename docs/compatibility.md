@@ -7,11 +7,20 @@ Release checks use these exact versions:
 | Component | Pinned version |
 |---|---|
 | Node.js | 24.15.0 |
-| Codex CLI | 0.147.0 |
+| Codex CLI | 0.153.4 |
 | Claude Code | 2.1.228 |
 
+The Codex pin changes explicitly from 0.147.0 to 0.153.4 for GPT-6 Astra
+worker defaults. The catalog returned to 0.147.0 omitted Astra, so native
+`spawn_agent` rejected the requested model even though the parent could run.
+The reviewed 0.153.4 catalog includes Astra with V2 metadata. This compatibility
+decision requires fresh checks on the exact host and candidate; it does not
+certify a release or change the outcome of earlier failed attempts. Model
+metadata comes from the host's provider catalog, without fabricated entries
+or copying a catalog across client versions.
+
 APE's Codex native worker dispatch requires the V2 agent interface on the pinned
-0.147.0 host. Enable it in the Codex home used to launch APE:
+0.153.4 host. Enable it in the Codex home used to launch APE:
 
 ```bash
 codex features enable multi_agent_v2
@@ -36,8 +45,8 @@ launch envelopes, including `task_name`, `fork_turns`, and model/reasoning
 overrides. It also enables the V2 wait tool by default. `multi_agent = true`
 alone can select the older V1 interface, which cannot accept those envelopes.
 No additional feature flag is required for this selection. These details are
-verified against the pinned host's [version selection](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/core/src/config/mod.rs#L1556)
-and [native tool definitions](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/core/src/tools/handlers/multi_agents_spec.rs#L102).
+verified against the pinned host's [version selection](https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/config/mod.rs#L1533)
+and [native tool definitions](https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/tools/handlers/multi_agents_spec.rs#L100).
 
 Codex is the sole required live release-certification host.
 Claude live operation is unverified. Credential-free CI checks its package, manifest, pinned CLI, and

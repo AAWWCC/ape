@@ -10,7 +10,10 @@ import { splitCommand } from '../lib/runtime/runner.js';
 
 const roots = [];
 const defaultEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^npm_config_(?:ignore[-_]scripts|if[-_]present|workspaces?|include[-_]workspace[-_]root|script[-_]shell)$/i.test(key)));
-afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
+// Bound retries to fixture removal; persistent cleanup errors still fail the test.
+afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, {
+  recursive: true, force: true, maxRetries: 3, retryDelay: 50,
+}))));
 async function put(root, file, content, executable = false) {
   const target = path.join(root, file);
   await mkdir(path.dirname(target), { recursive: true });

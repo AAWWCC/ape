@@ -134,6 +134,35 @@ describe('offline native probe failure reporting', () => {
     expect(await readFile(paths.bindingProbe, 'utf8')).toBe(before);
   });
 
+  it('distinguishes completed proof expiry from expiry before acknowledgement without changing proof', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-02T03:04:05.000Z'));
+    const paths = await fixture();
+    const action = await prepare(paths);
+    await launch(paths, action);
+    const { native } = await candidate(paths);
+    const bound = await bootstrapBindingProbe(paths, bootstrap(action, native));
+    expect(bound.valid).toBe(true);
+    const boundRecord = await readJson(paths.bindingProbe);
+    expect(projectBindingProbe(boundRecord, Date.parse(boundRecord.expires_at))).toMatchObject({
+      status: 'expired', infrastructure_status: 'failed',
+      reason: 'native binding diagnostic expired before acknowledgement',
+    });
+    await acknowledgeBindingProbe(paths, {
+      probe_id: action.probe.probe_id,
+      probe_capability: bound.additional_context.match(/^APE_PROBE_CAPABILITY=(.+)$/m)[1],
+    });
+    const before = await readFile(paths.bindingProbe, 'utf8');
+    const completed = JSON.parse(before);
+    vi.setSystemTime(Date.parse(completed.expires_at));
+    expect(await bindingProbeStatus(paths, { readOnly: true })).toMatchObject({
+      status: 'expired', infrastructure_status: 'failed', completed_at: completed.completed_at,
+      reason: 'completed native binding proof expired before consumption',
+      transitions: completed.transitions,
+    });
+    expect(await readFile(paths.bindingProbe, 'utf8')).toBe(before);
+  });
+
   it('retains a bounded exact-token production rejection in probe status', async () => {
     const paths = await fixture();
     const action = await prepare(paths);

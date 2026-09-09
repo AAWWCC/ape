@@ -39,7 +39,7 @@ Passing these checks is not proof of a working live host.
 ## Live certification
 
 Codex is the sole required live host from APE 2.23.0 onward, as defined in
-[`compatibility.json`](../compatibility.json). Keep its exact Codex CLI 0.147.0 pin.
+[`compatibility.json`](../compatibility.json). Keep its exact Codex CLI 0.153.4 pin.
 A host failure requires a compatibility decision, not an implicit upgrade.
 
 Installation, hook trust, repository creation, pushes, PRs, and merges each need
@@ -56,9 +56,10 @@ repository, and base. Never use APE's public source repository as the test targe
 3. Use an isolated host profile and supported permission/trust workflows. Project
    trust is not hook trust. Stop if permissions or trusted hooks are missing;
    do not change them implicitly or use bypass flags.
-   In that profile, set `[features] multi_agent_v2 = true`. The pinned CLI's
-   older default agent interface cannot accept APE's `task_name` and `fork_turns`
-   launch fields. Verify the effective host setting as well as hook trust;
+   In that profile, set `[features] multi_agent_v2 = true` to select the required
+   interface independently of model metadata. The older V1 interface cannot
+   accept APE's `task_name` and `fork_turns` launch fields. Verify the effective
+   host setting as well as hook trust;
    `multi_agent = true` alone does not select the required interface.
 4. Set this exact identity in each test repository's local Git config:
    `APE Certification <ape-certification@users.noreply.github.com>`.
@@ -97,8 +98,12 @@ Before launch, APE checks:
 - **Package:** the isolated home must contain the complete candidate package.
 - **Transport:** the selected custom `model_providers` table must contain TOML
   integer-zero request and stream retry counts, and boolean-false
-  `supports_websockets`. Inactive providers, comments, misplaced fields, quoted
-  zeroes, and floats cannot satisfy this check.
+  `supports_websockets`. Its display name must be exactly `name = "OpenAI"`:
+  the pinned host uses that name to preserve native encryption markers and
+  internal metadata in outgoing request history. Keep the custom provider ID;
+  endpoint and authentication settings still need separate effective preflight
+  review. Inactive providers, comments, misplaced fields, quoted zeroes, and
+  floats cannot satisfy this check.
 - **Configuration:** analytics/features values must be parsed booleans. Reserved
   built-in provider definitions and profile overrides are refused; use reviewed,
   flattened isolated settings.
@@ -114,6 +119,15 @@ Before launch, APE checks:
   approved through `approval_mode = "approve"` or an approving
   `default_tools_approval_mode`. Per-tool settings override defaults.
   `auto`, `prompt`, and `writes` do not meet this headless requirement.
+
+The launcher also checks the isolated profile's normally discovered child-model
+catalog. Its client version must match the pinned host, its age must not exceed
+the host's 300-second cache lifetime, and every effective Codex tier and role
+model must support native V2 agents. Refresh stale or missing metadata through
+normal host model discovery before an attempt; do not copy another client's
+cache or use a static catalog override. A working parent model does not establish
+child eligibility. This local snapshot check does not prove provider identity,
+authentication, or availability of a future backend request.
 
 Configuration must be a stable regular UTF-8 file, at most 256 KiB, 32 nesting
 levels, and 10,000 parsed values. Symlinks and special files are refused. Errors
@@ -139,6 +153,19 @@ Only the authenticated bind hook injects task and receipt authority. A probe
 follows its acknowledgement-only exception: no synthetic-ticket reads or receipt
 validation. Missing injected context or an unbound child fails the attempt.
 Never replace the child or reconstruct its authority from transcripts.
+
+### Model-catalog lifetime at launch
+
+Codex 0.153.4 `model/list` uses a valid cached catalog and has no force-refresh
+parameter. A successful response alone does not prove a refreshed
+`models_cache.json` timestamp. Finish remote preflight before the final metadata
+handoff. If the actual cache has too little lifetime remaining, wait until after
+expiry before acquiring temporary authentication and performing normal metadata
+discovery. Verify the actual exact-client cache, native model capabilities and
+at least 60 seconds of remaining lifetime after metadata cleanup and immediately
+before formal launch. Keep the launcher's 300-second guard unchanged; never
+rewrite cache timestamps, delete cache data to force a fetch, or synthesize
+catalog entries. Retain any failure without replaying a claimed attempt.
 
 ### Four runs, in order
 
@@ -209,6 +236,17 @@ signature or policy evaluator.
 
 ### Certificate and release
 
+Version 2.25.8 has a single, explicit owner-authorized publication exception,
+recorded in [the bounded release record](../evals/release-owner-exception-2.25.8.json).
+Its four workflows completed, but the full workflow's interruptions and
+expired-ticket retry prevent first-pass certification. For exactly tag
+`v2.25.8`, both release validation jobs run the separate exception verifier.
+That verifier pins the record and every file outside a fixed release-only
+allowlist to the tested candidate, including all runtime/plugin bytes and the
+unchanged strict verifier. Normal CI, package/public-safety checks, dependency
+auditing, and provenance attestations still apply. Every other version follows
+the strict certificate procedure below; there is no general bypass option.
+
 Use [the ledger schema](../evals/live-certification.schema.json) only for real
 qualifying runs. It permits bounded identifiers, versions, counters, reason
 codes, booleans, and hashes—not objectives, ticket/receipt prose, output, provider
@@ -233,6 +271,11 @@ rejects invalid ledgers, missing runs, wrong pins, host partitions, and incorrec
 source/tag relationships. Historical schema-v4 records remain readable but
 cannot pass the schema-v5 gate or be silently upgraded.
 
+Tagged-release publication also waits for the complete source suite on Node
+22.12.0 and the required native runtime selection on Linux, macOS, and Windows
+under both pinned Node versions. These jobs run against the tag's exact checkout;
+failed or skipped dependencies prevent host validation and publication.
+
 The operator creating the ledger attests that the recorded events happened.
 The verifier checks that attestation and its evidence bindings; it cannot
 independently prove external host or GitHub events. Retain the evidence for audit
@@ -251,9 +294,12 @@ npm run release:worker-validator-proof -- /secure/path/worker-validator-proof.js
 
 Run it from the exact candidate and retain the proof externally. It launches every
 packaged role without an injected tool allowlist and requires a real validator
-call to reach APE's no-active-run sentinel. The proof binds candidate manifests,
-MCP declaration, plugin identity, canary implementation, role/tool observations,
-and transcript hashes. Missing roles, changed evidence, or stale candidates fail.
+call to reach APE's no-active-run sentinel. The proof binds the complete regular-file
+package inventory, including runtime bundles, hooks, prompts, metadata and added files,
+plus canonical role manifests, canary implementation, role/tool observations, and
+transcript hashes. Symlinks and special files are refused. The candidate must retain
+the same digest throughout the checks. Missing roles, changed evidence, or stale
+candidates fail.
 
 Both commands must pass to record a successful validator-reachability proof.
 This optional check is not a release prerequisite and is not part of
@@ -275,12 +321,18 @@ Readiness also checks these runtime boundaries. See [pipeline](pipeline.md) and
   schemas, field/byte limits, commands, and capabilities before dispatch. Planning
   complexity is `production claims + test paths + 2*requirements + 4*risks +
   2*required verification profiles`. Scores above 48 or canonical inputs above
-  8192 UTF-8 bytes require acyclic, non-overlapping, scope-covering slices that
-  each pass admission.
+  8192 UTF-8 bytes recommend decomposition; these heuristics do not reject an
+  otherwise admissible task. Proposed slices must be acyclic, non-overlapping,
+  cover the scope, and each pass admission.
 - **Verification:** baseline inspection is read-only and does not run tests.
   Missing runners are different from legitimate failing tests. Generators and
   formatters do not belong in read-only `policy.evidence_scripts`; run approved
   maintenance before ticket issuance and review the resulting tree.
+  Aggregate `script/test` and npm scripts require an explicit
+  `test_commands.targeted_template` for red-test admission because arbitrary
+  scripts may ignore file arguments. Single-runner merge gates honor that same
+  template. Manifest discovery reads bounded regular files and refuses FIFOs,
+  symlinks, and oversized or changing manifests.
 - **Recovery advice:** tree-divergence and role-boundary refusals preserve state
   and do not identify the writer. Advice names cause, state, eligible actions,
   and operator decisions. Active runs cannot reset. An explicit audited abort
@@ -308,6 +360,11 @@ Readiness also checks these runtime boundaries. See [pipeline](pipeline.md) and
   Changed or rebound paths are rescanned. Locks, bounds, both sides of publication,
   and every later mutation are revalidated; live or permission-ambiguous owners
   are not evicted for an old heartbeat.
+  State replacements retain the old complete file if Windows sharing holds
+  outlast bounded retries. File contents and audit appends are synced before
+  return; directory entries are synced on POSIX filesystems that support it.
+  Windows and filesystems without directory fsync retain a power-loss durability
+  limitation. An interrupted audit append may leave a partial final line.
 - **Lineage:** immutable archives are never rewritten into success. Only complete,
   verified version-2 attestations may promote an existing successor relationship.
   New structured successor starts remain disabled because hook input does not

@@ -175,7 +175,7 @@ const INTERNAL_OWNER_ASSERTIONS = [
   {
     domain: 'bounded native Codex bootstrap identity evidence and orientation',
     owner: 'lib/runtime/codex-bootstrap.js',
-    exports: ['BOOTSTRAP_TOOL_PATTERN', 'codexBootstrapOrientation', 'recordCodexBootstrapCandidate', 'resolveCodexBootstrapCandidate'],
+    exports: ['BOOTSTRAP_TOOL_PATTERN', 'codexBootstrapOrientation', 'codexProbeReservationOrientation', 'recordCodexBootstrapCandidate', 'resolveCodexBootstrapCandidate'],
     dependencies: [
       'lib/runtime/constants.js',
       'lib/runtime/file-stats.js',
@@ -187,7 +187,7 @@ const INTERNAL_OWNER_ASSERTIONS = [
   {
     domain: 'bounded active run state reads and validation',
     owner: 'lib/runtime/active-state.js',
-    exports: ['ACTIVE_STATE_MAX_BYTES', 'activeState', 'activeStateDiagnosisMatchesEntry'],
+    exports: ['ACTIVE_STATE_MAX_BYTES', 'activeState', 'activeStateDiagnosisMatchesEntry', 'assertActiveStateWritable'],
     dependencies: [
       'lib/runtime/bounded-summary.js',
       'lib/runtime/constants.js',
@@ -217,7 +217,6 @@ const INTERNAL_OWNER_ASSERTIONS = [
       'capabilityDynamicTestPathBounds',
       'capabilityTestPathBoundErrors',
       'capabilityTestPathUsage',
-      'worstCaseCapabilityTestPathSets',
     ],
     dependencies: [
       'lib/runtime/constants.js',
@@ -232,7 +231,6 @@ const INTERNAL_OWNER_ASSERTIONS = [
       'capabilityManifestGrowthEnabled',
       'mergeReceiptCapabilityGrowthResult',
       'prospectiveReceiptCapabilityGrowth',
-      'prospectiveReceiptCapabilityGrowthFromTree',
       'ticketCapabilityManifest',
       'validateCapabilityManifestGrowth',
     ],
@@ -241,7 +239,6 @@ const INTERNAL_OWNER_ASSERTIONS = [
       'lib/runtime/capability-contract.js',
       'lib/runtime/capability-selection.js',
       'lib/runtime/constants.js',
-      'lib/runtime/git.js',
       'lib/runtime/lane-policy.js',
       'lib/runtime/path-scope.js',
       'lib/runtime/pipeline.js',
@@ -735,7 +732,7 @@ function analyzeBoundaries({
 
 function productionInput() {
   const missing = REQUIRED_OWNER_FILES.filter((file) => !existsSync(path.join(REPO_ROOT, file)));
-  const tracked = execFileSync('git', ['ls-files', 'lib/runtime'], { cwd: REPO_ROOT, encoding: 'utf8' })
+  const tracked = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', 'lib/runtime'], { cwd: REPO_ROOT, encoding: 'utf8' })
     .split('\n')
     .filter((file) => file.endsWith('.js'));
   const graphFiles = [...new Set([...tracked, ...REQUIRED_OWNER_FILES])].sort();
@@ -992,7 +989,7 @@ describe('runtime-v2 module boundaries: narrow internal capability owners', () =
 });
 
 describe('runtime-v2 module boundaries: genuine ownership, facade parity, and graph', () => {
-  it('uses the explicit owner-symbol manifest and has an acyclic tracked-plus-required runtime graph', () => {
+  it('uses the explicit owner-symbol manifest and has an acyclic worktree runtime graph', () => {
     const input = productionInput();
     if (input.missing.length > 0) return;
     const result = analyzeBoundaries({

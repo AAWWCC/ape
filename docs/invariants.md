@@ -32,7 +32,7 @@ only needs recording, the parent retries that record without restarting the work
    work claims neither.
 4. **Tree-bound evidence.** The runtime recomputes the tree SHA and changed files before accepting
    a receipt. A worker's claim alone is insufficient.
-5. **Bounded retries and remediation.** Each failed stage gets at most one retry. Further
+5. **Bounded retries and remediation.** Each failed stage follows the run's frozen retry policy (one retry by default). Further
    remediation requires a strictly smaller blocker set and available budget.
 6. **Shared project and host policy.** Claude and Codex use the same core rules. Adapters do not
    decide policy, and project tooling comes from configuration.

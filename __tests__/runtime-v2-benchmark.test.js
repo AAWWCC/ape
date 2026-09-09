@@ -204,7 +204,7 @@ describe('benchmark CLI', () => {
     expect(JSON.parse(result.stdout).passed).toBe(false);
   });
 
-  it('record appends a validated record that verify then consumes', () => {
+  it('record appends a validated record that verify then consumes without leaving locks or staging files', () => {
     writeFileSync(file, '[]\n');
     const result = runCli([
       'record', '--host', 'claude', '--lane', 'mechanical', '--raw-ms', '120000',
@@ -215,10 +215,12 @@ describe('benchmark CLI', () => {
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatchObject({ host: 'claude', lane: 'mechanical', raw_ms: 120_000, test_ms: 10_000 });
     expect(typeof stored[0].recorded_at).toBe('string');
+    expect(readdirSync(tempRoot)).toEqual(['reference-runs.json']);
     // The appended record is now real (insufficient) data: verify reports it and fails.
     const verify = runCli(['verify', file]);
     expect(verify.status).toBe(1);
     expect(JSON.parse(verify.stdout).groups.find((g) => g.host === 'claude' && g.lane === 'mechanical').count).toBe(1);
+    expect(readdirSync(tempRoot)).toEqual(['reference-runs.json']);
   });
 
   it('record rejects an invalid record without touching the ledger', () => {

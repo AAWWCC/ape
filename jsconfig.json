@@ -6,6 +6,8 @@
     "target": "ES2022",
     "strict": false,
     "noImplicitAny": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noEmit": true,
     "resolveJsonModule": true,
     "types": ["node", "vitest/globals"]

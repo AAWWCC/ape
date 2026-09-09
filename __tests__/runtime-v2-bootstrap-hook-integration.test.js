@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { bindingProbeStatus, prepareBindingProbe } from '../lib/runtime/binding-probe.js';
+import { acknowledgeBindingProbe, bindingProbeStatus, prepareBindingProbe } from '../lib/runtime/binding-probe.js';
 import { codexBootstrapStatus } from '../lib/runtime/claude-dispatch.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { invokeCodexHook } from './codex-native-test-helper.js';
@@ -23,18 +23,18 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-async function fixture() {
+async function fixture({ launch = true } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-bootstrap-hook-'));
   cleanups.push(dir);
   const paths = runtimePaths(dir);
   await mkdir(paths.runtime, { recursive: true });
   const action = await prepareBindingProbe(paths, { host: 'codex', model });
-  const launch = await invokeCodexHook(root, {
+  const launched = launch && await invokeCodexHook(root, {
     hook_event_name: 'PreToolUse', project_dir: dir,
     session_id: 'parent-session', turn_id: 'parent-turn', tool_use_id: 'spawn-call',
     tool_name: 'collaborationspawn_agent', tool_input: action.dispatch.spawn_args,
   });
-  expect(denied(launch)).toBe(false);
+  if (launch) expect(denied(launched)).toBe(false);
   return { dir, paths, action };
 }
 
@@ -56,6 +56,126 @@ function bind(value, overrides = {}) {
     ...overrides,
   };
 }
+
+describe('probe reservation orientation and denial diagnostics', () => {
+  const reason = (result) => result.hookSpecificOutput?.permissionDecisionReason;
+  const ordinary = (value, overrides = {}) => ({
+    ...child(value), hook_event_name: 'PreToolUse', tool_name: 'exec_command',
+    tool_input: { cmd: 'npm test', workdir: value.dir }, ...overrides,
+  });
+  const excludesAuthority = (text, value) => {
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThan(2_048);
+    for (const privateValue of [value.dir, value.action.probe.probe_id,
+      value.action.dispatch.agent_name, value.action.dispatch.bootstrap_args.bootstrap_capability]) {
+      expect(text).not.toContain(privateValue);
+    }
+    expect(text).not.toMatch(/APE_(?:RECEIPT|PROBE|BOUND)_CAPABILITY=/u);
+    expect(text).toContain('does not associate this child with a probe or ticket');
+    expect(text).not.toContain('continue that non-APE assignment');
+  };
+
+  it.each(['prepared', 'launched'])('states the actual %s reservation fence without authorizing a child', async (status) => {
+    const value = await fixture({ launch: status === 'launched' });
+    await writeFile(path.join(value.dir, 'AGENTS.md'), 'Run npm test for the complete independent test suite.\n');
+    const before = await readFile(value.paths.bindingProbe, 'utf8');
+    const observed = await invokeCodexHook(root, child(value));
+    const text = context(observed);
+    expect(text).toContain('APE preflight child-tool reservation');
+    excludesAuthority(text, value);
+    expect(text).toContain('No project work, commands, tests, or file access are authorized during this reservation');
+    expect(text).toContain('Keep honoring applicable repository constraints');
+    expect(text).toContain('APE_PROBE_BOOTSTRAP_UNAVAILABLE');
+    if (status === 'launched') {
+      expect(text).toContain('missing, unreadable, or not assigned to you');
+      expect(text).toContain('Do not request, reconstruct, or search for bootstrap arguments');
+      expect(text).toContain('Only with the exact parent-assigned bootstrap arguments');
+    } else {
+      expect(text).toContain('No authorized probe launch is awaiting bootstrap');
+      expect(text).toContain('Do not call tools');
+    }
+    const unrelated = await invokeCodexHook(root, child(value, { agent_id: 'unrelated-child', turn_id: 'unrelated-turn' }));
+    expect(context(unrelated)).toBe(text);
+    const rejected = await invokeCodexHook(root, ordinary(value));
+    expect(denied(rejected)).toBe(true);
+    expect(reason(rejected)).toContain('live binding probe reserves the pre-run child tool window');
+    expect(reason(rejected)).not.toContain('state validation failed');
+    expect(await readFile(value.paths.bindingProbe, 'utf8')).toBe(before);
+  });
+
+  it('does not invite bootstrap after the launch expires while the reservation remains live', async () => {
+    const value = await fixture();
+    const record = JSON.parse(await readFile(value.paths.bindingProbe, 'utf8'));
+    const shift = (time) => new Date(Date.parse(time) - 2 * 60_000).toISOString();
+    for (const key of ['prepared_at', 'expires_at', 'launched_at', 'launch_expires_at']) record[key] = shift(record[key]);
+    record.transitions = record.transitions.map((entry) => ({ ...entry, at: shift(entry.at) }));
+    await writeFile(value.paths.bindingProbe, JSON.stringify(record));
+    const before = await readFile(value.paths.bindingProbe, 'utf8');
+    const text = context(await invokeCodexHook(root, child(value)));
+    excludesAuthority(text, value);
+    expect(text).toContain('The authorized bootstrap launch has expired');
+    expect(text).toContain('Do not call tools');
+    expect(text).toContain('APE_PROBE_BOOTSTRAP_UNAVAILABLE');
+    expect(text).not.toContain('Call installed APE ape_bind');
+    expect(reason(await invokeCodexHook(root, ordinary(value)))).toContain('live binding probe reserves the pre-run child tool window');
+    expect(await readFile(value.paths.bindingProbe, 'utf8')).toBe(before);
+  });
+
+  it.each(['bound', 'completed'])('does not invite another bootstrap into a %s reservation', async (status) => {
+    const value = await fixture();
+    await invokeCodexHook(root, child(value));
+    const bootstrapped = await invokeCodexHook(root, bind(value));
+    expect(denied(bootstrapped)).toBe(false);
+    if (status === 'completed') {
+      await acknowledgeBindingProbe(value.paths, {
+        probe_id: value.action.probe.probe_id,
+        probe_capability: context(bootstrapped).match(/^APE_PROBE_CAPABILITY=(.+)$/m)[1],
+      });
+    }
+    const before = await readFile(value.paths.bindingProbe, 'utf8');
+    const second = child(value, { agent_id: 'another-child', turn_id: 'another-turn' });
+    const text = context(await invokeCodexHook(root, second));
+    excludesAuthority(text, value);
+    expect(text).toContain('This reservation already has a bound or completed claimant');
+    expect(text).toContain('Do not start another bootstrap');
+    expect(text).toContain('APE_PROBE_BOOTSTRAP_UNAVAILABLE');
+    expect(reason(await invokeCodexHook(root, ordinary(value, { agent_id: second.agent_id, turn_id: second.turn_id })))).toContain('live binding probe reserves the pre-run child tool window');
+    expect(denied(await invokeCodexHook(root, { ...bind(value), session_id: 'another-child', turn_id: 'another-turn' }))).toBe(true);
+    const after = JSON.parse(await readFile(value.paths.bindingProbe, 'utf8'));
+    const original = JSON.parse(before);
+    expect(after.status).toBe(original.status);
+    expect(after.bound_agent_id).toBe(original.bound_agent_id);
+    expect(reason(await invokeCodexHook(root, ordinary(value)))).toContain('binding canary may not call tools');
+  });
+
+  it('keeps malformed native identity and damaged probe state distinct from a healthy reservation denial', async () => {
+    const value = await fixture({ launch: false });
+    const malformed = await invokeCodexHook(root, { ...ordinary(value), agent_id: undefined, agent_type: undefined, is_subagent: true });
+    expect(denied(malformed)).toBe(true);
+    expect(reason(malformed)).toContain('probe identity state validation failed');
+    expect(context(await invokeCodexHook(root, child(value, { model: undefined })))).toBeUndefined();
+    await writeFile(value.paths.bindingProbe, '{malformed probe JSON');
+    const damaged = await invokeCodexHook(root, ordinary(value, { agent_id: 'new-child', turn_id: 'new-turn' }));
+    expect(denied(damaged)).toBe(true);
+    expect(reason(damaged)).toContain('probe identity state validation failed');
+    expect(reason(damaged)).not.toContain('live binding probe reserves');
+    expect(context(await invokeCodexHook(root, child(value, { agent_id: 'new-child', turn_id: 'new-turn' })))).toBeUndefined();
+  });
+
+  it('leaves expired unbound reservations and projects without a probe neutral', async () => {
+    const value = await fixture({ launch: false });
+    const record = JSON.parse(await readFile(value.paths.bindingProbe, 'utf8'));
+    const shift = (time) => new Date(Date.parse(time) - 6 * 60_000).toISOString();
+    record.prepared_at = shift(record.prepared_at);
+    record.expires_at = shift(record.expires_at);
+    record.transitions = record.transitions.map((entry) => ({ ...entry, at: shift(entry.at) }));
+    await writeFile(value.paths.bindingProbe, JSON.stringify(record));
+    expect(await invokeCodexHook(root, child(value))).toEqual({});
+    expect(await invokeCodexHook(root, ordinary(value))).toEqual({});
+    await rm(value.paths.bindingProbe);
+    expect(await invokeCodexHook(root, child(value))).toEqual({});
+    expect(await invokeCodexHook(root, ordinary(value))).toEqual({});
+  });
+});
 
 describe('native bootstrap source-hook integration', () => {
   it('delivers APE-bounded authority without host preview spilling', async () => {
@@ -238,7 +358,7 @@ describe('native bootstrap source-hook integration', () => {
     const observed = await invokeCodexHook(root, child(value, {
       session_id: 'unrelated-parent', agent_id: 'unrelated-child', turn_id: 'unrelated-first-turn',
     }));
-    expect(context(observed)).toContain('not ticket authority');
+    expect(context(observed)).toContain('does not associate this child with a probe or ticket');
     const external = {
       hook_event_name: 'PreToolUse', project_dir: value.dir,
       session_id: 'unrelated-child', tool_name: 'mcp__unrelated_provider__search', tool_input: {},

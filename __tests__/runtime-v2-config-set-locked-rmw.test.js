@@ -1,9 +1,7 @@
-import { execFileSync } from 'node:child_process';
-import { constants as fsConstants } from 'node:fs';
-import { mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configAction } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { readJson } from '../lib/runtime/storage.js';
@@ -17,26 +15,30 @@ import { readJson } from '../lib/runtime/storage.js';
 // writer's key AND its explicit_keys provenance entry while BOTH calls
 // return ok: silent config loss on a success response.
 //
-// Interleaving technique (deterministic, public surface only): every set
-// reads the stored config file (.ape/runtime/config.json) at the top of its
-// read-modify-write. Swapping that file for a FIFO holds the first writer at
-// exactly its base read; the test then restores the real stored bytes, lets
-// a second writer run, and only afterwards releases the held writer by
-// feeding its already-open descriptor the ORIGINAL base bytes. Under the
-// unserialized RMW the held writer's write-back lands strictly after the
-// second writer's and erases it. A correct runtime — whichever way it
-// serializes the RMW (withReceiptLock, a dedicated config lock on the same
-// helper, or an equivalent) — never lets the second writer's landed key
-// vanish: either the second writer queues behind the held first (the bounded
-// wait below then times out and the release happens first) or its write is
-// re-read before the first writer's write-back. Every assertion is about the
-// raced OUTCOME (which keys and provenance entries survive in the stored
-// config), never about which lock either call held. Same deterministic
-// hold/release-of-an-on-disk-file discipline as the sibling
-// start-override-reset race test.
+// Pause the first completed ordinary-file read at the storage seam. The
+// bytes and read guards remain real; only delivery of that first value waits.
+// A FIFO cannot represent stored configuration now that readers reject it.
+// With no RMW lock, writer two commits while writer one holds the old value,
+// then writer one overwrites it. Assertions exercise the public set/init
+// outcomes and exact surviving provenance, without mocking either lock.
+const heldRead = vi.hoisted(() => ({ file: null, arrive: null, release: null, wait: null }));
+vi.mock('../lib/runtime/bounded-file.js', async (original) => {
+  const actual = await original();
+  return { ...actual, readBoundedJson: async (...args) => {
+    const value = await actual.readBoundedJson(...args);
+    if (args[0] === heldRead.file) {
+      heldRead.file = null;
+      heldRead.arrive();
+      await heldRead.wait;
+    }
+    return value;
+  } };
+});
 
 const cleanups = [];
 afterEach(async () => {
+  heldRead.release?.();
+  Object.assign(heldRead, { file: null, arrive: null, release: null, wait: null });
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -51,41 +53,20 @@ async function project() {
 }
 
 // Seed one stored override through the public surface alone so the store
-// exists with well-formed bytes (and one provenance entry) to feed the held
-// reader later.
+// exists with well-formed bytes and one provenance entry.
 async function seededProject() {
   const dir = await project();
   const seeded = await configAction(dir, 'set', { key: 'custom.seed', value: 'baseline' });
   expect(seeded.ok).toBe(true);
   const paths = runtimePaths(dir);
-  const baseBytes = await readFile(paths.config, 'utf8');
-  return { dir, paths, baseBytes };
+  return { dir, paths };
 }
 
-// Plant the deterministic stall point: swap the stored config file for a FIFO
-// so the next writer blocks inside its read-modify-write, between its base
-// read and its write-back.
-async function plantConfigFifo(paths) {
-  await rm(paths.config, { force: true });
-  execFileSync('mkfifo', [paths.config]);
-}
-
-// Rendezvous with the in-flight writer: a non-blocking write-open of a FIFO
-// succeeds only once a reader has it open, i.e. only once the writer has
-// reached its base read mid-RMW. Bounded retry, no fixed sleeps.
-async function openWriteEndWhenReaderArrives(fifoPath, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      return await open(fifoPath, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK);
-    } catch (error) {
-      if (error?.code !== 'ENXIO') throw error;
-      if (Date.now() > deadline) {
-        throw new Error('timed out waiting for the config writer to reach its base read');
-      }
-      await sleep(10);
-    }
-  }
+function pauseConfigRead(paths) {
+  heldRead.file = paths.config;
+  const arrived = new Promise(resolve => { heldRead.arrive = resolve; });
+  heldRead.wait = new Promise(resolve => { heldRead.release = resolve; });
+  return { arrived, release: () => heldRead.release() };
 }
 
 async function waitFor(probe, timeoutMs, intervalMs = 25) {
@@ -120,23 +101,19 @@ describe('APE v2 setRuntimeConfig serialized read-modify-write (audit 1.10, inva
     );
   });
 
-  it.skipIf(process.platform === 'win32')(
+  it(
     'racing: a set that overlaps another set never drops the other writer\'s key or its explicit_keys provenance entry',
     async () => {
-      const { dir, paths, baseBytes } = await seededProject();
-      await plantConfigFifo(paths);
+      const { dir, paths } = await seededProject();
+      const barrier = pauseConfigRead(paths);
 
       const first = configAction(dir, 'set', { key: 'custom.alpha', value: 'from-first-writer' });
       first.catch(() => {});
       let second = null;
-      let writeEnd = null;
       try {
         // The first set is now held at its base read, mid read-modify-write.
-        writeEnd = await openWriteEndWhenReaderArrives(paths.config, 4_000);
-        // Restore the real stored bytes for every other reader; the held
-        // first set keeps its already-open FIFO descriptor.
-        await rm(paths.config, { force: true });
-        await writeFile(paths.config, baseBytes);
+        await barrier.arrived;
+
 
         second = configAction(dir, 'set', { key: 'custom.beta', value: 'from-second-writer' });
         second.catch(() => {});
@@ -153,13 +130,8 @@ describe('APE v2 setRuntimeConfig serialized read-modify-write (audit 1.10, inva
           return storedNow?.custom?.beta === 'from-second-writer';
         }, 3_000);
       } finally {
-        // Release the held first set: feed it the original base bytes and
-        // EOF, then drain both calls so no promise or descriptor outlives
-        // the test.
-        if (writeEnd) {
-          await writeEnd.write(baseBytes).catch(() => {});
-          await writeEnd.close().catch(() => {});
-        }
+        // Deliver the original parsed base, then drain both calls.
+        barrier.release();
         await Promise.allSettled([first, second ?? Promise.resolve()]);
       }
       const [firstSettled, secondSettled] = await Promise.allSettled([first, second]);
@@ -190,27 +162,25 @@ describe('APE v2 setRuntimeConfig serialized read-modify-write (audit 1.10, inva
     },
   );
 
-  it.skipIf(process.platform === 'win32')(
+  it(
     'racing: the init --apply per-slot loop rides the same serialization — a concurrent set survives it',
     async () => {
-      const { dir, paths, baseBytes } = await seededProject();
-      await plantConfigFifo(paths);
+      const { dir, paths } = await seededProject();
+      const barrier = pauseConfigRead(paths);
 
       // No runner manifest exists in the fixture, so the proposal is empty
       // and the operator-supplied values drive the per-slot persist loop:
       // two setRuntimeConfig calls, in whitelist order (targeted_template,
-      // then full). The first slot's base read is held at the FIFO.
+      // then full). The first slot's base read is paused before returning.
       const init = configAction(dir, 'init', {
         apply: true,
         values: { targeted_template: 'node --test {paths}', full: 'node --test' },
       });
       init.catch(() => {});
       let concurrentSet = null;
-      let writeEnd = null;
       try {
-        writeEnd = await openWriteEndWhenReaderArrives(paths.config, 4_000);
-        await rm(paths.config, { force: true });
-        await writeFile(paths.config, baseBytes);
+        await barrier.arrived;
+
 
         concurrentSet = configAction(dir, 'set', { key: 'custom.gamma', value: 'from-concurrent-set' });
         concurrentSet.catch(() => {});
@@ -224,10 +194,7 @@ describe('APE v2 setRuntimeConfig serialized read-modify-write (audit 1.10, inva
           return storedNow?.custom?.gamma === 'from-concurrent-set';
         }, 3_000);
       } finally {
-        if (writeEnd) {
-          await writeEnd.write(baseBytes).catch(() => {});
-          await writeEnd.close().catch(() => {});
-        }
+        barrier.release();
         await Promise.allSettled([init, concurrentSet ?? Promise.resolve()]);
       }
       const [initSettled, setSettled] = await Promise.allSettled([init, concurrentSet]);

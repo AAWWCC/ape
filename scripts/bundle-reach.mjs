@@ -17,9 +17,7 @@
  * verified record this incident produced and skills/run/SKILL.md ("Scope
  * fields") for the authoring guidance this tool exists to satisfy.
  *
- * Mirrors scripts/bundle-mcp.mjs's three entry points and their exact build
- * options (bundle/platform/format/target/minifyWhitespace) — keep the two in
- * step rather than duplicating a divergent option set. This script never
+ * Uses the generator's shared entry points and build options. This script never
  * writes an outfile: every build here runs `write: false`, so running it
  * never touches dist/ or anywhere else in the tree.
  *
@@ -41,27 +39,10 @@ import { build } from 'esbuild';
 import { statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BUNDLE_ENTRIES as ENTRIES, BUNDLE_OPTIONS } from './bundle-definition.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = dirname(__dirname);
-
-// Mirrors scripts/bundle-mcp.mjs's ENTRY / HOOKS_ENTRY / LARP_ENTRY and their
-// build options exactly (see that file's header comment); the label is this
-// tool's own vocabulary for reporting, not a bundle-mcp.mjs concept.
-const ENTRIES = [
-  { label: 'mcp', entry: 'bin/ape-mcp.mjs', artifact: 'dist/ape-mcp.bundle.mjs' },
-  { label: 'hooks', entry: 'bin/ape-hook.mjs', artifact: 'dist/ape-hooks.bundle.mjs' },
-  { label: 'larp', entry: 'bin/ape-larp.mjs', artifact: 'dist/ape-larp.bundle.mjs' },
-];
-
-/** @type {import('esbuild').BuildOptions} */
-const BUILD_OPTIONS = {
-  bundle: true,
-  platform: 'node',
-  format: 'esm',
-  target: 'node22',
-  minifyWhitespace: true,
-};
 
 class UsageError extends Error {}
 
@@ -93,7 +74,7 @@ function toRepoRelative(rawArg) {
 
 async function buildMetafile(entry) {
   const result = await build({
-    ...BUILD_OPTIONS,
+    ...BUNDLE_OPTIONS,
     entryPoints: [join(REPO_ROOT, entry)],
     write: false,
     metafile: true,

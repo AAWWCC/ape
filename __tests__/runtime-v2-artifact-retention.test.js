@@ -1,8 +1,9 @@
-import { gunzipSync } from 'node:zlib';
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
+import { link, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { archiveRun } from '../lib/runtime/history.js';
@@ -14,8 +15,21 @@ import { historyAction } from '../lib/runtime/service.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
 import { acquireRunLock, releaseRunLock } from '../lib/runtime/lock.js';
 
+const publicationRace = vi.hoisted(() => ({ destination: null, bytes: null }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, link: async (source, destination) => {
+    if (destination === publicationRace.destination) {
+      await actual.writeFile(destination, publicationRace.bytes, { flag: 'wx' });
+    }
+    return actual.link(source, destination);
+  } };
+});
+
 const cleanups = [];
 afterEach(async () => {
+  publicationRace.destination = null;
+  publicationRace.bytes = null;
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -70,6 +84,119 @@ async function redundantArtifacts(paths, runId, suffix) {
   await atomicWriteJson(files.prepared, { version: 1, run_id: runId, ticket_id: ticketId, status: 'prepared' });
   return files;
 }
+
+describe('retention archive membership and filesystem boundaries', () => {
+  it.each(['active-selector', 'wrong-owner', 'wrong-kind', 'live-run'])(
+    'refuses a self-consistent %s archive without deleting protected or old artifacts', async (variant) => {
+      const paths = await fixturePaths();
+      const runId = 'run-retention-membership';
+      const history = await archiveRun(paths, terminalRun(runId, '2026-01-01T00:01:00.000Z'));
+      const files = await redundantArtifacts(paths, runId, 'membership');
+      const active = { run_id: 'run-protected-active', status: 'running' };
+      await atomicWriteJson(paths.active, active);
+      const member = variant === 'active-selector'
+        ? { kind: 'run', path: 'active.json', value: active }
+        : variant === 'wrong-owner'
+          ? { kind: 'receipt', path: 'receipts/foreign.json', value: { run_id: active.run_id, receipt_id: 'foreign' } }
+          : variant === 'wrong-kind'
+            ? { kind: 'ticket', path: 'receipts/membership.json', value: { run_id: runId, receipt_id: 'membership' } }
+            : { kind: 'run', path: `runs/${runId}.json`, value: { run_id: runId, status: 'running' } };
+      const bytes = Buffer.from(JSON.stringify(member.value));
+      const payload = { format: 'ape-artifact-archive-v1', run_id: runId,
+        immutable_history: { record_hash: history.record_hash },
+        artifacts: [{ kind: member.kind, path: member.path, offset: 0, bytes: bytes.length,
+          sha256: createHash('sha256').update(bytes).digest('hex') }] };
+      const archiveDir = path.join(paths.runtime, 'artifact-archives');
+      await mkdir(archiveDir, { recursive: true });
+      await writeFile(path.join(archiveDir, `${runId}.json.gz`),
+        gzipSync(Buffer.concat([Buffer.from(`${JSON.stringify(payload)}\n`), bytes])));
+      const result = await compactArchivedArtifacts(paths, { keepRecentRuns: 0 });
+      expect(result.removed_files).toBe(0);
+      expect(result.failures).toHaveLength(1);
+      expect(JSON.parse(await readFile(paths.active, 'utf8'))).toEqual(active);
+      expect(await readFile(files.run, 'utf8')).toContain(runId);
+    });
+
+  it('refuses a redirected artifact directory before reading or removing external files', async () => {
+    const paths = await fixturePaths();
+    const runId = 'run-retention-ancestry';
+    await archiveRun(paths, terminalRun(runId, '2026-01-01T00:01:00.000Z'));
+    const files = await redundantArtifacts(paths, runId, 'ancestry');
+    const external = path.join(paths.root, 'external-tickets');
+    await mkdir(external);
+    const sentinel = path.join(external, path.basename(files.ticket));
+    const bytes = await readFile(files.ticket);
+    await writeFile(sentinel, bytes);
+    await rm(paths.tickets, { recursive: true });
+    await symlink(external, paths.tickets, process.platform === 'win32' ? 'junction' : 'dir');
+    await expect(compactArchivedArtifacts(paths, { keepRecentRuns: 0 })).rejects.toThrow(/plain directory/);
+    expect(await readFile(sentinel)).toEqual(bytes);
+    expect(await readFile(files.run, 'utf8')).toContain(runId);
+  });
+
+  it.each(['directory', 'file'])('refuses a redirected archive %s without writing outside runtime or removing sources', async (variant) => {
+    const paths = await fixturePaths();
+    const runId = 'run-retention-archive-ancestry';
+    await archiveRun(paths, terminalRun(runId, '2026-01-01T00:01:00.000Z'));
+    const files = await redundantArtifacts(paths, runId, 'archive-ancestry');
+    const archiveDirectory = path.join(paths.runtime, 'artifact-archives');
+    const archiveFile = path.join(archiveDirectory, `${runId}.json.gz`);
+    const external = path.join(paths.root, 'external-archives');
+    const externalFile = path.join(external, path.basename(archiveFile));
+    await mkdir(external);
+    let originalArchive;
+    if (variant === 'file') {
+      expect((await compactArchivedArtifacts(paths, { keepRecentRuns: 0 })).removed_files).toBe(4);
+      originalArchive = await readFile(archiveFile);
+      await writeFile(externalFile, originalArchive);
+      await redundantArtifacts(paths, runId, 'archive-ancestry');
+      await rm(archiveFile);
+      await symlink(externalFile, archiveFile, 'file');
+    } else {
+      await symlink(external, archiveDirectory, process.platform === 'win32' ? 'junction' : 'dir');
+    }
+    const result = await compactArchivedArtifacts(paths, { keepRecentRuns: 0 });
+    expect(result).toMatchObject({ compacted_runs: 0, removed_files: 0 });
+    expect(result.failures).toHaveLength(1);
+    expect(await readFile(files.run, 'utf8')).toContain(runId);
+    expect(await readdir(external)).toEqual(variant === 'file' ? [path.basename(archiveFile)] : []);
+    if (originalArchive) expect(await readFile(externalFile)).toEqual(originalArchive);
+  });
+
+  it('does not overwrite a concurrent archive publication or remove its source artifacts', async () => {
+    const paths = await fixturePaths();
+    const runId = 'run-retention-concurrent-publisher';
+    await archiveRun(paths, terminalRun(runId, '2026-01-01T00:01:00.000Z'));
+    const files = await redundantArtifacts(paths, runId, 'concurrent-publisher');
+    const archiveFile = path.join(paths.runtime, 'artifact-archives', `${runId}.json.gz`);
+    const otherPublication = Buffer.from('another publisher owns these archive bytes');
+    publicationRace.destination = archiveFile;
+    publicationRace.bytes = otherPublication;
+    const result = await compactArchivedArtifacts(paths, { keepRecentRuns: 0 });
+    expect(result).toMatchObject({ compacted_runs: 0, removed_files: 0 });
+    expect(result.failures).toHaveLength(1);
+    expect(await readFile(archiveFile)).toEqual(otherPublication);
+    expect(await readFile(files.run, 'utf8')).toContain(runId);
+    expect(await readdir(path.dirname(archiveFile))).toEqual([path.basename(archiveFile)]);
+  });
+
+  it('retains sources when an interrupted publication leaves an unexpected archive hardlink', async () => {
+    const paths = await fixturePaths();
+    const runId = 'run-retention-linked-archive';
+    await archiveRun(paths, terminalRun(runId, '2026-01-01T00:01:00.000Z'));
+    const files = await redundantArtifacts(paths, runId, 'linked-archive');
+    expect((await compactArchivedArtifacts(paths, { keepRecentRuns: 0 })).removed_files).toBe(4);
+    const archiveFile = path.join(paths.runtime, 'artifact-archives', `${runId}.json.gz`);
+    const archiveBytes = await readFile(archiveFile);
+    await redundantArtifacts(paths, runId, 'linked-archive');
+    await link(archiveFile, path.join(path.dirname(archiveFile), '.interrupted-publication.tmp'));
+    const result = await compactArchivedArtifacts(paths, { keepRecentRuns: 0 });
+    expect(result).toMatchObject({ compacted_runs: 0, removed_files: 0 });
+    expect(result.failures).toHaveLength(1);
+    expect(await readFile(archiveFile)).toEqual(archiveBytes);
+    expect(await readFile(files.run, 'utf8')).toContain(runId);
+  });
+});
 
 describe('archived artifact retention', () => {
   it('keeps compacted plan references in immutable storage while explain stays privacy-safe', async () => {

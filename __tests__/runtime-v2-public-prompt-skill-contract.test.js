@@ -122,6 +122,9 @@ describe('public prompt contracts', () => {
     expect(common).toMatch(/Plan review[\s\S]*"passed"[\s\S]*"agree"[\s\S]*"disagree"/u);
     expect(common).toMatch(/Code\/security review[\s\S]*"passed"[\s\S]*"pass"[\s\S]*"fail"/u);
     expect(common).toMatch(/stable final `draft`[\s\S]*omit timing[\s\S]*never generate timestamps during validation[\s\S]*ape_validate_receipt[\s\S]*corrections_remaining/iu);
+    expect(common).toMatch(/ape_validate_receipt` with explicit `project_dir`, immutable `ticket_id`, and exact draft/iu);
+    expect(common).toMatch(/Codex[\s\S]*exact `project_dir` from the successful `ape_bind` call[\s\S]*Claude[\s\S]*host-provided project root/iu);
+    expect(common).toContain('Do not rely on the MCP server working directory.');
     expect(common).toMatch(/`valid: true` is\s+terminal[\s\S]*no continuation action[\s\S]*return unchanged[\s\S]*never validate again/iu);
   });
 

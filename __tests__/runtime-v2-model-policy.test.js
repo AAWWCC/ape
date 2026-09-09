@@ -50,7 +50,7 @@ describe('model tier policy', () => {
 
   it('leaves the codex host untouched by the claude-only override', () => {
     expect(resolveModel(DEFAULT_CONFIG, 'codex', 'deep', 'security_reviewer'))
-      .toEqual({ model: 'gpt-5.5', reasoning_effort: 'high' });
+      .toEqual({ model: 'gpt-6-astra', reasoning_effort: 'high' });
   });
 
   it('rejects unlaunchable raw model mappings before issuing an immutable ticket', () => {

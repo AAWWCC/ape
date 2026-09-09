@@ -1,15 +1,41 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { wireStatusline } from '../lib/runtime/statusline.js';
 import { join } from 'node:path';
 import { configAction } from '../lib/runtime/service.js';
 import { parse as parseToml } from 'smol-toml';
+
+const faults = vi.hoisted(() => ({ write: null }));
+vi.mock('../lib/runtime/storage.js', async (importOriginal) => {
+  const original = await importOriginal();
+  return {
+    ...original,
+    atomicWriteJson: async (file, value) => {
+      const phase = value.pending_install ? 'pending' : 'complete';
+      if (file.endsWith('ape-statusline-wire.json') && faults.write === phase) {
+        faults.write = null;
+        throw new Error(`injected ${phase} ownership write failure`);
+      }
+      return original.atomicWriteJson(file, value);
+    },
+    atomicReplaceText: async (file, text, options) => {
+      if (file.endsWith('config.toml') && faults.write === 'config') {
+        faults.write = null;
+        throw new Error('injected config replacement failure');
+      }
+      return original.atomicReplaceText(file, text, options);
+    },
+  };
+});
 
 describe('ape v2 Codex-native statusline wiring', () => {
   let codexHome;
@@ -26,6 +52,7 @@ describe('ape v2 Codex-native statusline wiring', () => {
   });
 
   afterEach(() => {
+    faults.write = null;
     if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = previousCodexHome;
     rmSync(codexHome, { recursive: true, force: true });
@@ -195,6 +222,33 @@ describe('ape v2 Codex-native statusline wiring', () => {
     expect(readFileSync(configFile(), 'utf8')).toContain('status_line = ["weekly-limit"]');
   });
 
+  it.each(['pending', 'config', 'complete'])('preserves restoration data across a failed %s write and retry', async (phase) => {
+    const original = '[tui]\nstatus_line = ["weekly-limit"]\nstatus_line_use_colors = false\n';
+    writeFileSync(configFile(), original);
+    faults.write = phase;
+    await expect(configAction(project, 'wire', { host: 'codex' })).rejects.toThrow(/injected/);
+    if (phase !== 'complete') expect(readFileSync(configFile(), 'utf8')).toBe(original);
+    expect(readFileSync(`${configFile()}.bak`, 'utf8')).toBe(original);
+
+    await configAction(project, 'wire', { host: 'codex' });
+    expect(JSON.parse(readFileSync(stateFile(), 'utf8')).pending_install).toBe(false);
+    await configAction(project, 'unwire', { host: 'codex' });
+    expect(readFileSync(configFile(), 'utf8')).toBe(original);
+    expect(readFileSync(`${configFile()}.bak`, 'utf8')).toBe(original);
+    expect(existsSync(stateFile())).toBe(false);
+  });
+
+  it.each(['config', 'complete'])('can unwire directly after an interrupted %s write', async (phase) => {
+    const original = 'model = "example"\n';
+    writeFileSync(configFile(), original);
+    faults.write = phase;
+    await expect(configAction(project, 'wire', { host: 'codex' })).rejects.toThrow(/injected/);
+    await configAction(project, 'unwire', { host: 'codex' });
+    expect(readFileSync(configFile(), 'utf8')).toBe(original);
+    expect(readFileSync(`${configFile()}.bak`, 'utf8')).toBe(original);
+    expect(existsSync(stateFile())).toBe(false);
+  });
+
   it('refuses to remove a managed value the user changed', async () => {
     writeFileSync(configFile(), '[tui]\ntheme = "dark"\n');
     await configAction(project, 'wire', { host: 'codex' });
@@ -231,4 +285,37 @@ describe('ape v2 Codex-native statusline wiring', () => {
     expect(existsSync(`${configFile()}.bak`)).toBe(false);
     expect(existsSync(stateFile())).toBe(false);
   });
+
+  it.each(['config.toml', 'ape-statusline-wire.json', 'config.toml.bak'])(
+    'rejects oversized %s before any additional profile files are written', async (name) => {
+      writeFileSync(join(codexHome, name), ' '.repeat(1024 * 1024 + 1));
+      await expect(wireStatusline({ host: 'codex' })).rejects.toMatchObject({ code: 'APE_UNSAFE_FILE' });
+      expect(readdirSync(codexHome)).toEqual([name]);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32').each(['config.toml', 'ape-statusline-wire.json', 'config.toml.bak'])(
+    'refuses %s FIFO without waiting for an external writer', async (name) => {
+      expect(spawnSync('mkfifo', [join(codexHome, name)]).status).toBe(0);
+      const module = new URL('../lib/runtime/statusline.js', import.meta.url).href;
+      const child = spawnSync(process.execPath, ['--input-type=module', '-e',
+        `const {wireStatusline}=await import(${JSON.stringify(module)}); try { await wireStatusline({host:'codex'}); console.log('unexpected success'); } catch(error) { console.log(error.code); }`,
+      ], { encoding: 'utf8', timeout: 3_000 });
+      expect(child.error).toBeUndefined();
+      expect(child.status).toBe(0);
+      expect(child.stdout.trim()).toBe('APE_UNSAFE_FILE');
+      expect(readdirSync(codexHome)).toEqual([name]);
+    },
+  );
+
+  it.each(['config growth', 'ownership growth'])('refuses %s over its next reader budget before publishing anything', async (shape) => {
+    const value = 'x'.repeat(1024 * 1024 - 80);
+    const original = shape === 'config growth' ? `padding = "${value}"\n`
+      : `[tui]\nstatus_line = ["${value}"]\n`;
+    writeFileSync(configFile(), original);
+    await expect(wireStatusline({ host: 'codex' })).rejects.toThrow(/exceeds/);
+    expect(readdirSync(codexHome)).toEqual(['config.toml']);
+    expect(readFileSync(configFile(), 'utf8')).toBe(original);
+  });
+
 });

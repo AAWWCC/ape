@@ -3,7 +3,8 @@ import { access, chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const observer = vi.hoisted(() => ({ entered: null, effect: null, collect: null }));
+const observer = vi.hoisted(() => ({ entered: null, effect: null, collect: null, operationError: null,
+  taskReadError: null, terminalWriteError: null }));
 vi.mock('../lib/runtime/receipt-service.js', async (original) => {
   const actual = await original();
   return { ...actual, applyActions: (...args) => observer.effect
@@ -13,15 +14,26 @@ vi.mock('../lib/runtime/service.js', async (original) => {
   const actual = await original();
   return { ...actual, executeApeRunTaskOperation: (...args) => {
     observer.entered?.();
+    if (observer.operationError) throw observer.operationError;
     return actual.executeApeRunTaskOperation(...args);
   } };
 });
 vi.mock('../lib/runtime/task-store.js', async (original) => {
   const actual = await original();
-  return { ...actual, collectExpiredTasks: async (...args) => {
-    await observer.collect?.();
-    return actual.collectExpiredTasks(...args);
-  } };
+  return { ...actual,
+    getTask: (...args) => {
+      if (observer.taskReadError) throw observer.taskReadError;
+      return actual.getTask(...args);
+    },
+    appendTaskGeneration: (...args) => {
+      if (observer.terminalWriteError && args[2]?.status === 'failed') throw observer.terminalWriteError;
+      return actual.appendTaskGeneration(...args);
+    },
+    collectExpiredTasks: async (...args) => {
+      await observer.collect?.();
+      return actual.collectExpiredTasks(...args);
+    },
+  };
 });
 import { executeToolCall, handle, shutdownOwnedTasks } from '../bin/ape-mcp.mjs';
 import { withReceiptLock } from '../lib/runtime/receipt-service.js';
@@ -45,6 +57,118 @@ async function waitForTask(root, taskId, predicate) {
 }
 
 describe('task gate attribution stays inside its charged service effect', () => {
+  it('lets the original task complete after a cancellation names another project', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ape-task-cancel-root-'));
+    const other = await mkdtemp(path.join(tmpdir(), 'ape-task-cancel-other-'));
+    const paths = runtimePaths(root);
+    await mkdir(paths.runtime, { recursive: true });
+    await atomicWriteJson(paths.active, { schema_version: '2.0.0', run_id: 'run-original',
+      status: 'running', stage: 'test', mode: 'phase', lane: 'fast', host: 'codex', tickets: [], receipts: [] });
+    let release;
+    let entered;
+    const enteredPromise = new Promise((resolve) => { entered = resolve; });
+    const held = withReceiptLock(paths, async () => {
+      entered();
+      await new Promise((resolve) => { release = resolve; });
+    });
+    await enteredPromise;
+    const observed = new Promise((resolve) => { observer.entered = resolve; });
+    try {
+      const response = await executeToolCall({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'ape_run', arguments: { project_dir: root, action: 'regate' }, _meta: meta } });
+      expect(response.result.resultType).toBe('task');
+      await observed;
+      const cancelled = await handle({ jsonrpc: '2.0', id: 2, method: 'tasks/cancel',
+        params: { project_dir: other, taskId: response.result.taskId, _meta: meta } });
+      expect(cancelled.error).toMatchObject({ code: -32602 });
+      release();
+      await held;
+      const completed = await waitForTask(root, response.result.taskId, (task) => task?.status === 'completed');
+      expect(completed.cancellation).toBeNull();
+      expect(completed.result).toMatchObject({ resultType: 'complete' });
+      expect(completed.result.content).not.toHaveLength(0);
+    } finally {
+      observer.entered = null;
+      release?.();
+      await held;
+      await shutdownOwnedTasks('test teardown');
+      await Promise.all([root, other].map((dir) => rm(dir, { recursive: true, force: true })));
+    }
+  });
+
+  it.each([4_000, 12_000])('durably fails a task with a %i-character exception', async (length) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ape-task-long-error-'));
+    const paths = runtimePaths(root);
+    await mkdir(paths.runtime, { recursive: true });
+    await atomicWriteJson(paths.active, { schema_version: '2.0.0', run_id: 'run-error',
+      status: 'running', stage: 'test', mode: 'phase', lane: 'fast', host: 'codex', tickets: [], receipts: [] });
+    const message = 'e'.repeat(length);
+    observer.operationError = length <= 8_192
+      ? Object.assign(new Error('wrapped error'), { jsonRpcError: { code: -32603, message, data: { retained: true } } })
+      : new Error(message);
+    try {
+      const response = await executeToolCall({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'ape_run', arguments: { project_dir: root, action: 'regate' }, _meta: meta } });
+      expect(response.result.resultType).toBe('task');
+      const failed = await waitForTask(root, response.result.taskId, (task) => task?.status === 'failed');
+      expect(failed.error.message).toBe(message.slice(0, 8_192));
+      if (length <= 8_192) expect(failed.error.data).toEqual({ retained: true });
+      expect(failed.statusMessage.length).toBeLessThanOrEqual(2_048);
+      const polled = await handle({ jsonrpc: '2.0', id: 2, method: 'tasks/get',
+        params: { project_dir: root, taskId: response.result.taskId, _meta: meta } });
+      expect(polled.result).toMatchObject({ status: 'failed', error: failed.error });
+    } finally {
+      observer.operationError = null;
+      await shutdownOwnedTasks('test teardown');
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['read', 'write'])('reports a terminal task %s failure without an unhandled rejection', async (failure) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ape-task-persistence-error-'));
+    const paths = runtimePaths(root);
+    await mkdir(paths.runtime, { recursive: true });
+    await atomicWriteJson(paths.active, { schema_version: '2.0.0', run_id: 'run-storage-error',
+      status: 'running', stage: 'test', mode: 'phase', lane: 'fast', host: 'codex', tickets: [], receipts: [] });
+    const storageError = Object.assign(new Error('synthetic disk failure'), { code: 'EIO' });
+    observer.operationError = new Error('synthetic operation failure');
+    observer.entered = () => {
+      if (failure === 'read') observer.taskReadError = storageError;
+      else observer.terminalWriteError = storageError;
+    };
+    let report;
+    const reported = new Promise((resolve) => { report = resolve; });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      report(String(chunk));
+      return true;
+    });
+    try {
+      const response = await executeToolCall({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'ape_run', arguments: { project_dir: root, action: 'regate' }, _meta: meta } });
+      expect(response.result.resultType).toBe('task');
+      const diagnostic = await reported;
+      expect(diagnostic.length).toBeLessThan(512);
+      expect(JSON.parse(diagnostic)).toEqual({ event: 'ape_task_terminal_persistence_failed',
+        task_id: response.result.taskId, code: 'EIO' });
+      observer.taskReadError = null;
+      observer.terminalWriteError = null;
+      observer.entered = null;
+      // A failed disk write cannot claim a durable terminal result. The
+      // existing shutdown recovery must still find and settle this task.
+      expect((await getTask(root, response.result.taskId)).status).toBe('working');
+      await shutdownOwnedTasks('test storage recovered');
+      expect((await getTask(root, response.result.taskId)).status).toBe('cancelled');
+    } finally {
+      stderr.mockRestore();
+      observer.operationError = null;
+      observer.taskReadError = null;
+      observer.terminalWriteError = null;
+      observer.entered = null;
+      await shutdownOwnedTasks('test teardown');
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('preserves an active-state permission error before creating a task', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ape-task-state-permission-'));
     const paths = runtimePaths(root);

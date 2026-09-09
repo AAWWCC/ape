@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { access, mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { access, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -172,13 +172,68 @@ async function initializeInstalled(host, pluginRoot) {
   }
 }
 
+async function assertMatchingPackage(host, pluginRoot) {
+  const directory = { codex: 'ape', claude: 'ape-claude' }[host];
+  if (!directory) throw new Error(`unsupported installed package host: ${host}`);
+  const candidateRoot = join(REPO_ROOT, 'plugins', directory);
+  const refuse = (reason, name = 'package root') => {
+    throw new Error(`${host} installed package ${reason}: ${JSON.stringify(name)}`);
+  };
+  async function visit(candidate, installed, prefix = '') {
+    const roots = await Promise.all([lstat(candidate), lstat(installed)]);
+    if (roots.some((entry) => !entry.isDirectory())) refuse('requires regular directories without links', prefix || 'package root');
+    const [expected, observed] = await Promise.all([
+      readdir(candidate, { withFileTypes: true }),
+      readdir(installed, { withFileTypes: true }),
+    ]);
+    const expectedNames = new Set(expected.map((entry) => entry.name));
+    const observedByName = new Map(observed.map((entry) => [entry.name, entry]));
+    for (const entry of expected) {
+      if (!observedByName.has(entry.name)) refuse('is missing a candidate entry', `${prefix}${entry.name}`);
+    }
+    for (const entry of observed) {
+      if (!expectedNames.has(entry.name)) refuse('has an unexpected entry', `${prefix}${entry.name}`);
+    }
+    for (const entry of expected) {
+      const actual = observedByName.get(entry.name);
+      const name = `${prefix}${entry.name}`;
+      const expectedPath = join(candidate, entry.name);
+      const actualPath = join(installed, entry.name);
+      if (entry.isDirectory() && actual.isDirectory()) {
+        await visit(expectedPath, actualPath, `${name}/`);
+      } else if (entry.isFile() && actual.isFile()) {
+        const [expectedStat, actualStat] = await Promise.all([lstat(expectedPath), lstat(actualPath)]);
+        if (!expectedStat.isFile() || !actualStat.isFile()) refuse('requires regular files without links', name);
+        if (expectedStat.size !== actualStat.size) refuse('has modified file bytes', name);
+        const [expectedBytes, actualBytes] = await Promise.all([readFile(expectedPath), readFile(actualPath)]);
+        if (!expectedBytes.equals(actualBytes)) refuse('has modified file bytes', name);
+      } else refuse('has a different entry type or unsupported link/special file', name);
+    }
+  }
+  await visit(candidateRoot, pluginRoot);
+}
+
+// This is a staged package check; successful initialization does not establish
+// that a persistent host has loaded or trusted the installed hooks.
+export async function verifyInstalledPackage(host, pluginRoot) {
+  await assertMatchingPackage(host, pluginRoot);
+  await assertNoAssets(pluginRoot);
+  await initializeInstalled(host, pluginRoot);
+}
+
 function requestedOptions(argv) {
   let mode = 'blocking';
   let hosts = new Set(Object.keys(compatibility.hosts));
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === '--edge') {
+      if (mode === 'installed') throw new Error('--edge and --installed-hosts are mutually exclusive');
       mode = 'edge';
+      continue;
+    }
+    if (token === '--installed-hosts') {
+      if (mode === 'edge') throw new Error('--edge and --installed-hosts are mutually exclusive');
+      mode = 'installed';
       continue;
     }
     if (token === '--host' && compatibility.hosts[argv[index + 1]]) {
@@ -186,7 +241,7 @@ function requestedOptions(argv) {
       index += 1;
       continue;
     }
-    throw new Error('usage: node scripts/smoke-marketplace-install.mjs [--host codex|claude] [--edge]');
+    throw new Error('usage: node scripts/smoke-marketplace-install.mjs [--host codex|claude] [--edge | --installed-hosts]');
   }
   return { hosts, mode };
 }
@@ -214,7 +269,7 @@ async function main(argv = process.argv.slice(2)) {
   await mkdir(claudeConfig, { recursive: true, mode: 0o700 });
   try {
     let modulesRoot;
-    if (mode !== 'edge') {
+    if (mode === 'blocking') {
       const packages = [...hosts].map((identity) => {
         const host = compatibility.hosts[identity];
         return `${host.package}@${host.version}`;
@@ -229,6 +284,8 @@ async function main(argv = process.argv.slice(2)) {
       });
       modulesRoot = join(toolsRoot, 'node_modules');
     } else {
+      // CI can reuse its explicitly installed toolchain while still enforcing
+      // exact host pins. Only the separate edge mode permits newer versions.
       const rootResult = await npmCommand(['root', '--global'], { cwd: scratch, env: process.env });
       modulesRoot = rootResult.stdout.trim();
       if (!isAbsolute(modulesRoot)) throw new Error('npm root --global did not return an absolute path');
@@ -239,8 +296,7 @@ async function main(argv = process.argv.slice(2)) {
       await hostCommand('codex', ['plugin', 'marketplace', 'add', REPO_ROOT, '--json'], { cwd: scratch, env: codexEnv }, modulesRoot);
       await hostCommand('codex', ['plugin', 'add', 'ape@ape', '--json'], { cwd: scratch, env: codexEnv }, modulesRoot);
       const codexPackage = await findPackage(codexHome, '.codex-plugin');
-      await assertNoAssets(codexPackage);
-      await initializeInstalled('codex', codexPackage);
+      await verifyInstalledPackage('codex', codexPackage);
       process.stdout.write('Codex clean marketplace install and local stdio MCP initialization passed\n');
     }
 
@@ -250,8 +306,7 @@ async function main(argv = process.argv.slice(2)) {
       await hostCommand('claude', ['plugin', 'marketplace', 'add', REPO_ROOT, '--scope', 'user'], { cwd: scratch, env: claudeEnv }, modulesRoot);
       await hostCommand('claude', ['plugin', 'install', 'ape@ape', '--scope', 'user'], { cwd: scratch, env: claudeEnv }, modulesRoot);
       const claudePackage = await findPackage(claudeConfig, '.claude-plugin');
-      await assertNoAssets(claudePackage);
-      await initializeInstalled('claude', claudePackage);
+      await verifyInstalledPackage('claude', claudePackage);
       process.stdout.write('Claude clean marketplace install and local stdio MCP initialization passed\n');
     }
   } finally {
@@ -259,7 +314,9 @@ async function main(argv = process.argv.slice(2)) {
   }
 }
 
-main().catch((error) => {
+const invokedDirectly = process.argv[1]
+  && await realpath(process.argv[1]).catch(() => null) === await realpath(fileURLToPath(import.meta.url));
+if (invokedDirectly) main().catch((error) => {
   process.stderr.write(`smoke-marketplace-install: ${error?.message ?? String(error)}\n`);
   process.exitCode = 1;
 });

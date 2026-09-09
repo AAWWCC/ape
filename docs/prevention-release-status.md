@@ -1,9 +1,240 @@
 # Prevention-first reliability status
 
-**2.25.1 is a review candidate, not a certified release.** Reproduced blockers
-have fixes and regression tests. The full live acceptance requirement is still
-incomplete. This page records the latest results as of September 7, 2026; it does
-not authorize more testing, installation, or publication.
+**2.25.8 is approved for release with an explicit owner exception; it is not
+schema-v5 first-pass certified.** Tested source
+`2b902080bd6842adb185c3d17d68f323875f3859` passed all 18 jobs in
+[CI 34309635302](https://github.com/AAWWCC/ape/actions/runs/34309635302).
+All four Codex workflows completed and were independently reviewed:
+[mechanical](https://github.com/AAWWCC/ape-release-validation-20260908/pull/3),
+[fast](https://github.com/AAWWCC/ape-release-validation-20260908/pull/4),
+[full](https://github.com/AAWWCC/ape-release-validation-20260908/pull/5), and
+[protected-land](https://github.com/AAWWCC/ape-release-validation-20260908/pull/6).
+
+The full run retained its original parent and run identity through two host
+response-stream failures. The owner reported disconnecting Ethernet for the
+first; the second's specific cause is undetermined. On the next requested
+continuation, an unspawned test ticket had expired. Normal runtime resume
+issued attempt 2 within the unchanged budget of 2. Incidental worker command
+errors remain disclosed; all 38 APE operations and seven native validated
+receipt handoffs succeeded. Mechanical, fast, and protected-land individually
+qualified without those exceptions. All owned processes stopped and temporary
+authentication was removed.
+
+The [bounded owner exception](../evals/release-owner-exception-2.25.8.json)
+records the completed workflows, exact retained evidence hashes, and failed
+first-pass qualification. Publication adds only reviewed release metadata,
+documentation, workflow wiring, and exception-verifier coverage. All other
+source files, runtime bundles, plugin packages, dependencies, and the strict
+certificate verifier must match the tested source inventory. All normal
+tagged-release checks and artifact attestations remain required. Earlier
+campaign failures below retain their original classification. Claude live
+operation remains unverified.
+
+## 2.25.7 validation and failed formal campaign
+
+Frozen commit `68925304dde665a287507e7d81aea27cef49c853` passed all 18 jobs in
+[CI 34306159445](https://github.com/AAWWCC/ape/actions/runs/34306159445), including
+both Windows Node versions. Its first mechanical workflow qualified: all 13
+APE results succeeded, the sole worker receipt matched its validated draft and
+parent submission, gates passed, and the launcher exited 0 with clean process
+and temporary-authentication cleanup. [Synthetic PR #2](https://github.com/AAWWCC/ape-release-validation-20260908/pull/2)
+merged after its exact head's required check passed; all 11 active merge-rule
+evaluations passed and protection remained unchanged. Synthetic main advanced
+to `d6b42811ce26fd00a6f29cb3865791e33caac4d9`.
+
+The fast launch then failed its catalog prerequisite before native model or
+APE work began. Normal `model/list` returned eight models while its cached
+catalog was about 294 seconds old. Remote launch checks consumed another
+17 seconds, so the unchanged 300-second guard correctly refused the catalog.
+The API uses valid cached data and has no force-refresh parameter; a successful
+metadata response does not prove that the on-disk timestamp advanced. The safe
+post-failure cache observation, original failed attempt and unchanged provider
+state remain retained. No fast run ID, ticket, receipt, PR or merge was created.
+Full and protected-land were not attempted. The mechanical qualification stands;
+the four-workflow campaign remains failed.
+
+The correction belongs to the external certification supervisor and metadata
+helper: complete remote preflight first, check actual remaining catalog
+lifetime, wait past expiry when necessary before acquiring authentication,
+perform normal metadata discovery, and verify adequate remaining lifetime
+immediately before formal launch. It preserves the product guard and genuine
+host-owned cache. Offline validation must cover the observed clock and transport timing boundary
+without replaying the failed campaign before a new campaign is approved.
+
+## 2.25.6 validation and failed formal campaign
+
+Frozen commit `ed89d972f870a3dbe3c63e252c6c0b58103cc591` passed all 18 jobs in
+[CI 34303931274](https://github.com/AAWWCC/ape/actions/runs/34303931274), including
+both Windows Node versions. The mechanical workflow completed: all 13 APE
+control results succeeded, the worker's sole receipt validation passed, gates
+passed, and [synthetic PR #1](https://github.com/AAWWCC/ape-release-validation-20260908/pull/1)
+merged under the unchanged protection policy. The exact PR head's required
+`Synthetic tests` check succeeded, and its merge rule suite passed. Synthetic
+main advanced to `21b23fe7e35383f8f4186a66d6699484ce2159e7`.
+
+The launcher nevertheless exited with code 1 after rejecting the pinned host's
+`GET /ps/plugins/installed?limit=200` catalog request. Its stub required a scope
+and omitted the host's all-scopes request form. This runner failure disqualifies
+the formal campaign; fast, full, and protected-land were not attempted. Owned
+processes exited and temporary authentication was removed. The native receipt
+handoff and original-child association were verified; equality of decoded
+bootstrap-message plaintext remains unverified in the opaque transport records.
+
+The offline correction compares all six allowed routes against the same pinned
+host source, including the mutually exclusive installed-plugin query forms,
+featured-platform values, and rejection of duplicate query keys. Response
+bodies remain deterministic, typed empty results; unknown routes and methods
+remain rejected.
+
+## 2.25.5 validation and failed formal campaign
+
+Frozen commit `77bd588683f2336452fabdd885eaf168bb988c18` passed all 18 jobs in
+[CI 34301071318](https://github.com/AAWWCC/ape/actions/runs/34301071318), including
+both Windows Node versions and 701 operational canaries. The dependency audit
+reported zero vulnerabilities. Native model metadata advertised Astra V2 with
+all configured efforts, and all four launcher preflight checks passed.
+
+The first mechanical workflow ran for 220.138 seconds. Native worker launch,
+binding probe, acknowledgement, and run start succeeded. The worker's first
+receipt-validation call omitted `project_dir` and returned `no active run`;
+adding only the project path succeeded. The tool description and authoritative
+guidance had demonstrated only `ticket_id` and `draft`. The initial failure
+still disqualifies the campaign under its first-attempt rule.
+
+The parent accepted the worker receipt and gates passed, but shipping rejected
+an index/gate-tree mismatch. A disposable offline reproduction isolated the
+cause: gate snapshots removed tracked `.ape/config.json` while shipping
+retained that unchanged baseline file. The launcher separately rejected the
+host's `/ps/plugins/suggested/codex` catalog route. No PR or merge occurred;
+remote main and protection stayed unchanged. Cleanup retained the generated
+uncommitted documentation, while the owned processes exited and temporary
+authentication was removed. Fast, full, and protected-land were not attempted.
+Opaque bootstrap transport records establish matching non-message dispatch
+fields, not equality of decoded bootstrap-message text.
+
+## 2.25.4 validation and failed formal campaign
+
+Frozen commit `16c9deb9559b88447bf0366094388f160fd0ad01` passed all 18 jobs in
+[CI 34298522391](https://github.com/AAWWCC/ape/actions/runs/34298522391), including
+both Windows Node versions and 701 operational canaries. The high-severity audit
+gate passed while reporting three moderate entries for one Vitest development-
+server advisory; 2.25.5 updates that development tooling.
+
+The first live mechanical attempt failed after 78.877 seconds. Doctor, config,
+preview and probe preparation succeeded, but the pinned Codex 0.147.0 host
+rejected `gpt-6-astra` at native child launch. Its freshly retrieved model catalog
+omitted Astra even though the parent could use the model. No child, binding,
+APE run, receipt, branch push, PR or merge occurred. Remote main and protection
+remained unchanged. The campaign stopped with zero qualifying completions;
+fast, full and protected-land were not started. Exact decoded bootstrap-message
+equality was not established from the opaque transport records.
+
+The source fixes retain their narrower validation: the earlier
+[Windows CI failure](https://github.com/AAWWCC/ape/actions/runs/34296408215) led to
+consistent file-identity helpers, and the subsequent
+[cleanup CI failure](https://github.com/AAWWCC/ape/actions/runs/34297564805) led to
+bounded temporary-directory removal retries. Both failed runs remain recorded.
+The latter error did not reproduce locally; its originating writer or filesystem
+condition remains unknown. The successful CI does not establish live completion.
+
+## 2.25.3 validation and failed formal campaign
+
+Frozen commit `65aeda1f388b126c9faa08bfbdfc2ebcb41cbdf4` passed all 18 jobs in
+[CI 34237467513](https://github.com/AAWWCC/ape/actions/runs/34237467513).
+Its first formal mechanical attempt nevertheless failed when the child attempted
+a prohibited command before binding. No run or shipping completed; fast, full,
+and protected-land were not completed. The campaign remains failed, and the
+candidate changes do not establish the cause of that child's tool choice.
+All earlier failed attempts retain their original classification.
+
+## 2.25.3 certification provider request fidelity
+
+Pinned Codex 0.147.0 identifies OpenAI request handling by the selected provider's
+exact display name, `OpenAI`. Other labels remove internal message metadata and
+function encryption metadata from outgoing history. The launcher previously
+accepted any nonempty label; it now rejects labels that select that different
+request path. A separate custom provider ID and explicit zero-retry settings
+remain required. Endpoint and authentication identity remain separately reviewed
+preflight requirements; the name alone does not establish them.
+
+Two offline controls using the exact pinned binary reproduced this difference
+with a scripted loopback endpoint and synthetic assignments. Both delivered the
+synthetic plaintext assignment correctly. They made no real model or credential
+calls and do not prove an explanation or fix for the earlier live failure.
+Historical validation below retains its exact version and source attribution.
+
+## 2.25.2 validation and failed formal campaign
+
+Frozen commit `b16941eae308554395505c5592bf81a489ef3f1a` passed all 18 jobs in
+[CI 34186530890](https://github.com/AAWWCC/ape/actions/runs/34186530890), including
+both Windows Node pins. Its complete source suite passed **5,124 tests across
+308 files**, with zero failures and 87 skips. These CI results cover that frozen
+commit; this status documentation was updated afterward.
+
+The first formal mechanical attempt failed after **100.247 seconds**, before
+`ape_bind` or run start. Its native child attempted a prohibited shell call,
+which the hook denied. No PR or merge occurred; remote main and protection
+remained unchanged. The campaign stopped with zero qualifying completions,
+and fast, full, and protected-land were not started.
+
+The exact revised reserved-probe guidance was delivered before the prohibited
+call. Its delivery did not prevent the failure, so an explanation based only
+on omitted guidance is unsupported. The child's exact decoded assignment input
+remains unknown. Version 2.25.2 corrected conflicting guidance and a misleading
+denial diagnostic; no additional source fix is claimed for this formal failure.
+
+A complete macOS ARM64 run on Node 24.15.0 passed **5,124 tests across 308
+files**, with zero failures and 87 skips. The focused probe and bootstrap tests
+also passed on Node 22.12.0. Type checking, host compatibility, all 52 offline
+prompt scenarios, public-safety checks, fresh bundles and package parity passed.
+Both Node pins passed packaged MCP smoke, clean marketplace installs on pinned
+Codex 0.147.0 and Claude 2.1.228, and package/release reproducibility under each
+runtime. The two local runtimes produced different gzip bytes but identical
+uncompressed archive bytes; publication uses its separately pinned Ubuntu
+toolchain. These local checks and the subsequent CI result do not replace the
+required four ordered live certification workflows; the formal campaign failed.
+
+## 2.25.1 remote validation and failed formal campaign
+
+Commit `5c63369826f6e8cc073a88941d3894773164884a` passed all 18 jobs in
+[CI 34181947640](https://github.com/AAWWCC/ape/actions/runs/34181947640), including
+both Windows Node pins. Its complete source suite passed 5,117 tests across
+308 files, with zero failures and 87 skips. Both earlier failed CI runs remain
+retained.
+
+The first formal mechanical parent ended after the probe child attempted shell
+inspection before `ape_bind`. The hook denied it; the last authoritative state
+remained `launched / awaiting_binding`. No run, acknowledgement, receipt, PR or
+merge occurred. The campaign stopped with zero qualifying completions. The
+same host/model/bootstrap instructions had passed a separate rehearsal; that
+rehearsal cannot replace the formal failure. Encrypted assignment storage does
+not establish the exact decoded input seen by the child.
+
+Fresh offline fixtures on both Node pins reproduced the generic denial against
+a healthy reservation and showed that exact bootstrap binding remained possible.
+Those disposable checks diagnose enforcement; they do not repair the campaign.
+
+## 2.25.1 codebase audit remediation
+
+All 13 reproduced audit findings now have source fixes and regression coverage.
+The changes repair task cancellation and error persistence, detached launch
+failures, bounded receipt and manifest parsing, interrupted statusline setup,
+targeted merge gates, globstar ownership, saved evaluation evidence, release
+auditing/action pins, worker proof parsing, and receipt-result budgets. The
+cleanup removes 11 unused exports and shares duplicate validation and tooling.
+State writes retain complete destinations after Windows retry exhaustion and
+sync file contents and supported directory entries.
+
+A fresh complete run on macOS ARM64 with Node 24.15.0 passed **4,856 tests across
+285 files**, with 86 platform/host skips and zero failures. All 693 operational
+canaries passed. Type checking, configuration documentation, host compatibility,
+offline prompt checks, public-safety checks, packaged MCP smoke tests, Claude
+manifest validation, package parity, and package/release reproducibility passed.
+The dependency audit reported zero vulnerabilities. Local 2.25.1 release archives
+were regenerated; these results do not replace native CI or live certification.
+A concurrent follow-up audit began further source changes after this passing run.
+The counts above describe the completed batch; the later edits need their own
+verification and regenerated packages.
 
 ## 2.25.1 recovery patch
 
@@ -219,11 +450,14 @@ The 2.24.12 Claude worker-validator check could not authenticate on two authoriz
 attempts. No validator call or passing proof was produced. That check is optional
 under the 2.24.13 release policy; the retained failures remain failures.
 
-The current 2.25.1 packages require a fresh candidate-bound Codex live campaign.
-Earlier version evidence cannot certify them.
-
-The new native CI matrix must still run on the submitted candidate. Local macOS
-results and static Windows portability review do not certify its other cells.
+The tested 2.25.2 candidate passed exact-commit CI, then failed its first formal
+mechanical attempt before binding or run start. It has zero qualifying live
+completions; fast, full, and protected-land remain unstarted. Confirmed delivery
+of the revised guidance did not prevent the prohibited call, and the exact
+decoded assignment input remains unknown. No additional source fix or release
+certificate is claimed. The successful 2.25.1 CI and failed formal attempt remain
+evidence about that earlier candidate; neither certifies 2.25.2. The current
+2.25.4 candidate requires its own exact-source CI and authorized live campaign.
 
 The fast, full, and protected-land live scenarios on 2.24.11 remain unverified.
 The campaign stopped at the operator's request, and its disposable setup was

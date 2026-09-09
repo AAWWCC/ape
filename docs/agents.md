@@ -19,12 +19,17 @@ Workers do not schedule other workers or edit APE's runtime state.
 
 | Tier | Claude | Codex |
 | --- | --- | --- |
-| fast | `haiku` | `gpt-5.4-mini`, low reasoning |
-| balanced | `sonnet` | `gpt-5.5`, medium reasoning |
-| deep | `opus` | `gpt-5.5`, high reasoning |
+| fast | `haiku` | `gpt-6-astra`, low reasoning |
+| balanced | `sonnet` | `gpt-6-astra`, medium reasoning |
+| deep | `opus` | `gpt-6-astra`, high reasoning |
 
 Project configuration can override tiers or individual roles. Claude's security
 reviewer defaults to `opus`; its role override takes priority over the deep tier.
+
+All Codex tiers use GPT-6 Astra, with reasoning effort increasing by tier.
+Explicit model choices are preserved. Older materialized Mini and GPT-5.5 defaults
+are reported by `ape_config doctor` as ambiguous until explicitly claimed or updated.
+See the [GPT-6 Astra model reference](https://developers.openai.com/api/docs/models/gpt-6-astra).
 
 ## Tests and evidence
 

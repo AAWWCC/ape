@@ -9,11 +9,14 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.25.1** is a release candidate awaiting a new live certification
-campaign and tagged publication. The 2.24.12 campaign stopped
-before an APE run started because Codex exposed an incompatible native agent
-schema. The earlier 2.24.11 mechanical run does not certify this candidate. See the
-[current release status](docs/prevention-release-status.md) for the exact limits.
+Version **2.25.8** is approved for release with a documented owner exception.
+The tested candidate passed all 18 CI jobs and completed the mechanical, fast,
+full, and protected-land Codex workflows. The full workflow required recovery
+after two host stream interruptions and an expired, unspawned test ticket;
+this is not an uninterrupted schema-v5 first-pass certificate. Runtime and
+plugin package bytes are preserved from the tested candidate. See the
+[release notes](docs/releases/2.25.8.md) and
+[evidence and limits](docs/prevention-release-status.md).
 
 Codex CLI is the primary host. The Claude Code package is included, but
 Claude live operation is unverified. Codex IDE integrations and ChatGPT web,
@@ -29,7 +32,7 @@ Node.js 22.12.0 or newer is required.
 
 ### Codex CLI
 
-Use the pinned Codex CLI **0.147.0**. Install the plugin and enable the native V2
+Use the pinned Codex CLI **0.153.4**. Install the plugin and enable the native V2
 worker tools in the Codex home you use for APE:
 
 ```bash
@@ -158,10 +161,21 @@ npm run public:check
 `npm test` uses six workers. `npm run test:agent -- <paths...>` uses three and is
 the preferred profile when other agents may also be testing.
 
+`public:check` scans both packaged plugins and the actual Git worktree inventory,
+including new nonignored source files. Tracked docs and tests remain checked even
+when ignore rules change. Negative tests construct their explicitly synthetic
+protected-looking inputs from fixture components; no source directory is exempt.
+Never place real private values in source, including split or encoded forms.
+
 Keep runtime changes, tests, and generated packages easy to review separately.
 The Git hooks check commit identities; verify the remote before pushing.
 A rebuild does not update an installed plugin. Reinstallation, pushes, and
 publication are separate actions.
+
+The package and release builders accept `--output-root` for a new or empty directory,
+or one containing only recognized APE output. They preserve unfamiliar files and refuse
+source directories. A package upgrade that removes an old generated filename may need
+a fresh output directory; inspect the retained files before removing them yourself.
 
 For the full checklists, see [Contributing](CONTRIBUTING.md),
 [release checks](docs/operational-readiness.md),

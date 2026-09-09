@@ -1,4 +1,5 @@
 import childProcess, { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -34,17 +35,32 @@ import {
   buildLiveCertificationPrompt,
   writeLiveCertificationPrompts,
 } from '../scripts/prepare-live-certification-prompts.mjs';
+import { catalogResponseFor } from '../scripts/live-certification-catalog-stub.mjs';
+import {
+  protectedSourceInventorySha256,
+  validateReleaseOwnerExceptionProof,
+  validateReleaseOwnerExceptionRecord,
+  verifyReleaseOwnerExceptionRepository,
+} from '../scripts/verify-release-owner-exception.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const VERSION_SUFFIX = VERSION.split('.').slice(1).join('');
 const SOURCE = 'a'.repeat(40);
-const HOST_VERSIONS = Object.freeze({ codex: '0.147.0', claude: '2.1.228' });
+const HOST_VERSIONS = Object.freeze({ codex: '0.153.4', claude: '2.1.228' });
 const temporaryRepositories = [];
 const realSpawnSync = spawnSync;
 
 function codexVersionResult(overrides = {}) {
   return { status: 0, signal: null, stdout: Buffer.from(`codex-cli ${HOST_VERSIONS.codex}\n`),
     stderr: Buffer.alloc(0), ...overrides };
+}
+
+function modelCatalog(models = [{ slug: 'gpt-6-astra', multi_agent_version: 'v2' }]) {
+  return { client_version: HOST_VERSIONS.codex, fetched_at: new Date().toISOString(), models };
+}
+
+function writeModelCatalog(fixture, catalog) {
+  writeFileSync(path.join(fixture.codexHome, 'models_cache.json'), JSON.stringify(catalog));
 }
 
 function certificationParentFixture({
@@ -91,7 +107,7 @@ function certificationParentFixture({
     [
       'model_provider = "openai-zero-retry"',
       '[model_providers.openai-zero-retry]',
-      'name = "OpenAI zero retry"',
+      'name = "OpenAI"',
       'wire_api = "responses"',
       'requires_openai_auth = true',
       zeroRetry ? 'request_max_retries = 0' : 'request_max_retries = 5',
@@ -114,6 +130,7 @@ function certificationParentFixture({
   );
   cpSync(fileURLToPath(new URL('../plugins/ape', import.meta.url)),
     path.join(codexHome, 'plugins', 'cache', 'ape', 'ape', VERSION), { recursive: true });
+  writeModelCatalog({ codexHome }, modelCatalog());
   vi.spyOn(childProcess, 'spawnSync').mockReturnValue(codexVersionResult());
   return {
     projectDir: exactProject,
@@ -460,6 +477,107 @@ describe('live certification Codex parent launcher', () => {
     expect(invocation.host_version).toBe(HOST_VERSIONS.codex);
   });
 
+  it('admits the fresh pinned V2 catalog without changing the sparse governed defaults or cache', () => {
+    const fixture = certificationParentFixture();
+    const configPath = path.join(fixture.projectDir, '.ape', 'runtime', 'config.json');
+    const cachePath = path.join(fixture.codexHome, 'models_cache.json');
+    const before = [readFileSync(configPath), readFileSync(cachePath)];
+    expect(buildCodexParentInvocation(fixture).host_version).toBe(HOST_VERSIONS.codex);
+    expect([readFileSync(configPath), readFileSync(cachePath)]).toEqual(before);
+  });
+
+  it('rejects a parent-only model catalog even when the parent model and host version are supported', () => {
+    const fixture = certificationParentWithConfig((config) => `model = "parent-only"\n${config}`);
+    writeModelCatalog(fixture, modelCatalog([{ slug: 'parent-only', multi_agent_version: 'v2' }]));
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/child model catalog prerequisite/iu);
+  });
+
+  it.each([
+    ['wrong client', (catalog) => { catalog.client_version = '0.147.0'; }],
+    ['missing client', (catalog) => { delete catalog.client_version; }],
+    ['stale', (catalog) => { catalog.fetched_at = new Date(Date.now() - 300_001).toISOString(); }],
+    ['future timestamp', (catalog) => { catalog.fetched_at = new Date(Date.now() + 60_000).toISOString(); }],
+    ['invalid date', (catalog) => { catalog.fetched_at = '2026-02-30T12:00:00Z'; }],
+    ['missing timestamp', (catalog) => { delete catalog.fetched_at; }],
+    ['missing models', (catalog) => { delete catalog.models; }],
+    ['empty models', (catalog) => { catalog.models = []; }],
+    ['missing slug', (catalog) => { delete catalog.models[0].slug; }],
+    ['non-string slug', (catalog) => { catalog.models[0].slug = 42; }],
+    ['duplicate identity', (catalog) => { catalog.models.push({ ...catalog.models[0] }); }],
+    ['legacy backend', (catalog) => { catalog.models[0].multi_agent_version = 'v1'; }],
+    ['missing backend', (catalog) => { delete catalog.models[0].multi_agent_version; }],
+    ['malformed backend', (catalog) => { catalog.models[0].multi_agent_version = true; }],
+  ])('refuses a %s native child catalog without leaking or rewriting its contents', (_name, update) => {
+    const fixture = certificationParentFixture();
+    const catalog = modelCatalog();
+    catalog.unrelated_annotation = 'SYNTHETIC_PRIVATE_CATALOG_TEXT';
+    update(catalog);
+    writeModelCatalog(fixture, catalog);
+    const cachePath = path.join(fixture.codexHome, 'models_cache.json');
+    const before = readFileSync(cachePath);
+    let failure;
+    try { buildCodexParentInvocation(fixture); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(LiveCertificationParentError);
+    expect(failure.message).toMatch(/child model catalog prerequisite/iu);
+    expect(failure.message).not.toContain('SYNTHETIC_PRIVATE_CATALOG_TEXT');
+    expect(readFileSync(cachePath)).toEqual(before);
+  });
+
+  it('uses the pinned 300-second freshness boundary with a fixed clock', () => {
+    const now = Date.parse('2026-09-09T01:00:00Z');
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    const fixture = certificationParentFixture();
+    const catalog = { ...modelCatalog(), fetched_at: new Date(now - 300_000).toISOString() };
+    writeModelCatalog(fixture, catalog);
+    expect(buildCodexParentInvocation(fixture).command).toBe(fixture.codexBin);
+    catalog.fetched_at = new Date(now - 300_001).toISOString();
+    writeModelCatalog(fixture, catalog);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/child model catalog prerequisite/iu);
+  });
+
+  it.each(['tier', 'role'])('checks explicit %s model pins while preserving partial default inheritance', (kind) => {
+    const fixture = certificationParentFixture();
+    const configPath = path.join(fixture.projectDir, '.ape', 'runtime', 'config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    config.models = { codex: { balanced: { reasoning_effort: 'high' } } };
+    if (kind === 'tier') config.models.codex.fast = { model: 'explicit-worker' };
+    else config.role_models = { security_reviewer: { codex: { model: 'explicit-worker', reasoning_effort: 'high' } } };
+    writeFileSync(configPath, JSON.stringify(config));
+    const before = readFileSync(configPath);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/child model catalog prerequisite/iu);
+    writeModelCatalog(fixture, modelCatalog([
+      { slug: 'gpt-6-astra', multi_agent_version: 'v2' },
+      { slug: 'explicit-worker', multi_agent_version: 'v2' },
+    ]));
+    expect(buildCodexParentInvocation(fixture).command).toBe(fixture.codexBin);
+    expect(readFileSync(configPath)).toEqual(before);
+  });
+
+  it.each(['missing', 'directory', 'symlink', 'oversized', 'invalid UTF-8', 'duplicate key'])('rejects a %s model cache before launch', (kind) => {
+    const fixture = certificationParentFixture();
+    const file = path.join(fixture.codexHome, 'models_cache.json');
+    rmSync(file);
+    if (kind === 'directory') mkdirSync(file);
+    if (kind === 'symlink') {
+      const target = path.join(path.dirname(fixture.codexHome), 'external-cache.json');
+      writeFileSync(target, JSON.stringify(modelCatalog()));
+      symlinkSync(target, file);
+    }
+    if (kind === 'oversized') writeFileSync(file, Buffer.alloc(8 * 1024 * 1024 + 1, 0x20));
+    if (kind === 'invalid UTF-8') writeFileSync(file, Buffer.from([0xff]));
+    if (kind === 'duplicate key') {
+      const catalogJson = JSON.stringify(modelCatalog());
+      writeFileSync(file, '{"client_version":"old",' + catalogJson.slice(1));
+    }
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/child model catalog prerequisite/iu);
+  });
+
+  it('rejects an overriding static model catalog without invoking the host', () => {
+    const fixture = certificationParentWithConfig((config) => `model_catalog_json = "/synthetic/static.json"\n${config}`);
+    expect(() => buildCodexParentInvocation(fixture)).toThrow(/static model_catalog_json override/iu);
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, '', 'codex', './codex', 7, null])('host pin rejects missing or non-absolute executable %s without running it', (codexBin) => {
     const fixture = certificationParentFixture();
     expect(() => buildCodexParentInvocation({ ...fixture, codexBin })).toThrow(/absolute.*--codex-bin/iu);
@@ -481,8 +599,8 @@ describe('live certification Codex parent launcher', () => {
   it.each([
     ['wrong pin', { stdout: Buffer.from('codex-cli 0.148.0\n') }],
     ['missing version', { stdout: Buffer.alloc(0) }],
-    ['malformed version', { stdout: Buffer.from('0.147.0\n') }],
-    ['extra version lines', { stdout: Buffer.from('codex-cli 0.147.0\ncodex-cli 0.148.0\n') }],
+    ['malformed version', { stdout: Buffer.from('0.153.4\n') }],
+    ['extra version lines', { stdout: Buffer.from('codex-cli 0.153.4\ncodex-cli 0.148.0\n') }],
     ['invalid UTF-8', { stdout: Buffer.from([0xff]) }],
     ['failed process', { status: 1 }],
     ['terminated process', { status: null, signal: 'SIGKILL' }],
@@ -498,7 +616,7 @@ describe('live certification Codex parent launcher', () => {
     let failure;
     try { buildCodexParentInvocation(fixture); } catch (error) { failure = error; }
     expect(failure).toBeInstanceOf(LiveCertificationParentError);
-    expect(failure.message).toMatch(/Codex.*version|Codex.*0\.147\.0/iu);
+    expect(failure.message).toMatch(/Codex.*version|Codex.*0\.153\.4/iu);
     expect(failure.message.length).toBeLessThan(400);
     expect(failure.message).not.toContain('SYNTHETIC_SECRET');
     expect(failure.message).not.toContain(fixture.codexBin);
@@ -528,7 +646,7 @@ describe('live certification Codex parent launcher', () => {
     expect(checked.error).toBeUndefined();
     expect(checked.status).toBe(1);
     expect(checked.stdout).toBe('');
-    expect(checked.stderr).toMatch(/Codex.*0\.147\.0/iu);
+    expect(checked.stderr).toMatch(/Codex.*0\.153\.4/iu);
   });
 
   it('host pin rejects executable metadata drift during the version check', () => {
@@ -622,6 +740,20 @@ describe('live certification Codex parent launcher', () => {
   });
 
   it.each([
+    'OpenAI zero retry',
+    'OpenAI certification with no transport retries',
+    'Another compatible provider',
+    'openai',
+    ' OpenAI',
+    'OpenAI ',
+  ])('rejects provider display name %j before it can strip native request metadata', (name) => {
+    const fixture = certificationParentWithConfig((config) =>
+      config.replace('name = "OpenAI"', `name = ${JSON.stringify(name)}`));
+    const failure = expectCertificationConfigRefusal(fixture);
+    expect(failure.message).toMatch(/name = "OpenAI".*native.*metadata/iu);
+  });
+
+  it.each([
     ['selected retries are nonzero', (config) => config.replace('request_max_retries = 0', 'request_max_retries = 5')],
     ['selected retry fields are absent', (config) => config.replace(/^(?:request_max_retries|stream_max_retries|supports_websockets) = .*\n/gmu, '')],
     ['selected provider is absent', (config) => config.replace('[model_providers.openai-zero-retry]', '[model_providers.another-provider]')],
@@ -679,9 +811,9 @@ describe('live certification Codex parent launcher', () => {
     ['numeric model_provider', (config) => config.replace('model_provider = "openai-zero-retry"', 'model_provider = 7')],
     ['missing model_provider', (config) => config.replace('model_provider = "openai-zero-retry"\n', '')],
     ['empty model_provider', (config) => config.replace('model_provider = "openai-zero-retry"', 'model_provider = ""')],
-    ['missing selected provider name', (config) => config.replace('name = "OpenAI zero retry"\n', '')],
-    ['numeric selected provider name', (config) => config.replace('name = "OpenAI zero retry"', 'name = 7')],
-    ['empty selected provider name', (config) => config.replace('name = "OpenAI zero retry"', 'name = "  "')],
+    ['missing selected provider name', (config) => config.replace('name = "OpenAI"\n', '')],
+    ['numeric selected provider name', (config) => config.replace('name = "OpenAI"', 'name = 7')],
+    ['empty selected provider name', (config) => config.replace('name = "OpenAI"', 'name = "  "')],
     ['string request retry count', (config) => config.replace('request_max_retries = 0', 'request_max_retries = "0"')],
     ['boolean request retry count', (config) => config.replace('request_max_retries = 0', 'request_max_retries = false')],
     ['float zero request retry count', (config) => config.replace('request_max_retries = 0', 'request_max_retries = 0.0')],
@@ -717,7 +849,7 @@ describe('live certification Codex parent launcher', () => {
       .replace(/^([a-z_][a-z0-9_]*)(\s*=)/gmu, '"$1"$2')],
     ['dotted keys and literal strings', () => [
       "model_provider = 'openai-zero-retry'",
-      "model_providers.openai-zero-retry.name = 'OpenAI zero retry'",
+      "model_providers.openai-zero-retry.name = 'OpenAI'",
       "model_providers.openai-zero-retry.wire_api = 'responses'",
       'model_providers.openai-zero-retry.requires_openai_auth = true',
       'model_providers.openai-zero-retry.request_max_retries = 0',
@@ -733,7 +865,7 @@ describe('live certification Codex parent launcher', () => {
     ].join('\n')],
     ['inline tables', () => [
       'model_provider = "openai-zero-retry"',
-      'model_providers = { openai-zero-retry = { name = "OpenAI zero retry", wire_api = "responses", requires_openai_auth = true, request_max_retries = 0, stream_max_retries = 0, supports_websockets = false } }',
+      'model_providers = { openai-zero-retry = { name = "OpenAI", wire_api = "responses", requires_openai_auth = true, request_max_retries = 0, stream_max_retries = 0, supports_websockets = false } }',
       'analytics = { enabled = false }',
       'features = { multi_agent_v2 = true, plugins = true, apps = false, remote_plugin = true }',
       'plugins = { "ape@ape" = { enabled = true, mcp_servers = { ape = { default_tools_approval_mode = "approve" } } } }',
@@ -948,26 +1080,94 @@ describe('live certification Codex parent launcher', () => {
     const auditPath = path.join(root, 'requests.jsonl');
     const stub = await startCertificationCatalogStub(auditPath);
     try {
+      // Source-derived contracts at Codex 0.153.4 immutable commit
+      // 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a: core-plugins/src/remote.rs
+      // list/shared/installed/suggested builders and response structs;
+      // remote_legacy.rs featured Vec<String>; protocol.rs Product enum;
+      // backend-client/src/{client,types}.rs root-base user settings.
+      const page = { plugins: [], pagination: { next_page_token: null } };
+      const scopes = ['GLOBAL', 'USER', 'WORKSPACE'];
       const requests = [
-        '/api/codex/settings/user',
-        '/ps/plugins/suggested?scope=GLOBAL',
-        '/ps/plugins/list?scope=GLOBAL&limit=200',
-        '/ps/plugins/installed?scope=GLOBAL&includeDownloadUrls=true',
-        '/ps/plugins/workspace/shared?limit=200',
-        '/plugins/featured?platform=codex',
+        ['/api/codex/settings/user', { commit_attribution_enabled: false }],
+        ['/ps/plugins/suggested/codex?scope=GLOBAL', { enabled: true, plugins: [] }],
+        ...scopes.flatMap((scope) => [
+          [`/ps/plugins/list?scope=${scope}&limit=200`, page],
+          [`/ps/plugins/list?scope=${scope}&limit=200&pageToken=next%2Bpage`, page],
+        ]),
+        ['/ps/plugins/list?scope=GLOBAL&limit=200&collection=vertical', page],
+        ['/ps/plugins/list?scope=GLOBAL&limit=200&collection=vertical&pageToken=next%2Bpage', page],
+        ...['limit=200', ...scopes.map((scope) => `scope=${scope}`)].flatMap((selector) =>
+          ['', '&includeDownloadUrls=true', '&pageToken=next%2Bpage', '&includeDownloadUrls=true&pageToken=next%2Bpage']
+            .map((optional) => [`/ps/plugins/installed?${selector}${optional}`, page])),
+        ['/ps/plugins/workspace/shared?limit=200', page],
+        ['/ps/plugins/workspace/shared?limit=200&pageToken=next%2Bpage', page],
+        ...['codex', 'chat', 'atlas'].map((platform) => [`/plugins/featured?platform=${platform}`, []]),
       ];
-      const responses = await Promise.all(requests.map((request) => fetch(`${stub.baseUrl}${request}`)));
-      expect(responses.every((response) => response.status === 200)).toBe(true);
-      expect(await responses[0].json()).toEqual({ commit_attribution_enabled: false });
-      expect(await responses[1].json()).toEqual({ enabled: true, plugins: [] });
-      expect(await responses[2].json()).toEqual({
-        plugins: [],
-        pagination: { next_page_token: null },
-      });
-      expect(await responses[5].json()).toEqual([]);
-      expect(validateCertificationCatalogAudit(auditPath)).toEqual({ request_count: 6 });
+      await Promise.all(requests.map(async ([request, body]) => {
+        const response = await fetch(`${stub.baseUrl}${request}`);
+        expect(response.status, request).toBe(200);
+        expect(await response.json(), request).toEqual(body);
+      }));
+      expect(validateCertificationCatalogAudit(auditPath)).toEqual({ request_count: requests.length });
     } finally {
       await stopCertificationCatalogStub(stub);
+    }
+  });
+
+  it('rejects duplicate catalog query keys and extra keys on every route', () => {
+    const requests = [
+      '/api/codex/settings/user',
+      '/ps/plugins/suggested/codex?scope=GLOBAL',
+      '/ps/plugins/list?scope=GLOBAL&limit=200&collection=vertical&pageToken=next',
+      '/ps/plugins/installed?scope=GLOBAL&includeDownloadUrls=true&pageToken=next',
+      '/ps/plugins/installed?limit=200&includeDownloadUrls=true&pageToken=next',
+      '/ps/plugins/workspace/shared?limit=200&pageToken=next',
+      '/plugins/featured?platform=codex',
+    ];
+    for (const request of requests) {
+      const url = new URL(request, 'http://127.0.0.1');
+      const extra = new URL(url);
+      extra.searchParams.append('extra', 'true');
+      expect(catalogResponseFor('GET', `${extra.pathname}${extra.search}`), request)
+        .toMatchObject({ known: false, status: 400 });
+      for (const [key, value] of url.searchParams) {
+        for (const duplicate of [value, 'conflicting']) {
+          const repeated = new URL(url);
+          repeated.searchParams.append(key, duplicate);
+          expect(catalogResponseFor('GET', `${repeated.pathname}${repeated.search}`), `${request}: ${key}`)
+            .toMatchObject({ known: false, status: 400 });
+        }
+      }
+      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']) {
+        expect(catalogResponseFor(method, request), `${method} ${request}`)
+          .toMatchObject({ known: false, status: 405 });
+      }
+    }
+  });
+
+  it('rejects invalid catalog selectors without accepting an ambiguous installed scope', () => {
+    for (const request of [
+      '/ps/plugins/suggested/codex',
+      '/ps/plugins/suggested/codex?scope=USER',
+      '/ps/plugins/list?limit=200',
+      '/ps/plugins/list?scope=GLOBAL',
+      '/ps/plugins/list?scope=ALL&limit=200',
+      '/ps/plugins/list?scope=GLOBAL&limit=201',
+      '/ps/plugins/installed',
+      '/ps/plugins/installed?pageToken=next',
+      '/ps/plugins/installed?scope=GLOBAL&limit=200',
+      '/ps/plugins/installed?scope=&limit=200',
+      '/ps/plugins/installed?scope=ALL',
+      '/ps/plugins/installed?limit=201',
+      '/ps/plugins/installed?limit=0200',
+      '/ps/plugins/installed?scope=GLOBAL&includeDownloadUrls=false',
+      '/ps/plugins/installed?limit=200&includeDownloadUrls=TRUE',
+      '/ps/plugins/workspace/shared',
+      '/ps/plugins/workspace/shared?limit=201',
+      '/plugins/featured',
+      '/plugins/featured?platform=unknown',
+    ]) {
+      expect(catalogResponseFor('GET', request), request).toMatchObject({ known: false, status: 400 });
     }
   });
 
@@ -977,8 +1177,19 @@ describe('live certification Codex parent launcher', () => {
     const auditPath = path.join(root, 'requests.jsonl');
     const stub = await startCertificationCatalogStub(auditPath);
     try {
-      const response = await fetch(`${stub.baseUrl}/unknown`);
-      expect(response.status).toBe(404);
+      for (const [method, request, status] of [
+        ['GET', '/unknown', 404],
+        ['GET', '/ps/plugins/suggested?scope=GLOBAL', 404],
+        ['GET', '/ps/plugins/suggested/codex/extra?scope=GLOBAL', 404],
+        ['POST', '/ps/plugins/suggested/codex?scope=GLOBAL', 405],
+        ['GET', '/ps/plugins/suggested/codex', 400],
+        ['GET', '/ps/plugins/suggested/codex?scope=USER', 400],
+        ['GET', '/ps/plugins/suggested/codex?scope=GLOBAL&extra=true', 400],
+        ['GET', '/ps/plugins/suggested/codex?scope=GLOBAL&scope=GLOBAL', 400],
+      ]) {
+        const response = await fetch(`${stub.baseUrl}${request}`, { method });
+        expect(response.status, `${method} ${request}`).toBe(status);
+      }
       expect(() => validateCertificationCatalogAudit(auditPath)).toThrow(
         /rejected unexpected request GET \/unknown/iu,
       );
@@ -1634,5 +1845,151 @@ describe('tagged certification-only commit gate', () => {
     ]);
     expect(schema.$defs.terminal_reason_code.enum).toEqual(TERMINAL_REASON_CODES);
     expect(LiveCertificationError).toBeTypeOf('function');
+  });
+});
+
+
+describe('owner-authorized 2.25.8 publication exception', () => {
+  const exceptionRecord = readFileSync(new URL('../evals/release-owner-exception-2.25.8.json', import.meta.url));
+  const authorizedInventory = '79dafcbd0fc68911ea5f6629d1f7b6e6a6d9292b5acf6acf448bea928f95c002';
+  const tag = 'v2.25.8';
+
+  function exceptionRepository({ annotated = true, record = exceptionRecord } = {}) {
+    const fixture = sourceRepository();
+    writeFileSync(path.join(fixture.repo, 'package.json'), canonical({ name: 'ape', version: '2.25.8' }));
+    writeFileSync(path.join(fixture.repo, 'evals', 'release-owner-exception-2.25.8.json'), record);
+    git(fixture.repo, 'add', 'package.json', 'evals/release-owner-exception-2.25.8.json');
+    git(fixture.repo, 'commit', '-m', 'publish with disclosed exceptions');
+    const head = git(fixture.repo, 'rev-parse', 'HEAD');
+    if (annotated) git(fixture.repo, 'tag', '-a', tag, '-m', 'Owner-authorized release exception');
+    else git(fixture.repo, 'tag', tag);
+    return { ...fixture, head, tag };
+  }
+
+  function committedProof(fixture) {
+    return {
+      head: fixture.head,
+      checkedOutHead: git(fixture.repo, 'rev-parse', 'HEAD'),
+      tag,
+      tagType: git(fixture.repo, 'cat-file', '-t', `refs/tags/${tag}`),
+      tagCommit: git(fixture.repo, 'rev-parse', `${tag}^{commit}`),
+      packageVersion: JSON.parse(git(fixture.repo, 'show', `${fixture.head}:package.json`)).version,
+      rawRecord: execFileSync('git', ['show', `${fixture.head}:evals/release-owner-exception-2.25.8.json`], { cwd: fixture.repo }),
+      // The pure proof boundary models the authorized product inventory. The
+      // synthetic repository is deliberately not the real tested product.
+      inventorySha256: authorizedInventory,
+    };
+  }
+
+  it('accepts the exact record and committed annotated identities without claiming strict certification', () => {
+    const fixture = exceptionRepository();
+    writeFileSync(path.join(fixture.repo, 'evals', 'release-owner-exception-2.25.8.json'), '{"fabricated":true}\n');
+    expect(validateReleaseOwnerExceptionProof(committedProof(fixture))).toEqual({
+      version: '2.25.8',
+      source_commit: '2b902080bd6842adb185c3d17d68f323875f3859',
+      authorization: 'owner_authorized_release_exception',
+      strict_v5_uninterrupted_first_pass_qualified: false,
+    });
+    expect(() => verifyReleaseOwnerExceptionRepository(fixture))
+      .toThrow(/protected source inventory differs/iu);
+  });
+
+  it.each([
+    ['tag', 'v2.25.9', /only for v2\.25\.8/iu],
+    ['head', 'HEAD', /full lowercase commit hash/iu],
+    ['checkedOutHead', 'f'.repeat(40), /checked-out HEAD/iu],
+    ['tagType', 'commit', /must be annotated/iu],
+    ['tagCommit', 'f'.repeat(40), /does not point/iu],
+    ['packageVersion', '2.25.9', /version must be 2\.25\.8/iu],
+    ['inventorySha256', 'f'.repeat(64), /protected source inventory differs/iu],
+  ])('rejects a mismatched %s in the fixed authorization proof', (field, value, reason) => {
+    const proof = committedProof(exceptionRepository());
+    proof[field] = value;
+    expect(() => validateReleaseOwnerExceptionProof(proof)).toThrow(reason);
+  });
+
+  it('rejects record edits, different allowlists, changed evidence claims, and oversized records', () => {
+    for (const mutate of [
+      (record) => { record.version = '2.25.9'; },
+      (record) => { record.tested_source_commit = 'f'.repeat(40); },
+      (record) => { record.release_only_paths.push('lib/runtime/runner.js'); },
+      (record) => { record.strict_v5_uninterrupted_first_pass_qualified = true; },
+      (record) => { record.functional_evidence_sha256 = 'f'.repeat(64); },
+    ]) {
+      const record = JSON.parse(exceptionRecord.toString('utf8'));
+      mutate(record);
+      expect(() => validateReleaseOwnerExceptionRecord(Buffer.from(canonical(record))))
+        .toThrow(/authorized digest/iu);
+    }
+    expect(() => validateReleaseOwnerExceptionRecord(Buffer.concat([exceptionRecord, Buffer.from(' ')])))
+      .toThrow(/authorized digest/iu);
+    expect(() => validateReleaseOwnerExceptionRecord(Buffer.alloc(64 * 1024 + 1)))
+      .toThrow(/size limit/iu);
+    expect(() => validateReleaseOwnerExceptionRecord(Buffer.alloc(0))).toThrow(/empty/iu);
+  });
+
+  it('hashes exact Git inventory bytes and exempts only the nine exact publication paths', () => {
+    const product = `100644 blob ${'a'.repeat(40)}\tlib/runtime/runner.js`;
+    const baseline = Buffer.from(`${product}\0`);
+    const digest = protectedSourceInventorySha256(baseline);
+    expect(digest).toBe(createHash('sha256').update(baseline).digest('hex'));
+    const record = JSON.parse(exceptionRecord.toString('utf8'));
+    for (const publicationPath of record.release_only_paths) {
+      expect(protectedSourceInventorySha256(Buffer.from(`${product}\0` +
+        `100644 blob ${'b'.repeat(40)}\t${publicationPath}\0`))).toBe(digest);
+      expect(protectedSourceInventorySha256(Buffer.from(`${product}\0` +
+        `100644 blob ${'b'.repeat(40)}\t${publicationPath}.extra\0`))).not.toBe(digest);
+    }
+    for (const changed of [
+      product.replace('100644', '100755'),
+      product.replace('a'.repeat(40), 'b'.repeat(40)),
+      product.replace('runner.js', 'other.js'),
+      `${product}\0${product.replace('runner.js', 'added.js')}`,
+    ]) {
+      expect(protectedSourceInventorySha256(Buffer.from(`${changed}\0`))).not.toBe(digest);
+    }
+    const second = product.replace('runner.js', 'second.js');
+    expect(protectedSourceInventorySha256(Buffer.from(`${product}\0${second}\0`)))
+      .not.toBe(protectedSourceInventorySha256(Buffer.from(`${second}\0${product}\0`)));
+    expect(() => protectedSourceInventorySha256(Buffer.from(product))).toThrow(/NUL-terminated/iu);
+    expect(() => protectedSourceInventorySha256(Buffer.from('malformed\0'))).toThrow(/invalid Git entry/iu);
+    expect(() => protectedSourceInventorySha256(Buffer.from([0xff, 0]))).toThrow(/valid UTF-8/iu);
+  });
+
+  it('rejects missing or lightweight tags before reading release authority', () => {
+    const missing = exceptionRepository();
+    git(missing.repo, 'tag', '-d', tag);
+    expect(() => verifyReleaseOwnerExceptionRepository(missing)).toThrow(/annotated release tag/iu);
+    expect(() => verifyReleaseOwnerExceptionRepository(exceptionRepository({ annotated: false })))
+      .toThrow(/must be annotated/iu);
+  });
+
+  it('rejects mismatched tag targets and checked-out heads using committed Git objects', () => {
+    const movedTag = exceptionRepository();
+    git(movedTag.repo, 'tag', '-f', '-a', tag, movedTag.source, '-m', 'Wrong commit');
+    expect(() => verifyReleaseOwnerExceptionRepository(movedTag)).toThrow(/does not point/iu);
+    const movedHead = exceptionRepository();
+    git(movedHead.repo, 'commit', '--allow-empty', '-m', 'Different checkout');
+    expect(() => verifyReleaseOwnerExceptionRepository(movedHead)).toThrow(/checked-out HEAD/iu);
+    expect(() => verifyReleaseOwnerExceptionRepository({ ...movedHead, head: 'HEAD' }))
+      .toThrow(/full lowercase commit hash/iu);
+    expect(() => verifyReleaseOwnerExceptionRepository({ ...movedHead, tag: 'v2.25.9' }))
+      .toThrow(/only for v2\.25\.8/iu);
+  });
+
+  it('rejects an executable committed exception record even when its content is authorized', () => {
+    const fixture = exceptionRepository();
+    git(fixture.repo, 'update-index', '--chmod=+x', 'evals/release-owner-exception-2.25.8.json');
+    git(fixture.repo, 'commit', '-m', 'Invalid executable evidence');
+    const head = git(fixture.repo, 'rev-parse', 'HEAD');
+    git(fixture.repo, 'tag', '-f', '-a', tag, '-m', 'Invalid executable evidence');
+    expect(() => verifyReleaseOwnerExceptionRepository({ ...fixture, head }))
+      .toThrow(/regular non-executable file/iu);
+  });
+
+  it('cannot replace a changed committed record with an authorized working-tree record', () => {
+    const fixture = exceptionRepository({ record: Buffer.from('{}\n') });
+    writeFileSync(path.join(fixture.repo, 'evals', 'release-owner-exception-2.25.8.json'), exceptionRecord);
+    expect(() => verifyReleaseOwnerExceptionRepository(fixture)).toThrow(/authorized digest/iu);
   });
 });

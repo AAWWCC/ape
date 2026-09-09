@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -84,6 +85,67 @@ describe('APE v2 plugin package validation', () => {
     const result = await validateCodexPlugin(dir);
     expect(result.errors).toContain('skills path does not exist');
     expect(result.passed).toBe(false);
+  });
+
+  it.each(['claude', 'codex'])('rejects coercible non-string %s names', async (host) => {
+    const dir = await pluginDir({
+      [host]: { name: ['ape-test'], version: '1.0.0', mcpServers: { ape: { command: 'node' } } },
+    });
+    const result = await (host === 'claude' ? validateClaudePlugin : validateCodexPlugin)(dir);
+    expect(result.passed).toBe(false);
+    expect(result.errors).toContain('invalid plugin name');
+  });
+
+  it('rejects a Codex skills declaration outside the plugin even when the destination exists', async () => {
+    const outside = await pluginDir();
+    const dir = await pluginDir({ codex: {
+      name: 'ape-test', version: '1.0.0', skills: outside,
+      mcpServers: { ape: { command: 'node' } },
+    } });
+    const result = await validateCodexPlugin(dir);
+    expect(result.passed).toBe(false);
+    expect(result.errors).toContain('skills path escapes the plugin root');
+  });
+
+  it.each(['claude', 'codex'])('bounds %s manifest reads before parsing', async (host) => {
+    const dir = await pluginDir({ [host]: {} });
+    await writeFile(path.join(dir, `.${host}-plugin`, 'plugin.json'), ' '.repeat(1024 * 1024 + 1));
+    const result = await (host === 'claude' ? validateClaudePlugin : validateCodexPlugin)(dir);
+    expect(result.passed).toBe(false);
+    expect(result.errors[0]).toMatch(/stable bounded regular file/);
+  });
+
+  it.skipIf(process.platform === 'win32').each(['claude', 'codex', 'hooks'])(
+    'returns promptly when the %s JSON leaf is a FIFO', async (target) => {
+      const host = target === 'codex' ? 'codex' : 'claude';
+      const dir = await pluginDir({ [host]: {
+        name: 'ape-test', version: '1.0.0',
+        ...(target === 'hooks' ? { hooks: './hooks.json' } : {}),
+      } });
+      const file = target === 'hooks' ? path.join(dir, 'hooks.json')
+        : path.join(dir, `.${host}-plugin`, 'plugin.json');
+      await rm(file, { force: true });
+      execFileSync('mkfifo', [file]);
+      const functionName = host === 'claude' ? 'validateClaudePlugin' : 'validateCodexPlugin';
+      const script = `import { ${functionName} } from ${JSON.stringify(new URL('../lib/runtime/plugin-validation.js', import.meta.url).href)};\n`
+        + `console.log(JSON.stringify(await ${functionName}(${JSON.stringify(dir)})));`;
+      const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+        encoding: 'utf8', timeout: 5_000,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ passed: false });
+      expect(result.stdout).toContain('stable bounded regular file');
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')('does not follow a hooks JSON symlink', async () => {
+    const dir = await pluginDir({ claude: { name: 'ape-test', hooks: './hooks.json' } });
+    await writeFile(path.join(dir, 'real-hooks.json'), JSON.stringify({ hooks: {} }));
+    await symlink('real-hooks.json', path.join(dir, 'hooks.json'));
+    const result = await validateClaudePlugin(dir);
+    expect(result.passed).toBe(false);
+    expect(result.errors.join(' ')).toContain('stable bounded regular file');
   });
 
   it('validates the checked-in Claude package in-process without any vendor CLI', async () => {

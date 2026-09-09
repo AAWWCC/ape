@@ -62,9 +62,9 @@ export const DEFAULT_MODELS = Object.freeze({
     deep: Object.freeze({ model: 'opus' }),
   }),
   codex: Object.freeze({
-    fast: Object.freeze({ model: 'gpt-5.4-mini', reasoning_effort: 'low' }),
-    balanced: Object.freeze({ model: 'gpt-5.5', reasoning_effort: 'medium' }),
-    deep: Object.freeze({ model: 'gpt-5.5', reasoning_effort: 'high' }),
+    fast: Object.freeze({ model: 'gpt-6-astra', reasoning_effort: 'low' }),
+    balanced: Object.freeze({ model: 'gpt-6-astra', reasoning_effort: 'medium' }),
+    deep: Object.freeze({ model: 'gpt-6-astra', reasoning_effort: 'high' }),
   }),
 });
 
@@ -102,6 +102,21 @@ export const LEGACY_SHIPPED_DEFAULTS = Object.freeze([
     version: '2.6.2',
     defaults: Object.freeze({
       gates: Object.freeze({ inline_grace_ms: 10_000 }),
+    }),
+  }),
+  // 2.25.3 carried Mini for fast and GPT-5.5 for balanced/deep. Preserve
+  // ambiguous materialized values so doctor can distinguish a claimed pin
+  // from an old default without silently changing the operator's choice.
+  Object.freeze({
+    version: '2.25.3',
+    defaults: Object.freeze({
+      models: Object.freeze({
+        codex: Object.freeze({
+          fast: Object.freeze({ model: 'gpt-5.4-mini', reasoning_effort: 'low' }),
+          balanced: Object.freeze({ model: 'gpt-5.5', reasoning_effort: 'medium' }),
+          deep: Object.freeze({ model: 'gpt-5.5', reasoning_effort: 'high' }),
+        }),
+      }),
     }),
   }),
 ]);

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { BUNDLE_ENTRIES as ENTRIES, BUNDLE_OPTIONS } from '../scripts/bundle-definition.mjs';
 
 // Closes roadmap entry `bundle-reachability-needs-rebuild-not-grep`. See the
 // run objective for the full incident (run-fixture-494d93e8fd2f): a prior
@@ -19,18 +20,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const TOOL = path.join(REPO_ROOT, 'scripts', 'bundle-reach.mjs');
 
-// Mirrors scripts/bundle-mcp.mjs's three entry points and their exact build
-// options (bundle/platform/format/target/minifyWhitespace) — see that file's
-// header comment. The reachability aid must answer the same question that
-// script would produce a committed artifact for, so this suite's own ground
-// truth is built with matching options, out-of-tree (`write: false`) so
-// running this suite never touches dist/.
-const ENTRIES = [
-  { label: 'mcp', entry: 'bin/ape-mcp.mjs' },
-  { label: 'hooks', entry: 'bin/ape-hook.mjs' },
-  { label: 'larp', entry: 'bin/ape-larp.mjs' },
-];
-
+// Compute actual esbuild reachability under the generator's shared contract.
 let metafiles;
 
 beforeAll(async () => {
@@ -38,11 +28,7 @@ beforeAll(async () => {
   for (const { label, entry } of ENTRIES) {
     const result = await build({
       entryPoints: [path.join(REPO_ROOT, entry)],
-      bundle: true,
-      platform: 'node',
-      format: 'esm',
-      target: 'node22',
-      minifyWhitespace: true,
+      ...BUNDLE_OPTIONS,
       write: false,
       metafile: true,
       absWorkingDir: REPO_ROOT,
@@ -224,11 +210,7 @@ describe('structured preflight bundle reachability', () => {
   it('puts the answer-preflight action and analyst role in a fresh MCP build', async () => {
     const result = await build({
       entryPoints: [path.join(REPO_ROOT, 'bin/ape-mcp.mjs')],
-      bundle: true,
-      platform: 'node',
-      format: 'esm',
-      target: 'node22',
-      minifyWhitespace: true,
+      ...BUNDLE_OPTIONS,
       write: false,
       logLevel: 'silent',
     });

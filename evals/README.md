@@ -31,13 +31,20 @@ Claude runs with tools disabled. Codex runs in an empty, read-only, ephemeral
 sandbox with user configuration and rules disabled. Both receive only synthetic
 evidence and instructions not to use tools.
 
+The scorer conservatively classifies observed commands: shell expansion, compound
+commands, interpreters with write modes, and Git commands with configured helpers
+cannot pass as read-only. Accepted ripgrep inspection requires `--no-config`.
+This scoring check does not replace the host's read-only sandbox.
+
 Verify saved results offline:
 
 ```sh
 npm run eval:prompts:verify -- --results evals/results/release-candidate
 ```
 
-Verification checks the hashes and 100% release thresholds. Keep approved result
+Verification checks the hashes, recomputes provider safety from the retained
+actions, and applies the 100% thresholds. Synthetic scorer self-check records
+cannot pass saved live-result verification. Keep approved result
 artifacts in CI or release storage, not in source control.
 
 ## Live pipeline certification

@@ -1,13 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { constants as fsConstants } from 'node:fs';
-import { mkdtemp, mkdir, open, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { abortRun, overrideRun, startRun } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { inspectRunLock } from '../lib/runtime/lock.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
+import * as gitRuntime from '../lib/runtime/git.js';
 
 // Audit 1.9 (invariant 7: one active writer, atomic state): startRun and
 // overrideRun('reset') must be serialized so a reset that validated the
@@ -23,14 +23,12 @@ import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 // the new run's active state intact (or refuses the stale reset); it never
 // ends with no active.json while the new run's lock and branch live on.
 //
-// Interleaving technique (deterministic, public surface only): the reset's
-// critical section performs an archive step that reads the on-disk tree-index
-// scratch file — documented in runtimePaths as a pure cache, "safe to delete
-// at any time, rebuilt on the next call" — after it has validated the sealed
-// state and before its destructive apply. Replacing that cache file with a
-// FIFO lets the test hold the reset at exactly that point and release it by
-// closing the write end: the same deterministic hold/release-of-an-on-disk-
-// file discipline the sibling lock tests use, with no runtime instrumentation.
+// The reset's archive step computes the tree after validating the sealed
+// state and before its destructive apply. A test-only barrier holds that
+// first read through the existing tree-session export, then delegates to the
+// real computation without substituting any state or tree evidence. The
+// public reset/start calls, persistence, run locks, and stale-state guard all
+// execute normally. This does not depend on unsafe cache files blocking I/O.
 // Every assertion below is about the raced OUTCOME (which state survives,
 // whether a lock is orphaned), never about which lock either operation held.
 
@@ -95,23 +93,26 @@ async function sealedPreviousRun(dir) {
   return started.run.run_id;
 }
 
-// Rendezvous with the in-flight reset: a non-blocking write-open of a FIFO
-// succeeds only once a reader has it open, i.e. only once the reset has
-// validated the sealed state and reached its pre-deletion cache read. Bounded
-// retry, no fixed sleeps.
-async function openWriteEndWhenReaderArrives(fifoPath, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      return await open(fifoPath, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK);
-    } catch (error) {
-      if (error?.code !== 'ENXIO') throw error;
-      if (Date.now() > deadline) {
-        throw new Error('timed out waiting for the reset to reach its pre-deletion read');
-      }
-      await sleep(10);
-    }
-  }
+function holdNextTreeRead(projectDir) {
+  const original = gitRuntime.treeShaSession;
+  let arrived = false;
+  let release;
+  const released = new Promise((resolve) => { release = resolve; });
+  const spy = vi.spyOn(gitRuntime, 'treeShaSession').mockImplementationOnce((root) => {
+    expect(root).toBe(projectDir);
+    const session = original(root);
+    return {
+      ...session,
+      async current() {
+        if (!arrived) {
+          arrived = true;
+          await released;
+        }
+        return session.current();
+      },
+    };
+  });
+  return { arrived: () => arrived, release, restore: () => spy.mockRestore() };
 }
 
 async function waitFor(probe, timeoutMs, intervalMs = 25) {
@@ -136,18 +137,14 @@ describe('APE v2 startRun vs overrideRun(reset) serialization (audit 1.9, invari
     expect((await inspectRunLock(paths.lock)).present).toBe(false);
   });
 
-  it.skipIf(process.platform === 'win32')(
+  it(
     'racing: a reset validated against the previous sealed run never deletes a newly started run\'s state',
     async () => {
       const dir = await project();
       const oldRunId = await sealedPreviousRun(dir);
       const paths = runtimePaths(dir);
 
-      // Plant the deterministic stall point: swap the pure-cache tree-index
-      // scratch file for a FIFO so the reset blocks between validating the old
-      // sealed state and applying its deletion.
-      await rm(paths.treeIndex, { force: true });
-      execFileSync('mkfifo', [paths.treeIndex]);
+      const barrier = holdNextTreeRead(dir);
 
       const overridePromise = overrideRun(
         dir,
@@ -156,21 +153,19 @@ describe('APE v2 startRun vs overrideRun(reset) serialization (audit 1.9, invari
       );
       overridePromise.catch(() => {});
       let startPromise = null;
-      let writeEnd = null;
       try {
         // The reset has now read + validated the OLD sealed state and is held
-        // at its pre-deletion cache read.
-        writeEnd = await openWriteEndWhenReaderArrives(paths.treeIndex, 4_000);
-        // Restore the documented safe-to-delete cache state (absent) for every
-        // other reader; the held reset keeps its already-open descriptor.
-        await rm(paths.treeIndex, { force: true });
+        // at its first archive tree read. A missing rendezvous is a failure,
+        // not permission to run an uncoordinated race.
+        expect(await waitFor(barrier.arrived, 4_000),
+          'reset did not reach the pre-deletion tree-read barrier').toBe(true);
 
         startPromise = startRun(dir, startInput('second run: races the in-flight reset'));
         startPromise.catch(() => {});
 
-        // Today the unserialized start persists the NEW run while the reset is
-        // still in flight; wait for that persist so the reset's deletion is
-        // released strictly after it. A runtime that instead serializes the
+        // An overlapping start may persist the NEW run while reset is still
+        // in flight; wait for that persist so the reset's stale-state check
+        // runs strictly after it. A runtime that instead serializes the
         // whole start behind the in-flight reset never persists during this
         // bounded wait — the timeout arm then releases the reset first and the
         // start completes afterwards. Both orderings are covered below.
@@ -180,10 +175,11 @@ describe('APE v2 startRun vs overrideRun(reset) serialization (audit 1.9, invari
         }, 5_000);
         if (persistedDuringReset) await startPromise;
       } finally {
-        // Release the held reset (EOF on the cache read) and drain both
-        // operations so no promise or descriptor outlives the test.
-        if (writeEnd) await writeEnd.close().catch(() => {});
+        // Both bounded waits have ended; always release the held reset and
+        // drain the actual calls before removing the test-only interception.
+        barrier.release();
         await Promise.allSettled([overridePromise, startPromise ?? Promise.resolve()]);
+        barrier.restore();
       }
       const [overrideSettled, startSettled] = await Promise.allSettled([
         overridePromise,
@@ -201,8 +197,8 @@ describe('APE v2 startRun vs overrideRun(reset) serialization (audit 1.9, invari
 
       // RED anchor (the audited defect): the reset validated the OLD sealed
       // run, so after both operations settle the NEW run's active state must
-      // survive — today the reset's deletion fires after the new run persisted
-      // and erases the new run's only state.
+      // survive. Removing the stale-state guard makes the delayed deletion
+      // erase the new run's only state, which this assertion must detect.
       const finalActive = await readJson(paths.active, null);
       expect(
         finalActive,

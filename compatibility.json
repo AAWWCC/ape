@@ -7,7 +7,7 @@
   "hosts": {
     "codex": {
       "package": "@openai/codex",
-      "version": "0.147.0",
+      "version": "0.153.4",
       "live_certification": "required"
     },
     "claude": {

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, cpSync, appendFileSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -61,6 +61,59 @@ function transcript({ tool = 'mcp__ape__ape_validate_receipt', id = 'toolu-probe
 }
 
 describe('live per-role worker validator reachability canary', () => {
+  it.each([
+    'dist/ape-mcp.bundle.mjs',
+    'dist/ape-hooks.bundle.mjs',
+    'hooks/hooks.json',
+    'prompts/common.md',
+    'additional-file.txt',
+  ])('invalidates an existing proof when packaged file %s changes or appears', (file) => {
+    const pluginDir = path.join(scratch(), 'plugin');
+    cpSync(path.join(process.cwd(), 'plugins/ape-claude'), pluginDir, { recursive: true });
+    const original = candidateValidatorSurfaceHash({ pluginDir });
+    appendFileSync(path.join(pluginDir, file), '\nsynthetic changed candidate bytes\n');
+    expect(candidateValidatorSurfaceHash({ pluginDir })).not.toBe(original);
+    expect(() => verifyWorkerValidatorReachabilityProof({
+      version: 1,
+      host: 'claude',
+      checked_at: '2026-01-01T00:00:00Z',
+      candidate_validator_surface_sha256: original,
+    }, { pluginDir })).toThrow(/does not match this candidate/u);
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a symlinked file in the candidate inventory', () => {
+    const root = scratch();
+    const pluginDir = path.join(root, 'plugin');
+    cpSync(path.join(process.cwd(), 'plugins/ape-claude'), pluginDir, { recursive: true });
+    writeFileSync(path.join(root, 'external.txt'), 'synthetic external fixture');
+    symlinkSync(path.join(root, 'external.txt'), path.join(pluginDir, 'additional-link.txt'));
+    expect(() => candidateValidatorSurfaceHash({ pluginDir })).toThrow(/symlinks/u);
+  });
+
+  it('refuses to issue proof when the package changes between role calls', () => {
+    const pluginDir = path.join(scratch(), 'plugin');
+    cpSync(path.join(process.cwd(), 'plugins/ape-claude'), pluginDir, { recursive: true });
+    let changed = false;
+    expect(() => runWorkerValidatorReachability({
+      pluginDir,
+      spawn: (_command, args, options) => {
+        if (!changed) {
+          appendFileSync(path.join(pluginDir, 'prompts/common.md'), '\nsynthetic candidate change\n');
+          changed = true;
+        }
+        const role = args[args.indexOf('--agent') + 1].slice('ape:'.length);
+        const ticketId = `ape-validator-reachability:${role}`;
+        return {
+          status: 0,
+          stderr: '',
+          stdout: transcript({ input: {
+            project_dir: options.cwd, ticket_id: ticketId, draft: { ticket_id: ticketId },
+          } }),
+        };
+      },
+    })).toThrow(/candidate package changed/u);
+  });
+
   it('enumerates every canonical and packaged Claude role', () => {
     expect(canonicalWorkerRoles()).toEqual(roles);
     expect(canonicalWorkerRoles(path.join(process.cwd(), 'plugins', 'ape-claude', 'agents')))
@@ -139,6 +192,47 @@ describe('live per-role worker validator reachability canary', () => {
       expect(() => inspectWorkerValidatorTranscript(raw, expected))
         .toThrow(WorkerValidatorReachabilityError);
     }
+  });
+
+  it('ignores validator-shaped data outside complete assistant and user message blocks', () => {
+    const expected = { role: 'reviewer', project_dir: '/tmp/probe', ticket_id: 'ape-validator-reachability:reviewer' };
+    const input = { project_dir: expected.project_dir, ticket_id: expected.ticket_id, draft: { ticket_id: expected.ticket_id } };
+    const [call, result] = transcript({ input }).split('\n').map((line) => JSON.parse(line));
+    for (const raw of [
+      JSON.stringify({ type: 'tool_result', tool_use_id: 'unrelated', content: { call, result } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'unrelated', name: 'mcp__fixture__read', input: { call, result } }] } }),
+      JSON.stringify({ type: 'result', structured_output: { call, result } }),
+      [JSON.stringify({ ...call, type: 'user' }), JSON.stringify(result)].join('\n'),
+    ]) expect(() => inspectWorkerValidatorTranscript(raw, expected)).toThrow(WorkerValidatorReachabilityError);
+  });
+
+  it('requires the exact linked JSON sentinel and rejects duplicate or reordered events', () => {
+    const expected = { role: 'reviewer', project_dir: '/tmp/probe', ticket_id: 'ape-validator-reachability:reviewer' };
+    const input = { project_dir: expected.project_dir, ticket_id: expected.ticket_id, draft: { ticket_id: expected.ticket_id } };
+    const [call, result] = transcript({ input }).split('\n').map((line) => JSON.parse(line));
+    for (const content of [
+      'transport failed before receiving no active run',
+      JSON.stringify({ ok: true, errors: ['no active run'] }),
+      JSON.stringify({ ok: false, errors: ['no active run', 'transport failed'] }),
+      JSON.stringify({ ok: false, errors: ['no active run'], unexpected: true }),
+    ]) {
+      const changed = structuredClone(result);
+      changed.message.content[0].content = [{ type: 'text', text: content }];
+      expect(() => inspectWorkerValidatorTranscript([call, changed].map(JSON.stringify).join('\n'), expected))
+        .toThrow(/sentinel/u);
+    }
+    for (const events of [[call, call, result], [call, result, result], [result, call]]) {
+      expect(() => inspectWorkerValidatorTranscript(events.map(JSON.stringify).join('\n'), expected))
+        .toThrow(WorkerValidatorReachabilityError);
+    }
+    const wrongCall = structuredClone(call);
+    wrongCall.message.content[0].id = 'different-call';
+    wrongCall.message.content[0].input.ticket_id = 'different-ticket';
+    expect(() => inspectWorkerValidatorTranscript([call, result, wrongCall].map(JSON.stringify).join('\n'), expected))
+      .toThrow(/exactly one/u);
+    result.message.content[0].is_error = true; // The expected domain rejection is an MCP error result.
+    expect(inspectWorkerValidatorTranscript([call, result].map(JSON.stringify).join('\n'), expected).service_response)
+      .toBe('no-active-run');
   });
 
   it('fails closed unless the host transcript proves every role called the validator', () => {

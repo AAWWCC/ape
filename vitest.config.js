@@ -28,17 +28,6 @@ const SPAWN_SERIAL_FILES = [
   // Benchmark lock tests also await cold CLI children. Keep their existing
   // deadlines out of contention with parallel workers.
   '__tests__/runtime-v2-benchmark.test.js',
-  // Contention quarantine: this audit sweep awaits REAL children today (line
-  // refs into that file) — execFileSync `git` repos (:293-299) and a real
-  // `mkfifo` (:1573), and decisively its fixture's `targeted: 'node
-  // tests/value.test.js'` (:661), which the RUNTIME's own red-test observation
-  // spawns and awaits twice per admission on each of three walkToReview paths.
-  // Starving it is not merely slow: the POSIX-only item-13 arms (:1593-1649)
-  // rendezvous with an in-flight reset through a FIFO under a hard 10s
-  // wall-clock deadline that THROWS on expiry (:1546-1559, armed at :1579).
-  // The item-3 escalate-once arms landing in the next run (not on this base)
-  // deepen that profile further: they await a grandchild that ignores SIGTERM.
-  '__tests__/runtime-v2-audit-2026-07-24-nits.test.js',
 ];
 
 export default defineConfig({

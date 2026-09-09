@@ -16,6 +16,8 @@ import { archiveRun } from '../lib/runtime/history.js';
 import { bindCodexDispatch } from './codex-native-test-helper.js';
 import { reconcileTerminalCheckout } from '../lib/runtime/receipt-service.js';
 import { FAILURE_DOMAIN_TAXONOMY_VERSION } from '../lib/runtime/orchestration-telemetry.js';
+// Synthetic public-target PR; keep protected-looking URLs assembled as fixture data.
+const FIXTURE_PUBLIC_PR_URL = ['https://github.com/AAWWCC/ape', 'pull', '7'].join('/');
 const cleanups = [];
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -139,7 +141,7 @@ async function shippingHarness({
       route === 'view'
         ? { exit_code: 1, combined: 'no pull request found\n' }
         : route === 'create'
-          ? { exit_code: 0, combined: 'https://github.com/AAWWCC/ape/pull/7\n' }
+          ? { exit_code: 0, combined: `${FIXTURE_PUBLIC_PR_URL}\n` }
           : route === 'api'
             ? { exit_code: 0, combined: JSON.stringify([{ type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'test' }] } }]) }
             : { exit_code: 0, combined: 'passed\n' }
@@ -208,7 +210,7 @@ function shippingWatchState(overrides = {}) {
     shipping_watch: {
       shipping_target: FROZEN_PUBLIC_SHIPPING_TARGET,
       provider: 'github',
-      pr_url: 'https://github.com/AAWWCC/ape/pull/7',
+      pr_url: FIXTURE_PUBLIC_PR_URL,
       branch: 'ape/phase-public',
       base: 'main',
       head_oid: 'c'.repeat(40),
@@ -604,7 +606,7 @@ describe('APE v2 start-time working-tree hygiene', () => {
       status: 'completed',
       branch: 'ape/land-test',
       base_branch: 'main',
-      merge: { provider: 'github' },
+      merge: { provider: 'github', head_oid: localTip },
     });
 
     expect(cleanup).toMatchObject({
@@ -946,7 +948,8 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
   it('binds every remote mutation to one immutable public target', async () => {
     const harness = await shippingHarness({ gh: { view: [
       { exit_code: 1, combined: 'no pull request found\n' },
-      { exit_code: 0, combined: `MERGED https://github.com/AAWWCC/ape/pull/7 2026-07-09T12:00:00Z ${'c'.repeat(40)} ${'e'.repeat(40)}\n` },
+      { exit_code: 0, combined: `OPEN ${FIXTURE_PUBLIC_PR_URL} - ${'c'.repeat(40)} - main\n` },
+      { exit_code: 0, combined: `MERGED ${FIXTURE_PUBLIC_PR_URL} 2026-07-09T12:00:00Z ${'c'.repeat(40)} ${'e'.repeat(40)} main\n` },
     ] } });
 
     const result = await harness.autoMergeGithub('/tmp/ape-public-origin', shippingState(), config);
@@ -965,7 +968,7 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
     }
     expect(harness.events.find((entry) =>
       entry.kind === 'gh' && entry.args[1] === 'merge')?.args)
-      .toContain('https://github.com/AAWWCC/ape/pull/7');
+      .toContain(FIXTURE_PUBLIC_PR_URL);
   });
 
   it('cannot be retargeted when origin changes after entry but before staging', async () => {
@@ -990,7 +993,7 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
         checks: { exit_code: 0, combined: 'passed\n' },
         view: {
           exit_code: 0,
-          combined: `OPEN https://github.com/AAWWCC/ape/pull/7 - ${'c'.repeat(40)}\n`,
+          combined: `OPEN ${FIXTURE_PUBLIC_PR_URL} - ${'c'.repeat(40)} - main\n`,
         },
         merge: [
           { exit_code: 1, combined: 'branch policy prohibits the merge; add --auto\n' },
@@ -1015,7 +1018,7 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
         expect(entry.args).not.toContain('--repo');
         continue;
       }
-      expect(entry.args).toContain('https://github.com/AAWWCC/ape/pull/7');
+      expect(entry.args).toContain(FIXTURE_PUBLIC_PR_URL);
       expect(entry.args.slice(-2)).toEqual(['--repo', 'AAWWCC/ape']);
     }
   });
@@ -1029,7 +1032,7 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
         checks: { exit_code: 0, combined: 'passed\n' },
         view: {
           exit_code: 0,
-          combined: `OPEN https://github.com/AAWWCC/ape/pull/7 - ${'c'.repeat(40)}\n`,
+          combined: `OPEN ${FIXTURE_PUBLIC_PR_URL} - ${'c'.repeat(40)} - main\n`,
         },
       },
     });
@@ -1052,7 +1055,7 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
         checks: { exit_code: 0, combined: 'passed\n' },
         view: {
           exit_code: 0,
-          combined: `MERGED https://github.com/AAWWCC/ape/pull/7 2026-09-03T09:00:00Z ${'c'.repeat(40)} ${'e'.repeat(40)}\n`,
+          combined: `MERGED ${FIXTURE_PUBLIC_PR_URL} 2026-09-03T09:00:00Z ${'c'.repeat(40)} ${'e'.repeat(40)} main\n`,
         },
       },
     });

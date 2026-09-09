@@ -309,21 +309,6 @@ function inspectRevisions(projectDir, revisions) {
   return { findings, commits: commits.length, refs: revisions.length };
 }
 
-export function verifyPublicCommitIdentities({
-  projectDir = process.cwd(),
-  revisions = ['HEAD'],
-} = {}) {
-  ensureCompleteRepository(projectDir);
-  const result = inspectRevisions(projectDir, revisions);
-  if (result.findings.length > 0) {
-    throw new PublicCommitIdentityError(
-      `public commit identity gate failed with ${result.findings.length} finding(s):\n` +
-      result.findings.map((finding) => `- ${finding}`).join('\n'),
-    );
-  }
-  return Object.freeze({ commits: result.commits, refs: result.refs });
-}
-
 function invokedDirectly(argvPath) {
   if (!argvPath) return false;
   try {

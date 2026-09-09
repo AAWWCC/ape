@@ -2,12 +2,17 @@
 
 import childProcess, { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { accessSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdtempSync, openSync, opendirSync, readFileSync, readSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { accessSync, closeSync, constants, existsSync, mkdtempSync, openSync, opendirSync, readFileSync, readSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseToml } from 'smol-toml';
 import { verifyLiveCertificationEnvironment } from './check-live-certification-environment.mjs';
+import { lstatFileSync as lstatSync, statFileDescriptor as fstatSync } from '../lib/runtime/file-stats.js';
+import { readBoundedFileSync } from '../lib/runtime/bounded-file.js';
+import { DEFAULT_CONFIG, resolveModel } from '../lib/runtime/config.js';
+import { ROLE_POLICIES } from '../lib/runtime/constants.js';
+import { assertSafeInput, INPUT_LIMITS } from '../lib/runtime/input-guard.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const RELEASE_VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -16,6 +21,9 @@ const CATALOG_STUB = path.join(ROOT, 'scripts', 'live-certification-catalog-stub
 const FAIL_CLOSED_CATALOG_URL = 'http://127.0.0.1:1';
 const MAX_CODEX_CONFIG_BYTES = 256 * 1024;
 const MAX_HOST_VERSION_BYTES = 4_096;
+const MAX_MODEL_CATALOG_BYTES = 8 * 1024 * 1024;
+// Codex rust-v0.153.4, models-manager/src/manager.rs: DEFAULT_MODEL_CACHE_TTL.
+const MODEL_CATALOG_TTL_MS = 300_000;
 // Control and worker calls required by the pinned certification run protocol.
 export const CERTIFICATION_APE_TOOLS = Object.freeze([
   'ape_config', 'ape_run', 'ape_bind', 'ape_validate_receipt',
@@ -222,8 +230,12 @@ function requireDeterministicConfig(codexHome) {
       'isolated Codex model_provider must select its own declared model_providers table with explicit transport settings',
     );
   }
-  if (typeof ownConfigValue(provider, 'name') !== 'string' || provider.name.trim().length === 0) {
-    throw new LiveCertificationParentError('the selected Codex model_providers table must declare a non-empty name');
+  // The pinned host uses this exact display name to preserve native call
+  // encryption markers and internal metadata in outgoing request history.
+  if (ownConfigValue(provider, 'name') !== 'OpenAI') {
+    throw new LiveCertificationParentError(
+      'the selected Codex model_providers table must declare name = "OpenAI" to preserve native request metadata',
+    );
   }
   const requirements = [
     { key: 'request_max_retries', value: 0n, description: 'request_max_retries = 0 (TOML integer)' },
@@ -243,7 +255,7 @@ function requireDeterministicConfig(codexHome) {
     );
   }
   const features = ownConfigValue(config, 'features');
-  // Codex 0.147.0 otherwise selects its native agent API from model metadata
+  // Codex otherwise selects its native agent API from model metadata
   // or legacy feature defaults. APE's unchanged launch envelope requires V2's
   // task_name and fork_turns fields, which the V1 schema cannot accept.
   if (ownConfigValue(features, 'multi_agent_v2') !== true) {
@@ -267,6 +279,92 @@ function requireDeterministicConfig(codexHome) {
     );
   }
   requireHeadlessMcpPolicy(config);
+  if (Object.hasOwn(config, 'model_catalog_json')) {
+    throw new LiveCertificationParentError('isolated Codex certification cannot use a static model_catalog_json override; refresh the normal profile model catalog before launch');
+  }
+}
+
+function requireChildModelCatalog(codexHome, configured) {
+  const refuse = () => {
+    throw new LiveCertificationParentError(
+      'Codex child model catalog prerequisite: use normal host metadata discovery to refresh this isolated profile models_cache.json; ' +
+      'a stable bounded catalog for the exact pinned client, fetched within 300 seconds, must contain every effective Codex tier and role model with native V2 support. ' +
+      'Do not synthesize catalog entries or change explicit model choices to bypass this check',
+    );
+  };
+  try {
+    const file = path.join(codexHome, 'models_cache.json');
+    const before = lstatSync(file);
+    const raw = new TextDecoder('utf-8', { fatal: true }).decode(readBoundedFileSync(file, MAX_MODEL_CATALOG_BYTES));
+    const after = lstatSync(file);
+    if (!after.isFile() || ['dev', 'ino', 'size', 'mode', 'mtimeMs', 'ctimeMs'].some((key) => before[key] !== after[key])) refuse();
+    const catalog = JSON.parse(raw);
+    // Like serde's typed cache fields, reject duplicate JSON identities instead
+    // of accepting JSON.parse's last-value-wins interpretation. Inspect strings
+    // only as tokens, so model instruction text cannot impersonate object keys.
+    const stack = [];
+    const tokens = /"(?:[^"\\]|\\.)*"|[{}\[\]]/gu;
+    const colon = /\s*:/uy;
+    for (let token; (token = tokens.exec(raw)) !== null;) {
+      const value = token[0];
+      if (value === '{' || value === '[') {
+        stack.push(value === '{' ? new Set() : null);
+        if (stack.length > 32) refuse();
+      } else if (value === '}' || value === ']') stack.pop();
+      else {
+        colon.lastIndex = tokens.lastIndex;
+        if (!colon.test(raw)) continue;
+        const keys = stack.at(-1);
+        const key = JSON.parse(value);
+        if (!keys || keys.has(key)) refuse();
+        keys.add(key);
+      }
+    }
+    assertSafeInput(catalog, { ...INPUT_LIMITS, maxBytes: MAX_MODEL_CATALOG_BYTES });
+    if (!configTable(catalog) || catalog.client_version !== CODEX_HOST_VERSION ||
+        typeof catalog.fetched_at !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(catalog.fetched_at) ||
+        (catalog.etag !== undefined && catalog.etag !== null && typeof catalog.etag !== 'string') ||
+        !Array.isArray(catalog.models) || catalog.models.length === 0) refuse();
+    const fetchedAt = Date.parse(catalog.fetched_at);
+    const age = Date.now() - fetchedAt;
+    if (!Number.isFinite(fetchedAt) || new Date(fetchedAt).toISOString().slice(0, 19) !== catalog.fetched_at.slice(0, 19) ||
+        age < 0 || age > MODEL_CATALOG_TTL_MS) refuse();
+    const models = new Map();
+    for (const model of catalog.models) {
+      if (!configTable(model) || typeof model.slug !== 'string' || model.slug.length === 0 || model.slug.length > 512 ||
+          model.slug.trim() !== model.slug || /[\u0000-\u001f\u007f]/u.test(model.slug) || models.has(model.slug)) refuse();
+      models.set(model.slug, model);
+    }
+    // Same recursive sparse-override semantics as loadRuntimeConfig. Only the
+    // model subtrees participate; provenance/version fields cannot select models.
+    const merge = (base, override) => {
+      if (!configTable(override)) return base;
+      const result = { ...base };
+      for (const [key, value] of Object.entries(override)) {
+        result[key] = configTable(value) ? merge(base?.[key] ?? {}, value) : value;
+      }
+      return result;
+    };
+    const modelSettings = {};
+    for (const key of ['models', 'role_models']) {
+      if (Object.hasOwn(configured, key)) modelSettings[key] = configured[key];
+    }
+    assertSafeInput(modelSettings);
+    const effective = merge(DEFAULT_CONFIG, modelSettings);
+    const selections = [
+      ...['fast', 'balanced', 'deep'].map((tier) => resolveModel(effective, 'codex', tier)),
+      ...Object.entries(ROLE_POLICIES).map(([role, policy]) => resolveModel(effective, 'codex', policy.model_tier, role)),
+    ];
+    for (const selected of selections) {
+      const model = models.get(selected.model);
+      if (!model || model.multi_agent_version !== 'v2') refuse();
+    }
+    // This checks the retained local capability snapshot, not signed provenance,
+    // current authentication, or availability of a future backend request.
+  } catch {
+    refuse();
+  }
 }
 
 // Version labels alone do not identify plugin code. Compare the complete staged
@@ -373,6 +471,7 @@ function requireReleaseShippingPolicy(project) {
       'governed project must explicitly set shipping.required_remote_checks to match its CI topology before first-pass-perfect certification',
     );
   }
+  return config;
 }
 
 function requireExactPromptProject(prompt, project) {
@@ -460,10 +559,11 @@ export function buildCodexParentInvocation({
     throw new LiveCertificationParentError('--prompt must not be empty');
   }
   requireExactPromptProject(prompt, project);
-  requireReleaseShippingPolicy(project);
+  const governedConfig = requireReleaseShippingPolicy(project);
   requireDeterministicConfig(home);
   const candidatePackage = requireExactPlugin(home);
   const command = requirePinnedCodexExecutable(codexBin, project, home);
+  requireChildModelCatalog(home, governedConfig);
   const catalogUrl = exactLoopbackCatalogUrl(catalogBaseUrl);
   // Carry an existing approval across the parent-process boundary. The flag is
   // caller attestation, not a source of permission or authenticated provenance.

@@ -52,6 +52,8 @@ async function isolatedSurface(files, fingerprints = []) {
   const root = path.join(repository, 'surface');
   await mkdir(path.dirname(checker), { recursive: true });
   await writeFile(checker, await readFile(CHECKER));
+  await writeFile(path.join(repository, 'scripts', 'public-text-policy.mjs'),
+    await readFile(path.join(REPO_ROOT, 'scripts', 'public-text-policy.mjs')));
   await writeFile(path.join(repository, 'public-asset-fingerprints.json'), `${JSON.stringify({
     version: 1,
     domain: 'APE-public-forbidden-v1',
