@@ -2,12 +2,13 @@
 
 import childProcess, { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { accessSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdtempSync, openSync, opendirSync, readFileSync, readSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { accessSync, closeSync, constants, existsSync, mkdtempSync, openSync, opendirSync, readFileSync, readSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseToml } from 'smol-toml';
 import { verifyLiveCertificationEnvironment } from './check-live-certification-environment.mjs';
+import { lstatFileSync as lstatSync, statFileDescriptor as fstatSync } from '../lib/runtime/file-stats.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const RELEASE_VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;

@@ -38,11 +38,13 @@ function temporaryRoot(prefix) {
 function fixtureProject() {
   const root = temporaryRoot('ape-duration-contract-');
   mkdirSync(join(root, 'scripts'), { recursive: true });
+  mkdirSync(join(root, 'lib', 'runtime'), { recursive: true });
   mkdirSync(join(root, 'node_modules', 'vitest'), { recursive: true });
   mkdirSync(join(root, '.github'), { recursive: true });
   mkdirSync(join(root, '__tests__'), { recursive: true });
   copyFileSync(UPDATE_SCRIPT, join(root, 'scripts', 'update-test-durations.mjs'));
   copyFileSync(join(ROOT, 'scripts', 'tooling-snapshots.mjs'), join(root, 'scripts', 'tooling-snapshots.mjs'));
+  copyFileSync(join(ROOT, 'lib', 'runtime', 'file-stats.js'), join(root, 'lib', 'runtime', 'file-stats.js'));
   writeFileSync(join(root, '__tests__', 'a.test.js'), 'export {}\n');
   writeFileSync(join(root, '__tests__', 'b.test.js'), 'export {}\n');
   writeFileSync(join(root, '.github', 'test-durations.json'), '{"sentinel":17}\n');
@@ -119,6 +121,61 @@ afterEach(() => {
 });
 
 describe('committed duration inventory and deterministic CI partition', () => {
+  it.each(['wide-volume', 'zero-volume', 'different-volume', 'different-inode'])(
+    'refreshes only matching Windows identities (%s)', (scenario) => {
+      const root = fixtureProject();
+      const destination = join(root, '.github', 'test-durations.json');
+      const before = readFileSync(destination);
+      const injector = join(root, 'windows-file-identities.mjs');
+      writeFileSync(injector, `
+        import fs from 'node:fs';
+        import { syncBuiltinESMExports } from 'node:module';
+        process.env.TEMP = ${JSON.stringify(root)};
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const scenario = process.env.APE_STAT_SCENARIO;
+        function identity(metadata, descriptor) {
+          const device = descriptor
+            ? 0xabcdef01n + BigInt(scenario === 'different-volume')
+            : scenario === 'zero-volume' ? 0n : 0x12345678abcdef01n;
+          const inode = (1n << 60n) + BigInt(metadata.ino)
+            + BigInt(descriptor && scenario === 'different-inode');
+          return Object.assign(Object.create(Object.getPrototypeOf(metadata)), metadata, {
+            dev: typeof metadata.dev === 'bigint' ? device : Number(device),
+            ino: typeof metadata.ino === 'bigint' ? inode : Number(inode),
+          });
+        }
+        const originalLstat = fs.promises.lstat.bind(fs.promises);
+        fs.promises.lstat = async (...args) => identity(await originalLstat(...args), false);
+        const originalOpen = fs.promises.open.bind(fs.promises);
+        fs.promises.open = async (...args) => {
+          const handle = await originalOpen(...args);
+          const originalStat = handle.stat.bind(handle);
+          handle.stat = async (...options) => identity(await originalStat(...options), true);
+          return handle;
+        };
+        syncBuiltinESMExports();
+      `);
+      const result = runRefresh(root, {
+        success: true,
+        testResults: [
+          timingResult(root, '__tests__/a.test.js', 10, 20),
+          timingResult(root, '__tests__/b.test.js', 10, 40),
+        ],
+      }, 0, { NODE_OPTIONS: `--import=${injector}`, APE_STAT_SCENARIO: scenario });
+      if (scenario.startsWith('different-')) {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('duration destination changed during refresh');
+        expect(readFileSync(destination)).toEqual(before);
+      } else {
+        expect(result.status, result.stderr).toBe(0);
+        expect(JSON.parse(readFileSync(destination, 'utf8'))).toEqual({
+          '__tests__/a.test.js': 10, '__tests__/b.test.js': 30,
+        });
+        expect(readdirSync(join(root, '.github'))).toEqual(['test-durations.json']);
+      }
+    },
+  );
+
   it('commits one sorted positive duration for every supported test file', async () => {
     const inventory = await listTestFiles();
     const durations = JSON.parse(readFileSync(join(ROOT, '.github', 'test-durations.json'), 'utf8'));

@@ -11,11 +11,9 @@ import {
   constants,
   fchmodSync,
   existsSync,
-  fstatSync,
   fsyncSync,
   ftruncateSync,
   linkSync,
-  lstatSync,
   openSync,
   opendirSync,
   readdirSync,
@@ -31,6 +29,7 @@ import { sameIdentity, sameSnapshot, sameLockSnapshot, sameReclaimableLock } fro
 import { selectEffectiveRecord } from '../lib/runtime/history.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { DEFAULT_DEADLINES_MS } from '../lib/runtime/constants.js';
+import { lstatFileSync as lstatSync, statFileDescriptor as fstatSync } from '../lib/runtime/file-stats.js';
 
 const DEFAULT_FILE = 'benchmarks/reference-runs.json';
 const HOSTS = ['claude', 'codex'];

@@ -13,6 +13,9 @@ campaign remain required. The failed 2.25.3 mechanical attempt remains failed.
 - Use `gpt-6-astra` for all Codex default tiers: low effort for fast, medium for
   balanced, and high for deep. Preserve Claude defaults and explicit model pins;
   diagnose materialized 2.25.3 model defaults without silently rewriting them.
+- Use the existing Windows file-identity compatibility helpers in benchmark,
+  certification-launcher, and test-duration tooling, preserving replacement and
+  ownership checks when Node 22 pathname and handle device identifiers differ.
 
 ## 2.25.3 — 2026-09-08
 

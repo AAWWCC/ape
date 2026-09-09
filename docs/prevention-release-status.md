@@ -9,6 +9,12 @@ are pending; local tests and package checks do not replace those requirements.
 This page records results as of September 8, 2026 and does not authorize testing,
 installation or publication.
 
+The first 2.25.4 CI run, [34296408215](https://github.com/AAWWCC/ape/actions/runs/34296408215),
+failed three benchmark CLI checks on Windows/Node 22; the other 16 jobs passed.
+The follow-up applies the existing Windows file-identity compatibility helpers
+to benchmark, certification-launcher, and duration tooling. A new exact-source
+CI run is required. No 2.25.4 live certification attempt has started.
+
 ## 2.25.3 validation and failed formal campaign
 
 Frozen commit `65aeda1f388b126c9faa08bfbdfc2ebcb41cbdf4` passed all 18 jobs in

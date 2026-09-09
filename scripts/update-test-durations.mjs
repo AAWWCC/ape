@@ -2,13 +2,13 @@
 
 import { randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
 import { constants } from 'node:fs';
-import { link, lstat, mkdtemp, open, readdir, rename, rm } from 'node:fs/promises';
+import { link, mkdtemp, open, readdir, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sameIdentity, sameSnapshot, sameLockSnapshot, sameReclaimableLock } from './tooling-snapshots.mjs';
+import { lstatFile as lstat, statFileHandle } from '../lib/runtime/file-stats.js';
 
 const REPORT_BYTES = 16 * 1024 * 1024;
 const OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -29,7 +29,7 @@ async function acquireWriterLock() {
         const metadata = await writeLockMetadata(handle);
         return { file, handle, ...metadata };
       } catch (error) {
-        const owned = await handle.stat().catch(() => null);
+        const owned = await statFileHandle(handle).catch(() => null);
         await handle.close().catch(() => {});
         const current = await lstat(file).catch(() => null);
         if (owned && current && sameIdentity(owned, current)) await rm(file).catch(() => {});
@@ -51,7 +51,7 @@ async function writeLockMetadata(handle) {
   await handle.truncate(0);
   await handle.write(bytes, 0, bytes.length, 0);
   await handle.sync();
-  return { identity: await handle.stat(), bytes };
+  return { identity: await statFileHandle(handle), bytes };
 }
 
 async function acquireReclaimCandidacy(file) {
@@ -62,7 +62,7 @@ async function acquireReclaimCandidacy(file) {
     `${prefix}${String(Date.now()).padStart(13, '0')}-${process.pid}-${randomBytes(16).toString('hex')}`,
   );
   const handle = await open(candidate, 'wx', 0o600);
-  const owned = await handle.stat();
+  const owned = await statFileHandle(handle);
   await handle.close();
   // Keep the winning candidacy published through the entire in-place
   // transition. A killed reclaimer leaves a PID-named artifact that a later
@@ -99,14 +99,14 @@ async function releaseReclaimCandidacy(candidacy) {
 }
 
 async function readLockSnapshot(file) {
-  const before = await fs.promises.lstat(file);
+  const before = await lstat(file);
   if (!before.isFile()) return null;
   const handle = await open(file, constants.O_RDONLY);
   try {
-    const opened = await handle.stat();
+    const opened = await statFileHandle(handle);
     if (!sameIdentity(before, opened) || opened.size !== before.size) return null;
     if (opened.size > LOCK_BYTES) {
-      const after = await handle.stat();
+      const after = await statFileHandle(handle);
       if (!sameSnapshot(opened, after)) return null;
       return { stats: opened, bytes: null };
     }
@@ -117,7 +117,7 @@ async function readLockSnapshot(file) {
       if (bytesRead === 0) return null;
       offset += bytesRead;
     }
-    const after = await handle.stat();
+    const after = await statFileHandle(handle);
     if (!sameSnapshot(opened, after)) return null;
     return { stats: opened, bytes };
   } finally {
@@ -206,12 +206,12 @@ async function tryReclaimWriterLock(file) {
     oldClaimed = false;
 
     const reserved = await open(claim, 'wx', 0o600);
-    freshClaimIdentity = await reserved.stat();
+    freshClaimIdentity = await statFileHandle(reserved);
     await reserved.close();
     await link(claim, file);
     primaryPublished = true;
     handle = await open(claim, 'r+');
-    const openedFresh = await handle.stat();
+    const openedFresh = await statFileHandle(handle);
     const publishedFresh = await lstat(file);
     if (!sameIdentity(openedFresh, freshClaimIdentity)
       || !sameIdentity(publishedFresh, freshClaimIdentity)) {
@@ -232,7 +232,7 @@ async function tryReclaimWriterLock(file) {
     }
     await rm(claim);
     freshClaimIdentity = undefined;
-    return { file, handle, identity: await handle.stat(), bytes: writtenMetadata.bytes };
+    return { file, handle, identity: await statFileHandle(handle), bytes: writtenMetadata.bytes };
   } catch (error) {
     await handle?.close().catch(() => {});
     if (primaryPublished && freshClaimIdentity) {
@@ -299,7 +299,7 @@ async function destinationSnapshot(file, allowMissing = false) {
   }
   const handle = await open(file, constants.O_RDONLY);
   try {
-    const opened = await handle.stat();
+    const opened = await statFileHandle(handle);
     if (!sameIdentity(before, opened) || opened.size !== before.size) {
       throw new Error('duration destination changed during refresh');
     }
@@ -310,7 +310,7 @@ async function destinationSnapshot(file, allowMissing = false) {
       if (bytesRead === 0) throw new Error('duration destination changed during refresh');
       offset += bytesRead;
     }
-    const after = await handle.stat();
+    const after = await statFileHandle(handle);
     if (!sameSnapshot(opened, after)) throw new Error('duration destination changed during refresh');
     return { exists: true, ...opened, bytes };
   } finally {
@@ -325,7 +325,7 @@ async function validateStagedBytes(file, owned, expectedBytes) {
   }
   const handle = await open(file, constants.O_RDONLY);
   try {
-    const opened = await handle.stat();
+    const opened = await statFileHandle(handle);
     if (!sameIdentity(opened, owned) || opened.size !== expectedBytes.length) {
       throw new Error('duration staging validation failed');
     }
@@ -336,7 +336,7 @@ async function validateStagedBytes(file, owned, expectedBytes) {
       if (bytesRead === 0) throw new Error('duration staging validation failed');
       offset += bytesRead;
     }
-    const after = await handle.stat();
+    const after = await statFileHandle(handle);
     if (!sameSnapshot(opened, after) || !bytes.equals(expectedBytes)) {
       throw new Error('duration staging validation failed');
     }
@@ -351,7 +351,7 @@ async function readBoundedJson(file, byteLimit, label) {
   if (before.size > byteLimit) throw new Error(`${label} exceeds byte limit`);
   const handle = await open(file, constants.O_RDONLY);
   try {
-    const opened = await handle.stat();
+    const opened = await statFileHandle(handle);
     if (!sameSnapshot(before, opened)) throw new Error(`${label} changed while being read`);
     const bytes = Buffer.alloc(opened.size);
     let offset = 0;
@@ -360,7 +360,7 @@ async function readBoundedJson(file, byteLimit, label) {
       if (bytesRead === 0) throw new Error(`${label} changed while being read`);
       offset += bytesRead;
     }
-    const after = await handle.stat();
+    const after = await statFileHandle(handle);
     if (!sameSnapshot(opened, after)) throw new Error(`${label} changed while being read`);
     return JSON.parse(bytes.toString('utf8'));
   } finally {
@@ -386,7 +386,7 @@ async function atomicReplace(content, expectedDestination) {
       staged = join(dirname(destination), `.test-durations.${randomBytes(16).toString('hex')}.tmp`);
       try {
         handle = await open(staged, 'wx', 0o600);
-        owned = await handle.stat();
+        owned = await statFileHandle(handle);
         break;
       } catch (error) {
         if (error?.code !== 'EEXIST') throw error;
@@ -395,13 +395,13 @@ async function atomicReplace(content, expectedDestination) {
     if (!handle) throw new Error('could not reserve duration staging file');
     await handle.writeFile(content, 'utf8');
     await handle.sync();
-    const stagedStats = await handle.stat();
+    const stagedStats = await statFileHandle(handle);
     if (stagedStats.size !== Buffer.byteLength(content) || stagedStats.size > OUTPUT_BYTES) {
       throw new Error('duration staging validation failed');
     }
     const validationHandle = await open(staged, constants.O_RDONLY);
     try {
-      const validationStats = await validationHandle.stat();
+      const validationStats = await statFileHandle(validationHandle);
       if (!sameIdentity(validationStats, owned) || validationStats.size !== stagedStats.size) {
         throw new Error('duration staging validation failed');
       }
