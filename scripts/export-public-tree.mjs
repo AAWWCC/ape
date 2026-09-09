@@ -2,6 +2,7 @@
 
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import {
   access,
   chmod,
@@ -19,7 +20,7 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = dirname(SCRIPT_DIR);
-const PUBLIC_VERSION = '2.25.3';
+const PUBLIC_VERSION = '2.25.4';
 const PUBLIC_FILES = Object.freeze([
   '.gitattributes',
   'compatibility.json',
@@ -260,7 +261,16 @@ async function main(argv) {
   process.stdout.write(`exported verified public ${PUBLIC_VERSION} tree to ${args.output}\n`);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2)).catch((error) => {
+function invokedDirectly(argvPath) {
+  if (!argvPath) return false;
+  try {
+    return realpathSync(argvPath) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly(process.argv[1])) main(process.argv.slice(2)).catch((error) => {
   if (error instanceof ExportError) process.stderr.write(usage());
   process.stderr.write(`export-public-tree: ${error?.message ?? String(error)}\n`);
   process.exitCode = 1;

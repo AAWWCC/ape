@@ -9,10 +9,11 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.25.3** is a release candidate awaiting exact-candidate CI and a new
-live certification campaign. It corrects certification-provider request handling.
-The first 2.25.2 live attempt failed before binding despite delivered guidance;
-its underlying cause remains unresolved. See the
+Version **2.25.4** is a release candidate awaiting exact-candidate CI and a new
+live certification campaign. It includes CLI entry guards, probe recovery
+diagnostics, and GPT-6 Astra defaults with tier-specific reasoning efforts.
+The first 2.25.3 live mechanical attempt remains failed; these changes do not
+certify that campaign or establish its underlying bootstrap cause. See the
 [current release status](docs/prevention-release-status.md) for the exact limits.
 
 Codex CLI is the primary host. The Claude Code package is included, but

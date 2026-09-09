@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, realpathSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -88,7 +88,7 @@ export function catalogResponseFor(method, requestUrl) {
 function invokedDirectly(argvPath) {
   if (!argvPath) return false;
   try {
-    return path.resolve(argvPath) === fileURLToPath(import.meta.url);
+    return realpathSync(argvPath) === realpathSync(fileURLToPath(import.meta.url));
   } catch {
     return false;
   }

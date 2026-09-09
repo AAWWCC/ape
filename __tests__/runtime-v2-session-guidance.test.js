@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -14,7 +14,7 @@ import {
   runtimeGuidanceForState,
 } from '../lib/runtime/session-guidance.js';
 import { recordCodexBootstrapCandidate } from '../lib/runtime/codex-bootstrap.js';
-import { bindingProbeStatus, bootstrapBindingProbe, launchBindingProbe, prepareBindingProbe } from '../lib/runtime/binding-probe.js';
+import { acknowledgeBindingProbe, bindingProbeStatus, bootstrapBindingProbe, consumeBindingProbe, launchBindingProbe, prepareBindingProbe } from '../lib/runtime/binding-probe.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -102,7 +102,10 @@ function activeState(overrides = {}) {
 
 describe('runtime-owned session guidance', () => {
   const dirs = [];
-  afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+  afterEach(() => {
+    vi.useRealTimers();
+    dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true }));
+  });
 
   function project(prefix = 'ape-session-guidance-') {
     const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -137,6 +140,37 @@ describe('runtime-owned session guidance', () => {
     })).valid).toBe(false);
     expect((await bindingProbeStatus(paths)).infrastructure_status).toBe('failed');
     return paths;
+  }
+
+  async function intactProbe(dir, status) {
+    const paths = runtimePaths(dir);
+    mkdirSync(paths.runtime, { recursive: true });
+    const model = { model: 'gpt-5.4-mini', reasoning_effort: 'low' };
+    const action = await prepareBindingProbe(paths, { host: 'codex', model });
+    if (status !== 'prepared') {
+      expect((await launchBindingProbe(paths, {
+        session_id: 'probe-parent', turn_id: 'probe-parent-turn', tool_use_id: 'probe-spawn',
+        tool_name: 'collaborationspawn_agent', tool_input: action.dispatch.spawn_args,
+      })).valid).toBe(true);
+    }
+    if (['bound', 'completed', 'consumed'].includes(status)) {
+      await recordCodexBootstrapCandidate(paths, {
+        session_id: 'probe-parent', agent_id: 'probe-child', turn_id: 'probe-child-turn',
+        agent_type: 'default', model: model.model,
+      });
+      const binding = await bootstrapBindingProbe(paths, {
+        session_id: 'probe-child', turn_id: 'probe-child-turn', tool_use_id: 'probe-bind',
+        tool_name: 'mcp__ape__ape_bind', tool_input: action.dispatch.bootstrap_args,
+      });
+      expect(binding.valid).toBe(true);
+      if (status !== 'bound') {
+        const probe_capability = binding.additional_context.match(/^APE_PROBE_CAPABILITY=(.+)$/m)[1];
+        await acknowledgeBindingProbe(paths, { probe_id: action.probe.probe_id, probe_capability });
+      }
+      if (status === 'consumed') expect((await consumeBindingProbe(paths, 'codex')).ok).toBe(true);
+    }
+    expect((await bindingProbeStatus(paths, { readOnly: true })).status).toBe(status);
+    return { paths, action };
   }
 
   it('stays silent outside a configured APE runtime and never creates state', async () => {
@@ -219,6 +253,54 @@ describe('runtime-owned session guidance', () => {
     expect(invokeCodexHook(dir).hookSpecificOutput?.additionalContext).toContain(
       'do not automatically launch or replace a probe or start a run',
     );
+    expect(runtimeSnapshot(paths)).toEqual(before);
+  });
+
+  it.each([
+    ['prepared', 'recover a lost prepared envelope only through ape_run probe and its checked response'],
+    ['launched', 'wait for the original child binding result'],
+    ['bound', "acknowledge only the original child's exact returned probe acknowledgement"],
+    ['completed', 'original parent: review ape_run preview, then ape_run start with expected_admission_digest from that ready preview'],
+  ])('refreshes the existing %s probe without restarting its handshake', async (status, continuation) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-02T03:04:05.000Z'));
+    const dir = project();
+    const { paths, action } = await intactProbe(dir, status);
+    for (const runStatus of [null, 'completed', 'aborted']) {
+      if (runStatus) writeFileSync(paths.active, JSON.stringify(activeState({ status: runStatus, stage: runStatus })));
+      const before = runtimeSnapshot(paths);
+      for (const source of SESSION_START_SOURCES) {
+        const guidance = await loadSessionGuidance(dir, { host: 'codex', source });
+        expect(guidance).toContain('Next safe action: refresh the existing ape_run probe-status');
+        expect(guidance).toContain(continuation);
+        expect(guidance).not.toContain('complete ape_run probe, launch');
+        expect(guidance).not.toContain('diagnose the native binding failure');
+        expect(guidance).toContain('do not');
+        for (const privateValue of [paths.root, action.probe.probe_id, action.dispatch.bootstrap_args.bootstrap_capability]) {
+          expect(guidance).not.toContain(privateValue);
+        }
+        expect(Buffer.byteLength(guidance, 'utf8')).toBeLessThanOrEqual(SESSION_GUIDANCE_MAX_BYTES);
+      }
+      await expect(loadSessionGuidance(dir, { host: 'codex', is_subagent: true })).resolves.toBeNull();
+      expect(runtimeSnapshot(paths)).toEqual(before);
+    }
+    if (status === 'launched') {
+      const before = runtimeSnapshot(paths);
+      vi.setSystemTime(Date.parse((await bindingProbeStatus(paths)).launch_expires_at));
+      expect(await loadSessionGuidance(dir, { host: 'codex', source: 'resume' }))
+        .toContain('diagnose the native binding failure with ape_run probe-status');
+      expect(runtimeSnapshot(paths)).toEqual(before);
+    }
+  });
+
+  it('keeps initial probe prerequisites after a completed proof is consumed', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-02T03:04:05.000Z'));
+    const dir = project();
+    const { paths } = await intactProbe(dir, 'consumed');
+    const before = runtimeSnapshot(paths);
+    expect(await loadSessionGuidance(dir, { host: 'codex', source: 'resume' }))
+      .toContain('complete ape_run probe, launch dispatch.spawn_args unchanged');
     expect(runtimeSnapshot(paths)).toEqual(before);
   });
 

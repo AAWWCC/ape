@@ -20,6 +20,7 @@ import {
   opendirSync,
   readdirSync,
   readSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeSync,
@@ -946,7 +947,16 @@ function main(argv) {
   if (!report.passed) process.exitCode = 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+function invokedDirectly(argvPath) {
+  if (!argvPath) return false;
+  try {
+    return realpathSync(argvPath) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly(process.argv[1])) {
   try {
     main(process.argv.slice(2));
   } catch (error) {

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,7 +42,16 @@ export async function promptBudgetReport(root = ROOT) {
   return { advisory: true, files, over_target_count: files.filter((entry) => entry.over_target).length };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+function invokedDirectly(argvPath) {
+  if (!argvPath) return false;
+  try {
+    return realpathSync(argvPath) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly(process.argv[1])) {
   try {
     const report = await promptBudgetReport();
     if (process.argv.includes('--json')) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

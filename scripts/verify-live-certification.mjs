@@ -2,6 +2,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -481,4 +482,6 @@ async function main() {
   }
 }
 
-if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) await main();
+const invokedDirectly = typeof process.argv[1] === 'string'
+  && await realpath(process.argv[1]).catch(() => null) === await realpath(fileURLToPath(import.meta.url));
+if (invokedDirectly) await main();

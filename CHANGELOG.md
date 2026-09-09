@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.25.4 — 2026-09-08
+
+Release candidate; exact-candidate CI and a new authorized four-workflow Codex
+campaign remain required. The failed 2.25.3 mechanical attempt remains failed.
+
+- Correct CLI entry detection so canonical and symlinked invocations execute
+  while imports remain passive; retain coverage in the native CI selection.
+- Refresh existing native probes with phase-specific session guidance instead
+  of restarting the handshake. Describe completed-proof expiry as expiry before
+  consumption, preserving the recorded acknowledgement and all expiry gates.
+- Use `gpt-6-astra` for all Codex default tiers: low effort for fast, medium for
+  balanced, and high for deep. Preserve Claude defaults and explicit model pins;
+  diagnose materialized 2.25.3 model defaults without silently rewriting them.
+
 ## 2.25.3 — 2026-09-08
 
 Release candidate; exact-candidate CI and a new authorized Codex live campaign

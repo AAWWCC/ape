@@ -67,11 +67,11 @@ checked byte-for-byte by `npm run docs:check`.
 | `models.claude.fast.model` | string | `"haiku"` | Claude fast-tier model. |
 | `models.claude.balanced.model` | string | `"sonnet"` | Claude balanced-tier model. |
 | `models.claude.deep.model` | string | `"opus"` | Claude deep-tier model. |
-| `models.codex.fast.model` | string | `"gpt-5.4-mini"` | Codex fast-tier model. |
+| `models.codex.fast.model` | string | `"gpt-6-astra"` | Codex fast-tier model. |
 | `models.codex.fast.reasoning_effort` | string | `"low"` | Codex fast-tier reasoning effort. |
-| `models.codex.balanced.model` | string | `"gpt-5.5"` | Codex balanced-tier model. |
+| `models.codex.balanced.model` | string | `"gpt-6-astra"` | Codex balanced-tier model. |
 | `models.codex.balanced.reasoning_effort` | string | `"medium"` | Codex balanced-tier reasoning effort. |
-| `models.codex.deep.model` | string | `"gpt-5.5"` | Codex deep-tier model. |
+| `models.codex.deep.model` | string | `"gpt-6-astra"` | Codex deep-tier model. |
 | `models.codex.deep.reasoning_effort` | string | `"high"` | Codex deep-tier reasoning effort. |
 | `role_models.security_reviewer.claude.model` | string | `"opus"` | Role override, applied before the tier default. |
 | `verification.profiles` | object array | `[]` | Unique shell-free verification commands frozen at start and required as assigned merge gates. |

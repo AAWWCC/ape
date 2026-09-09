@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -30,6 +31,7 @@ export const WINDOWS_SMOKE_TEST_FILES = SMOKE_TEST_FILES;
 // OS/Node pair, plus the Node 22 file-identity and output-drain regressions.
 // The native fixtures exercise the current operating system.
 export const NATIVE_RUNTIME_TEST_FILES = Object.freeze([
+  '__tests__/runtime-v2-cli-entrypoints.test.js',
   '__tests__/runtime-v2-codex-windows-launchers.test.js',
   '__tests__/runtime-v2-file-stat-compat.test.js',
   '__tests__/runtime-v2-hook-output-flush.test.js',
@@ -132,4 +134,13 @@ async function main() {
   process.exitCode = result.status ?? 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) await main();
+function invokedDirectly(argvPath) {
+  if (!argvPath) return false;
+  try {
+    return realpathSync(argvPath) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly(process.argv[1])) await main();

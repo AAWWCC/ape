@@ -1,11 +1,23 @@
 # Prevention-first reliability status
 
-**2.25.3 is a review candidate, not a certified release.** This follow-up fixes
-an independently reproduced certification request-fidelity discrepancy. It does
-not establish the cause of the failed 2.25.2 native-child bootstrap. Fresh
-exact-candidate CI and a new authorized four-workflow campaign remain required.
+**2.25.4 is a review candidate, not a certified release.** It includes corrected
+CLI entry guards, phase-specific guidance for existing probes, an accurate
+completed-proof expiry reason, and GPT-6 Astra defaults at low/medium/high effort
+for the Codex fast/balanced/deep tiers. Claude defaults and explicit model choices
+remain intact. Exact-candidate CI and a new four-workflow certification campaign
+are pending; local tests and package checks do not replace those requirements.
 This page records results as of September 8, 2026 and does not authorize testing,
 installation or publication.
+
+## 2.25.3 validation and failed formal campaign
+
+Frozen commit `65aeda1f388b126c9faa08bfbdfc2ebcb41cbdf4` passed all 18 jobs in
+[CI 34237467513](https://github.com/AAWWCC/ape/actions/runs/34237467513).
+Its first formal mechanical attempt nevertheless failed when the child attempted
+a prohibited command before binding. No run or shipping completed; fast, full,
+and protected-land were not completed. The campaign remains failed, and the
+candidate changes do not establish the cause of that child's tool choice.
+All earlier failed attempts retain their original classification.
 
 ## 2.25.3 certification provider request fidelity
 
@@ -317,7 +329,7 @@ of the revised guidance did not prevent the prohibited call, and the exact
 decoded assignment input remains unknown. No additional source fix or release
 certificate is claimed. The successful 2.25.1 CI and failed formal attempt remain
 evidence about that earlier candidate; neither certifies 2.25.2. The current
-2.25.3 candidate requires its own exact-source CI and authorized live campaign.
+2.25.4 candidate requires its own exact-source CI and authorized live campaign.
 
 The fast, full, and protected-land live scenarios on 2.24.11 remain unverified.
 The campaign stopped at the operator's request, and its disposable setup was

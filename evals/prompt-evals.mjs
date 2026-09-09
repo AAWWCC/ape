@@ -2,6 +2,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import {
   access,
   mkdir,
@@ -1425,7 +1426,16 @@ export async function main(argv = process.argv.slice(2)) {
   throw new EvalError(`unknown command: ${options.command}`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_PATH) {
+function invokedDirectly(argvPath) {
+  if (!argvPath) return false;
+  try {
+    return realpathSync(argvPath) === realpathSync(SCRIPT_PATH);
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly(process.argv[1])) {
   main().catch((error) => {
     process.stderr.write(`${usage()}\nprompt-evals: ${error?.message ?? String(error)}\n`);
     process.exitCode = 1;
