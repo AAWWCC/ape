@@ -565,7 +565,10 @@ describe('live certification Codex parent launcher', () => {
     }
     if (kind === 'oversized') writeFileSync(file, Buffer.alloc(8 * 1024 * 1024 + 1, 0x20));
     if (kind === 'invalid UTF-8') writeFileSync(file, Buffer.from([0xff]));
-    if (kind === 'duplicate key') writeFileSync(file, JSON.stringify(modelCatalog()).replace('{', '{"client_version":"old",'));
+    if (kind === 'duplicate key') {
+      const catalogJson = JSON.stringify(modelCatalog());
+      writeFileSync(file, '{"client_version":"old",' + catalogJson.slice(1));
+    }
     expect(() => buildCodexParentInvocation(fixture)).toThrow(/child model catalog prerequisite/iu);
   });
 
