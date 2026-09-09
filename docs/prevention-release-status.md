@@ -1,11 +1,37 @@
 # Prevention-first reliability status
 
-**2.25.5 is a review candidate, not a certified release.** It explicitly updates
-the Codex CLI pin to 0.153.4, adds a native child-model catalog preflight, and
-updates affected development tooling to Vitest 4.1.11. The Codex defaults remain
-GPT-6 Astra with low/medium/high effort for fast/balanced/deep. Exact-candidate CI
-and a newly authorized four-workflow campaign remain required. These changes do
-not repair or reclassify any earlier failed campaign.
+**2.25.6 is a review candidate, not a certified release.** It addresses the
+shipping-tree mismatch, catalog-route incompatibility, and incomplete worker
+receipt-validation guidance observed during the failed 2.25.5 campaign. Codex
+remains pinned to 0.153.4 with GPT-6 Astra low/medium/high defaults. Exact-candidate
+CI and a newly authorized four-workflow campaign remain required. Earlier
+failed campaigns retain their original classification.
+
+## 2.25.5 validation and failed formal campaign
+
+Frozen commit `77bd588683f2336452fabdd885eaf168bb988c18` passed all 18 jobs in
+[CI 34301071318](https://github.com/AAWWCC/ape/actions/runs/34301071318), including
+both Windows Node versions and 701 operational canaries. The dependency audit
+reported zero vulnerabilities. Native model metadata advertised Astra V2 with
+all configured efforts, and all four launcher preflight checks passed.
+
+The first mechanical workflow ran for 220.138 seconds. Native worker launch,
+binding probe, acknowledgement, and run start succeeded. The worker's first
+receipt-validation call omitted `project_dir` and returned `no active run`;
+adding only the project path succeeded. The tool description and authoritative
+guidance had demonstrated only `ticket_id` and `draft`. The initial failure
+still disqualifies the campaign under its first-attempt rule.
+
+The parent accepted the worker receipt and gates passed, but shipping rejected
+an index/gate-tree mismatch. A disposable offline reproduction isolated the
+cause: gate snapshots removed tracked `.ape/config.json` while shipping
+retained that unchanged baseline file. The launcher separately rejected the
+host's `/ps/plugins/suggested/codex` catalog route. No PR or merge occurred;
+remote main and protection stayed unchanged. Cleanup retained the generated
+uncommitted documentation, while the owned processes exited and temporary
+authentication was removed. Fast, full, and protected-land were not attempted.
+Opaque bootstrap transport records establish matching non-message dispatch
+fields, not equality of decoded bootstrap-message text.
 
 ## 2.25.4 validation and failed formal campaign
 

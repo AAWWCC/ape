@@ -1071,7 +1071,7 @@ describe('live certification Codex parent launcher', () => {
     try {
       const requests = [
         '/api/codex/settings/user',
-        '/ps/plugins/suggested?scope=GLOBAL',
+        '/ps/plugins/suggested/codex?scope=GLOBAL',
         '/ps/plugins/list?scope=GLOBAL&limit=200',
         '/ps/plugins/installed?scope=GLOBAL&includeDownloadUrls=true',
         '/ps/plugins/workspace/shared?limit=200',
@@ -1098,8 +1098,19 @@ describe('live certification Codex parent launcher', () => {
     const auditPath = path.join(root, 'requests.jsonl');
     const stub = await startCertificationCatalogStub(auditPath);
     try {
-      const response = await fetch(`${stub.baseUrl}/unknown`);
-      expect(response.status).toBe(404);
+      for (const [method, request, status] of [
+        ['GET', '/unknown', 404],
+        ['GET', '/ps/plugins/suggested?scope=GLOBAL', 404],
+        ['GET', '/ps/plugins/suggested/codex/extra?scope=GLOBAL', 404],
+        ['POST', '/ps/plugins/suggested/codex?scope=GLOBAL', 405],
+        ['GET', '/ps/plugins/suggested/codex', 400],
+        ['GET', '/ps/plugins/suggested/codex?scope=USER', 400],
+        ['GET', '/ps/plugins/suggested/codex?scope=GLOBAL&extra=true', 400],
+        ['GET', '/ps/plugins/suggested/codex?scope=GLOBAL&scope=GLOBAL', 400],
+      ]) {
+        const response = await fetch(`${stub.baseUrl}${request}`, { method });
+        expect(response.status, `${method} ${request}`).toBe(status);
+      }
       expect(() => validateCertificationCatalogAudit(auditPath)).toThrow(
         /rejected unexpected request GET \/unknown/iu,
       );

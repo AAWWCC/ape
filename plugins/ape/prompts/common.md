@@ -57,7 +57,9 @@ Return one JSON object with required `ticket_id`, `status`, `tests`, `findings`,
   unable is `status: "failed"`.
 
 Build a stable final `draft`; omit timing and never generate timestamps during validation. Call
-`ape_validate_receipt` with immutable `ticket_id` and exact draft. `valid: true` is terminal
+`ape_validate_receipt` with explicit `project_dir`, immutable `ticket_id`, and exact draft.
+On Codex, reuse the exact `project_dir` from the successful `ape_bind` call; on Claude, use the
+host-provided project root. Do not rely on the MCP server working directory. `valid: true` is terminal
 with no continuation action: return unchanged and never validate again. Otherwise correct fields
 within `validation.corrections_remaining`. On `exhausted`, stop for runtime recovery; never convert
 receipt failure into remediation, replan, abort, or successor.

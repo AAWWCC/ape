@@ -39,8 +39,9 @@ export function catalogResponseFor(method, requestUrl) {
       ? { known: true, status: 200, body: { commit_attribution_enabled: false } }
       : { known: false, status: 400, body: { error: 'unexpected user-settings query' } };
   }
-  if (pathname === '/ps/plugins/suggested') {
-    const valid = hasOnly(searchParams, ['scope']) && searchParams.get('scope') === 'GLOBAL';
+  // Codex 0.153.4 core-plugins/src/remote.rs fetch_recommended_plugins.
+  if (pathname === '/ps/plugins/suggested/codex') {
+    const valid = searchParams.size === 1 && searchParams.get('scope') === 'GLOBAL';
     return valid
       ? { known: true, status: 200, body: { enabled: true, plugins: [] } }
       : { known: false, status: 400, body: { error: 'unexpected suggested-plugin query' } };

@@ -131,6 +131,12 @@ describe('APE v2 MCP public surface', () => {
     expect(receiptValidator.description).toMatch(
       /valid result is terminal[\s\S]*no continuation action[\s\S]*exact validated draft unchanged[\s\S]*do not validate it again/iu,
     );
+    expect(receiptValidator.description).toMatch(
+      /project_dir[\s\S]*explicitly[\s\S]*Codex[\s\S]*successful ape_bind[\s\S]*Claude[\s\S]*host-provided project root/iu,
+    );
+    expect(receiptValidator.description).toContain('Do not rely on the MCP server working directory.');
+    // Rooted legacy callers may still omit project_dir; the worker hint must
+    // prevent omission when the MCP server belongs to another directory.
     expect(receiptValidator.inputSchema).toMatchObject({
       required: ['ticket_id', 'draft'],
       additionalProperties: false,

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -26,7 +26,7 @@ function commitShippingFixture(state, repository = {}) {
   state.admitted_start_identity_hash = admittedStartIdentityHash(state);
   return state;
 }
-async function project() {
+async function project({ trackedConfig = false } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'ape-shipping-prevention-'));
   directories.push(directory);
   await runGit(directory, ['init', '-b', 'main']);
@@ -35,6 +35,11 @@ async function project() {
   await runGit(directory, ['config', 'commit.gpgsign', 'false']);
   await writeFile(path.join(directory, 'value.txt'), 'baseline\n');
   await runGit(directory, ['add', 'value.txt']);
+  if (trackedConfig) {
+    await mkdir(path.join(directory, '.ape'));
+    await writeFile(path.join(directory, '.ape/config.json'), '{"baseline":true}\n');
+    await runGit(directory, ['add', '.ape/config.json']);
+  }
   await runGit(directory, ['commit', '-m', 'baseline']);
   await runGit(directory, ['remote', 'add', 'origin', target.origin]);
   await runGit(directory, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
@@ -56,17 +61,17 @@ function stubAdmissionGithub({ repository = {}, rules = null, failed = false } =
   return calls;
 }
 
-async function preparedShipping(directory) {
+async function preparedShipping(directory, { file = 'value.txt' } = {}) {
   const admission = await shipping.inspectShippingAdmission(directory, {}, config);
   await runGit(directory, ['switch', '-c', 'ape/test']);
   const head = await runGit(directory, ['rev-parse', 'HEAD']);
-  await writeFile(path.join(directory, 'value.txt'), 'approved change\n');
+  await writeFile(path.join(directory, file), 'approved change\n');
   const state = commitShippingFixture({
     run_id: 'run-offline-shipping', objective: 'Offline shipping fixture', mode: 'phase', lane: 'fast',
     branch: 'ape/test', base_branch: 'main', base_commit_sha: head, auto_merge_authorized: true,
     shipping_target: admission.shipping_target,
     gates: { passed: true, tree_sha: await currentTreeSha(directory) },
-    receipts: [{ changed_files: ['value.txt'] }],
+    receipts: [{ changed_files: [file] }],
   });
   const events = [];
   const originalGit = git.runGit;
@@ -451,6 +456,39 @@ describe('prevention-first shipping admission', () => {
     await writeFile(path.join(directory, 'shadow.txt'), 'hidden staged version\n');
     await runGit(directory, ['add', 'shadow.txt']);
     await rm(path.join(directory, 'shadow.txt'));
+    const { state, events } = await preparedShipping(directory);
+    const before = await readFile(path.join(directory, '.git', 'index'));
+    await expect(shipping.autoMergeGithub(directory, state, config)).rejects.toThrow(/prospective shipping index/);
+    expect(await readFile(path.join(directory, '.git', 'index'))).toEqual(before);
+    expect(events.some((event) => event[0] === 'git' && ['add', 'commit', 'push'].includes(event[1]))).toBe(false);
+  });
+
+  it('ships an approved new file while retaining tracked reserved baseline configuration', async () => {
+    const directory = await project({ trackedConfig: true });
+    await mkdir(path.join(directory, 'docs'));
+    await mkdir(path.join(directory, '.ape/runtime'));
+    await writeFile(path.join(directory, '.ape/runtime/active.json'), '{"synthetic":true}\n');
+    await writeFile(path.join(directory, '.ape/config.json'), '{"local_only":true}\n');
+    const { state, events, originalGit } = await preparedShipping(directory, { file: 'docs/change.md' });
+    await expect(shipping.autoMergeGithub(directory, state, config)).rejects.toThrow(/offline network sink intercepted/);
+    expect(await originalGit(directory, ['rev-parse', 'HEAD^{tree}'])).toBe(state.gates.tree_sha);
+    expect(await originalGit(directory, ['show', 'HEAD:.ape/config.json'])).toBe('{"baseline":true}');
+    expect(await originalGit(directory, ['ls-tree', '-r', '--name-only', 'HEAD', '--', '.ape']))
+      .toBe('.ape/config.json');
+    expect(await originalGit(directory, ['show', 'HEAD:docs/change.md'])).toBe('approved change');
+    expect(events.some((event) => event[0] === 'git' && event[1] === 'commit')).toBe(true);
+    expect(events.some((event) => event[0] === 'git' && event[1] === 'push')).toBe(true);
+  });
+
+  it.each(['edit', 'addition', 'deletion'])('rejects an untested staged reserved-path %s without changing the real index', async (variant) => {
+    const directory = await project({ trackedConfig: true });
+    if (variant === 'edit') {
+      await writeFile(path.join(directory, '.ape/config.json'), '{"untested":true}\n');
+      await runGit(directory, ['add', '.ape/config.json']);
+    } else if (variant === 'addition') {
+      await writeFile(path.join(directory, '.ape/unreviewed.json'), '{"untested":true}\n');
+      await runGit(directory, ['add', '.ape/unreviewed.json']);
+    } else await runGit(directory, ['rm', '.ape/config.json']);
     const { state, events } = await preparedShipping(directory);
     const before = await readFile(path.join(directory, '.git', 'index'));
     await expect(shipping.autoMergeGithub(directory, state, config)).rejects.toThrow(/prospective shipping index/);

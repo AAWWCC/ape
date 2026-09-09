@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.25.6 — 2026-09-08
+
+Release candidate; exact-candidate CI and a newly authorized four-workflow
+Codex campaign remain required. The failed 2.25.5 campaign remains failed.
+
+- Preserve the committed APE control subtree in gate tree identities so a
+  repository with tracked APE configuration can pass exact shipping-tree checks.
+  Working runtime state remains excluded; staged control-file drift still fails.
+- Match Codex 0.153.4's exact suggested-plugin catalog route and strict query.
+- Include the governed project root in native worker receipt-validation guidance,
+  preserving the optional API for callers already rooted in the project.
+
 ## 2.25.5 — 2026-09-08
 
 Release candidate; exact-candidate CI and a newly authorized four-workflow

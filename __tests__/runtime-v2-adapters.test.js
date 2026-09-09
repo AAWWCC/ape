@@ -227,6 +227,10 @@ describe('APE v2 adapter conformance', () => {
     expect(injected).toContain('APE common contract');
     expect(injected).toContain('APE implementer contract');
     expect(injected).toContain('APE hook-enforced receipt construction (authoritative)');
+    const receiptGuidance = injected.slice(injected.indexOf('APE hook-enforced receipt construction (authoritative)'));
+    expect(receiptGuidance).toMatch(/ape_validate_receipt with explicit project_dir[\s\S]*immutable ticket_id[\s\S]*as draft/iu);
+    expect(receiptGuidance).toMatch(/Codex[\s\S]*exact project_dir from the successful ape_bind call[\s\S]*Claude[\s\S]*host-provided project root/iu);
+    expect(receiptGuidance).toContain('Do not rely on the MCP server working directory.');
     expect(injected).toContain('Receipt envelope scaffold');
     expect(injected).toContain('Role-specific output_schema excerpt');
     expect(injected).toContain('"receipt_capability":"$APE_RECEIPT_CAPABILITY"');
