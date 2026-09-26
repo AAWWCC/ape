@@ -55,9 +55,11 @@ from this evidence summary.
 
 Disagreement can add one additional deep-tier judge dispatch without spending a retry or remediation cycle.
 The judge receives bounded `review_findings` and advances, requests a directed replan, or blocks.
-The frozen policy permits two directed replans by default. After the first, the normalized assurance identities must
-strictly shrink. Preview includes the initial plan and the configured possible replans. The judge never
-writes code.
+For new runs, directed replans have no fixed count quota. After the first, the
+normalized assurance identities must strictly shrink. Preview includes the initial
+plan; recovery totals that depend on future progress are `null` (unknown).
+Historical frozen execution policies retain their original replan quotas. The
+judge never writes code.
 
 ### Tests and plan contracts
 
@@ -89,9 +91,12 @@ as `evidence.test_correction`.
 | `test` | Remediation test |
 | Mixed findings or `both` | Remediation test → remediation build |
 
-Writers stay serialized. Each sequence spends one of `policy.max_remediation_cycles`; security
-review remains in the final group when required. After the first cycle, normalized blocker
-identities must strictly shrink. Repeated, expanded, incomparable, or malformed blocker sets stop.
+Writers stay serialized, and security review remains in the final group when
+required. New runs have no fixed remediation-cycle quota. After the first cycle,
+normalized blocker identities must strictly shrink. Repeated, expanded,
+incomparable, or malformed blocker sets stop. Historical frozen execution policies
+retain their original cycle quotas. Stage retries, worker replacements and
+validation submissions still have finite limits.
 
 New review tickets use `review_contract_version: 1`. Advisory findings use `blocking: false`
 without remediation. Blocking findings name an owner; `test` and `both` also name exact

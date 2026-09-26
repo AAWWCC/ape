@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
-import { projectedPipeline } from '../lib/runtime/pipeline.js';
+import { pipelineRunSpec, projectedPipeline } from '../lib/runtime/pipeline.js';
 import { RunStartInputSchema } from '../lib/runtime/schemas.js';
 import { configAction, previewRun, startRun } from '../lib/runtime/service.js';
 import { evaluateRunReadiness } from '../lib/runtime/readiness.js';
@@ -32,22 +32,11 @@ function runInput(overrides = {}) {
 
 function readinessFor(input, config = DEFAULT_CONFIG) {
   const classification = { lane: 'fast', risk_triggers: [], reasons: [] };
-  const spec = {
-    mode: input.mode,
-    lane: classification.lane,
-    behavioral: input.behavioral,
-    high_risk: false,
-    plan_contract_version: 2,
-    policy: { high_risk_security_review: true },
-    remediation_cycles: 0,
-    test_paths: input.test_paths,
-    claimed_paths: input.claimed_paths,
-  };
   return evaluateRunReadiness({
     input,
     config,
     classification,
-    projection: projectedPipeline(spec),
+    projection: projectedPipeline(pipelineRunSpec(input, classification, config)),
     discovered: { targeted: true, full: true },
   });
 }

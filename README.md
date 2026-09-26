@@ -9,14 +9,15 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.25.8** is approved for release with a documented owner exception.
-The tested candidate passed all 18 CI jobs and completed the mechanical, fast,
-full, and protected-land Codex workflows. The full workflow required recovery
-after two host stream interruptions and an expired, unspawned test ticket;
-this is not an uninterrupted schema-v5 first-pass certificate. Runtime and
-plugin package bytes are preserved from the tested candidate. See the
-[release notes](docs/releases/2.25.8.md) and
-[evidence and limits](docs/prevention-release-status.md).
+Version **2.26.0** removes fixed directed-replan and remediation quotas for new
+runs. Recovery continues while normalized blockers strictly shrink; worker
+failure limits and historical run contracts remain in force. See the
+[runtime limits](docs/limits.md) and [configuration migration](docs/configuration.md).
+
+The latest published release, **2.25.8**, has a documented owner exception.
+That approval applies to its tested runtime and does not certify the changed
+2.26.0 runtime. Fresh live certification is not claimed. See the historical
+[release notes](docs/releases/2.25.8.md) and [validation status](docs/prevention-release-status.md).
 
 Codex CLI is the primary host. The Claude Code package is included, but
 Claude live operation is unverified. Codex IDE integrations and ChatGPT web,

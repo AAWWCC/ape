@@ -1,6 +1,6 @@
 # Runtime limits
 
-APE uses limits for resource containment, finite recovery, authenticated authority,
+APE uses limits for resource containment, failed-worker recovery, authenticated authority,
 transport, and presentation. A useful mechanism does not establish that its exact
 number is optimal. The September 2026 audit traced producers and consumers,
 reproduced boundary failures, and exercised the revised contracts. It did not
@@ -36,15 +36,18 @@ used at once. Schema acceptance is not proof of a good plan or correct product.
 
 Execution settings are configurable operating policies, frozen at new-run START.
 Ticket/dispatch receipt limits are also bound to immutable authority. Changing
-project configuration affects subsequent runs. Legacy runs keep their supported
-fallback semantics. See the generated [configuration reference](configuration.md).
+project configuration affects subsequent runs. Legacy runs keep their frozen
+quotas and supported fallback semantics. New runs use execution policy v2, which
+removes directed-replan and remediation count quotas while preserving their
+strictly shrinking blocker checks. See the generated
+[configuration reference](configuration.md).
 
 | Policy | Default and disposition |
 | --- | --- |
 | Product stage attempts | **Configurable:** 2, including the initial attempt. |
-| Directed replans | **Configurable:** 2 additional planner attempts. |
+| Directed replans | **Changed:** new runs have no fixed count quota. After the first directed replan, normalized assurance blockers must strictly shrink. Historical execution policies retain their quotas. |
 | Protocol redispatches | **Configurable:** 1 per ordinary stage. |
-| Remediation cycles | **Configurable:** 3; the former upper bound of 10 is removed. |
+| Remediation cycles | **Changed:** new runs have no fixed count quota. After the first cycle, normalized blockers must strictly shrink. Historical execution policies retain their quotas. |
 | Re-gates | **Configurable:** 3. |
 | Physical workers per ticket | **Configurable:** 2. Replacement N requires exact predecessor retirement and preserves lineage accounting; recovery cannot reset the budget. |
 | Validation submissions per worker | **Configurable:** 3. Exact successful replay remains idempotent. Exhaustion accounting does not loop once per configured submission. |
@@ -55,8 +58,10 @@ fallback semantics. See the generated [configuration reference](configuration.md
 | Remote check registration | **Configurable:** 120-second registration window and 10-second retry advice. A pending CI check has no new global elapsed-run cutoff. |
 
 Attempt/worker/submission counts require positive safe integers. Optional recovery
-counts accept zero. Combined counters must fit safe-integer arithmetic before
-forecasts or allocation. Timer settings reject fractions and values outside their
+counts accept zero. Combined finite counters must fit safe-integer arithmetic
+before forecasts or allocation. Forecast totals that depend on future recovery
+progress are `null` (unknown), not zero or an invented numeric ceiling.
+Timer settings reject fractions and values outside their
 supported domains; the maximum is 2,147,483,647 ms. These checks prevent silent
 numeric fallback and overflow into nearly immediate timers.
 The representable delay boundary follows [Node's timer behavior](https://nodejs.org/api/timers.html#settimeoutcallback-delay-args),
@@ -65,7 +70,10 @@ not measurements of how long useful work should take.
 Strictly shrinking normalized blockers, serialized writers, the pipeline's two
 independent review roles, lane escalation, one authoritative receipt, exact claims,
 and immutable provenance remain structural protections. Raising a retry policy
-cannot bypass them. Local archived runs show budget hits, but stopped runs cannot
+cannot bypass them. The retired `policy.max_directed_replans` and
+`policy.max_remediation_cycles` configuration keys cannot be set and do not
+constrain new runs; existing stored values are removed on the next ordinary
+configuration write. Local archived runs show budget hits, but stopped runs cannot
 reveal what another attempt would have achieved; that history does not establish
 an optimal retry count.
 

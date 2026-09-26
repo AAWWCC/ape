@@ -4,7 +4,7 @@ import { sha256 } from '../lib/runtime/canonical.js';
 import { capabilityTestPathBoundErrors } from '../lib/runtime/capability-contract.js';
 import { ticketCapabilityManifest, validateCapabilityManifestGrowth, mergeReceiptCapabilityGrowthResult } from '../lib/runtime/capability-manifest.js';
 import { evaluateRunReadiness } from '../lib/runtime/readiness.js';
-import { projectedPipeline } from '../lib/runtime/pipeline.js';
+import { pipelineRunSpec, projectedPipeline } from '../lib/runtime/pipeline.js';
 import { receiptOutputSchemaForTicket, validateReceiptDraft } from '../lib/runtime/receipt-validator.js';
 import { runContractByteBudgets, runContractFieldBounds } from '../lib/runtime/run-contract.js';
 import { reviewFindings } from '../lib/runtime/review-evidence.js';
@@ -51,8 +51,9 @@ function readinessFor(config, testPaths = ['tests/base.test.js']) {
   const input = { objective: 'Verify the concrete admitted scope', host: 'codex', mode: 'phase', lane: 'fast',
     behavioral: true, claimed_paths: ['src/value.js'], test_paths: testPaths,
     required_capabilities: [], requirements: [], risk_triggers: [], plan_contract_version: 2 };
-  return evaluateRunReadiness({ input, config, classification: { lane: 'fast', risk_triggers: [], reasons: [] },
-    projection: projectedPipeline({ ...input, policy: config.policy }), discovered: {} });
+  const classification = { lane: 'fast', risk_triggers: [], reasons: [] };
+  return evaluateRunReadiness({ input, config, classification,
+    projection: projectedPipeline(pipelineRunSpec(input, classification, config)), discovered: {} });
 }
 
 describe('capability and receipt resource envelopes', () => {

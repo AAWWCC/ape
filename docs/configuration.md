@@ -23,11 +23,24 @@ positive safe integers. See [runtime limits](limits.md) for their purpose and tr
 
 Execution policy, deadlines, fast-lane file routing, gate timing and remote-check
 registration timing are frozen when a new run starts. Changing configuration
-affects subsequent runs. Existing issued tickets retain their original receipt
-and artifact contracts. Optional retry and remediation counts accept zero;
+affects subsequent runs. Existing runs and issued tickets retain their original
+execution, receipt and artifact contracts. Optional retry counts accept zero;
 attempt, worker and submission counts require at least one. Combined counters
 must fit safe-integer arithmetic. These are configurable operating choices,
 not claims about an optimal number of attempts.
+
+New runs have no fixed count quota for directed replans or remediation cycles.
+After the first recovery, normalized blockers must strictly shrink; repeated,
+expanded, incomparable or malformed blocker sets stop recovery. Forecasts report
+`null` where a total depends on future recovery progress, meaning unknown rather
+than zero. Other retry, worker and submission limits remain in force.
+
+`policy.max_directed_replans` and `policy.max_remediation_cycles` are retired.
+Stored values are ignored for new runs, and setting either key is rejected.
+Reading an older configuration leaves its file unchanged; the next ordinary
+configuration write removes those retired overrides and their provenance while
+preserving unrelated settings. Historical frozen execution policies keep their
+original quotas.
 
 <!-- BEGIN GENERATED CONFIG REFERENCE -->
 ## Complete key reference
@@ -45,9 +58,7 @@ checked byte-for-byte by `npm run docs:check`.
 | `shipping.checks_registration_window_ms` | number | `120000` | Time to allow remote CI checks to register before treating their absence as failure. |
 | `shipping.checks_registration_retry_delay_ms` | number | `10000` | Suggested polling delay while remote CI checks are registering. |
 | `policy.max_stage_attempts` | number | `2` | Initial product-stage attempt plus ordinary retries. |
-| `policy.max_directed_replans` | number | `2` | Additional planner attempts for concrete review corrections. |
 | `policy.max_worker_protocol_redispatches_per_stage` | number | `1` | Replacement stage dispatches for worker-protocol failure. |
-| `policy.max_remediation_cycles` | number | `3` | Maximum remediation cycles; repeated or non-shrinking blockers stop sooner. |
 | `policy.max_regate_attempts` | number | `3` | Re-gates allowed after failed full-suite evidence. |
 | `policy.max_physical_workers_per_ticket` | number | `2` | Initial native worker plus replacements; prior workers must be retired. |
 | `policy.max_validation_submissions_per_worker` | number | `3` | Receipt-validation submissions available to each physical worker. |

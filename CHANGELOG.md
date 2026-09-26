@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.26.0 — 2026-09-26
+
+- Remove fixed directed-replan and remediation-cycle quotas from new execution
+  policies. Recovery still requires strictly shrinking normalized blockers, and
+  failed-worker retries, validation submissions and resource limits remain finite.
+- Preserve existing frozen execution policies and ticket authority. New forecasts
+  report progress-dependent recovery totals as unknown instead of imposing a
+  count ceiling.
+- Retire the two recovery-quota configuration keys. Ignore old stored values on
+  reads and remove only their overrides and provenance on the next configuration
+  write, preserving unrelated settings.
+
 ## 2.25.8 — 2026-09-09
 
 Owner-approved release with disclosed certification exceptions. The exact

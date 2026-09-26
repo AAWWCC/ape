@@ -8,6 +8,7 @@ import {
   initialStages,
   nextStages,
   pendingSecurityReviewStages,
+  pipelineRunSpec,
   // projectedPipeline does not exist yet — deterministic red.
   projectedPipeline,
 } from '../lib/runtime/pipeline.js';
@@ -21,6 +22,8 @@ import {
 } from '../lib/runtime/constants.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
+import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
+import { executionPolicySnapshot } from '../lib/runtime/pipeline-limits.js';
 
 // ------------------------------------------------------------------
 // Helpers
@@ -415,6 +418,78 @@ describe('projectedPipeline dispatch_bounds breakdown', () => {
   });
 });
 
+describe('new-run recovery forecasts', () => {
+  function currentRun(overrides = {}) {
+    return runSpec({ execution_policy: executionPolicySnapshot(DEFAULT_CONFIG), ...overrides });
+  }
+
+  it('publishes progress-dependent counts without turning unknown counts into zero', () => {
+    const result = projectedPipeline(currentRun());
+    const bounds = result.dispatch_bounds;
+    expect(bounds).toMatchObject({
+      total: null,
+      logical_ticket_upper_bound: null,
+      physical_dispatch_upper_bound: null,
+      receipt_validation_submission_upper_bound: null,
+      protocol_replacement_ticket_upper_bound: 14,
+      total_semantics: 'progress-dependent-logical-ticket-upper-bound',
+      null_semantics: 'depends-on-strict-subset-recovery-progress',
+    });
+    const dependentStages = ['plan-check', 'plan-critic', 'plan-judge', 'plan-replan',
+      'remediation-test', 'remediation-build', 'remediation-review', 'remediation-security-review'];
+    expect(bounds.progress_dependent_stages).toEqual(dependentStages);
+    for (const id of dependentStages) {
+      expect(bounds.by_stage[id]).toBeNull();
+      expect(bounds.physical_by_stage[id]).toBeNull();
+    }
+    expect(bounds.by_stage).toMatchObject({ preflight: 2, plan: 2, test: 2, build: 2, 'test-recheck': 1 });
+    expect(bounds.by_role).toMatchObject({ preflight_analyst: 2, planner: null, implementer: null, reviewer: null });
+    expect(bounds.by_model_tier).toEqual({ balanced: null, deep: null, fast: null });
+    expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+    expect(Object.isFrozen(bounds.progress_dependent_stages)).toBe(true);
+    expect(result.conditional_branches).toContainEqual({
+      id: 'plan-replan',
+      label: 'Directed replans while missing assurances strictly decrease (on judge rejection)',
+    });
+  });
+
+  it.each(['debug', 'spike', 'land'])('keeps finite forecasts for %s mode', (mode) => {
+    const modern = projectedPipeline(currentRun({ mode }));
+    const historical = projectedPipeline(runSpec({ mode }));
+    expect(modern.dispatch_bounds).toEqual(historical.dispatch_bounds);
+    expect(modern.dispatch_bounds.total).toBeGreaterThan(0);
+    expect(modern.dispatch_bounds).not.toHaveProperty('null_semantics');
+  });
+
+  it('keeps a mechanical build finite when security review and remediation cannot be reached', () => {
+    const result = projectedPipeline(currentRun({
+      lane: 'mechanical', behavioral: false, high_risk: false,
+      claimed_paths: ['docs/notes.md'], test_paths: [],
+      policy: { high_risk_security_review: false },
+    }));
+    expect(result.dispatch_bounds.total).toBe(2);
+    expect(result.dispatch_bounds.by_stage).toEqual({ build: 2 });
+  });
+
+  it('admission explicitly opts into new semantics even when old config keys disabled recovery', () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    Object.assign(config.policy, { max_directed_replans: 0, max_remediation_cycles: 0 });
+    const spec = pipelineRunSpec(runSpec(), { lane: 'full', risk_triggers: [] }, config);
+    const result = projectedPipeline(spec);
+    expect(spec.execution_policy).toMatchObject({ version: 2, limits: { version: 2 } });
+    expect(spec.policy).not.toHaveProperty('max_directed_replans');
+    expect(spec.policy).not.toHaveProperty('max_remediation_cycles');
+    expect(result.stages.map((entry) => entry.id)).toEqual(expect.arrayContaining(['plan-replan', 'remediation-build']));
+    expect(result.dispatch_bounds.total).toBeNull();
+  });
+
+  it('continues v2 remediation routing beyond the old ceiling while preserving legacy routing', () => {
+    expect(nextStages(currentRun({ remediation_cycles: 4 }), 'review-disagreed', {}))
+      .toContainEqual(expect.objectContaining({ id: 'remediation-build' }));
+    expect(nextStages(runSpec({ remediation_cycles: 4 }), 'review-disagreed', {})).toEqual([]);
+  });
+});
+
 // ==================================================================
 // projectedPipeline: conditional branches
 // ==================================================================
@@ -485,6 +560,8 @@ describe('previewRun blueprint shape', () => {
     expect(bp).toHaveProperty('lane_reasons');
     expect(bp).toHaveProperty('stages');
     expect(bp).toHaveProperty('dispatch_bounds');
+    expect(bp.dispatch_bounds.total).toBeNull();
+    expect(bp.dispatch_bounds.null_semantics).toBe('depends-on-strict-subset-recovery-progress');
   });
 
   it('returns doctor-backed readiness with a healthy flag', async () => {

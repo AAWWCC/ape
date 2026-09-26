@@ -3,7 +3,7 @@ import { canonicalJson, sha256 } from '../lib/runtime/canonical.js';
 import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
 import { RISK_TRIGGERS } from '../lib/runtime/constants.js';
 import { compileRunAdmissionContract } from '../lib/runtime/admission-compiler.js';
-import { projectedPipeline } from '../lib/runtime/pipeline.js';
+import { pipelineRunSpec, projectedPipeline } from '../lib/runtime/pipeline.js';
 import { evaluateRunReadiness } from '../lib/runtime/readiness.js';
 import { candidatePlanForScope, LEGACY_PLAN_CONTRACT_LIMITS, PLAN_CONTRACT_LIMITS, PLAN_CONTRACT_MAX_BYTES, planLimitsForTicket, preflightSchemaForTicket } from '../lib/runtime/plan-contract.js';
 import { CapabilityManifestSchema } from '../lib/runtime/schemas.js';
@@ -81,9 +81,9 @@ describe('compatible planning, receipt, and feedback limits', () => {
     };
     const allPaths = [...input.claimed_paths, ...input.test_paths];
     const original = structuredClone(input);
-    const result = compileRunAdmissionContract({ input, config,
-      classification: { lane: 'full', risk_triggers: risks, reasons: [] },
-      projection: projectedPipeline({ ...input, policy: config.policy }), planning_commands: ['npm test'] });
+    const classification = { lane: 'full', risk_triggers: risks, reasons: [] };
+    const result = compileRunAdmissionContract({ input, config, classification,
+      projection: projectedPipeline(pipelineRunSpec(input, classification, config)), planning_commands: ['npm test'] });
     expect(result.valid).toBe(true);
     expect(result.planner).toMatchObject({ representable: true });
     expect(result.planner.template_utf8_bytes).toBeLessThan(PLAN_CONTRACT_MAX_BYTES);
@@ -202,8 +202,9 @@ describe('compatible planning, receipt, and feedback limits', () => {
     config.policy.evidence_scripts = ['test', ...Array.from({ length: 63 }, (_, index) => `check${index}`)];
     const input = { objective: 'Inspect aliases', host: 'codex', mode: 'phase', lane: 'full', behavioral: false,
       claimed_paths: ['src/value.js'], test_paths: [], requirements: [], required_capabilities: [], run_command_profiles: [] };
-    const evaluate = () => evaluateRunReadiness({ input, config, classification: { lane: 'full', risk_triggers: [] },
-      projection: projectedPipeline({ ...input, policy: config.policy }) });
+    const classification = { lane: 'full', risk_triggers: [] };
+    const evaluate = () => evaluateRunReadiness({ input, config, classification,
+      projection: projectedPipeline(pipelineRunSpec(input, classification, config)) });
     expect(evaluate().ready).toBe(true);
     config.policy.evidence_scripts = Array.from({ length: 513 }, (_, index) => `check${index}`);
     const overflow = evaluate();

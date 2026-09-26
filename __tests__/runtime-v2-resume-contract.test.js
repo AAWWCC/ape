@@ -45,9 +45,15 @@ describe('exact resume service contract', () => {
     });
     expect(started.ok).toBe(true);
     const before = await readJson(runtimePaths(dir).active);
+    expect(before.execution_policy.version).toBe(2);
+    expect(before.execution_policy.limits).not.toHaveProperty('max_directed_replans');
+    expect(before.execution_policy.limits).not.toHaveProperty('max_remediation_cycles');
+    expect(before.tickets.length).toBeGreaterThan(0);
+    for (const ticket of before.tickets) expect(ticket.execution_limits).toEqual(before.execution_policy.limits);
     const resumed = await resumeRun(dir);
     expect(resumed.ok).toBe(true);
     expect(resumed.run.run_id).toBe(before.run_id);
+    expect(resumed.run.execution_policy).toEqual(before.execution_policy);
     expect(resumed.run.tickets).toEqual(before.tickets);
     expect(resumed.run.claimed_paths).toEqual([]);
     expect(resumed.run.test_paths).toEqual([]);
