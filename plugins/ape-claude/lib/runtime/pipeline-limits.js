@@ -6,7 +6,7 @@ import {
   GATE_POLL_RETRY_DELAY_MS, CHECKS_REGISTRATION_WINDOW_MS, CHECKS_REGISTRATION_RETRY_DELAY_MS,
 } from './constants.js';
 
-// Shipped policy defaults, shared by scheduler, schemas, and admission.
+// Historical defaults remain exact for already-admitted runs and tickets.
 // This leaf has no schema/pipeline dependency, so consumers cannot form cycles.
 export const MAX_DIRECTED_REPLANS = 2;
 export const MAX_WORKER_PROTOCOL_REDISPATCHES_PER_STAGE = 1;
@@ -23,14 +23,32 @@ export const EXECUTION_POLICY_DEFAULTS = Object.freeze({
   max_reconciliation_protocol_redispatches: 0,
 });
 
+// Version 2 removes only the two recovery ceilings whose continuation already
+// requires a strictly shrinking structured blocker set. The marker travels in
+// execution_limits as well as the run snapshot so immutable tickets carry the
+// same semantics without rewriting historical tickets or hashes.
+export const CURRENT_EXECUTION_POLICY_DEFAULTS = Object.freeze(Object.fromEntries(
+  Object.entries(EXECUTION_POLICY_DEFAULTS)
+    .filter(([key]) => !['max_directed_replans', 'max_remediation_cycles'].includes(key)),
+));
+
 export const EXECUTION_POSITIVE_COUNTS = new Set([
   'max_stage_attempts', 'max_physical_workers_per_ticket',
   'max_validation_submissions_per_worker', 'max_reconciliation_stage_attempts',
 ]);
 
 export function assertExecutionPolicy(policy = {}) {
+  if (policy.version !== undefined && policy.version !== 2) {
+    throw new Error('unsupported execution limits version');
+  }
+  const progressBounded = policy.version === 2;
+  if (progressBounded && Object.keys(policy).some((key) =>
+    key !== 'version' && !Object.hasOwn(CURRENT_EXECUTION_POLICY_DEFAULTS, key))) {
+    throw new Error('version 2 execution limits cannot contain retired recovery quotas or unknown fields');
+  }
+  const defaults = progressBounded ? CURRENT_EXECUTION_POLICY_DEFAULTS : EXECUTION_POLICY_DEFAULTS;
   const value = {};
-  for (const [key, fallback] of Object.entries(EXECUTION_POLICY_DEFAULTS)) {
+  for (const [key, fallback] of Object.entries(defaults)) {
     value[key] = policy[key] === undefined ? fallback : policy[key];
     const minimum = EXECUTION_POSITIVE_COUNTS.has(key) ? 1 : 0;
     if (!Number.isSafeInteger(value[key]) || value[key] < minimum) {
@@ -39,8 +57,8 @@ export function assertExecutionPolicy(policy = {}) {
   }
   // Counters and admission forecasts must remain exact. This is an arithmetic
   // representation constraint, not a smaller undocumented retry policy.
-  const logical = BigInt(value.max_stage_attempts) + BigInt(value.max_directed_replans)
-    + BigInt(value.max_remediation_cycles) + BigInt(value.max_worker_protocol_redispatches_per_stage)
+  const logical = BigInt(value.max_stage_attempts) + BigInt(value.max_directed_replans ?? 0)
+    + BigInt(value.max_remediation_cycles ?? 0) + BigInt(value.max_worker_protocol_redispatches_per_stage)
     + BigInt(value.max_reconciliation_stage_attempts) + BigInt(value.max_reconciliation_protocol_redispatches);
   if (logical * BigInt(value.max_physical_workers_per_ticket)
       * BigInt(value.max_validation_submissions_per_worker) > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -58,13 +76,33 @@ export function stageRecoveryLimits(stageId, run = {}) {
 }
 
 export function remediationCycleLimit(run) {
-  return pipelineLimits(run).max_remediation_cycles;
+  const limits = pipelineLimits(run);
+  return limits.version === 2 ? null : limits.max_remediation_cycles;
+}
+
+export function directedReplanLimit(run) {
+  const limits = pipelineLimits(run);
+  return limits.version === 2 ? null : limits.max_directed_replans;
 }
 
 export function pipelineLimits(run = {}) {
-  const configured = run.execution_policy?.limits ?? run.execution_limits ?? run.policy ?? {};
-  const limits = Object.fromEntries(Object.entries(EXECUTION_POLICY_DEFAULTS)
-    .map(([key, fallback]) => [key, configured[key] === undefined ? fallback : configured[key]]));
+  const snapshot = run.execution_policy;
+  if (snapshot && (
+    ![1, 2].includes(snapshot.version) ||
+    !snapshot.limits || typeof snapshot.limits !== 'object' || Array.isArray(snapshot.limits) ||
+    (snapshot.version === 2 && snapshot.limits?.version !== 2) ||
+    (snapshot.version === 1 && snapshot.limits?.version !== undefined)
+  )) throw new Error('unsupported or inconsistent immutable execution policy');
+  const configured = snapshot ? snapshot.limits : run.execution_limits ?? run.policy ?? {};
+  assertExecutionPolicy(configured);
+  const progressBounded = configured.version === 2;
+  const defaults = progressBounded ? CURRENT_EXECUTION_POLICY_DEFAULTS : EXECUTION_POLICY_DEFAULTS;
+  /** @type {Record<string, number>} */
+  const limits = {
+    ...(progressBounded ? { version: 2 } : {}),
+    ...Object.fromEntries(Object.entries(defaults)
+      .map(([key, fallback]) => [key, configured[key] === undefined ? fallback : configured[key]])),
+  };
   assertExecutionPolicy(limits);
   return Object.freeze(limits);
 }
@@ -95,9 +133,14 @@ export function receiptLimits(ticketOrIntent = {}) {
 }
 
 export function executionPolicySnapshot(config) {
+  const limits = pipelineLimits({ execution_limits: {
+    version: 2,
+    ...Object.fromEntries(Object.entries(CURRENT_EXECUTION_POLICY_DEFAULTS)
+      .map(([key, fallback]) => [key, config.policy?.[key] === undefined ? fallback : config.policy[key]])),
+  } });
   return {
-    version: 1,
-    limits: pipelineLimits({ policy: config.policy }),
+    version: 2,
+    limits,
     fast_max_files: config.policy?.fast_max_files ?? 6,
     deadlines_ms: structuredClone({ ...DEFAULT_DEADLINES_MS, ...config.deadlines_ms }),
     gates: {
@@ -117,8 +160,7 @@ export function executionPolicySnapshot(config) {
 export function executionConfigForRun(config, run) {
   const snapshot = run?.execution_policy;
   if (!snapshot) return config;
-  if (snapshot.version !== 1) throw new Error('unsupported immutable execution policy');
-  const limits = pipelineLimits(run);
+  const { version: _version, ...limits } = pipelineLimits(run);
   return {
     ...config,
     policy: { ...config.policy, ...limits, fast_max_files: snapshot.fast_max_files },

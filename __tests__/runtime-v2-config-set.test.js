@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { configAction } from '../lib/runtime/service.js';
+import { loadRuntimeConfig, setRuntimeConfig } from '../lib/runtime/config.js';
 
 // The MCP `value` field is loosely typed; some clients deliver structured values
 // as JSON strings. Regression: `ape_config set models.claude.fast '{"model":"opus"}'`
@@ -105,19 +106,58 @@ describe('ape v2 config set type validation against the defaults tree', () => {
       .rejects.toThrow(/policy\.fast_max_files/);
   });
 
-  it('accepts operator remediation budgets without a hidden ten-cycle ceiling', async () => {
+  it.each(['max_directed_replans', 'max_remediation_cycles'])('rejects retired recovery quota %s through every set route', async (name) => {
     const dir = project();
-    const { config } = await configAction(dir, 'set', {
-      key: 'policy.max_remediation_cycles', value: 5,
-    });
-    expect(config.policy.max_remediation_cycles).toBe(5);
-    for (const value of [0, 11]) {
-      expect((await configAction(dir, 'set', { key: 'policy.max_remediation_cycles', value }))
-        .config.policy.max_remediation_cycles).toBe(value);
+    const configPath = join(dir, 'config.json');
+    await setRuntimeConfig(configPath, 'custom.marker', 'preserve');
+    const before = readFileSync(configPath, 'utf8');
+    for (const [key, value] of [
+      [`policy.${name}`, 0],
+      [`policy.${name}.nested`, 5],
+      ['policy', { [name]: 11, max_stage_attempts: 8 }],
+    ]) {
+      await expect(setRuntimeConfig(configPath, key, value))
+        .rejects.toThrow(new RegExp(`policy\\.${name} is retired`));
+      expect(readFileSync(configPath, 'utf8')).toBe(before);
     }
-    await expect(configAction(dir, 'set', {
-      key: 'policy.max_remediation_cycles', value: -1,
-    })).rejects.toThrow(/integer/);
+  });
+
+  it('ignores stored retired quotas without changing bytes and removes only those overrides on a normal write', async () => {
+    const configPath = join(project(), 'config.json');
+    const source = `${JSON.stringify({
+      version: 1,
+      policy: {
+        max_directed_replans: 0,
+        max_remediation_cycles: 'obsolete invalid value',
+        max_stage_attempts: 5,
+        operator_annotation: 'preserve',
+      },
+      custom: { max_remediation_cycles: 17, marker: 'preserve' },
+      explicit_keys: [
+        'policy.max_directed_replans', 'policy.max_remediation_cycles',
+        'policy.max_remediation_cycles.nested', 'policy.max_stage_attempts',
+        'policy.operator_annotation', 'custom.max_remediation_cycles', 'custom.marker',
+      ],
+    }, null, 4)}\n`;
+    writeFileSync(configPath, source);
+
+    const loaded = await loadRuntimeConfig(configPath);
+    expect(loaded.policy).not.toHaveProperty('max_directed_replans');
+    expect(loaded.policy).not.toHaveProperty('max_remediation_cycles');
+    expect(loaded.policy.max_stage_attempts).toBe(5);
+    expect(readFileSync(configPath, 'utf8')).toBe(source);
+
+    await setRuntimeConfig(configPath, 'shipping.auto_merge', true);
+    const stored = JSON.parse(readFileSync(configPath, 'utf8'));
+    expect(stored).toEqual({
+      policy: { max_stage_attempts: 5, operator_annotation: 'preserve' },
+      custom: { max_remediation_cycles: 17, marker: 'preserve' },
+      shipping: { auto_merge: true },
+      explicit_keys: [
+        'custom.marker', 'custom.max_remediation_cycles', 'policy.max_stage_attempts',
+        'policy.operator_annotation', 'shipping.auto_merge',
+      ],
+    });
   });
 
   it('leaves unknown keys unvalidated (no shipped shape to enforce)', async () => {

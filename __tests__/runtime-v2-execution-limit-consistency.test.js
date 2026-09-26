@@ -56,7 +56,7 @@ describe('execution configuration represents the actual runtime domains', () => 
     const file = path.join(dir, 'config.json');
     await setRuntimeConfig(file, 'policy.fast_max_files', 8);
     const before = await readFile(file, 'utf8');
-    await expect(setRuntimeConfig(file, key, value)).rejects.toThrow(/integer/);
+    await expect(setRuntimeConfig(file, key, value)).rejects.toThrow(/integer|retired/);
     expect(await readFile(file, 'utf8')).toBe(before);
   });
 
@@ -117,7 +117,11 @@ describe('operator execution policy stays exact across run and ticket boundaries
     const run = { execution_policy: executionPolicySnapshot(config) };
     const changed = structuredClone(DEFAULT_CONFIG);
     const resolved = executionConfigForRun(changed, run);
-    expect(resolved.policy).toEqual(config.policy);
+    const { max_directed_replans, max_remediation_cycles, ...currentPolicy } = config.policy;
+    expect(resolved.policy).toEqual(currentPolicy);
+    const historicalRun = { execution_policy: { ...run.execution_policy, version: 1,
+      limits: pipelineLimits({ policy: config.policy }) } };
+    expect(executionConfigForRun(changed, historicalRun).policy).toEqual(config.policy);
     expect(resolved.deadlines_ms).toEqual(config.deadlines_ms);
     expect(resolved.gates).toEqual(config.gates);
     expect(resolved.shipping).toEqual(config.shipping);
@@ -151,19 +155,21 @@ describe('operator execution policy stays exact across run and ticket boundaries
       max_validation_submissions_per_worker: 2 } })).toThrow(/safe integer/);
   });
 
-  it('removes disabled recovery branches before capability admission while retaining mandatory work', () => {
+  it('admits progress-based recovery despite retired zeros while preserving legacy disabled branches', () => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.policy.max_remediation_cycles = 0;
     config.policy.max_directed_replans = 0;
-    // With remediation disabled, this mechanical run cannot issue a test
-    // writer and does not need a targeted test command solely for recovery.
+    config.test_commands.targeted_template = 'node --test {paths}';
+    config.test_commands.full = 'node --test';
     const input = { objective: 'Adjust documentation', host: 'codex', mode: 'phase', lane: 'mechanical',
       behavioral: false, claimed_paths: ['README.md'], test_paths: [], requirements: [], required_capabilities: [] };
     const classification = { lane: 'mechanical', risk_triggers: [], reasons: [] };
     const projection = projectedPipeline(pipelineRunSpec(input, classification, config));
-    expect(projection.stages.map((entry) => entry.id)).toEqual(['build', 'security-review']);
-    expect(projection.conditional_branches.some((entry) => entry.id === 'remediation')).toBe(false);
-    expect(projection.dispatch_bounds.by_role).not.toHaveProperty('test_writer');
+    expect(projection.stages.map((entry) => entry.id)).toEqual(expect.arrayContaining([
+      'build', 'security-review', 'remediation-test', 'remediation-build', 'remediation-review',
+    ]));
+    expect(projection.conditional_branches.some((entry) => entry.id === 'remediation')).toBe(true);
+    expect(projection.dispatch_bounds.by_role.test_writer).toBeNull();
     const readiness = evaluateRunReadiness({ input, config, classification, projection });
     expect(readiness.blocking.filter((entry) => /test-command|targeted|test-writer/.test(entry.code))).toEqual([]);
     expect(readiness.ready).toBe(true);
@@ -239,7 +245,11 @@ describe('operator execution policy stays exact across run and ticket boundaries
       stage: { id: 'plan-judge', role: 'plan_judge' }, next_state: run };
     expect(reduceRun(run, event)).toContainEqual(expect.objectContaining({ type: 'issue_ticket', recovery_kind: 'directed_replan' }));
     expect(reduceRun(run, { ...event, receipt }).some((entry) => entry.type === 'issue_ticket')).toBe(false);
-    expect(reduceRun({ ...run, plan_replan_cycles: 3 }, event).some((entry) => entry.type === 'issue_ticket')).toBe(false);
+    expect(reduceRun({ ...run, plan_replan_cycles: 3 }, event).some((entry) => entry.type === 'issue_ticket')).toBe(true);
+    const legacy = { ...run, plan_replan_cycles: 3, execution_policy: {
+      ...run.execution_policy, version: 1, limits: pipelineLimits({ policy: { max_directed_replans: 3 } }),
+    } };
+    expect(reduceRun(legacy, event).some((entry) => entry.type === 'issue_ticket')).toBe(false);
   });
 
   it('does not label a long versioned ticket history unversioned in session guidance', () => {

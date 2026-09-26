@@ -205,6 +205,8 @@
   "__tests__/runtime-v2-prevention-pipeline-matrix.test.js": 93,
   "__tests__/runtime-v2-probe-bootstrap.test.js": 2000,
   "__tests__/runtime-v2-probe-diagnostics.test.js": 1000,
+  "__tests__/runtime-v2-progress-recovery-contract.test.js": 12.04833984375,
+  "__tests__/runtime-v2-progress-recovery.test.js": 14.26611328125,
   "__tests__/runtime-v2-project-metrics.test.js": 2892,
   "__tests__/runtime-v2-prompt-evals.test.js": 1160,
   "__tests__/runtime-v2-prompt-red-satisfiability.test.js": 4,

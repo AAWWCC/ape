@@ -17,7 +17,7 @@ function fixture(overrides = {}) {
   config.test_commands.targeted_template = 'npm test -- {paths}';
   config.test_commands.full = 'npm test';
   const classification = { lane: input.lane, risk_triggers: [], reasons: [] };
-  const projection = projectedPipeline({ ...input, policy: config.policy });
+  const projection = projectedPipeline(pipelineRunSpec(input, classification, config));
   return { input, config, classification, projection, planning_commands: ['npm test'] };
 }
 
@@ -26,12 +26,13 @@ describe('prevention-first admission compiler', () => {
     const args = fixture({ plan_contract_version: version });
     args.config.policy.high_risk_security_review = false;
     args.config.policy.design_assurance_required = false;
-    args.config.policy.max_remediation_cycles = 10;
+    args.config.policy.max_stage_attempts = 4;
     args.classification.risk_triggers = ['auth'];
     const spec = pipelineRunSpec(args.input, args.classification, args.config);
     expect(spec.plan_contract_version).toBe(version);
+    expect(spec.execution_policy.version).toBe(2);
     expect(spec.policy).toEqual({
-      ...pipelineLimits({ policy: args.config.policy }),
+      ...spec.execution_policy.limits,
       high_risk_security_review: false, design_assurance_required: false,
     });
     args.projection = projectedPipeline(spec);
@@ -65,27 +66,40 @@ describe('prevention-first admission compiler', () => {
     }));
   });
 
-  it('shares the unchanged recovery limits and deterministic dispatch forecast', () => {
+  it('shares the current immutable execution policy and progress-dependent dispatch forecast', () => {
     const args = fixture();
     const result = compileRunAdmissionContract(args);
-    expect(result.limits).toMatchObject({ max_directed_replans: 2, max_remediation_cycles: 3, max_stage_attempts: 2 });
-    expect(result.limits).toEqual(pipelineLimits({ policy: args.config.policy }));
+    expect(result.limits).toMatchObject({ version: 2, max_stage_attempts: 2 });
+    expect(result.limits).not.toHaveProperty('max_directed_replans');
+    expect(result.limits).not.toHaveProperty('max_remediation_cycles');
+    expect(result.limits).toEqual(pipelineLimits(pipelineRunSpec(args.input, args.classification, args.config)));
     expect(result.dispatch_bounds).toEqual(args.projection.dispatch_bounds);
     expect(compileRunAdmissionContract(args)).toEqual(result);
     expect(result.planner.template_hash).toBe(sha256(result.planner.template));
   });
 
-  it('separately bounds physical workers including existing retries and receipt correction', () => {
+  it('retains finite worker and protocol bounds where recovery progress cannot change the count', () => {
     const forecast = fixture().projection.dispatch_bounds;
-    expect(forecast.total).toBe(45);
-    expect(forecast.total_semantics).toBe('logical-ticket-upper-bound');
-    expect(forecast.logical_ticket_upper_bound).toBe(45);
+    expect(forecast.total).toBeNull();
+    expect(forecast.total_semantics).toBe('progress-dependent-logical-ticket-upper-bound');
+    expect(forecast.null_semantics).toBe('depends-on-strict-subset-recovery-progress');
+    expect(forecast.logical_ticket_upper_bound).toBeNull();
     expect(forecast.protocol_replacement_ticket_upper_bound).toBe(14);
-    expect(forecast.physical_dispatch_upper_bound).toBe(118);
-    expect(forecast.receipt_validation_submission_upper_bound).toBe(354);
+    expect(forecast.physical_dispatch_upper_bound).toBeNull();
+    expect(forecast.receipt_validation_submission_upper_bound).toBeNull();
     expect(forecast.physical_by_stage['test-reconcile']).toBe(2);
     expect(forecast.physical_by_stage['test-recheck']).toBe(2);
-    expect(forecast.physical_by_stage['plan-replan']).toBe(8);
+    expect(forecast.physical_by_stage.build).toBe(6);
+    expect(forecast.physical_by_stage['plan-replan']).toBeNull();
+  });
+
+  it('rejects a historical numeric forecast presented for new admission', () => {
+    const args = fixture();
+    args.projection = projectedPipeline({ ...args.input, policy: args.config.policy });
+    expect(args.projection.dispatch_bounds.total).toBe(45);
+    const result = compileRunAdmissionContract(args);
+    expect(result.valid).toBe(false);
+    expect(result.blocking).toContainEqual({ code: 'pipeline-forecast-mismatch' });
   });
 
   it('publishes runtime artifact producers and consumers through gates and conditional shipping', () => {

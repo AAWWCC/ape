@@ -1,5 +1,20 @@
 # Prevention-first reliability status
 
+## 2.26.0 progress-based recovery
+
+New execution policies remove the directed-replan and remediation-cycle count
+ceilings while retaining strict-subset progress, finite worker-failure recovery,
+and resource limits. Existing frozen run and ticket contracts retain their
+original quotas. The two configuration keys are retired for new runs.
+
+Local validation of the recovery change passed 399 tests across 19 affected
+suites, including reruns of every initial full-suite failure, along with
+type checking, public-safety checks, and package parity. Pull-request CI must
+pass before merge. Fresh live release certification has not been performed;
+the 2.25.8 owner exception remains specific to that earlier release.
+
+## 2.25.8 release exception
+
 **2.25.8 is approved for release with an explicit owner exception; it is not
 schema-v5 first-pass certified.** Tested source
 `2b902080bd6842adb185c3d17d68f323875f3859` passed all 18 jobs in
