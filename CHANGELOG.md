@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.27.0 — 2026-09-27
+
+- Remove worker duration limits from new execution policy v3 runs. Elapsed time
+  no longer expires worker authority or consumes a retry; explicit cancellation,
+  revocation and recovery after confirmed worker termination remain available.
+- Preserve historical worker deadlines and keep command/suite timeouts,
+  launch-token expiry, lock leases, polling and shutdown grace periods separate.
+
 ## 2.26.0 — 2026-09-26
 
 - Remove fixed directed-replan and remediation-cycle quotas from new execution

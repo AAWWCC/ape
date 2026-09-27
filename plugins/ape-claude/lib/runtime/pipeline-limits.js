@@ -38,13 +38,13 @@ export const EXECUTION_POSITIVE_COUNTS = new Set([
 ]);
 
 export function assertExecutionPolicy(policy = {}) {
-  if (policy.version !== undefined && policy.version !== 2) {
+  if (policy.version !== undefined && ![2, 3].includes(policy.version)) {
     throw new Error('unsupported execution limits version');
   }
-  const progressBounded = policy.version === 2;
+  const progressBounded = [2, 3].includes(policy.version);
   if (progressBounded && Object.keys(policy).some((key) =>
     key !== 'version' && !Object.hasOwn(CURRENT_EXECUTION_POLICY_DEFAULTS, key))) {
-    throw new Error('version 2 execution limits cannot contain retired recovery quotas or unknown fields');
+    throw new Error('progress-based execution limits cannot contain retired recovery quotas or unknown fields');
   }
   const defaults = progressBounded ? CURRENT_EXECUTION_POLICY_DEFAULTS : EXECUTION_POLICY_DEFAULTS;
   const value = {};
@@ -77,34 +77,42 @@ export function stageRecoveryLimits(stageId, run = {}) {
 
 export function remediationCycleLimit(run) {
   const limits = pipelineLimits(run);
-  return limits.version === 2 ? null : limits.max_remediation_cycles;
+  return limits.version >= 2 ? null : limits.max_remediation_cycles;
 }
 
 export function directedReplanLimit(run) {
   const limits = pipelineLimits(run);
-  return limits.version === 2 ? null : limits.max_directed_replans;
+  return limits.version >= 2 ? null : limits.max_directed_replans;
 }
 
 export function pipelineLimits(run = {}) {
   const snapshot = run.execution_policy;
   if (snapshot && (
-    ![1, 2].includes(snapshot.version) ||
+    ![1, 2, 3].includes(snapshot.version) ||
     !snapshot.limits || typeof snapshot.limits !== 'object' || Array.isArray(snapshot.limits) ||
-    (snapshot.version === 2 && snapshot.limits?.version !== 2) ||
+    (snapshot.version >= 2 && snapshot.limits?.version !== snapshot.version) ||
     (snapshot.version === 1 && snapshot.limits?.version !== undefined)
   )) throw new Error('unsupported or inconsistent immutable execution policy');
   const configured = snapshot ? snapshot.limits : run.execution_limits ?? run.policy ?? {};
   assertExecutionPolicy(configured);
-  const progressBounded = configured.version === 2;
+  const progressBounded = [2, 3].includes(configured.version);
   const defaults = progressBounded ? CURRENT_EXECUTION_POLICY_DEFAULTS : EXECUTION_POLICY_DEFAULTS;
   /** @type {Record<string, number>} */
   const limits = {
-    ...(progressBounded ? { version: 2 } : {}),
+    ...(progressBounded ? { version: configured.version } : {}),
     ...Object.fromEntries(Object.entries(defaults)
       .map(([key, fallback]) => [key, configured[key] === undefined ? fallback : configured[key]])),
   };
   assertExecutionPolicy(limits);
   return Object.freeze(limits);
+}
+
+// Version 3 separates worker lifetime from the command timeout settings.
+// Validate the frozen authority before interpreting the marker; unknown or
+// mixed contracts must never silently turn off a historical deadline.
+export function workerDeadlinesEnabled(runOrTicket = {}) {
+  const limits = pipelineLimits(runOrTicket);
+  return limits.version !== 3 || !(runOrTicket.execution_policy || runOrTicket.execution_limits);
 }
 
 export function receiptLimits(ticketOrIntent = {}) {
@@ -134,14 +142,15 @@ export function receiptLimits(ticketOrIntent = {}) {
 
 export function executionPolicySnapshot(config) {
   const limits = pipelineLimits({ execution_limits: {
-    version: 2,
+    version: 3,
     ...Object.fromEntries(Object.entries(CURRENT_EXECUTION_POLICY_DEFAULTS)
       .map(([key, fallback]) => [key, config.policy?.[key] === undefined ? fallback : config.policy[key]])),
   } });
   return {
-    version: 2,
+    version: 3,
     limits,
     fast_max_files: config.policy?.fast_max_files ?? 6,
+    // Kept for command/suite watchdogs; v3 workers have no elapsed-time limit.
     deadlines_ms: structuredClone({ ...DEFAULT_DEADLINES_MS, ...config.deadlines_ms }),
     gates: {
       heartbeat_ms: config.gates?.heartbeat_ms ?? GATE_RUNNER_HEARTBEAT_MS,

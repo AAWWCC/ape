@@ -44,6 +44,7 @@ import { resolveGovernedRoot } from '../lib/runtime/paths.js';
 import { lstatFileSync, statFileDescriptor } from '../lib/runtime/file-stats.js';
 import { RUNTIME_STATE_MAX_BYTES } from '../lib/runtime/resource-limits.js';
 import { projectRunDiagnostic, safeDiagnosticText, strictIsoMs } from '../lib/runtime/diagnostics.js';
+import { workerDeadlinesEnabled } from '../lib/runtime/pipeline-limits.js';
 
 const RESET = '\x1b[0m';
 const DIM = '\x1b[2m';
@@ -560,10 +561,24 @@ function validIntentArtifact(value, run, ticketId, now) {
   if (!DISPATCH_HASH.test(value.ticket_hash ?? '') || !DISPATCH_HASH.test(bindingHash ?? '')
     || !DISPATCH_HASH.test(value.capability_hash ?? '') || !DISPATCH_TEXT.test(value.agent_type ?? '')) return false;
   if (!Number.isSafeInteger(value.launch_attempts) || value.launch_attempts < 0) return false;
-  for (const key of ['prepared_at', 'expires_at', 'launched_at', 'launch_expires_at', 'bound_at']) {
+  for (const key of ['prepared_at', 'launched_at', 'launch_expires_at', 'bound_at']) {
     if (strictIsoMs(value[key]) === null) return false;
   }
   if (value.agent_stopped_at !== undefined && strictIsoMs(value.agent_stopped_at) === null) return false;
+  const ticket = run.tickets?.find((entry) => entry.ticket_id === ticketId);
+  let timed;
+  try {
+    timed = workerDeadlinesEnabled(ticket);
+    if ((run.execution_policy || run.execution_limits) && workerDeadlinesEnabled(run) !== timed) return false;
+  }
+  catch { return false; }
+  if (value.execution_policy_version !== undefined) {
+    if (value.execution_policy_version !== 3 || value.expires_at !== null ||
+        value.codex_task_namespace === 'probe' || !ticket ||
+        ticket.ticket_hash !== value.ticket_hash || ticket.deadline_at !== null) return false;
+    return !timed;
+  }
+  if (!timed) return false;
   const expiresAt = strictIsoMs(value.expires_at);
   return expiresAt !== null && expiresAt > now;
 }

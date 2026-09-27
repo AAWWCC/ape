@@ -12,7 +12,7 @@ function ticket(execution_limits, attempt = 1) {
     schema_version: '2.0.0', ticket_id: 'run-progress:plan-replan:ticket', run_id: 'run-progress',
     stage_id: 'plan-replan', parallel_group: null, role: 'planner', objective: 'Complete the admitted scope',
     claimed_paths: ['src/value.js'], test_paths: [], model_tier: 'deep', model: {},
-    deadline_at: '2026-09-26T15:00:00.000Z', output_schema: {}, required_checks: [], parent_hash: null,
+    deadline_at: execution_limits?.version === 3 ? null : '2026-09-26T15:00:00.000Z', output_schema: {}, required_checks: [], parent_hash: null,
     base_tree_sha: 'a'.repeat(40), attempt: 1, writable: false, issued_at: '2026-09-26T14:00:00.000Z',
     ...(execution_limits ? { execution_limits } : {}),
     plan_recovery: { version: 1, attempt, source_ticket_id: 'judge', missing_assurances: [{
@@ -27,8 +27,8 @@ describe('immutable progress-based recovery authority', () => {
     Object.assign(config.policy, { max_directed_replans: 0, max_remediation_cycles: 0,
       max_stage_attempts: 4, max_physical_workers_per_ticket: 5 });
     const snapshot = executionPolicySnapshot(config);
-    expect(snapshot.version).toBe(2);
-    expect(snapshot.limits).toMatchObject({ version: 2, max_stage_attempts: 4,
+    expect(snapshot.version).toBe(3);
+    expect(snapshot.limits).toMatchObject({ version: 3, max_stage_attempts: 4,
       max_physical_workers_per_ticket: 5 });
     expect(snapshot.limits).not.toHaveProperty('max_directed_replans');
     expect(snapshot.limits).not.toHaveProperty('max_remediation_cycles');
@@ -72,7 +72,7 @@ describe('immutable progress-based recovery authority', () => {
   });
 
   it('retains the exact representation and hash of legacy tickets', () => {
-    for (const limits of [undefined, pipelineLimits()]) {
+    for (const limits of [undefined, pipelineLimits(), { ...executionPolicySnapshot(DEFAULT_CONFIG).limits, version: 2 }]) {
       const historical = ticket(limits, 2);
       historical.ticket_hash = hashRecord(historical, ['ticket_hash']);
       const bytes = JSON.stringify(historical);
@@ -86,7 +86,7 @@ describe('immutable progress-based recovery authority', () => {
     const legacy = pipelineLimits();
     const current = executionPolicySnapshot(DEFAULT_CONFIG).limits;
     for (const limits of [
-      { ...legacy, version: 2 }, { ...current, version: 3 },
+      { ...legacy, version: 2 }, { ...current, version: 4 },
       { ...current, max_directed_replans: 10 }, { ...current, max_remediation_cycles: null },
     ]) {
       expect(ExecutionLimitsSchema.safeParse(limits).success).toBe(false);
@@ -94,7 +94,7 @@ describe('immutable progress-based recovery authority', () => {
     }
     for (const snapshot of [
       { version: 2, limits: legacy }, { version: 1, limits: current },
-      { version: 3, limits: current }, { version: 2 }, { version: 1 },
+      { version: 4, limits: current }, { version: 2 }, { version: 1 },
       { version: 1, limits: null },
     ]) expect(() => pipelineLimits({ execution_policy: snapshot, execution_limits: current,
       policy: { version: 2 } })).toThrow(/execution policy/);

@@ -8,6 +8,7 @@ import { evaluateLifecyclePolicy } from '../lib/runtime/hooks.js';
 import { projectedPipeline } from '../lib/runtime/pipeline.js';
 import { evaluateRunReadiness } from '../lib/runtime/readiness.js';
 import { RunStartInputSchema } from '../lib/runtime/schemas.js';
+import { executionPolicySnapshot } from '../lib/runtime/pipeline-limits.js';
 import { previewRun, startRun } from '../lib/runtime/service.js';
 
 const PROFILE = Object.freeze({
@@ -77,12 +78,13 @@ describe('run-scoped read-only command profiles', () => {
     })).success).toBe(false);
   });
 
-  it('makes the runtime deadline authoritative over timebox prose in the objective', () => {
+  it('distinguishes unlimited new workers and historical deadlines from timebox prose in the objective', () => {
     const common = readFileSync(new URL('../prompts/common.md', import.meta.url), 'utf8');
     const runSkill = readFileSync(new URL('../plugin-src/skills/run/body.md', import.meta.url), 'utf8');
-    expect(common).toMatch(/`deadline_at` is the runtime-issued authorization horizon/iu);
+    expect(common).toMatch(/Execution policy v3 workers have `deadline_at: null` and no elapsed-time cutoff/iu);
+    expect(common).toMatch(/historical tickets, a non-null `deadline_at` remains the runtime-issued authorization horizon/iu);
     expect(common).toMatch(/never stop early[\s\S]*because of that prose/iu);
-    expect(runSkill).toMatch(/Omit execution budgets and dispatch limits[\s\S]*preview reports the runtime-owned ticket deadline/iu);
+    expect(runSkill).toMatch(/Omit execution budgets and dispatch limits[\s\S]*new workers have no duration limit[\s\S]*preview reports `deadline_ms: null`/iu);
     expect(resolveTicketDeadline({ deadlines_ms: { spike: 0, full: 123 } }, 'spike', 'full'))
       .toEqual({ deadline_ms: 0, source: 'mode:spike' });
     expect(resolveTicketDeadline({ deadlines_ms: { debug: 420_000, full: 123 } }, 'debug', 'full'))
@@ -96,6 +98,24 @@ describe('run-scoped read-only command profiles', () => {
       'debug',
       'full',
     )).toThrow(/invalid ticket deadline for mode:debug/iu);
+  });
+
+  it('separates new worker authority from frozen command timeouts while retaining legacy deadlines', () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.deadlines_ms.spike = 0;
+    config.deadlines_ms.full = 123;
+    const snapshot = executionPolicySnapshot(config);
+    expect(snapshot).toMatchObject({ version: 3, limits: { version: 3 } });
+    expect(resolveTicketDeadline(config, 'spike', 'full', { execution_policy: snapshot }))
+      .toEqual({ deadline_ms: null, source: 'no-worker-deadline' });
+    expect(resolveTicketDeadline(config, 'spike', 'full', { execution_limits: snapshot.limits }))
+      .toEqual({ deadline_ms: null, source: 'no-worker-deadline' });
+    expect(snapshot.deadlines_ms).toEqual(config.deadlines_ms);
+    const historical = { ...snapshot, version: 2, limits: { ...snapshot.limits, version: 2 } };
+    expect(resolveTicketDeadline(config, 'spike', 'full', { execution_policy: historical }))
+      .toEqual({ deadline_ms: 0, source: 'mode:spike' });
+    expect(resolveTicketDeadline(config, 'spike', 'full'))
+      .toEqual({ deadline_ms: 0, source: 'mode:spike' });
   });
 
   it('merges run-local profiles into readiness and rejects persistent-id ambiguity', () => {
@@ -135,7 +155,7 @@ describe('run-scoped read-only command profiles', () => {
     });
   });
 
-  it('freezes the exact profile and uses the spike-mode deadline despite full classification', async () => {
+  it('freezes the exact profile without imposing a worker deadline despite full classification', async () => {
     const dir = initRepository();
     dirs.push(dir);
     const input = spikeInput();
@@ -143,8 +163,9 @@ describe('run-scoped read-only command profiles', () => {
     const preview = await previewRun(dir, input);
     expect(preview.blueprint).toMatchObject({
       lane: 'full',
-      ticket_deadline: { deadline_ms: 900_000, source: 'mode:spike' },
+      ticket_deadline: { deadline_ms: null, source: 'no-worker-deadline' },
     });
+    expect(preview.admission.ticket_deadline).toEqual(preview.blueprint.ticket_deadline);
 
     const started = await startRun(dir, input);
     expect(started.ok).toBe(true);
@@ -153,7 +174,8 @@ describe('run-scoped read-only command profiles', () => {
     const ticket = started.run.tickets[0];
     expect(ticket.role).toBe('spike_researcher');
     expect(ticket.capability_manifest.command_profiles).toEqual([PROFILE]);
-    expect(Date.parse(ticket.deadline_at) - Date.parse(ticket.issued_at)).toBe(900_000);
+    expect(ticket.deadline_at).toBeNull();
+    expect(ticket.execution_limits.version).toBe(3);
 
     expect(evaluateLifecyclePolicy({
       host: 'claude',

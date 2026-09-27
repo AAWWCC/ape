@@ -5,6 +5,8 @@ import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, 
 import { hostname, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CURRENT_EXECUTION_POLICY_DEFAULTS } from '../lib/runtime/pipeline-limits.js';
+import { finalizeTicket } from '../lib/runtime/schemas.js';
 
 const RENDERER = fileURLToPath(new URL('../bin/ape-statusline.mjs', import.meta.url));
 const PACKAGE_BUILDER = fileURLToPath(new URL('../scripts/build-plugin-packages.mjs', import.meta.url));
@@ -776,6 +778,60 @@ describe('ape v2 statusline renderer', () => {
     const out = stripAnsi(render({ workspace: { current_dir: dir } }));
     expect(out).toContain('dispatch_live');
     expect(out).not.toContain('dispatch_pending');
+  });
+
+  it('shows a long-lived v3 worker as live only when ticket and intent agree on no deadline', () => {
+    const issuedAt = '2025-01-01T00:00:00.000Z';
+    const ticket = finalizeTicket({
+      schema_version: '2.0.0', run_id: 'run-v3-statusline', ticket_id: 'run-v3-statusline:build:ticket',
+      stage_id: 'build', role: 'implementer', objective: 'Finish the authorized work',
+      claimed_paths: ['src/value.js'], test_paths: [], model_tier: 'balanced', model: { model: 'sonnet' },
+      issued_at: issuedAt, deadline_at: null,
+      execution_limits: { version: 3, ...CURRENT_EXECUTION_POLICY_DEFAULTS },
+      output_schema: {}, required_checks: [], parent_hash: null, base_tree_sha: '0'.repeat(40),
+      attempt: 1, writable: true,
+    });
+    const runtime = join(dir, '.ape', 'runtime');
+    const intents = join(runtime, 'dispatch-intents');
+    const state = { version: 2, run_id: ticket.run_id, host: 'claude', dispatch_state: undefined, tickets: [ticket] };
+    writeActive(dir, state);
+    mkdirSync(intents, { recursive: true });
+    writeFileSync(join(runtime, 'active.lock'), JSON.stringify({
+      version: 1, run_id: ticket.run_id, host: hostname(), pid: process.pid,
+      acquired_at: new Date().toISOString(), nonce: '12345678-1234-4234-8234-123456789abc',
+    }));
+    const intentFile = join(intents, createHash('sha256').update(ticket.ticket_id).digest('hex') + '.json');
+    const bound = {
+      version: 2, host: 'claude', run_id: ticket.run_id, ticket_id: ticket.ticket_id,
+      ticket_hash: ticket.ticket_hash, agent_type: 'implementer', nonce_hash: 'b'.repeat(64),
+      capability_hash: 'c'.repeat(64), status: 'bound', launch_attempts: 1,
+      prepared_at: issuedAt, launched_at: issuedAt, bound_at: issuedAt,
+      launch_expires_at: '2025-01-01T00:01:00.000Z',
+      execution_policy_version: 3, expires_at: null,
+    };
+    const diagnostic = () => stripAnsi(render({ workspace: { current_dir: dir } }));
+    writeFileSync(intentFile, JSON.stringify(bound));
+    expect(diagnostic()).toContain('dispatch_live');
+    writeFileSync(intentFile, JSON.stringify({ ...bound, agent_stopped_at: new Date().toISOString() }));
+    expect(diagnostic()).toContain('dispatch_stopped');
+
+    for (const changed of [
+      { ...bound, execution_policy_version: undefined },
+      { ...bound, execution_policy_version: 4 },
+      { ...bound, ticket_hash: 'd'.repeat(64) },
+      { ...bound, expires_at: new Date(Date.now() + 60_000).toISOString() },
+      { ...bound, execution_policy_version: undefined, expires_at: new Date(Date.now() + 60_000).toISOString() },
+    ]) {
+      writeFileSync(intentFile, JSON.stringify(changed));
+      expect(diagnostic()).toContain('dispatch_pending');
+      expect(diagnostic()).not.toContain('dispatch_live');
+    }
+
+    const legacyTicket = finalizeTicket({ ...ticket, execution_limits: { ...ticket.execution_limits, version: 2 },
+      deadline_at: new Date(Date.now() + 60_000).toISOString() });
+    writeActive(dir, { ...state, tickets: [legacyTicket] });
+    writeFileSync(intentFile, JSON.stringify({ ...bound, ticket_hash: legacyTicket.ticket_hash }));
+    expect(diagnostic()).toContain('dispatch_pending');
   });
 
   it('classifies a malformed dispatch collection tail before probing intent files', () => {

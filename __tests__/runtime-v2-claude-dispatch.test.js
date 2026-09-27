@@ -16,7 +16,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   bindClaudeSubagent,
   launchClaudeIntent,
@@ -27,6 +27,16 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { finalizeTicket } from '../lib/runtime/schemas.js';
 import { abortRun, recordReceipt, startRun } from '../lib/runtime/service.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
+
+// These fixtures exercise already-admitted policy-v2 deadline behavior.
+// New timer-free admission and binding are covered in runtime-v2-worker-timers.
+vi.mock('../lib/runtime/pipeline-limits.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, executionPolicySnapshot: (config) => {
+    const policy = actual.executionPolicySnapshot(config);
+    return { ...policy, version: 2, limits: { ...policy.limits, version: 2 } };
+  } };
+});
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 // End-to-end against the SOURCE hook binary (bin/ape-hook.mjs), not the stale

@@ -3,7 +3,7 @@ import { readFile, mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   observeClaudeSubagentStop,
 } from '../lib/runtime/claude-dispatch.js';
@@ -55,6 +55,16 @@ import { atomicWriteJson } from '../lib/runtime/storage.js';
 // arm below now asserts the ACTUAL wire shape, not just the coarse
 // allow/deny outcome, so a cause-specific denial reason ships proven rather
 // than collapsing invisibly behind `subagentStartOutcome`.
+
+// These fixtures exercise already-admitted policy-v2 deadline behavior.
+// New timer-free admission and binding are covered in runtime-v2-worker-timers.
+vi.mock('../lib/runtime/pipeline-limits.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, executionPolicySnapshot: (config) => {
+    const policy = actual.executionPolicySnapshot(config);
+    return { ...policy, version: 2, limits: { ...policy.limits, version: 2 } };
+  } };
+});
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const hookBinary = path.join(root, 'bin', 'ape-hook.mjs');

@@ -37,9 +37,9 @@ used at once. Schema acceptance is not proof of a good plan or correct product.
 Execution settings are configurable operating policies, frozen at new-run START.
 Ticket/dispatch receipt limits are also bound to immutable authority. Changing
 project configuration affects subsequent runs. Legacy runs keep their frozen
-quotas and supported fallback semantics. New runs use execution policy v2, which
-removes directed-replan and remediation count quotas while preserving their
-strictly shrinking blocker checks. See the generated
+quotas and supported fallback semantics. New runs use execution policy v3, which
+removes worker duration limits as well as directed-replan and remediation count
+quotas, while preserving strictly shrinking blocker checks. See the generated
 [configuration reference](configuration.md).
 
 | Policy | Default and disposition |
@@ -53,7 +53,8 @@ strictly shrinking blocker checks. See the generated
 | Validation submissions per worker | **Configurable:** 3. Exact successful replay remains idempotent. Exhaustion accounting does not loop once per configured submission. |
 | Reconciliation attempts / protocol redispatches | **Configurable:** 1 / 0. The single nonrecursive contradiction-reconciliation chain remains an architectural constraint. |
 | Fast lane production files | **Configurable:** 6. Normalized exact files are counted cumulatively across validated receipts; known broad production directory claims select full for behavioral work. This is routing policy, not a universal task size. |
-| Stage/suite deadlines | **Configurable:** mechanical/debug/spike 15 minutes, fast 30, full 60. Worker replacement uses the same mode-aware resolver. Zero or negative configured stage deadlines intentionally expire immediately. |
+| Worker deadlines | **Removed for new runs:** tickets carry `deadline_at: null`. Elapsed time does not revoke worker authority or trigger a retry. Explicit cancellation, revocation and confirmed-stop recovery remain. Historical execution policies v1 and v2 retain their frozen deadlines, including mode-aware replacement deadlines. |
+| Command/suite timeouts | **Configurable:** mechanical 15 minutes, fast 30, full 60 through the existing `deadlines_ms` keys. Zero or negative configured timeouts intentionally expire immediately. These bound subprocess execution, not the lifetime of new workers. |
 | Gate watch | **Configurable:** heartbeat 5 seconds, stale age 30 seconds, total spawns 2, inline grace 300 seconds, advisory poll delay 5 seconds. A verified live owner is stronger evidence than heartbeat age alone. |
 | Remote check registration | **Configurable:** 120-second registration window and 10-second retry advice. A pending CI check has no new global elapsed-run cutoff. |
 
@@ -87,7 +88,7 @@ promise that every possible accumulated transcript fits in persistent state.
 | --- | --- |
 | Wire and injected context | MCP responses: 48,000 framed bytes; receipt construction: 96 KiB; Codex injected context: 160 KiB; native prompt: 256 KiB; packaged common/role prompt files: 64 KiB each; session guidance: 4 KiB. Large schemas/plans use exact durable references with hashes. These are project transport policies, not model context-window claims. |
 | Correction and review forwarding | All 20 bounded correction entries are rendered completely. Review forwarding retains 40 entries / 10,000 serialized JSON characters, with reserved omission notices; structured identity previews retain 16 with omission counts. Full source receipts remain authoritative. |
-| Native binding | Fresh launch claim: 60 seconds within the ticket horizon; probe horizon: 5 minutes. Intent/probe files: 1 MiB; bootstrap candidate: 8 KiB; start diagnostics: 64 KiB and last 8 observations. Old independent 64-launch/million-generation cuts are removed; exact intent bytes and safe counters remain bounded. |
+| Native binding | Fresh launch claim: 60 seconds, additionally bounded by the ticket horizon for historical workers; probe horizon: 5 minutes. These limit unclaimed launch credentials, not bound worker duration. Intent/probe files: 1 MiB; bootstrap candidate: 8 KiB; start diagnostics: 64 KiB and last 8 observations. Old independent 64-launch/million-generation cuts are removed; exact intent bytes and safe counters remain bounded. |
 | Native identity | Claude model 256, Codex model 512, effort 64 characters; probes and production agree. Identity/path fields retain bounded grammar. Bearer entropy and digest/key widths describe cryptographic formats, not work allowances. Live host support still requires certification. |
 | In-call waiting | NEXT waits at most 300 seconds per call with a 250 ms poll floor; inline polling uses the smaller of 200 ms and remaining grace. These prevent busy loops or indefinite synchronous calls, not continued work across calls. |
 | Process output and shutdown | Suite collection retains 200,000 UTF-16 units plus at most one pipe chunk. SIGTERM grace 10 seconds and drain 5 seconds bound shutdown; owned-process freshness 30 seconds and lifetime slack 60 seconds protect identity. Per-GitHub command timeout is 120 seconds. Exact margins are operational choices. |

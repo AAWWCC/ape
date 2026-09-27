@@ -3,7 +3,7 @@ import { lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { reduceRun } from '../lib/runtime/scheduler.js';
 import { abortRun, nextRun, resumeRun, startRun, statusRun } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
@@ -17,6 +17,19 @@ import {
   launchClaudeIntent,
   launchCodexIntent,
 } from '../lib/runtime/claude-dispatch.js';
+
+// This suite exercises already-admitted v2 runs. New v3 runs explicitly have
+// no worker deadline and are covered by the worker-timing/dispatch suites.
+vi.mock('../lib/runtime/pipeline-limits.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    executionPolicySnapshot(config) {
+      const policy = actual.executionPolicySnapshot(config);
+      return { ...policy, version: 2, limits: { ...policy.limits, version: 2 } };
+    },
+  };
+});
 
 // F17: an expired pending ticket must move the run forward (retry once, then
 // block) instead of emitting un-launchable dispatches forever, and next/resume

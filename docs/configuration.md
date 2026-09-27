@@ -14,20 +14,28 @@ and merges them over shipped defaults. Do not hand-edit runtime state.
 MCP discovery and permissions belong to the host, not APE. Initialization does not create or edit
 repository instruction files.
 
-Execution limits are checked both when set and when loaded. Deadlines must be
+Execution limits are checked both when set and when loaded. Command and suite timeouts must be
 integers from −2,147,483,647 through 2,147,483,647 milliseconds; zero and negative
 values intentionally expire immediately. Gate grace and poll delays accept zero;
 heartbeat and stale intervals must be positive. All gate intervals share the
 2,147,483,647 ms maximum supported by Node timers. File and spawn counts must be
 positive safe integers. See [runtime limits](limits.md) for their purpose and tradeoffs.
 
-Execution policy, deadlines, fast-lane file routing, gate timing and remote-check
+Execution policy, command timeouts, fast-lane file routing, gate timing and remote-check
 registration timing are frozen when a new run starts. Changing configuration
 affects subsequent runs. Existing runs and issued tickets retain their original
 execution, receipt and artifact contracts. Optional retry counts accept zero;
 attempt, worker and submission counts require at least one. Combined counters
 must fit safe-integer arithmetic. These are configurable operating choices,
 not claims about an optimal number of attempts.
+
+New runs use execution policy v3 and have no worker duration limit. Their tickets
+carry `deadline_at: null`; elapsed time does not expire worker authority or spend
+a retry. Explicit cancellation, revocation and recovery after a confirmed worker
+stop still apply. Historical execution policies v1 and v2 keep their frozen
+worker deadlines. The existing `deadlines_ms` settings continue to bound command
+and test-suite execution; they do not set a worker time quota for new runs.
+Launch-token expiry, lock leases, polling and shutdown grace periods remain in force.
 
 New runs have no fixed count quota for directed replans or remediation cycles.
 After the first recovery, normalized blockers must strictly shrink; repeated,
@@ -70,11 +78,11 @@ checked byte-for-byte by `npm run docs:check`.
 | `policy.full_suite_cache` | boolean | `true` | Reuse passing suites for the same tree and resolved command. |
 | `policy.evidence_scripts` | string array | `[]` | Exact extra package scripts allowed as read-only evidence. |
 | `policy.command_profiles` | object array | `[]` | Exact external-tool commands approved by the operator. |
-| `deadlines_ms.mechanical` | number | `900000` | Mechanical stage/suite deadline (15 minutes). |
-| `deadlines_ms.fast` | number | `1800000` | Fast stage/suite deadline (30 minutes). |
-| `deadlines_ms.full` | number | `3600000` | Full stage/suite deadline (60 minutes). |
-| `deadlines_ms.debug` | number | `900000` | Read-only debug deadline (15 minutes), independent of lane. |
-| `deadlines_ms.spike` | number | `900000` | Read-only spike deadline (15 minutes), independent of lane. |
+| `deadlines_ms.mechanical` | number | `900000` | Mechanical command/suite timeout (15 minutes); new workers have no duration limit. |
+| `deadlines_ms.fast` | number | `1800000` | Fast command/suite timeout (30 minutes); new workers have no duration limit. |
+| `deadlines_ms.full` | number | `3600000` | Full command/suite timeout (60 minutes); new workers have no duration limit. |
+| `deadlines_ms.debug` | number | `900000` | Debug timeout retained for historical worker contracts (15 minutes); new debug workers have no duration limit. |
+| `deadlines_ms.spike` | number | `900000` | Spike timeout retained for historical worker contracts (15 minutes); new spike workers have no duration limit. |
 | `models.claude.fast.model` | string | `"haiku"` | Claude fast-tier model. |
 | `models.claude.balanced.model` | string | `"sonnet"` | Claude balanced-tier model. |
 | `models.claude.deep.model` | string | `"opus"` | Claude deep-tier model. |

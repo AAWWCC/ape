@@ -78,7 +78,8 @@ timings from at most the newest 20 history files under `.ape/runtime/`.
 ### Start and advance
 
 1. Call `preview` with the intended run inputs. It checks readiness without running
-   tests or creating state, and reports capabilities, dispatch bounds, and deadlines.
+   tests or creating state, and reports capabilities, dispatch bounds, and
+   `ticket_deadline: { deadline_ms: null, source: 'no-worker-deadline' }` for new runs.
 2. For the new protocol, review the complete, ready `admission` manifest (version 1).
    Call `start` with the same inputs plus `expected_admission_digest` set to the
    returned `admission_digest`.
@@ -205,8 +206,12 @@ call `next` again to advance that watch.
 
 Long synchronous calls send progress every ten seconds when `_meta.progressToken`
 is present. Wait for native workers using the host's agent-wait tool.
-`SubagentStop` records termination; an elapsed deadline alone does not authorize
-a duplicate worker.
+`SubagentStop` records termination. New workers have no elapsed-time cutoff:
+their execution policy v3 tickets carry `deadline_at: null`. Explicit cancellation,
+revocation and confirmed-stop recovery still apply. Historical tickets keep their
+original deadlines; an elapsed historical deadline alone does not authorize a
+duplicate worker. Command/suite timeouts, launch-token expiry, lock leases,
+polling and shutdown grace periods remain separate operational timers.
 
 `ship` and `regate` reject a run in the non-blocking watch states `gating` or `shipping` and point
 to `ape_run next`, which is the action that advances those states. A gate-blocked run points to

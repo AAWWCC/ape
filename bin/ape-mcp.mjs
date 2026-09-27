@@ -134,7 +134,7 @@ const TOOLS = Object.freeze([
         },
         objective: {
           type: 'string',
-          description: 'Observable outcome and acceptance criteria. Do not embed execution budgets or guessed lane durations; preview reports the runtime-owned ticket deadline separately.',
+          description: 'Observable outcome and acceptance criteria. Do not embed execution budgets or guessed lane durations; new workers have no duration limit and preview reports deadline_ms: null.',
         },
         expected_admission_digest: {
           type: 'string', pattern: '^[a-f0-9]{64}$',
@@ -537,7 +537,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '2.26.0' };
+    return { name: 'ape', version: '2.27.0' };
   }
 }
 

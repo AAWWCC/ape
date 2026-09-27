@@ -30,7 +30,7 @@ describe('prevention-first admission compiler', () => {
     args.classification.risk_triggers = ['auth'];
     const spec = pipelineRunSpec(args.input, args.classification, args.config);
     expect(spec.plan_contract_version).toBe(version);
-    expect(spec.execution_policy.version).toBe(2);
+    expect(spec.execution_policy.version).toBe(3);
     expect(spec.policy).toEqual({
       ...spec.execution_policy.limits,
       high_risk_security_review: false, design_assurance_required: false,
@@ -69,7 +69,7 @@ describe('prevention-first admission compiler', () => {
   it('shares the current immutable execution policy and progress-dependent dispatch forecast', () => {
     const args = fixture();
     const result = compileRunAdmissionContract(args);
-    expect(result.limits).toMatchObject({ version: 2, max_stage_attempts: 2 });
+    expect(result.limits).toMatchObject({ version: 3, max_stage_attempts: 2 });
     expect(result.limits).not.toHaveProperty('max_directed_replans');
     expect(result.limits).not.toHaveProperty('max_remediation_cycles');
     expect(result.limits).toEqual(pipelineLimits(pipelineRunSpec(args.input, args.classification, args.config)));
