@@ -3338,11 +3338,12 @@ describe('APE v2 authenticated recovery and native launch generations', () => {
     const [intentName] = (await readdir(paths.dispatchIntents)).filter((name) => name.endsWith('.json'));
     const intentFile = path.join(paths.dispatchIntents, intentName);
     const intent = await readJson(intentFile);
+    const now = Date.now();
     const elapsed = {
-      prepared_at: new Date(Date.now() - 62_000).toISOString(),
-      launched_at: new Date(Date.now() - 61_000).toISOString(),
-      authorized_at: new Date(Date.now() - 61_000).toISOString(),
-      launch_expires_at: new Date(Date.now() - 1).toISOString(),
+      prepared_at: new Date(now - 62_000).toISOString(),
+      launched_at: new Date(now - 61_000).toISOString(),
+      authorized_at: new Date(now - 61_000).toISOString(),
+      launch_expires_at: new Date(now - 1_000).toISOString(),
     };
     await atomicWriteJson(intentFile, {
       ...intent,
