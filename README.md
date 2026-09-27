@@ -9,14 +9,15 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.26.0** removes fixed directed-replan and remediation quotas for new
-runs. Recovery continues while normalized blockers strictly shrink; worker
-failure limits and historical run contracts remain in force. See the
-[runtime limits](docs/limits.md) and [configuration migration](docs/configuration.md).
+Version **2.27.0** removes worker-duration limits for new runs. Workers can
+continue until completion, a blocker, or explicit cancellation. Command/suite
+timeouts and operational timers remain separate, and historical run contracts
+keep their original rules. See the [runtime limits](docs/limits.md) and
+[configuration reference](docs/configuration.md).
 
 The latest published release, **2.25.8**, has a documented owner exception.
 That approval applies to its tested runtime and does not certify the changed
-2.26.0 runtime. Fresh live certification is not claimed. See the historical
+2.27.0 runtime. Fresh live certification is not claimed. See the historical
 [release notes](docs/releases/2.25.8.md) and [validation status](docs/prevention-release-status.md).
 
 Codex CLI is the primary host. The Claude Code package is included, but

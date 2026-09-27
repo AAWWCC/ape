@@ -1,5 +1,20 @@
 # Prevention-first reliability status
 
+## 2.27.0 worker-duration limits removed
+
+New execution policy v3 runs carry no worker deadline. Elapsed time no longer
+revokes a bound worker's authority or consumes a retry. Explicit cancellation,
+revocation and stopped-worker recovery remain available. Command/suite timeouts,
+launch-token expiry, lock leases, polling and shutdown timers remain separate.
+Historical v1/v2 contracts retain their frozen deadlines and exact replay rules.
+
+The local full regression run passed 5,305 tests and skipped 87. All five reported
+failures were resolved; the final combined rerun passed all 197 tests in the
+affected suites. Type checking, public-safety and compatibility checks, package
+parity and reproducibility also passed. Pull-request CI must pass before merge.
+Fresh live release certification has not been performed; the 2.25.8 owner
+exception remains specific to that release.
+
 ## 2.26.0 progress-based recovery
 
 New execution policies remove the directed-replan and remediation-cycle count

@@ -93,6 +93,7 @@ async function fixture(host = 'codex', options = {}) {
   const stageId = options.stage_id ?? 'build';
   const role = options.role ?? 'implementer';
   const ticketId = `${runId}:${stageId}:ticket-1`;
+  const timerFree = options.execution_policy?.version === 3;
   const objective = options.objective ?? 'Return one exact validated receipt';
   const claimedPaths = options.claimed_paths ?? ['value.js'];
   const testPaths = options.test_paths ?? [];
@@ -120,7 +121,7 @@ async function fixture(host = 'codex', options = {}) {
     risk_triggers: [],
     model_tier: 'balanced',
     model: { model: 'gpt-5.4', reasoning_effort: 'medium' },
-    deadline_at: options.deadline_at ?? new Date(Date.now() + 3_600_000).toISOString(),
+    deadline_at: timerFree ? null : options.deadline_at ?? new Date(Date.now() + 3_600_000).toISOString(),
     required_checks: options.required_checks ?? [],
     writable: options.writable ?? role === 'implementer',
     base_tree_sha: treeSha,
@@ -181,7 +182,7 @@ async function fixture(host = 'codex', options = {}) {
   });
   const createdAt = new Date(Math.min(
     Date.now() - 1_000,
-    Date.parse(ticket.deadline_at) - 1_000,
+    timerFree ? Infinity : Date.parse(ticket.deadline_at) - 1_000,
     options.agent_stopped_at ? Date.parse(options.agent_stopped_at) - 1_000 : Infinity,
   )).toISOString();
   const state = {
@@ -279,13 +280,14 @@ async function fixture(host = 'codex', options = {}) {
       launched_at: createdAt,
       launch_expires_at: new Date(Math.min(
         Date.parse(createdAt) + 60_000,
-        Date.parse(ticket.deadline_at),
+        timerFree ? Infinity : Date.parse(ticket.deadline_at),
       )).toISOString(),
       bound_at: createdAt,
       ...(options.agent_stopped_at
         ? { agent_stopped_at: options.agent_stopped_at }
         : {}),
       expires_at: ticket.deadline_at,
+      ...(timerFree ? { execution_policy_version: 3 } : {}),
       launch_attempts: 1,
       physical_worker_dispatches: 1,
       ...(options.execution_policy ? { receipt_limits: {
@@ -365,14 +367,16 @@ describe('live receipt contract integration', () => {
     expect(after.tickets).toEqual(before.tickets);
   });
 
-  it('uses the frozen three-worker four-submission contract through two expired-ticket recovery launches', async () => {
+  it.each([2, 3])('uses the frozen three-worker four-submission contract through version %s receipt recovery launches', async (version) => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.policy.max_physical_workers_per_ticket = 3;
     config.policy.max_validation_submissions_per_worker = 4;
     config.deadlines_ms.debug = 123_456;
+    const snapshot = executionPolicySnapshot(config);
+    const executionPolicy = { ...snapshot, version, limits: { ...snapshot.limits, version } };
     const value = await fixture('codex', { mode: 'debug', lane: 'full', stage_id: 'debug', role: 'debugger',
       writable: false, claimed_paths: [], deadline_at: new Date(Date.now() - 1_000).toISOString(),
-      execution_policy: executionPolicySnapshot(config) });
+      execution_policy: executionPolicy });
     await atomicWriteJson(value.paths.config, { policy: { max_physical_workers_per_ticket: 1,
       max_validation_submissions_per_worker: 1 }, deadlines_ms: { debug: 10 } });
     let capability = value.capability;
@@ -400,13 +404,20 @@ describe('live receipt contract integration', () => {
       expect(dispatched).toMatchObject({ recovery_kind: 'redispatch_same_ticket', ticket: value.ticket });
       const intent = await readJson(intentFile);
       expect(intent).toMatchObject({ physical_worker_dispatches: worker + 1,
-        receipt_validation_exhaustions: worker, receipt_protocol_recovery: true,
-        receipt_protocol_recovery_source: { physical_worker_dispatches: worker, validation_exhaustions: worker } });
-      // The horizon is chosen before the intent is prepared. Separate clock
-      // reads can differ under load, so verify the frozen allowance against
-      // the actual call interval rather than treating both timestamps as one.
-      expect(Date.parse(intent.expires_at)).toBeGreaterThanOrEqual(beforeRecovery + 123_456);
-      expect(Date.parse(intent.expires_at)).toBeLessThanOrEqual(afterRecovery + 123_456);
+        receipt_validation_exhaustions: worker });
+      if (version === 3) {
+        expect(intent).toMatchObject({ expires_at: null, execution_policy_version: 3 });
+        expect(dispatched.ticket.deadline_at).toBeNull();
+        expect(intent).not.toHaveProperty('receipt_protocol_recovery');
+        expect(intent).not.toHaveProperty('immutable_ticket_deadline_at');
+      } else {
+        expect(intent).toMatchObject({ receipt_protocol_recovery: true,
+          receipt_protocol_recovery_source: { physical_worker_dispatches: worker, validation_exhaustions: worker } });
+        // Historical workers retain their exact frozen allowance even after
+        // the live configuration changed. The calls use separate clocks.
+        expect(Date.parse(intent.expires_at)).toBeGreaterThanOrEqual(beforeRecovery + 123_456);
+        expect(Date.parse(intent.expires_at)).toBeLessThanOrEqual(afterRecovery + 123_456);
+      }
       session = `parent-${worker + 1}`;
       turn = `child-turn-${worker + 1}`;
       const env = { APE_HOST: 'codex', CODEX_CWD: value.directory };
@@ -2258,10 +2269,12 @@ describe('live receipt contract integration', () => {
     { mode: 'phase', lane: 'fast', stage_id: 'build', role: 'implementer', expectedDeadline: 1_800_000 },
     { mode: 'debug', lane: 'full', stage_id: 'debug', role: 'debugger', expectedDeadline: 900_000 },
     { mode: 'spike', lane: 'full', stage_id: 'spike', role: 'spike_researcher', expectedDeadline: 900_000 },
-  ])('preserves the $mode horizon when stopped-worker recovery replaces an expired ticket', async ({ expectedDeadline, ...options }) => {
+  ])('preserves the historical $mode horizon when stopped-worker recovery replaces an expired ticket', async ({ expectedDeadline, ...options }) => {
+    const snapshot = executionPolicySnapshot(DEFAULT_CONFIG);
     const value = await fixture('codex', {
       ...options,
       deadline_at: new Date(Date.now() - 1_000).toISOString(),
+      execution_policy: { ...snapshot, version: 2, limits: { ...snapshot.limits, version: 2 } },
     });
     const originalTicket = structuredClone(value.ticket);
     const firstStop = (status) => ({

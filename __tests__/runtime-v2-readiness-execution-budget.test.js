@@ -362,7 +362,8 @@ describe('run readiness and capability manifests', () => {
       run_contract: result.run.run_contract,
     });
     expect(projected.tickets[0].capability_manifest).not.toHaveProperty('command_profiles');
-    expect(Date.parse(ticket.deadline_at)).toBeGreaterThan(Date.parse(ticket.issued_at));
+    expect(ticket.deadline_at).toBeNull();
+    expect(ticket.execution_limits.version).toBe(3);
   });
 
   it('proposes and applies grounded config without reading or changing repository instructions', async () => {

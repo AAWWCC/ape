@@ -476,7 +476,7 @@ describe('new-run recovery forecasts', () => {
     Object.assign(config.policy, { max_directed_replans: 0, max_remediation_cycles: 0 });
     const spec = pipelineRunSpec(runSpec(), { lane: 'full', risk_triggers: [] }, config);
     const result = projectedPipeline(spec);
-    expect(spec.execution_policy).toMatchObject({ version: 2, limits: { version: 2 } });
+    expect(spec.execution_policy).toMatchObject({ version: 3, limits: { version: 3 } });
     expect(spec.policy).not.toHaveProperty('max_directed_replans');
     expect(spec.policy).not.toHaveProperty('max_remediation_cycles');
     expect(result.stages.map((entry) => entry.id)).toEqual(expect.arrayContaining(['plan-replan', 'remediation-build']));

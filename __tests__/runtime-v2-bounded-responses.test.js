@@ -1058,7 +1058,7 @@ describe('APE v2 bounded MCP responses over a live run', () => {
     expect(testTicket.objective).toBe('Change behavior');
     expect(testTicket.required_checks).toEqual(['red-test']);
     expect(testTicket.model).toBeTruthy();
-    expect(testTicket.deadline_at).toBeTruthy();
+    expect(testTicket.deadline_at).toBeNull();
     expect(testTicket.output_schema.required).toContain('ticket_id');
     expect(dispatched.dispatch.ticket).toEqual({ ticket_id: testTicket.ticket_id });
     // Both parent ticket projections reference the run objective and immutable
@@ -1104,7 +1104,7 @@ describe('APE v2 bounded MCP responses over a live run', () => {
     expect(implementer.objective).toBe('Change behavior');
     expect(implementer.required_checks).toEqual(['targeted-tests']);
     expect(implementer.model).toBeTruthy();
-    expect(implementer.deadline_at).toBeTruthy();
+    expect(implementer.deadline_at).toBeNull();
     const wireImplementer = recorded.run.tickets.at(-1);
     expect(wireImplementer.objective).toBe(RUN_OBJECTIVE_REFERENCE);
     expect(wireImplementer.output_schema).toEqual(OUTPUT_SCHEMA_REFERENCE);

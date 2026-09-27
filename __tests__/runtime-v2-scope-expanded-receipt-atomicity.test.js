@@ -566,6 +566,7 @@ import {
   withDirLockLeaseMutation,
 } from '../lib/runtime/lock.js';
 import { sha256 } from '../lib/runtime/canonical.js';
+import * as executionPolicies from '../lib/runtime/pipeline-limits.js';
 
 // Real filesystem + git + spawned red-test observation; keep the honest tests
 // off the default timeout, and let teardown ride out win32 EBUSY.
@@ -1669,7 +1670,7 @@ describe('APE v2 bounded capability-recovery publication', () => {
       model_tier: ticket.model_tier,
       model: ticket.model,
       issued_at: expect.any(String),
-      deadline_at: expect.any(String),
+      deadline_at: null,
       writable: ticket.writable,
       recovery_lineage: {
         source_ticket_id: ticket.ticket_id,
@@ -1696,8 +1697,8 @@ describe('APE v2 bounded capability-recovery publication', () => {
       },
     });
     expect(validateTicket(successors[0])).toMatchObject({ valid: true });
-    expect(Date.parse(successors[0].deadline_at))
-      .toBeGreaterThan(Date.parse(successors[0].issued_at));
+    expect(ticket.deadline_at).toBeNull();
+    expect(successors[0].deadline_at).toBeNull();
     expect(successors[0].ticket_id).toMatch(
       new RegExp(`^${active.run_id}:${ticket.stage_id}:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`),
     );
@@ -1793,7 +1794,7 @@ describe('APE v2 bounded capability-recovery publication', () => {
           source_issued_at: ticket.issued_at,
           source_deadline_at: ticket.deadline_at,
           successor_issued_at: expect.any(String),
-          successor_deadline_at: expect.any(String),
+          successor_deadline_at: null,
           prepared_at: expect.any(String),
         },
         byte_budgets: ticket.capability_manifest.byte_budgets,
@@ -1812,7 +1813,7 @@ describe('APE v2 bounded capability-recovery publication', () => {
           claimed_paths: [...ticket.claimed_paths, 'src/generated.js'],
           test_paths: ticket.test_paths,
           issued_at: expect.any(String),
-          deadline_at: expect.any(String),
+          deadline_at: null,
           recovery_lineage: {
             source_ticket_id: ticket.ticket_id,
             validation_submissions: 1,
@@ -2383,11 +2384,10 @@ describe('APE v2 frozen recovery authority and receipt-lock ownership', () => {
     expect(await runtimeSnapshot(paths.runtime)).toEqual(before);
   });
 
-  it('derives successor timing from frozen ticket authority after live configuration changes', async () => {
+  it('preserves the absence of a worker deadline after live command timeout changes', async () => {
     const dir = await project();
     const { ticket, capability } = await nativeCapabilityTicket(dir);
-    const sourceDuration = Date.parse(ticket.deadline_at) - Date.parse(ticket.issued_at);
-    expect(sourceDuration).toBeGreaterThan(1);
+    expect(ticket.deadline_at).toBeNull();
     await atomicWriteJson(runtimePaths(dir).config, {
       deadlines_ms: { fast: 1, full: 1 },
     });
@@ -2401,8 +2401,43 @@ describe('APE v2 frozen recovery authority and receipt-lock ownership', () => {
     expect(recovered.ok).toBe(true);
     const successor = recovered.actions.find((action) => action.type === 'dispatch_agent')?.ticket;
     expect(successor).toBeTruthy();
-    expect(Date.parse(successor.deadline_at) - Date.parse(successor.issued_at))
-      .toBe(sourceDuration);
+    expect(successor.deadline_at).toBeNull();
+    expect(successor.recovery_provenance.source_deadline_at).toBeNull();
+  });
+
+  it.each([1, 2])('preserves version %s capability successor duration and exact replay', async (version) => {
+    const dir = await project();
+    const currentSnapshot = executionPolicies.executionPolicySnapshot;
+    const snapshotSpy = vi.spyOn(executionPolicies, 'executionPolicySnapshot').mockImplementation((config) => {
+      const snapshot = currentSnapshot(config);
+      return { ...snapshot, version, limits: version === 1
+        ? executionPolicies.pipelineLimits({ policy: config.policy })
+        : { ...snapshot.limits, version: 2 } };
+    });
+    let source;
+    try {
+      source = await nativeCapabilityTicket(dir);
+    } finally {
+      snapshotSpy.mockRestore();
+    }
+    const { ticket, capability } = source;
+    const sourceDuration = Date.parse(ticket.deadline_at) - Date.parse(ticket.issued_at);
+    expect(sourceDuration).toBeGreaterThan(1);
+    const paths = runtimePaths(dir);
+    const sourceFile = path.join(paths.tickets, `${ticket.ticket_id.replaceAll(':', '_')}.json`);
+    const sourceBytes = await readFile(sourceFile, 'utf8');
+    await atomicWriteJson(paths.config, { deadlines_ms: { fast: 1, full: 1 } });
+    const payload = capabilityReceipt(ticket, capability, { claimed_paths: ['src/legacy-authority.js'] });
+    expect(await validateReceiptForDispatch(dir, payload)).toMatchObject({ valid: true });
+    const recovered = await recordReceipt(dir, payload);
+    expect(recovered.ok, JSON.stringify(recovered.errors)).toBe(true);
+    const successor = recovered.actions.find((action) => action.type === 'dispatch_agent')?.ticket;
+    expect(successor).toBeTruthy();
+    expect(Date.parse(successor.deadline_at) - Date.parse(successor.issued_at)).toBe(sourceDuration);
+    expect(successor.recovery_provenance.source_deadline_at).toBe(ticket.deadline_at);
+    expect((await recordReceipt(dir, payload)).ok).toBe(true);
+    expect((await readJson(paths.active)).tickets).toEqual(recovered.run.tickets);
+    expect(await readFile(sourceFile, 'utf8')).toBe(sourceBytes);
   });
 
   it('derives a requested-role successor model from frozen authority, not changed live config', async () => {
@@ -3327,7 +3362,7 @@ describe('APE v2 authenticated recovery and native launch generations', () => {
     expect(await bootstrapCodexSubagent(paths, await readJson(paths.active), lateBootstrap))
       .toMatchObject({ valid: false, binding_observation: { code: 'ticket_deadline_elapsed' } });
     expect((await dispatchGenerations(paths, ticketId)).some((record) => record.status === 'bound')).toBe(false);
-    expect(Date.parse(action.ticket.deadline_at)).toBeGreaterThan(Date.now());
+    expect(action.ticket.deadline_at).toBeNull();
 
     const prepared = await Promise.allSettled([
       prepareCodexIntent(paths, action.ticket, action.ticket.role, { bootstrap_protocol: 1 }),

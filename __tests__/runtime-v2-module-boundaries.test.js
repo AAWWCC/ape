@@ -193,6 +193,7 @@ const INTERNAL_OWNER_ASSERTIONS = [
       'lib/runtime/constants.js',
       'lib/runtime/diagnostics.js',
       'lib/runtime/file-stats.js',
+      'lib/runtime/pipeline-limits.js',
       'lib/runtime/resource-limits.js',
     ],
   },

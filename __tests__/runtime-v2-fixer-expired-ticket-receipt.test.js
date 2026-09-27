@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { recordReceipt, resumeRun, startRun } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
@@ -12,6 +12,18 @@ import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 // rejected instead of advancing the pipeline in parallel with the retry
 // (duplicate stage tickets, double progression). Deadline-aware admission
 // (state.deadline_overruns) applies only while the runtime has not moved on.
+
+// Exercise the frozen v2 timing contract; new v3 tickets never expire by time.
+vi.mock('../lib/runtime/pipeline-limits.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    executionPolicySnapshot(config) {
+      const policy = actual.executionPolicySnapshot(config);
+      return { ...policy, version: 2, limits: { ...policy.limits, version: 2 } };
+    },
+  };
+});
 
 const PAST = '2026-01-01T00:00:00.000Z';
 

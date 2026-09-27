@@ -310,5 +310,8 @@
   "__tests__/runtime-v2-verification-profiles.test.js": 229,
   "__tests__/runtime-v2-versioned-terminal-diagnostics.test.js": 482,
   "__tests__/runtime-v2-windows-path-containment.test.js": 3,
+  "__tests__/runtime-v2-worker-timer-receipts.test.js": 144,
+  "__tests__/runtime-v2-worker-timers.test.js": 1264,
+  "__tests__/runtime-v2-worker-timing-contract.test.js": 15,
   "__tests__/runtime-v2-worker-validator-reachability.test.js": 22
 }

@@ -13,7 +13,7 @@ once; stop on repeated denial or missing authority. Find `AGENTS.md` with
 `rg --files -g 'AGENTS.md' -g '!**/.git/**' || true`.
 
 - `objective`: outcome and acceptance. Omit execution budgets and dispatch limits;
-  preview reports the runtime-owned ticket deadline.
+  new workers have no duration limit, and preview reports `deadline_ms: null`.
 - `host` (`codex` or `claude`) in preview/start.
 - Include confirmed `hooks_trusted: true`, `subagents_available: true`, and
   `explicit_invocation: true` in preview and unchanged start. Never invent trust or
