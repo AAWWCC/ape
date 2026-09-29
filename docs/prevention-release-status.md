@@ -1,5 +1,27 @@
 # Prevention-first reliability status
 
+## 2.29.0 native-worker retirement and shipping recovery
+
+Completed native children can be archived through the supported Codex desktop
+control after their exact receipts or probe acknowledgments are accepted. This
+procedure restored launches in the same chat during the roadmap run. Runtime
+reporting keeps fully automatic conditional release unsupported on shipped hosts
+and reports unknown effective host capacity as unknown.
+
+Retirement evidence now covers exact identity, stopped-worker and handoff proof,
+durable replay, refusal, strict ledger validation, and consumed probe records.
+Capability recovery retains the complete admitted policy instead of replacing it
+with the subset needed to issue a successor. Regression tests exercise shipping
+eligibility after ordinary recovery and publication-crash replay while continuing
+to reject altered policy commitments.
+
+The native-worker roadmap run passed 5,490 tests with 87 skips, independent code
+and security reviews, and its required gates before release preparation. The
+shipping-policy defect was discovered by the subsequent ship attempt and is
+covered by two additional regressions. Pull-request CI must pass before merge.
+Fresh live release certification is not claimed; the 2.25.8 owner exception
+remains specific to that earlier release.
+
 ## 2.28.0 evidence-based recovery and worker accounting
 
 New execution policy v4 replaces fixed recovery-attempt ceilings with durable

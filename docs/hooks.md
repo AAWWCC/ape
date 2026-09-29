@@ -9,6 +9,25 @@ APE finds the governed project by walking up from a project hint to the nearest
 
 ## Codex native bootstrap
 
+### Stop evidence and reclamation
+
+`SubagentStop` records a stopped native turn; it does not prove a worker slot
+was released. Resuming the bound identity invalidates its prior stop evidence.
+Accepted exact receipts or acknowledged probes plus current stopped evidence
+establish eligibility only. Probe quarantine remains an authority fence even
+after cleanup and must never be deleted to reclaim capacity.
+
+The internal retirement adapter requires an identity-conditional host operation,
+history preservation and exact release confirmation. Receipt-effects, probe and
+dispatch locks serialize local checks in that order; the host primitive must
+itself refuse a concurrent resume. An intent is durable before the host call;
+uncertain outcomes reconcile the same operation, without inventing release or
+decrementing cumulative physical-worker accounting. Neither shipped host has
+such an adapter. Admission/status report this automatic-release limitation;
+interruption and turn completion are not substitutes. Desktop archival is a
+separate supported host control with observed session recovery, but does not
+establish the conditional semantics required by this internal adapter.
+
 New Codex workers receive authority in this order:
 
 1. `SubagentStart` records provisional native identity and actual model. It does

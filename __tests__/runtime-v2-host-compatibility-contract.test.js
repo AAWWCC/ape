@@ -103,6 +103,38 @@ describe('host compatibility contract', () => {
     expect(result.stdout).toMatch(/compatibility.{0,40}passed/iu);
   });
 
+  it('keeps native capacity unknown and release unsupported in the shipped host contracts', async () => {
+    const manifest = JSON.parse(await read('compatibility.json'));
+    for (const host of ['codex', 'claude']) {
+      expect(manifest.hosts[host].native_worker_lifecycle).toMatchObject({
+        release: { support: 'unsupported' },
+        capacity: { effective_launch_limit: null, retained_thread_limit: null },
+      });
+    }
+  });
+
+  it.each([
+    ['unsupported release claim', (value) => { value.release = { support: 'supported', operation: 'archive_chat' }; }],
+    ['invented effective limit', (value) => { value.capacity.effective_launch_limit = 4; }],
+    ['missing lifecycle contract', (_value, host) => { delete host.native_worker_lifecycle; }],
+  ])('rejects %s in a synthetic compatibility fixture', async (_name, mutate) => {
+    const fixture = await mutatedFixture('compatibility.json', (text) => {
+      const manifest = JSON.parse(text);
+      const host = manifest.hosts.codex;
+      // The synthetic baseline remains meaningful even before the additive
+      // lifecycle contract exists in the public manifest.
+      host.native_worker_lifecycle ??= {
+        release: { support: 'unsupported' },
+        capacity: { effective_launch_limit: null, retained_thread_limit: null },
+      };
+      mutate(host.native_worker_lifecycle, host);
+      return JSON.stringify(manifest, null, 2);
+    });
+    const result = await checker(fixture);
+    expect(result.exitCode, result.stdout).not.toBe(0);
+    expect(result.stderr).toMatch(/lifecycle|capacity|release|compatibility/i);
+  });
+
   const drifts = [
     ['manifest', 'compatibility.json', (text) => text.replace('22.12.0', '22.13.0')],
     ['live-certification policy', 'compatibility.json', (text) => text.replace('"required"', '"unverified"')],

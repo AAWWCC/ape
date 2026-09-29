@@ -544,6 +544,7 @@ import {
 } from '../lib/runtime/storage.js';
 import {
   nextRun,
+  previewRun,
   recordReceipt,
   startRun,
   validateReceiptForDispatch,
@@ -567,6 +568,9 @@ import {
 } from '../lib/runtime/lock.js';
 import { sha256 } from '../lib/runtime/canonical.js';
 import * as executionPolicies from '../lib/runtime/pipeline-limits.js';
+import * as runtimeGit from '../lib/runtime/git.js';
+import { validatedAdmittedStartIdentity } from '../lib/runtime/admitted-start-identity.js';
+import { resolveFrozenShippingTarget } from '../lib/runtime/shipping-target.js';
 
 // Real filesystem + git + spawned red-test observation; keep the honest tests
 // off the default timeout, and let teardown ride out win32 EBUSY.
@@ -2360,6 +2364,53 @@ describe('APE v2 exact recovery generations and selector authority', () => {
 });
 
 describe('APE v2 frozen recovery authority and receipt-lock ownership', () => {
+  it.each(['ordinary', 'publication replay'])('preserves shipping admission and the complete start policy after %s capability recovery', async (boundary) => {
+    const dir = await project();
+    const paths = runtimePaths(dir);
+    const target = { origin: 'https://github.com/acme/project.git', repository: 'acme/project', base: 'main' };
+    git(dir, 'branch', '-M', 'main');
+    git(dir, 'remote', 'add', 'origin', target.origin);
+    git(dir, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const config = await readJson(paths.config);
+    config.shipping.target = target;
+    await atomicWriteJson(paths.config, config);
+    const inputs = { binding_protocol: 'native-v1', capability_contract_required: true, admission_contract_version: 1 };
+    const preview = await previewRun(dir, startInput(inputs));
+    expect(preview.admission.ready, JSON.stringify(preview.admission.blocking)).toBe(true);
+    const remoteTip = vi.spyOn(runtimeGit, 'remoteBranchTip').mockResolvedValue(git(dir, 'rev-parse', 'HEAD'));
+    try {
+      const { ticket, capability } = await nativeCapabilityTicket(dir, {
+        ...inputs, expected_admission_digest: preview.admission_digest,
+      });
+      const before = await readJson(paths.active);
+      const identity = validatedAdmittedStartIdentity(before);
+      expect(identity).not.toBeNull();
+      expect(before.policy.high_risk_security_review).toBe(true);
+      expect(before.policy.evidence_executables).toBeTruthy();
+      expect((await resolveFrozenShippingTarget(dir, before, config)).repository).toBe(target.repository);
+      const payload = capabilityReceipt(ticket, capability, { claimed_paths: ['src/shipping-recovery.js'] });
+      expect(await validateReceiptForDispatch(dir, payload, ticket.ticket_id)).toMatchObject({ valid: true });
+      if (boundary === 'publication replay') {
+        __publicationFault.arm = { kind: 'crash-after-selector-publish' };
+        const crashed = await capturedRecord(dir, payload);
+        expect(capturedMessage(crashed)).toContain('APE_TEST_CRASH_AFTER_SELECTOR_PUBLISH');
+      }
+      expect((await recordReceipt(dir, payload)).ok).toBe(true);
+      const recovered = await readJson(paths.active);
+      expect(recovered.policy).toEqual(before.policy);
+      expect(recovered.admitted_start_identity_hash).toBe(before.admitted_start_identity_hash);
+      expect(validatedAdmittedStartIdentity(recovered)).toEqual(identity);
+      expect((await resolveFrozenShippingTarget(dir, recovered, config)).repository).toBe(target.repository);
+      expect((await recordReceipt(dir, payload)).ok).toBe(true);
+      expect(validatedAdmittedStartIdentity(await readJson(paths.active))).toEqual(identity);
+      const tampered = structuredClone(recovered);
+      tampered.policy.high_risk_security_review = false;
+      await expect(resolveFrozenShippingTarget(dir, tampered, config)).rejects.toThrow(/admitted.start identity/);
+    } finally {
+      remoteTip.mockRestore();
+    }
+  });
+
   it('fails closed without the frozen run-contract manifest and leaves every remaining byte unchanged', async () => {
     const dir = await project();
     const { ticket, capability } = await nativeCapabilityTicket(dir);

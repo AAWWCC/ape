@@ -171,6 +171,7 @@
   "__tests__/runtime-v2-module-boundaries.test.js": 538,
   "__tests__/runtime-v2-native-platform.test.js": 2755,
   "__tests__/runtime-v2-native-recovery.test.js": 2095,
+  "__tests__/runtime-v2-native-worker-retirement.test.js": 60000,
   "__tests__/runtime-v2-onboarding-runners-proposal.test.js": 63,
   "__tests__/runtime-v2-operational-replay.test.js": 4,
   "__tests__/runtime-v2-optional-admission-capabilities.test.js": 14129,

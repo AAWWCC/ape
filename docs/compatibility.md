@@ -1,5 +1,41 @@
 # Host compatibility
 
+## Native worker lifecycle and capacity
+
+Admission and status expose `native_worker_lifecycle`. Both shipped adapters
+report release unsupported and effective launch and retained-thread limits
+unknown. Compatibility metadata describes capabilities; it cannot authorize a
+host operation. Missing legacy lifecycle evidence never means released capacity.
+
+The September 29, 2026 development session's host-provided tool inventory exposes
+`spawn_agent`, `followup_task`, `interrupt_agent`, `list_agents`, `send_message`,
+and `wait_agent`, with advertised concurrency of four agents including the root.
+That is session evidence, not a permanent host-version limit. There is no native
+close/release tool in that inventory. The desktop additionally exposes
+`set_thread_archived`: the development chat recorded archival of three exact
+completed child threads followed by a successful bound implementation launch.
+This is live recovery evidence for that session, not proof of a general slot
+limit or an identity-conditional automatic release contract. Turn completion
+and interruption alone do not prove release. The effective cumulative launch limit and retained-thread limit remain
+unknown; APE's `physical_worker_dispatches` is cumulative accounting and never
+decreases after cleanup.
+
+The internal retirement boundary requires an exact authenticated host, session,
+agent, ticket/probe and launch generation, authoritative current stop evidence,
+and durable exact receipt acceptance or probe acknowledgement. It preserves
+history, binding proofs and quarantine. A supported adapter must conditionally
+refuse resumed workers at the host operation itself, preserve history, and
+return identity-bound evidence. A local check followed by an unconditional host
+call is insufficient. Durable intent precedes the operation; replay reconciles
+the same identity using a host query or an idempotent operation. Refusal or lost
+responses never count as confirmed release. No production adapter is enabled.
+
+On launch rejection, keep its generation and use status, native wait for that
+same child, and resume. Only runtime-authorized expiry/revocation can permit
+replacement. Do not retry launches immediately or reset a run for capacity.
+See [operational readiness](operational-readiness.md#native-capacity-certification)
+for the separate live certification procedure.
+
 APE supports Linux, macOS, and Windows. Node.js 22.12.0 or newer is required.
 
 Release checks use these exact versions:

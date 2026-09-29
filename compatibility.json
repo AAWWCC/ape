@@ -8,12 +8,22 @@
     "codex": {
       "package": "@openai/codex",
       "version": "0.153.4",
-      "live_certification": "required"
+      "live_certification": "required",
+      "native_worker_lifecycle": {
+        "release": { "support": "unsupported", "operation": null },
+        "capacity": { "advertised_active_concurrency": null, "effective_launch_limit": null, "retained_thread_limit": null },
+        "provenance": "No installed conditional native release adapter; host session evidence is separate"
+      }
     },
     "claude": {
       "package": "@anthropic-ai/claude-code",
       "version": "2.1.228",
-      "live_certification": "unverified"
+      "live_certification": "unverified",
+      "native_worker_lifecycle": {
+        "release": { "support": "unsupported", "operation": null },
+        "capacity": { "advertised_active_concurrency": null, "effective_launch_limit": null, "retained_thread_limit": null },
+        "provenance": "No installed conditional native release adapter; host session evidence is separate"
+      }
     }
   },
   "platforms": [
