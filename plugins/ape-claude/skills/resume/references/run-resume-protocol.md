@@ -75,8 +75,14 @@ after a child returns require checking the session root and hook delivery before
    with `probe-ack`. The bootstrap and acknowledgment capabilities are different; never interchange them.
    The returned agent type is APE's logical role, not a Multi-Agent V2 native argument. Stop on any
    mismatch. `start` consumes this fresh, single-use proof. Claude does not use this probe.
-   After `probe-ack` succeeds and the native canary has completed, close or archive that exact
-   child through supported host controls, preserving its history and the acknowledged proof.
+   After `probe-ack` succeeds, preserve the proof and wait for authoritative native stop evidence.
+   These establish eligibility only. Host slot release additionally requires an installed,
+   identity-conditional native release operation that preserves history and returns exact release
+   evidence. The shipped hosts have no such automatic adapter; report that limitation and continue
+   feasible work. Supported desktop archival is a separate control: verify the exact completed
+   child, accepted acknowledgement, history preservation and absence of pending evidence first.
+   Record observed recovery separately from automatic release guarantees. Probe quarantine is an
+   authority fence, not reclaimed capacity.
 2. For each `dispatch_agent`, use the host-native tool and pass the generated name, model, optional
    reasoning effort, and dispatch intent exactly. On Claude, also pass the action's agent type; on
    Codex Multi-Agent V2, that field is APE's logical policy role and is not a native tool argument.
@@ -108,9 +114,12 @@ after a child returns require checking the session root and hook delivery before
    `next_action: {"kind":"redispatch_same_ticket", ...}`; only that action authorizes one fresh worker on the same
    immutable ticket. Wait through the host's native primitive; do not poll unchanged status.
    If native spawn reports an agent thread limit, stop immediate launch retries. Completion or
-   interruption alone may leave a native thread slot occupied. Release only verified completed
-   children whose receipts were accepted (or whose probe acknowledgement was accepted), using
-   supported host close/archive controls and preserving history. Then use `status`/`resume` and
+   interruption alone may leave a native thread slot occupied. Desktop archival has restored
+   launch availability in observed sessions, but does not prove a general capacity or conditional
+   release contract. Only an installed conditional native release adapter
+   may reclaim an exact stopped generation after receipt acceptance or probe acknowledgement,
+   preserving history and returning identity-bound confirmation. If unavailable, report that
+   limitation and use `status`, native wait for the same child, and `resume`;
    follow the runtime's pending-launch recovery; an unbound generation must expire or be revoked
    before replacement. Never assume a failed tool response proves no child exists, edit host/runtime
    state directly, close an active child, or reset/abort a run solely for host capacity.
@@ -158,11 +167,16 @@ after a child returns require checking the session root and hook delivery before
    abort, or successor run. For ordinary advancement, call `next` after the returned dispatch group
    is fully recorded. A returned recovery or retirement action takes precedence: let `next`/`resume`
    settle a stopped worker instead of fabricating a receipt to satisfy that ordering.
-   After `record` accepts the exact receipt and the native child has completed, close or archive
-   that exact child through supported host controls before the next dispatch. Preserve its history
-   and the durable APE receipt. Never close a worker while its receipt, validation, or corrections
-   remain pending. If the host lacks a supported close/archive control, report that limitation;
-   interruption is not proof that its thread slot was released.
+   After `record` accepts the exact receipt and an authoritative native stop is observed, the
+   exact generation is eligible for supported conditional release. Preserve history and the
+   durable receipt; pending validation, corrections, or unrecorded evidence forbid cleanup.
+   Without an installed release adapter, report unsupported automatic reclamation. Separately,
+   supported desktop archival may clean up that exact verified completed child while preserving
+   history. Retain the archive result and observed subsequent launch outcome; do not treat this as
+   conditional-adapter certification or infer release from interruption. A refused or uncertain
+   automatic release retains the same durable operation
+   identity and must be reconciled by host evidence or an idempotent exact-operation retry; it
+   never grants capacity credit. Cumulative APE physical-worker charges never decrease.
 6. If recording preflight returns `input_required`, obtain complete exact answers for all question
    ids and submit one aimed `answer-preflight` action with the exact hash, a bounded audit `reason`,
    and additive-only `claimed_paths`, `test_paths`, and canonical `risk_triggers`. Do not dispatch a

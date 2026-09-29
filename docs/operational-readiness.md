@@ -380,6 +380,51 @@ Readiness also checks these runtime boundaries. See [pipeline](pipeline.md) and
   Produce-and-hold defers remote proof; queued merges require server-enforced
   up-to-date checks or an ALLGREEN merge queue with required checks.
 
+## Native capacity certification
+
+The native-worker-retirement regression is an adapter simulation, not live host
+certification. Its finite occupancy map retains history and uses real APE
+bootstrap, receipt validation/acceptance and stop/probe paths. It exercises
+conditional refusal, identity mismatch, concurrent repeated cleanup and durable
+operation recovery around host calls. The current session exposes no native
+conditional close/release operation. Separately, desktop archival of exact
+completed children was followed by successful launch in this development run.
+That observed recovery does not certify the automatic conditional adapter or
+the full sequential capacity procedure below.
+
+On a host that provides a supported conditional release primitive, first record
+its operation inventory, advertised active concurrency, retained-thread rules
+and evidence provenance separately from APE's cumulative worker charges. Keep
+unknown limits unknown. Then execute sequential planning, test, implementation
+and review workers in the same native session, exceeding simultaneous capacity
+without a fresh chat. Each worker must use APE binding and ownership, hand off
+its exact accepted receipt (or probe acknowledgement), and have authoritative
+current stop evidence before conditional release. Retain exact host release
+confirmation and preserved history for each generation. Test replay, refusal,
+interruption and response/persistence loss without bypassing those boundaries.
+Simulation results cannot substitute for these live observations.
+
+If launch is rejected, retain the generation, stop immediate retries, inspect
+status, wait for the same child and use resume's supported action. No native
+release adapter means automatic reclamation is unsupported. Supported desktop
+cleanup remains a separate host operation: verify exact completed child identity,
+accepted receipt or probe acknowledgement, preserved history, and absence of
+pending evidence before archival. Record its result and subsequent launch
+observations separately; do not infer a general capacity guarantee. Never
+interrupt workers, reset/abort, or infer that a failed spawn created no child
+solely to recover capacity.
+
+For the observed Codex desktop path, use `read_thread` on the parent chat to
+inspect `subAgentActivity`, which maps an exact `agentPath` to its
+`agentThreadId`. Verify authoritative completion and acceptance of the exact
+receipt or probe acknowledgement, with no pending evidence, before calling
+`set_thread_archived({ threadId: exactChildId, archived: true })`. Preserve the
+history and never infer a child ID from its title. Confirm that exact child
+leaves `collaboration.list_agents`, then follow APE `resume`/`next` and record
+the subsequent launch result. An archive response or disappearance alone is
+not proof of general release semantics; never archive an active or pending
+child. This manual desktop procedure does not enable the automatic adapter.
+
 ## Recovery development rule
 
 Fix dispatch, binding, and ticket orchestration through ordinary development.

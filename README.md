@@ -9,7 +9,11 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.28.0** admits execution policy v4: productive recovery
+Version **2.29.0** makes native-worker cleanup capabilities explicit and documents
+the verified Codex desktop archive workflow. Capability recovery preserves the
+complete admitted policy needed to ship a recovered run.
+
+Execution policy v4 admits productive recovery that
 uses recorded evidence instead of fixed retry counts. Repeated or missing evidence
 still blocks with a diagnostic, and historical tickets retain their exact authority.
 
@@ -21,7 +25,7 @@ keep their original rules. See the [runtime limits](docs/limits.md) and
 
 The latest published release, **2.25.8**, has a documented owner exception.
 That approval applies to its tested runtime and does not certify the changed
-2.28.0 runtime. Fresh live certification is not claimed. See the historical
+2.29.0 runtime. Fresh live certification is not claimed. See the historical
 [release notes](docs/releases/2.25.8.md) and [validation status](docs/prevention-release-status.md).
 
 Codex CLI is the primary host. The Claude Code package is included, but

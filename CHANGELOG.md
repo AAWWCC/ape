@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.29.0 — 2026-09-29
+
+- Report native-worker cleanup support and unknown host capacity explicitly;
+  document the verified Codex desktop archive workflow for completed workers.
+- Require exact stopped-worker identity and accepted receipt or probe evidence
+  before conditional retirement, with durable replay and refusal handling.
+- Harden retirement ledger validation and preserve valid consumed-probe evidence;
+  shipped hosts continue to report automatic conditional release as unsupported.
+- Preserve the complete admitted run policy during capability recovery so scope
+  expansion and crash replay retain shipping eligibility and security bindings.
+- Add regression coverage and regenerate both public host packages.
+
 ## 2.28.0 — 2026-09-29
 
 - Admit execution policy v4 with evidence-based stage, protocol, receipt and

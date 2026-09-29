@@ -50,6 +50,16 @@ async function check(root) {
   const manifestText = await text(root, 'compatibility.json');
   const manifest = JSON.parse(manifestText);
   requireCondition(manifest.version === 2, 'compatibility.json version must be 2');
+  for (const host of ['codex', 'claude']) {
+    const lifecycle = manifest.hosts?.[host]?.native_worker_lifecycle;
+    requireCondition(lifecycle?.release?.support === 'unsupported' && lifecycle.release.operation === null,
+      `${host} lifecycle release must remain unsupported without an installed conditional native adapter`);
+    requireCondition(lifecycle?.capacity?.effective_launch_limit === null &&
+      lifecycle.capacity.retained_thread_limit === null && lifecycle.capacity.advertised_active_concurrency === null,
+      `${host} lifecycle capacity must remain unknown in the shipped contract; session observations are separate`);
+    requireCondition(typeof lifecycle.provenance === 'string' && lifecycle.provenance.length > 0,
+      `${host} lifecycle requires evidence provenance`);
+  }
   requireCondition(manifest.node?.minimum === '22.12.0', 'Node.js minimum must be 22.12.0');
   requireCondition(manifest.node?.blocking === '24.15.0', 'blocking Node.js must be 24.15.0');
   requireCondition(manifest.hosts?.codex?.package === '@openai/codex', 'Codex package identity mismatch');

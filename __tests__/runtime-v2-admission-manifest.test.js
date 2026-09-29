@@ -30,6 +30,21 @@ const request = (extra = {}) => ({
 });
 
 describe('reviewed admission manifest through real lifecycle boundary', () => {
+  it('reports native reclamation limits before launch without rejecting feasible work or changing the digest', async () => {
+    const root = await fixture();
+    const preview = await previewRun(root, request());
+    expect(preview.admission.ready).toBe(true);
+    expect(preview.admission.native_worker_lifecycle).toMatchObject({
+      release: { support: 'unsupported' },
+      capacity: { effective_launch_limit: null, retained_thread_limit: null },
+    });
+    expect(preview.admission.native_worker_lifecycle.release.reason).toMatch(/native.*(?:release|close)|(?:release|close).*native/i);
+    expect((await previewRun(root, request())).admission_digest).toBe(preview.admission_digest);
+    const started = await startRun(root, request({ expected_admission_digest: preview.admission_digest }));
+    expect(started.ok).toBe(true);
+    expect(started.run.admission.manifest.native_worker_lifecycle).toEqual(preview.admission.native_worker_lifecycle);
+  });
+
   it('preview is read-only and returns stable reviewed inputs, not an authorization assertion', async () => {
     const root = await fixture();
     const index = await readFile(path.join(root, '.git/index'));
