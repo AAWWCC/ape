@@ -103,7 +103,8 @@ duplicate, forged, or rebound fields are rejected. New preparation and replayed 
 use the same schema, policy, filesystem, and runtime checks.
 
 Validation submissions and physical workers follow the execution policy frozen
-into the ticket; defaults are three submissions and two workers.
+into the ticket. V4 requires recorded progress and exact predecessor retirement
+without a count quota; historical defaults remain three submissions and two workers.
 Test paths must be unique, canonical, contained project-relative names. Absolute, parent-relative,
 `.ape`-reserved, alias, and option-like paths are rejected. The complete additive union is
 checked before mutation against the actual derived command and complete manifest

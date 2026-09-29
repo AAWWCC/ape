@@ -45,7 +45,7 @@ describe('exact resume service contract', () => {
     });
     expect(started.ok).toBe(true);
     const before = await readJson(runtimePaths(dir).active);
-    expect(before.execution_policy.version).toBe(3);
+    expect(before.execution_policy.version).toBe(4);
     expect(before.execution_policy.limits).not.toHaveProperty('max_directed_replans');
     expect(before.execution_policy.limits).not.toHaveProperty('max_remediation_cycles');
     expect(before.tickets.length).toBeGreaterThan(0);

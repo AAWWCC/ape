@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -14,11 +14,29 @@ import { finalizeReceipt, finalizeTicket, validateTicket } from '../lib/runtime/
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { receiptInputHash } from '../lib/runtime/receipt-input.js';
 
+const legacyPolicy = vi.hoisted(() => ({ enabled: false }));
+
+// The strict-subset replay preserves an admitted v3 recovery contract. Other
+// integration cases retain current admission and configuration-drift checks.
+vi.mock('../lib/runtime/pipeline-limits.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  const { historicalExecutionPolicy } = await import('./historical-execution-policy-helper.js');
+  return {
+    ...actual,
+    executionPolicySnapshot(config) {
+      return legacyPolicy.enabled
+        ? historicalExecutionPolicy(3, {}, config)
+        : actual.executionPolicySnapshot(config);
+    },
+  };
+});
+
 const cleanups = [];
 
-afterEach(async () => Promise.all(
-  cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
-));
+afterEach(async () => {
+  legacyPolicy.enabled = false;
+  await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 function git(cwd, ...args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -185,6 +203,7 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
   it('plan-directed-replan issues a schema-valid second ticket only for strict-subset progress', async () => {
     const dir = await integrationProject();
     const objective = 'Change the value without breaking callers';
+    legacyPolicy.enabled = true;
     const started = await startRun(dir, {
       objective,
       mode: 'phase',
@@ -201,8 +220,10 @@ describe('APE v2 bounded false-block recovery operational replay corpus', () => 
       plan_contract_version: 2,
     });
     expect(started.ok).toBe(true);
+    expect(started.run.execution_policy.version).toBe(3);
 
     const preflightTicket = started.run.tickets.at(-1);
+    expect(preflightTicket.execution_limits.version).toBe(3);
     const artifact = preflightArtifact(objective);
     const preflight = await recordReceipt(dir, receipt(preflightTicket, {
       tests: [{

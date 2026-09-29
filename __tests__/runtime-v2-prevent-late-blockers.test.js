@@ -58,7 +58,8 @@ describe('APE prevents late blocker discovery', () => {
     expect(run).toMatch(/deterministic\s+dispatch\s+bounds/i);
     expect(run).not.toMatch(/max_worker_dispatches|max_active_seconds|extend-budget/i);
     expect(protocol).toMatch(/ape_validate_receipt/i);
-    expect(protocol).toMatch(/initial validation plus at most two[\s\S]*corrections/i);
+    expect(protocol).toMatch(/V4 uses durable correction progress[\s\S]*null remaining[\s\S]*count is not exhaustion/i);
+    expect(protocol).toMatch(/Historical tickets retain their finite allowance[\s\S]*never a new budget per record rejection/i);
     expect(protocol).toMatch(/redispatch_same_ticket[\s\S]*worker_protocol_failure/i);
     expect(resume).toMatch(/redispatch_same_ticket/i);
   });

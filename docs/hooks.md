@@ -339,6 +339,22 @@ bind one native child to one ticket. Receipt admission checks that binding and
 consumes the receipt credential. `SubagentStop` reports termination, not a
 successfully recorded result.
 
+Codex completion does not necessarily release the child's open-thread slot.
+After APE accepts the exact receipt and the native child completes, the parent
+closes or archives that child through supported host controls, retaining its
+history. A completed binding canary can be released after `probe-ack` succeeds.
+Workers with pending work or receipt corrections remain open. A host thread-limit
+error calls for this cleanup and runtime-guided pending-launch recovery, not an
+automatic run reset.
+
+Codex has no spawn-failure hook. A modern bootstrap launch that never bound a
+child retains its reserved receipt-worker slot when its launch credential expires
+or is revoked. Recovery rotates the launch generation and fences the old bearer;
+it does not spend another physical worker merely for preparing a fresh launch.
+Once a child binds, its worker charge survives retirement and replacement. Frozen
+ticket limits, bound-child liveness checks, and receipt-validation limits still
+apply.
+
 `hooks/hooks.json` registers shared policy for both hosts. The shell-free Node
 launcher uses Codex `PLUGIN_ROOT` or Claude `CLAUDE_PLUGIN_ROOT` and pins the
 host. Claude's explicit `hooks/claude-hooks.json` adds only LARP notifications,

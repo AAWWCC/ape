@@ -53,6 +53,28 @@ function occurrences(value, hash) {
 }
 
 describe('APE v2 structured-plan wire projection', () => {
+  it('deduplicates prior v4 judgment context while preserving an exact persisted reference', () => {
+    const oldPlan = plan();
+    const previous = { plan_hash: sha256(oldPlan), plan: oldPlan };
+    const newPlan = plan();
+    newPlan.workstreams[0].steps = ['Preserve exact prior-plan context and independently assess the replacement'];
+    const current = { plan_hash: sha256(newPlan), plan: newPlan };
+    const oldJudge = ticket('run-recovery:plan-judge:old', 'Review the plan', { candidate_plan: previous });
+    const judge = ticket('run-recovery:plan-judge:current', 'Review the plan', { candidate_plan: current,
+      plan_recovery_context: { version: 1, source_ticket_hash: oldJudge.ticket_hash, previous_candidate: previous } });
+    const response = { ok: true, run: { run_id: 'run-recovery', objective: 'Review the plan',
+      tickets: [oldJudge, judge], receipts: [] }, actions: [dispatch(judge)] };
+    const before = JSON.stringify(response);
+    const projected = projectRunResponse(response);
+    expect(occurrences(projected, previous.plan_hash).full).toBe(1);
+    expect(occurrences(projected, current.plan_hash).full).toBe(1);
+    const reference = projected.actions[0].ticket.plan_recovery_context.previous_candidate;
+    expect(reference).toEqual({ plan_hash: previous.plan_hash, ticket_id: judge.ticket_id,
+      plan_ref: '.ape/runtime/tickets/run-recovery_plan-judge_current.json#plan_recovery_context.previous_candidate' });
+    expect(judge.plan_recovery_context.previous_candidate).toEqual(previous);
+    expect(JSON.stringify(response)).toBe(before);
+  });
+
   it('references a complete plan larger than the wire budget without mutating its persisted authority', () => {
     const value = plan();
     value.workstreams[0].outcome = 'x'.repeat(60_000);

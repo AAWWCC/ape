@@ -1676,8 +1676,8 @@ describe('APE v2 bounded capability-recovery publication', () => {
         source_ticket_id: ticket.ticket_id,
         validation_submissions: 3,
         physical_workers: 1,
-        validation_submissions_per_worker: 3,
-        max_physical_workers: 2,
+        validation_submissions_per_worker: null,
+        max_physical_workers: null,
       },
       recovery_provenance: {
         authority: 'runtime',
@@ -1818,8 +1818,8 @@ describe('APE v2 bounded capability-recovery publication', () => {
             source_ticket_id: ticket.ticket_id,
             validation_submissions: 1,
             physical_workers: 1,
-            validation_submissions_per_worker: 3,
-            max_physical_workers: 2,
+            validation_submissions_per_worker: null,
+            max_physical_workers: null,
           },
           recovery_provenance: {
             authority: 'runtime',
@@ -2407,12 +2407,12 @@ describe('APE v2 frozen recovery authority and receipt-lock ownership', () => {
 
   it.each([1, 2])('preserves version %s capability successor duration and exact replay', async (version) => {
     const dir = await project();
-    const currentSnapshot = executionPolicies.executionPolicySnapshot;
+    const { historicalExecutionPolicy } = await import('./historical-execution-policy-helper.js');
     const snapshotSpy = vi.spyOn(executionPolicies, 'executionPolicySnapshot').mockImplementation((config) => {
-      const snapshot = currentSnapshot(config);
-      return { ...snapshot, version, limits: version === 1
-        ? executionPolicies.pipelineLimits({ policy: config.policy })
-        : { ...snapshot.limits, version: 2 } };
+      return version === 1
+        ? { ...historicalExecutionPolicy(2, {}, config), version: 1,
+          limits: executionPolicies.pipelineLimits({ policy: config.policy }) }
+        : historicalExecutionPolicy(2, {}, config);
     });
     let source;
     try {

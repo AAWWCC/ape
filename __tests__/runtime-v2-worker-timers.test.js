@@ -160,7 +160,7 @@ describe('immutable worker timer policy', () => {
 
   it.each([
     ['missing marker', (record) => { delete record.execution_policy_version; }],
-    ['unknown marker', (record) => { record.execution_policy_version = 4; }],
+    ['unknown marker', (record) => { record.execution_policy_version = 5; }],
     ['missing deadline', (record) => { delete record.expires_at; }],
     ['mismatched generation', (record) => { delete record.launch_generations[0].execution_policy_version; }],
   ])('rejects %s instead of treating invalid durable evidence as timer-free', async (_name, mutate) => {

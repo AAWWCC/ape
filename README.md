@@ -9,15 +9,19 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
-Version **2.27.0** removes worker-duration limits for new runs. Workers can
-continue until completion, a blocker, or explicit cancellation. Command/suite
+Version **2.28.0** admits execution policy v4: productive recovery
+uses recorded evidence instead of fixed retry counts. Repeated or missing evidence
+still blocks with a diagnostic, and historical tickets retain their exact authority.
+
+New workers have no duration limit and can continue until completion, a blocker,
+or explicit cancellation. Command/suite
 timeouts and operational timers remain separate, and historical run contracts
 keep their original rules. See the [runtime limits](docs/limits.md) and
 [configuration reference](docs/configuration.md).
 
 The latest published release, **2.25.8**, has a documented owner exception.
 That approval applies to its tested runtime and does not certify the changed
-2.27.0 runtime. Fresh live certification is not claimed. See the historical
+2.28.0 runtime. Fresh live certification is not claimed. See the historical
 [release notes](docs/releases/2.25.8.md) and [validation status](docs/prevention-release-status.md).
 
 Codex CLI is the primary host. The Claude Code package is included, but

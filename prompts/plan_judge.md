@@ -25,3 +25,21 @@ A `disagree` verdict must include `evidence.missing_assurances` as 1-16 bounded 
 `summary` and `evidence_anchor`, plus `requirement_id` and `risk_trigger` when applicable. These
 entries guide runtime-owned recovery. Keep supplied unresolved summaries and requirement/risk
 identities stable across replans. Corrections must fit the issued schema and command catalog.
+
+When a v4 ticket includes `plan_recovery_context`, compare its `previous_candidate` with
+`candidate_plan` and the exact prior blockers in `plan_recovery.missing_assurances`. Another
+negative judgment can authorize recovery only when you independently verify a substantive
+resolution. Report `evidence.plan_resolutions` with `version: 1`, the exact
+`previous_plan_hash` and `candidate_plan_hash`, and a `resolved` entry for each verified repair.
+Each entry names `prior_assurance_id`, an evidence-grounded `rationale`, and nonempty
+`implementation_anchors` and `acceptance_anchors`. Workstream anchors use `workstream_id`,
+`field: "steps"` or `"acceptance"`, and a zero-based `index`; the workstream must be linked
+to the prior requirement through `requirements[].workstreams`. Risk-assurance anchors use
+`assurance_id` and a related implementation field (`feasibility`, `failure_modes`,
+`crash_recovery`, `migration`, or `determinism`) or `executable_tests` for acceptance, with
+`index` only for array fields. Cite current-plan coverage; requirement IDs need not appear
+in its prose. At least one cited coverage entry must have changed. Rewritten instructions
+are allowed; whitespace, duplicates, ordering, unrelated edits, renamed blockers, and
+cosmetic paraphrases do not establish resolution. Do not report a resolution merely because
+text changed or the planner claims success. Keep still-unresolved defects in
+`missing_assurances`; omit `plan_resolutions` if none was substantively resolved.

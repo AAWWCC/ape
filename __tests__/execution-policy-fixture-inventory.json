@@ -1,0 +1,1309 @@
+{
+  "version": 1,
+  "scope": "All 322 current __tests__ test/helper files; inventory excludes itself.",
+  "method": "Read every listed file; inspect policy markers, snapshot constructors, retry/worker/validation/protocol/reconciliation/regate counts, strict-subset handling, deadline/forecast/schema/config assertions and service admission helpers. No test execution in the test-writer stage.",
+  "retained_checkpoints": [
+    "06a196da00636211727d40f24faa694912e53653",
+    "6f121dbb29e9d002b1cee02a3a80872608d460b4"
+  ],
+  "notes": [
+    "Current admissions assert v4; explicit legacy quota and strict-subset behavior remains in historical or unversioned fixtures.",
+    "Five mocked v2 admission suites and capability-successor fixtures now use frozen historical snapshots; no relabeling of current admission limits.",
+    "Historical CURRENT_EXECUTION_POLICY_DEFAULTS references in timer/statusline suites are explicit v2/v3 fixtures; unknown-marker cases now use version 5.",
+    "The directed-replan regression now uses schema-validated plan/hash envelopes and stable assurance anchors, four mixed replans and a reintroduced blocker after JSON restart; cosmetic plan edits must stall.",
+    "The v4 regate service case uses a canonical run ID; a separate synthetic fixture retains rejection of v4-five-regates.",
+    "Current forecast null_semantics is expected to describe evidence-based recovery; frozen v3 forecasts retain strict-subset wording.",
+    "Service regression coverage retains concurrent validation/replacement, lost-response replay, retired capabilities, exact draft attestation and scope/cancellation faults after validation.",
+    "Manual recovery review added exact plan-resolution provenance, receipt-error multiplicity, retained net-diff and current-episode writer evidence regressions. The strict-subset integration case explicitly preserves v3 while its other admission cases remain current."
+  ],
+  "files": [
+    {
+      "path": "__tests__/codex-native-test-helper.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/historical-execution-policy-helper.js",
+      "classification": "frozen-v2-v3-helper"
+    },
+    {
+      "path": "__tests__/legacy-run-test-helper.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-abort-aiming.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-abort-quarantine.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-active-state-safe-read.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-adapters.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-admission-baseline.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-admission-command-prerequisites.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-admission-compiler.test.js",
+      "classification": "current-v4-and-legacy-forecast"
+    },
+    {
+      "path": "__tests__/runtime-v2-admission-manifest.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-admission-npm-path.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-admission-package-selection.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-adoption-incident-regression-loop.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-agent-tool-surface.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-artifact-resource-budget.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-artifact-retention.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-authored-byte-integrity.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-authored-path-admission.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-benchmark.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-binding-clock-transitions.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-binding-probe.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-block-prevention.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-bootstrap-hook-integration.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-bootstrap-merge-gates.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-bootstrap-oversized-canary.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-boundary-availability.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-bounded-false-block-recovery.test.js",
+      "classification": "frozen-v3-strict-subset-and-current-admission"
+    },
+    {
+      "path": "__tests__/runtime-v2-bounded-responses.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-bounded-summary-control-characters.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-bundle-freshness.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-bundle-pinned-time-drift.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-bundle-reachability.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-capability-block.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-capability-command-roundtrip.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-capability-recovery-tree-handoff.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-capability-resource-contract.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-certification-prompt-preparation.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-certification-protection-policy.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-character-policy-divergence.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-claude-dispatch.test.js",
+      "classification": "frozen-v2"
+    },
+    {
+      "path": "__tests__/runtime-v2-cli-entrypoints.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-codex-binding-seam.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-codex-bootstrap.test.js",
+      "classification": "legacy-and-v4-bootstrap"
+    },
+    {
+      "path": "__tests__/runtime-v2-codex-cache-retention.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-codex-freeform-apply-patch.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-codex-model-defaults.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-codex-windows-launchers.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-config-codex-statusline.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-config-doc-parity.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-config-doctor.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-config-history-import.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-config-init-modifiers.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-config-init.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-config-runners-validator.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-config-set-locked-rmw.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-config-set.test.js",
+      "classification": "current-v4-retired-config"
+    },
+    {
+      "path": "__tests__/runtime-v2-config-sparse-overrides.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-config-statusline.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-configuration-file-boundaries.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-continuation-recovery-guidance.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-control-plane-ownership.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-core-deadline-timeout.test.js",
+      "classification": "frozen-v2"
+    },
+    {
+      "path": "__tests__/runtime-v2-core-escalation.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-core-land-lane.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-core-lane-surface.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-core-receipt-lock.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-core-remediation-convergence.test.js",
+      "classification": "unversioned-legacy-reducer"
+    },
+    {
+      "path": "__tests__/runtime-v2-core-terminal-history.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-data-file-lane.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-dir-lock-rename-away.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-dir-lock-steal.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-dispatch-binding-expiry.test.js",
+      "classification": "frozen-v2"
+    },
+    {
+      "path": "__tests__/runtime-v2-dispatch-deny-reason-causes.test.js",
+      "classification": "frozen-v2"
+    },
+    {
+      "path": "__tests__/runtime-v2-dispatch-ticket-dedupe.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-doctor-bundle-drift.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-eval-process-lifecycle.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-evidence-channel-residuals.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-evidence-character-allowlist.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-evidence-command-script-allowlist.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-evidence-effective-cwd.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-evidence-everyday-reads.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-evidence-executable-pinning.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-evidence-git-inspection.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-evidence-recovery-contract.test.js",
+      "classification": "current-v4-and-frozen-v1-v2-v3"
+    },
+    {
+      "path": "__tests__/runtime-v2-evidence-recovery.test.js",
+      "classification": "current-v4"
+    },
+    {
+      "path": "__tests__/runtime-v2-execution-config-case-folding.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-execution-limit-consistency.test.js",
+      "classification": "frozen-quotas-and-current-admission"
+    },
+    {
+      "path": "__tests__/runtime-v2-execution-preflight-regressions.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-expire-dispatch-orphan-admission.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-external-tools.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fast-lane-review-contract.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-file-lock-steal-window.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-file-stat-compat.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-finalize-hash-after-parse.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fixer-ci-lint-parallelism.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fixer-codex-binding-docs.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fixer-expire-dispatch.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-fixer-expired-ticket-receipt.test.js",
+      "classification": "frozen-v2"
+    },
+    {
+      "path": "__tests__/runtime-v2-fixer-import-listing.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fixer-writer-serialization.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-forwarded-channel-disclosure.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-pass-audit-sink-availability.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-pass-doctor-read-boundaries.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-pass-executable-read-boundaries.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-pass-gate-artifact-bounds.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-pass-guidance-root-boundaries.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-pass-lifecycle.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-pass-mcp-transport-shutdown.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-pass-receipt-audit.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-pass-recovery-read-boundaries.test.js",
+      "classification": "historical-receipt-bounds"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-pass-runner-file-boundaries.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-pass-task-update-atomicity.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-fourth-release-input-versions.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-gate-heartbeat-lifecycle.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-gate-launch-failure-cause.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-gate-runner-job-write-failure.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-gate-suite-temp-sweep.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-gate-sweep-staleness-clock.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-gates-automerge.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-gates-merge.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-gates-plugin-parity.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-gates-verification.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-gates.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-gating-watch.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-git-plumbing.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-git-status.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-green-maintenance.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-history-explain.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-history.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-hook-agent-attribution.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-hook-deletion.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-hook-drift-recovery.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-hook-matcher-coverage.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-hook-out-of-project.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-hook-output-flush.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-hook-parent-shell-drift-latch.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-hook-shell-policy.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-hook-stdin-decode.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-hooks-lock.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-hooks-project-root.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-hooks-response-shape.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-host-compatibility-contract.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-host-ticket-binding.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-impacted-gate.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-importer-determinism-toctou.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-issued-receipt-schema.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-kill-process-tree-stale-pid.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-larp.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-legacy-policy-bounded-reads.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-lifecycle-regressions.test.js",
+      "classification": "current-v4-resource-bounds"
+    },
+    {
+      "path": "__tests__/runtime-v2-limit-contract-repairs.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-literal-inspection.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-live-certification-gate.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-loaded-module-drift.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-loaded-module-stamp-precision.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-lock-protocol.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-lock-release-reinstall.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-main-session-exemption.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-mcp-interleaving.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-mcp-json-host-resolution.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-mcp-progress.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-mcp-protocol-conformance.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-mcp-shutdown-persistence.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-mcp-task-gate-attribution.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-mcp-tasks-cancellation.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-mcp-tasks-protocol.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-mcp-tasks-reissue.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-mcp-tasks-storage.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-mcp.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-merged-archive-idempotency.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-model-policy.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-module-boundaries.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-native-platform.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-native-recovery.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-onboarding-runners-proposal.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-operational-replay.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-optional-admission-capabilities.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-override-reason-audit-bound.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-packaged-lifecycle.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-path-scope.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-per-runner-gate-cwd.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-per-runner-red-admission.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-per-runner-red-restore-before-verdict.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-per-runner-targeted-gate.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-performance-baselines-sharded-ci.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-plan-artifact-disclosure.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-plan-artifact-evidence-not-plan.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-plan-artifact-forwarding.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-plan-check-rescope.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-plan-contract-v2.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-plan-contract.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-plan-judge-verdict.test.js",
+      "classification": "unversioned-legacy-reducer"
+    },
+    {
+      "path": "__tests__/runtime-v2-plan-projection.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-plan-resolution-contract.test.js",
+      "classification": "v4-plan-resolution-with-historical-schema-hashes"
+    },
+    {
+      "path": "__tests__/runtime-v2-planning-capability-manifest.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-planning-capability-projection.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-plugin-packages-public.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-plugin-validation.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-polyglot-integration-matrix.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-polyglot-root-runner-owns-swallow.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-post-build-test-recheck.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-preflight-answer.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-preflight-artifact-contract.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-preflight-input-required.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-preflight-legacy-compat.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-preflight-routing.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-preflight-status-history.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-prevent-late-blockers.test.js",
+      "classification": "current-v4-protocol-with-historical-allowance"
+    },
+    {
+      "path": "__tests__/runtime-v2-prevention-pipeline-matrix.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-probe-bootstrap.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-probe-diagnostics.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-progress-recovery-contract.test.js",
+      "classification": "frozen-v1-v2-v3"
+    },
+    {
+      "path": "__tests__/runtime-v2-progress-recovery.test.js",
+      "classification": "explicit-v2-and-legacy"
+    },
+    {
+      "path": "__tests__/runtime-v2-project-metrics.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-prompt-evals.test.js",
+      "classification": "provider-json-schema-subset-unrelated"
+    },
+    {
+      "path": "__tests__/runtime-v2-prompt-red-satisfiability.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-prompt-ticket-fallback.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-property-deps.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-property-lock.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-property-reducer.test.js",
+      "classification": "unversioned-legacy-reducer"
+    },
+    {
+      "path": "__tests__/runtime-v2-property-storage.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-prose-bound-bypass-routes.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-public-commit-identity.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-public-prompt-skill-contract.test.js",
+      "classification": "current-v4-protocol-with-historical-allowance"
+    },
+    {
+      "path": "__tests__/runtime-v2-public-surface.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-public-tooling-regressions.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-readiness-execution-budget.test.js",
+      "classification": "current-v4"
+    },
+    {
+      "path": "__tests__/runtime-v2-readonly-tool-config-write.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-receipt-admission.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-receipt-contract-live-integration.test.js",
+      "classification": "legacy-and-v4-service"
+    },
+    {
+      "path": "__tests__/runtime-v2-receipt-contract-validator.test.js",
+      "classification": "historical-receipt-schema"
+    },
+    {
+      "path": "__tests__/runtime-v2-receipt-input-dx.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-receipt-parent-drift.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-receipt-recovery-guidance.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-receipt-schema-parity.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-recovery-action-eligibility.test.js",
+      "classification": "unversioned-legacy-reducer"
+    },
+    {
+      "path": "__tests__/runtime-v2-recovery-observability.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-red-admission-flake-screen.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-red-test-scoping.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-red-test-side-effects.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-regate.test.js",
+      "classification": "legacy-and-v4-regate"
+    },
+    {
+      "path": "__tests__/runtime-v2-release-2-17-1.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-release-artifacts.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-release-version-parity.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-remediation-boundaries.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-remediation-review-findings.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-remediation-test-path-routing.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-rest-state-lever-guidance.test.js",
+      "classification": "legacy-regate-and-guidance"
+    },
+    {
+      "path": "__tests__/runtime-v2-rest-state-ship-self-disclosure.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-resume-contract.test.js",
+      "classification": "current-v4"
+    },
+    {
+      "path": "__tests__/runtime-v2-retry-remediation-evidence.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-review-findings-ticket-notice.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-review-recovery-net-diff.test.js",
+      "classification": "current-v4-real-git-recovery-service"
+    },
+    {
+      "path": "__tests__/runtime-v2-risk-trigger-admission.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-risk-trigger-receipt-surfacing.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-roadmap-derivation.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-roadmap-registration-bar.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-roadmap-response-bound.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-roadmap-store.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-roadmap-surface.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-root-test-claim-widening.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-round3-parity-hook-types.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-round3-red-test-admission.test.js",
+      "classification": "legacy-seeded-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-round3-terminal-tree.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-run-observability.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-run-preview-forecast.test.js",
+      "classification": "legacy-v3-and-current-v4-forecast"
+    },
+    {
+      "path": "__tests__/runtime-v2-run-scoped-command-profiles.test.js",
+      "classification": "current-v4-and-frozen-v2"
+    },
+    {
+      "path": "__tests__/runtime-v2-runner-routing-resolver.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-runner.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-scheduler.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-scope-expanded-receipt-atomicity.test.js",
+      "classification": "current-admission-and-frozen-v1-v2"
+    },
+    {
+      "path": "__tests__/runtime-v2-scope-expansion.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-sequential-union-gate.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-service-recovery.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-service.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-session-guidance.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-shell-write-verb-coverage.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-ship-deleted-paths.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-ship.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-shipping-cleanup.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-shipping-prevention.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-spawn-serial-isolation.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-spawn.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-start-admission-prelock.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-start-binding-deadline.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-start-hygiene.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-start-override-reset-race.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-start-test-paths.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-state-recovery-boundaries.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-status-contract.test.js",
+      "classification": "current-v4"
+    },
+    {
+      "path": "__tests__/runtime-v2-status-doc.test.js",
+      "classification": "legacy-diagnostic-fixtures"
+    },
+    {
+      "path": "__tests__/runtime-v2-statusline-cache-safety.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-statusline-gallery.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-statusline-terminal-glyphs.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-statusline.test.js",
+      "classification": "explicit-legacy-v2-v3-and-neutral-ui"
+    },
+    {
+      "path": "__tests__/runtime-v2-stop-lifecycle.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-storage-durability.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-storage-limit-boundaries.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-storage-policy-pagination.test.js",
+      "classification": "explicit-v1-history"
+    },
+    {
+      "path": "__tests__/runtime-v2-structured-remediation-routing.test.js",
+      "classification": "legacy-remediation"
+    },
+    {
+      "path": "__tests__/runtime-v2-suite-cache-retention.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-suite-supervision.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-task-crash-recovery.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-task-native-recovery.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-temp-fixtures.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-test-command-serialize-compose.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-test-command-shuffle-compose.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-test-contradiction-block.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-test-scope-directory-widening.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-tree-attribution.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-tree-memo.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-unbounded-sink-guard.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-unified-run-diagnostics.test.js",
+      "classification": "current-admission-no-fixed-policy-expectation"
+    },
+    {
+      "path": "__tests__/runtime-v2-validated-receipt-handoff.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-verification-profiles.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-versioned-terminal-diagnostics.test.js",
+      "classification": "historical-terminal-diagnostics"
+    },
+    {
+      "path": "__tests__/runtime-v2-windows-path-containment.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    },
+    {
+      "path": "__tests__/runtime-v2-worker-timer-receipts.test.js",
+      "classification": "explicit-v1-v2-v3-v4"
+    },
+    {
+      "path": "__tests__/runtime-v2-worker-timers.test.js",
+      "classification": "explicit-legacy-v2-v3"
+    },
+    {
+      "path": "__tests__/runtime-v2-worker-timing-contract.test.js",
+      "classification": "explicit-v1-v2-v3-v4"
+    },
+    {
+      "path": "__tests__/runtime-v2-worker-validator-reachability.test.js",
+      "classification": "policy-independent-or-unversioned-fixture"
+    }
+  ]
+}

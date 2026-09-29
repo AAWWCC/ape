@@ -9,7 +9,7 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { activeState, ACTIVE_STATE_MAX_BYTES } from '../lib/runtime/active-state.js';
 import { persist } from '../lib/runtime/receipt-service.js';
 import { renderStatusDoc } from '../lib/runtime/status-doc.js';
-import { setRuntimeConfig } from '../lib/runtime/config.js';
+import { DEFAULT_CONFIG, setRuntimeConfig } from '../lib/runtime/config.js';
 import { RunStartInputSchema } from '../lib/runtime/schemas.js';
 import { classifyLane } from '../lib/runtime/lane-policy.js';
 import { pipelineRunSpec, projectedPipeline } from '../lib/runtime/pipeline.js';
@@ -82,23 +82,24 @@ describe('exact configured command argv', () => {
 });
 
 describe('admitted execution policy and durable state budgets', () => {
-  it('keeps larger configured ticket, receipt and expiry histories readable and renderable', async () => {
+  it('keeps evidence-dependent ticket, receipt and expiry histories readable and renderable', async () => {
     const paths = await fixture();
-    const config = await setRuntimeConfig(paths.config, 'policy.max_stage_attempts', 300);
+    const config = structuredClone(DEFAULT_CONFIG);
     const input = RunStartInputSchema.parse({ mode: 'debug', host: 'codex', lane: 'full',
       objective: 'Investigate the admitted scoped issue', claimed_paths: ['src/main.js'],
       hooks_trusted: true, subagents_available: true, explicit_invocation: true });
     const classification = classifyLane({ ...input, requested_lane: input.lane }, config.policy);
     const projection = projectedPipeline(pipelineRunSpec(input, classification, config));
     expect(evaluateRunReadiness({ input, config, classification, projection }).ready).toBe(true);
-    expect(projection.dispatch_bounds.logical_ticket_upper_bound).toBe(300);
+    expect(projection.dispatch_bounds.logical_ticket_upper_bound).toBeNull();
     const tickets = Array.from({ length: 300 }, (_, i) => ({
       ticket_id: `ticket-${i + 1}`, stage_id: 'debug', role: 'debugger', attempt: i + 1,
     }));
     const state = { schema_version: '2.0.0', run_id: 'run-large-admitted', status: 'running',
       mode: 'debug', lane: 'full', host: 'codex', stage: 'debug', dispatch_state: 'pending',
       tickets, receipts: tickets.slice(0, -1).map((ticket) => ({ ticket_id: ticket.ticket_id, status: 'failed' })),
-      expired_tickets: tickets.slice(0, -1).map((ticket) => ticket.ticket_id), policy: config.policy,
+      expired_tickets: tickets.slice(0, -1).map((ticket) => ticket.ticket_id),
+      execution_policy: pipelineRunSpec(input, classification, config).execution_policy, policy: config.policy,
       tree_sha: 'a'.repeat(40) };
     await persist(paths, state, null, { refreshTree: false });
     expect((await activeState(paths)).tickets).toHaveLength(300);

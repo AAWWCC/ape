@@ -22,11 +22,11 @@ import {
 // no worker deadline and are covered by the worker-timing/dispatch suites.
 vi.mock('../lib/runtime/pipeline-limits.js', async (importOriginal) => {
   const actual = await importOriginal();
+  const { historicalExecutionPolicy } = await import('./historical-execution-policy-helper.js');
   return {
     ...actual,
     executionPolicySnapshot(config) {
-      const policy = actual.executionPolicySnapshot(config);
-      return { ...policy, version: 2, limits: { ...policy.limits, version: 2 } };
+      return historicalExecutionPolicy(2, {}, config);
     },
   };
 });

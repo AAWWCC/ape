@@ -95,7 +95,7 @@ describe('APE v2 compact status and resume liveness contract', () => {
     expect(liveStatus.dispatch_state).toBe('live');
     expect(dispatched.ticket.deadline_at).toBeNull();
     expect(liveStatus.dispatches).toContainEqual(expect.objectContaining({
-      ticket_id: dispatched.ticket.ticket_id, execution_policy_version: 3, expires_at: null,
+      ticket_id: dispatched.ticket.ticket_id, execution_policy_version: 4, expires_at: null,
     }));
     expect(await compactStatus(dir)).toMatchObject({
       dispatch_state: 'live',

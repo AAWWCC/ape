@@ -1,5 +1,26 @@
 # Prevention-first reliability status
 
+## 2.28.0 evidence-based recovery and worker accounting
+
+New execution policy v4 replaces fixed recovery-attempt ceilings with durable
+evidence of progress. Plan resolutions, receipt corrections, review remediation,
+and test-contradiction recovery must resolve actual blockers; cosmetic changes,
+repeated failures and reverted edits do not qualify. Historical contracts retain
+their frozen policy and receipt schemas.
+
+Codex launch reservations that never bind a native child can be reused after
+expiry or revocation without charging another worker. Accepted receipt/probe
+handoff and authoritative native completion precede supported child archival;
+active workers and unrecorded evidence remain protected.
+
+Before the version metadata bump, the full local suite passed 5,441 tests and
+skipped 87. The ten-suite recovery replay passed all 317 tests. Independent code
+and security reviews, type checking, prompt checks, package parity and
+reproducibility, and public-safety checks passed. Pull-request CI must pass before
+merge. Fresh live release certification and the remaining native-worker-retirement
+roadmap acceptance are not claimed; the 2.25.8 owner exception remains specific
+to that earlier release.
+
 ## 2.27.0 worker-duration limits removed
 
 New execution policy v3 runs carry no worker deadline. Elapsed time no longer

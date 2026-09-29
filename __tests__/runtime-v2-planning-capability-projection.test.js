@@ -401,4 +401,61 @@ describe('native full-phase planning capability projection', () => {
     ]));
     expect(judged.run).toMatchObject({ status: 'running', plan_replan_cycles: 1 });
   }, 30_000);
+
+  it('persists exact prior-plan context and validates an independent resolution through native service re-entry', async () => {
+    const directory = await project();
+    const { plan, checker, critic } = await reachPlanReview(directory);
+    const missing = [
+      { requirement_id: 'R1', evidence_anchor: 'implementation.steps', summary: 'Missing ordered implementation proof' },
+      { requirement_id: 'R1', evidence_anchor: 'implementation.acceptance', summary: 'A separate acceptance issue remains' },
+    ];
+    await recordValidatedReceipt(directory, receipt(checker, { evidence: { verdict: 'disagree', missing_assurances: missing } }));
+    const disagreed = await recordValidatedReceipt(directory, receipt(critic));
+    await bindDispatches(directory, disagreed);
+    const firstJudge = disagreed.run.tickets.at(-1);
+    expect(firstJudge).not.toHaveProperty('plan_recovery_context');
+    const judged = await recordValidatedReceipt(directory, receipt(firstJudge, {
+      evidence: { verdict: 'disagree', missing_assurances: missing },
+    }));
+    await bindDispatches(directory, judged);
+    const replacement = structuredClone(plan);
+    replacement.workstreams[0].steps = ['Write the focused failing test, implement the behavior, then run both configured checks'];
+    replacement.workstreams[0].acceptance = ['Typecheck and lint succeed after the focused regression exercises the changed behavior'];
+    const replanned = await recordValidatedReceipt(directory, receipt(judged.run.tickets.at(-1), {
+      evidence: { candidate_plan: replacement },
+    }));
+    await bindDispatches(directory, replanned);
+    const [nextChecker, nextCritic] = replanned.run.tickets.slice(-2);
+    await recordValidatedReceipt(directory, receipt(nextChecker, {
+      evidence: { verdict: 'disagree', missing_assurances: [missing[1]] },
+    }));
+    const nextDisagreed = await recordValidatedReceipt(directory, receipt(nextCritic));
+    await bindDispatches(directory, nextDisagreed);
+    const secondJudge = nextDisagreed.run.tickets.at(-1);
+    expect(secondJudge.plan_recovery_context).toEqual({ version: 1,
+      source_ticket_hash: firstJudge.ticket_hash, previous_candidate: firstJudge.candidate_plan });
+    expect(secondJudge.plan_recovery).toEqual(judged.run.plan_recovery);
+    const published = secondJudge.output_schema.properties.evidence.properties.plan_resolutions;
+    expect(published.properties.previous_plan_hash.const).toBe(firstJudge.candidate_plan.plan_hash);
+    expect(published.properties.candidate_plan_hash.const).toBe(secondJudge.candidate_plan.plan_hash);
+    const saved = await readJson(runtimePaths(directory).active);
+    expect(saved.tickets.at(-1)).toEqual(secondJudge);
+    const input = receipt(secondJudge, { evidence: { verdict: 'disagree', missing_assurances: [missing[1]],
+      plan_resolutions: { version: 1, previous_plan_hash: firstJudge.candidate_plan.plan_hash,
+        candidate_plan_hash: secondJudge.candidate_plan.plan_hash,
+        resolved: [{ prior_assurance_id: secondJudge.plan_recovery.missing_assurances[0].id,
+          implementation_anchors: [{ workstream_id: 'implementation', field: 'steps', index: 0 }],
+          acceptance_anchors: [{ workstream_id: 'implementation', field: 'acceptance', index: 0 }],
+          rationale: 'The revised sequence and checks resolve the prior implementation proof defect' }],
+      } } });
+    const validated = await validateReceiptForDispatch(directory, input);
+    expect(validated.valid, JSON.stringify(validated.corrections ?? validated.errors)).toBe(true);
+    const altered = structuredClone(input);
+    altered.evidence.plan_resolutions.resolved[0].rationale = 'Different unvalidated evidence';
+    expect(await recordReceipt(directory, altered)).toMatchObject({ ok: false, rejected: true });
+    const accepted = await recordReceipt(directory, input);
+    expect(accepted.ok, JSON.stringify(accepted.errors)).toBe(true);
+    expect(accepted.run).toMatchObject({ status: 'running', plan_replan_cycles: 2 });
+    expect(accepted.run.tickets.at(-1).stage_id).toBe('plan-replan');
+  }, 60_000);
 });

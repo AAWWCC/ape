@@ -156,10 +156,14 @@ dispatch. Changing the draft invalidates it. `record` requires this matching
 attestation for new-contract tickets, then verifies identity, tree/test evidence,
 hashes, and the next transition. The parent must not reconstruct a worker receipt.
 
-Each worker gets an initial validation and two corrections. One fresh worker may
-then be authorized on the same ticket without using a stage attempt. Exhausting
-that worker's corrections blocks as `worker_protocol_failure`; it does not count
-as reviewer dissent or trigger product remediation, replan, abort, or a new run.
+Execution policy v4 uses durable correction progress without a submission or
+worker-count quota. Removing errors at schema-declared locations can advance;
+repeated or reintroduced errors cannot. Follow the returned recovery decision
+for same-worker correction or replacement after the exact predecessor retires.
+Historical tickets retain their frozen limits, normally three submissions per
+worker and two workers. A terminal correction failure blocks as
+`worker_protocol_failure`; it does not count as reviewer dissent or trigger
+product remediation, replan, abort, or a new run.
 
 Emergency `recover-receipt` requires operator approval and a native-bound worker
 that the host observed stopping without an attestation. Supply the unchanged
