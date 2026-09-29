@@ -27,6 +27,7 @@ import { canonicalJson, sha256 } from '../lib/runtime/canonical.js';
 import { finalizeTicket } from '../lib/runtime/schemas.js';
 import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
 import { executionPolicySnapshot } from '../lib/runtime/pipeline-limits.js';
+import { historicalExecutionPolicy } from './historical-execution-policy-helper.js';
 
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const cleanups = [];
@@ -93,7 +94,7 @@ async function fixture(host = 'codex', options = {}) {
   const stageId = options.stage_id ?? 'build';
   const role = options.role ?? 'implementer';
   const ticketId = `${runId}:${stageId}:ticket-1`;
-  const timerFree = options.execution_policy?.version === 3;
+  const timerFree = options.execution_policy?.version >= 3;
   const objective = options.objective ?? 'Return one exact validated receipt';
   const claimedPaths = options.claimed_paths ?? ['value.js'];
   const testPaths = options.test_paths ?? [];
@@ -161,8 +162,10 @@ async function fixture(host = 'codex', options = {}) {
       design_assurance_required: false,
       receipt_schema: { ref: 'ticket.output_schema', hash: sha256(outputSchema) },
       field_bounds: {
-        validation_attempts_per_worker: options.execution_policy?.limits.max_validation_submissions_per_worker ?? 3,
-        max_physical_workers_per_ticket: options.execution_policy?.limits.max_physical_workers_per_ticket ?? 2,
+        ...(options.execution_policy?.version >= 4 ? {} : {
+          validation_attempts_per_worker: options.execution_policy?.limits.max_validation_submissions_per_worker ?? 3,
+          max_physical_workers_per_ticket: options.execution_policy?.limits.max_physical_workers_per_ticket ?? 2,
+        }),
         corrections_per_validation: 20,
         ...(options.manifest_growth_contract_version === 1
           ? {
@@ -287,10 +290,11 @@ async function fixture(host = 'codex', options = {}) {
         ? { agent_stopped_at: options.agent_stopped_at }
         : {}),
       expires_at: ticket.deadline_at,
-      ...(timerFree ? { execution_policy_version: 3 } : {}),
+      ...(timerFree ? { execution_policy_version: options.execution_policy.version } : {}),
       launch_attempts: 1,
       physical_worker_dispatches: 1,
-      ...(options.execution_policy ? { receipt_limits: {
+      ...(options.execution_policy ? { receipt_limits: options.execution_policy.version >= 4
+        ? options.execution_policy.limits : {
         max_physical_workers_per_ticket: options.execution_policy.limits.max_physical_workers_per_ticket,
         max_validation_submissions_per_worker: options.execution_policy.limits.max_validation_submissions_per_worker,
       } } : {}),
@@ -308,6 +312,35 @@ function draft(ticket, capability, status = 'passed') {
     evidence: { summary: 'complete' },
     receipt_capability: capability,
   };
+}
+
+async function bindReceiptReplacement(value, launch, worker) {
+  const session = `receipt-recovery-parent-${worker}`;
+  const turn = `receipt-recovery-turn-${worker}`;
+  const agent = `receipt-recovery-agent-${worker}`;
+  const env = { APE_HOST: 'codex', CODEX_CWD: value.directory };
+  const [pre] = await runProcess('bin/ape-hook.mjs', {
+    hook_event_name: 'PreToolUse', project_dir: value.directory, session_id: session,
+    turn_id: `receipt-recovery-parent-turn-${worker}`, tool_use_id: `receipt-recovery-spawn-${worker}`,
+    tool_name: 'collaborationspawn_agent',
+    tool_input: { ...launch.dispatch.spawn_args, message: 'gAAAAABencrypted-receipt-recovery-message' },
+  }, env);
+  expect(pre).toEqual({});
+  const [start] = await runProcess('bin/ape-hook.mjs', {
+    hook_event_name: 'SubagentStart', project_dir: value.directory, session_id: session,
+    turn_id: turn, agent_id: agent, agent_type: 'default', model: launch.dispatch.model.model,
+  }, env);
+  expect(start.hookSpecificOutput?.additionalContext).toBe(codexBootstrapOrientation());
+  const [bound] = await runProcess('bin/ape-hook.mjs', {
+    hook_event_name: 'PreToolUse', project_dir: value.directory, session_id: session,
+    turn_id: turn, tool_use_id: `receipt-recovery-bind-${worker}`, tool_name: 'ape_bind',
+    tool_input: launch.dispatch.bootstrap_args, model: launch.dispatch.model.model,
+  }, env);
+  const capability = /APE_RECEIPT_CAPABILITY=([A-Za-z0-9_-]{32,256})/
+    .exec(bound.hookSpecificOutput?.additionalContext ?? '')?.[1];
+  expect(capability).toBeTruthy();
+  return { capability, identity: { session_id: session, turn_id: turn,
+    agent_id: agent, agent_type: 'default' } };
 }
 
 function maximalPlannerPlan(preflightHash, targetBytes = 16_384) {
@@ -343,6 +376,392 @@ function maximalPlannerPlan(preflightHash, targetBytes = 16_384) {
 }
 
 describe('live receipt contract integration', () => {
+  it('accepts five materially correcting drafts beyond the old validation quota and seals the exact sixth draft', async () => {
+    const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) });
+    const payload = draft(value.ticket, value.capability);
+    // Independent schema defects, all present at the start. Each submission
+    // repairs one defect, so neither changing prose nor attempt count is the
+    // reason continuation is justified.
+    const defects = { status: 'success', tests: 'invalid', findings: 'invalid', evidence: 'invalid', extra_worker_note: true };
+    Object.assign(payload, defects);
+    for (const [key, replacement] of [
+      ['status', 'passed'], ['tests', []], ['findings', []], ['evidence', { summary: 'complete' }],
+      ['extra_worker_note', undefined],
+    ]) {
+      const result = await validateReceiptForDispatch(value.directory, payload);
+      expect(result.valid).toBe(false);
+      expect(result.validation.exhausted).toBe(false);
+      if (replacement === undefined) delete payload[key];
+      else payload[key] = replacement;
+    }
+    const valid = await validateReceiptForDispatch(value.directory, payload);
+    expect(valid.valid).toBe(true);
+    const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
+    const sealed = await readJson(intentFile);
+    const repeated = await Promise.all(Array.from({ length: 3 }, () =>
+      validateReceiptForDispatch(value.directory, structuredClone(payload))));
+    expect(repeated.every((result) => result.valid)).toBe(true);
+    expect(await readJson(intentFile)).toEqual(sealed);
+    const changed = await recordReceipt(value.directory, { ...payload, evidence: { summary: 'altered after attestation' } });
+    expect(changed).toMatchObject({ ok: false, rejected: true });
+    expect((await readJson(value.paths.active)).receipts).toHaveLength(0);
+    const recorded = await recordReceipt(value.directory, payload);
+    expect(recorded.ok, JSON.stringify(recorded.errors)).toBe(true);
+    expect(recorded.run.receipts).toHaveLength(1);
+  });
+
+  it('accepts repaired validator errors with new independent errors but stops error-set cycles', async () => {
+    const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) });
+    const base = draft(value.ticket, value.capability);
+    const candidates = [
+      { ...base, status: 'success', tests: 'bad' },
+      { ...base, tests: 'bad', findings: 'bad' },
+      { ...base, findings: 'bad', evidence: 'bad' },
+      { ...base, evidence: 'bad', extra_worker_note: true },
+    ];
+    for (const candidate of candidates) {
+      const result = await validateReceiptForDispatch(value.directory, candidate);
+      expect(result.valid).toBe(false);
+      expect(result.validation.exhausted).toBe(false);
+    }
+    // Disk-backed service re-entry must retain the episode; a fresh object and
+    // different summary cannot erase a previously unresolved error state.
+    const cycle = await validateReceiptForDispatch(value.directory, {
+      ...candidates[0], evidence: { summary: 'different wording, same defects' },
+    });
+    expect(cycle.valid).toBe(false);
+    expect(cycle.validation.exhausted).toBe(true);
+    expect(JSON.stringify(cycle)).toMatch(/cycle|repeat|stall|progress/i);
+  });
+
+  it('does not purchase correction or replacement progress by reordering defects beyond the public correction cap', async () => {
+    const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG),
+      allowed_evidence_commands: ['npm test'] });
+    const base = draft(value.ticket, value.capability);
+    const test = { command: 'npm test', passed: true, exit_code: 0, duration_ms: 1 };
+    const commandDefects = Array.from({ length: 20 }, () => ({ ...test, command: '' }));
+    const passedDefects = Array.from({ length: 20 }, () => ({ ...test, passed: 'yes' }));
+    const firstDraft = { ...base, tests: [...commandDefects, ...passedDefects] };
+    const reorderedDraft = { ...base, tests: [...passedDefects, ...commandDefects] };
+    const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
+    const first = await validateReceiptForDispatch(value.directory, firstDraft);
+    expect(first).toMatchObject({ valid: false, attested: false,
+      validation: { exhausted: false } });
+    expect(first.corrections).toHaveLength(20);
+    expect(first.corrections.every((correction) => correction.field.endsWith('.command'))).toBe(true);
+    expect((await readJson(intentFile)).recovery_progress[0].keys)
+      .toEqual(['tests.*.command', 'tests.*.passed']);
+
+    // The public response may show different first-page diagnostics, but the
+    // complete defect multiset is identical after service re-entry.
+    const reordered = await validateReceiptForDispatch(value.directory, reorderedDraft);
+    expect(reordered).toMatchObject({ valid: false, attested: false,
+      validation: { exhausted: true, recovery_decision: { resolved: [] } } });
+    expect(reordered.corrections).toHaveLength(20);
+    expect(reordered.corrections.every((correction) => correction.field.endsWith('.passed'))).toBe(true);
+    for (const result of [first, reordered]) {
+      expect(result).not.toHaveProperty('recovery_keys');
+      expect(result).not.toHaveProperty('correction_locations');
+      for (const correction of result.corrections) {
+        expect(Object.keys(correction).sort()).toEqual(['correction', 'field', 'issue']);
+      }
+    }
+    expect(await recordReceipt(value.directory, reorderedDraft)).toMatchObject({ ok: false, rejected: true });
+    const beforeStop = await readJson(intentFile);
+    expect(beforeStop.recovery_progress.map((entry) => entry.keys)).toEqual([
+      ['tests.*.command', 'tests.*.passed'], ['tests.*.command', 'tests.*.passed'],
+    ]);
+    expect(beforeStop.physical_worker_dispatches).toBe(1);
+    expect((await readJson(value.paths.active)).receipts).toHaveLength(0);
+
+    // The first exhausted worker retains the existing one-time replacement
+    // opportunity. Reordering again cannot renew that opportunity afterward.
+    expect(await observeCodexSubagentStop(value.paths, await readJson(value.paths.active), {
+      session_id: 'session-1', agent_id: 'agent-1', agent_type: 'default',
+    })).toMatchObject({ observed: true });
+    const next = await nextRun(value.directory);
+    const launch = next.actions.find((entry) => entry.type === 'dispatch_agent');
+    expect(launch.ticket).toEqual(value.ticket);
+    const replacement = await bindReceiptReplacement(value, launch, 2);
+    const unchanged = await validateReceiptForDispatch(value.directory, {
+      ...firstDraft, receipt_capability: replacement.capability,
+    });
+    expect(unchanged).toMatchObject({ valid: false, attested: false,
+      validation: { exhausted: true, recovery_decision: { resolved: [], replacement_allowed: false } },
+      next_action: { kind: 'blocked', automatic_successor: false } });
+    expect(await observeCodexSubagentStop(value.paths, await readJson(value.paths.active), replacement.identity))
+      .toMatchObject({ observed: true });
+    const settled = await settleReceiptValidationSubagentStop(value.directory);
+    expect(settled).toMatchObject({ ok: true, settled: true, blocked: true,
+      next_action: { kind: 'blocked', automatic_successor: false } });
+    expect((settled.actions ?? []).some((entry) => entry.type === 'dispatch_agent')).toBe(false);
+    expect((await readJson(intentFile)).physical_worker_dispatches).toBe(2);
+    const finalState = await readJson(value.paths.active);
+    expect(finalState.status).toBe('blocked');
+    expect(finalState.tickets).toEqual([value.ticket]);
+    expect(finalState.receipts).toHaveLength(0);
+  });
+
+  it('blocks a reintroduced receipt defect before a whole error set repeats or a replacement is purchased', async () => {
+    const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) });
+    const base = draft(value.ticket, value.capability);
+    const candidates = [
+      { ...base, status: 'success', tests: 'bad' },
+      { ...base, tests: 'bad', findings: 'bad' },
+      { ...base, findings: 'bad', status: 'success' },
+    ];
+    for (const candidate of candidates.slice(0, 2)) {
+      expect(await validateReceiptForDispatch(value.directory, candidate))
+        .toMatchObject({ valid: false, attested: false, validation: { exhausted: false } });
+    }
+    const reintroduced = await validateReceiptForDispatch(value.directory, candidates[2]);
+    expect(reintroduced).toMatchObject({ valid: false, attested: false,
+      validation: { exhausted: true, recovery_decision: {
+        reason_code: 'repeated_or_stalled_correction', replacement_allowed: false,
+      } }, next_action: { kind: 'blocked', automatic_successor: false } });
+    for (const correction of reintroduced.corrections) {
+      expect(Object.keys(correction).sort()).toEqual(['correction', 'field', 'issue']);
+    }
+    const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
+    const stopped = await readJson(intentFile);
+    expect(stopped.recovery_progress.map((entry) => entry.keys))
+      .toEqual([['status', 'tests'], ['findings', 'tests'], ['findings', 'status']]);
+    expect(stopped.physical_worker_dispatches).toBe(1);
+    expect(stopped.receipt_validation_exhaustions).toBe(1);
+    expect(stopped.valid_draft_observed).not.toBe(true);
+    expect(await recordReceipt(value.directory, candidates[2])).toMatchObject({ ok: false, rejected: true });
+    expect(await observeCodexSubagentStop(value.paths, await readJson(value.paths.active), {
+      session_id: 'session-1', agent_id: 'agent-1', agent_type: 'default',
+    })).toMatchObject({ observed: true });
+    const settled = await settleReceiptValidationSubagentStop(value.directory);
+    expect(settled).toMatchObject({ ok: true, settled: true, blocked: true,
+      next_action: { kind: 'blocked', automatic_successor: false } });
+    expect((settled.actions ?? []).some((entry) => entry.type === 'dispatch_agent')).toBe(false);
+    const finalState = await readJson(value.paths.active);
+    expect(finalState.status).toBe('blocked');
+    expect(finalState.tickets).toEqual([value.ticket]);
+    expect(finalState.receipts).toHaveLength(0);
+    expect((await readJson(intentFile)).physical_worker_dispatches).toBe(1);
+  });
+
+  it('continues after one of several repeated receipt defects is actually repaired', async () => {
+    const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG),
+      allowed_evidence_commands: ['npm test'] });
+    const test = { command: 'npm test', passed: true, exit_code: 0, duration_ms: 1 };
+    const payload = { ...draft(value.ticket, value.capability),
+      tests: [{ ...test, command: '' }, { ...test, command: '' }] };
+    const first = await validateReceiptForDispatch(value.directory, payload);
+    expect(first).toMatchObject({ valid: false, attested: false, validation: { exhausted: false } });
+    payload.tests[0].command = test.command;
+    const partialRepair = await validateReceiptForDispatch(value.directory, payload);
+    expect(partialRepair).toMatchObject({ valid: false, attested: false,
+      validation: { exhausted: false }, next_action: { kind: 'continue_same_agent' } });
+    expect(await recordReceipt(value.directory, payload)).toMatchObject({ ok: false, rejected: true });
+    expect((await readJson(value.paths.active)).receipts).toHaveLength(0);
+    payload.tests[1].command = test.command;
+    const complete = await validateReceiptForDispatch(value.directory, payload);
+    expect(complete).toMatchObject({ valid: true, attested: true, validation: { exhausted: false } });
+    expect((await recordReceipt(value.directory, payload)).ok).toBe(true);
+    expect((await readJson(value.paths.active)).receipts).toHaveLength(1);
+    const intent = await readJson(path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`));
+    expect(intent.physical_worker_dispatches).toBe(1);
+    expect(intent.receipt_validation_exhaustions).toBe(0);
+  });
+
+  it('continues after removing one of two unknown top-level receipt properties', async () => {
+    const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) });
+    const payload = { ...draft(value.ticket, value.capability), extra_one: true, extra_two: true };
+    expect(await validateReceiptForDispatch(value.directory, payload))
+      .toMatchObject({ valid: false, attested: false, validation: { exhausted: false } });
+    delete payload.extra_one;
+    const partialRepair = await validateReceiptForDispatch(value.directory, payload);
+    expect(partialRepair).toMatchObject({ valid: false, attested: false,
+      validation: { exhausted: false }, next_action: { kind: 'continue_same_agent' } });
+    for (const correction of partialRepair.corrections) {
+      expect(Object.keys(correction).sort()).toEqual(['correction', 'field', 'issue']);
+    }
+    expect(await recordReceipt(value.directory, payload)).toMatchObject({ ok: false, rejected: true });
+    expect((await readJson(value.paths.active)).receipts).toHaveLength(0);
+    delete payload.extra_two;
+    expect(await validateReceiptForDispatch(value.directory, payload))
+      .toMatchObject({ valid: true, attested: true, validation: { exhausted: false } });
+    expect((await recordReceipt(value.directory, payload)).ok).toBe(true);
+    const intent = await readJson(path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`));
+    expect(intent.physical_worker_dispatches).toBe(1);
+    expect(intent.receipt_validation_exhaustions).toBe(0);
+  });
+
+  it('blocks resurrected receipt defect counts even when another schema location is repaired', async () => {
+    const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG),
+      allowed_evidence_commands: ['npm test'] });
+    const test = { command: 'npm test', passed: true, exit_code: 0, duration_ms: 1 };
+    const payload = { ...draft(value.ticket, value.capability), tests: [
+      { ...test, command: '', passed: 'yes' }, { ...test, command: '' },
+    ] };
+    expect((await validateReceiptForDispatch(value.directory, payload)).validation.exhausted).toBe(false);
+    payload.tests[0].command = test.command;
+    expect((await validateReceiptForDispatch(value.directory, payload)).validation.exhausted).toBe(false);
+    payload.tests[0].command = '';
+    payload.tests[0].passed = true;
+    const recurrence = await validateReceiptForDispatch(value.directory, payload);
+    expect(recurrence).toMatchObject({ valid: false, attested: false,
+      validation: { exhausted: true, recovery_decision: { replacement_allowed: false } },
+      next_action: { kind: 'blocked', automatic_successor: false } });
+    const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
+    const intent = await readJson(intentFile);
+    expect(intent.recovery_progress.map((entry) => entry.counts)).toEqual([
+      { 'tests.*.command': 2, 'tests.*.passed': 1 },
+      { 'tests.*.command': 1, 'tests.*.passed': 1 },
+      { 'tests.*.command': 2 },
+    ]);
+    expect(intent.physical_worker_dispatches).toBe(1);
+    expect(await recordReceipt(value.directory, payload)).toMatchObject({ ok: false, rejected: true });
+    expect((await readJson(value.paths.active)).receipts).toHaveLength(0);
+  });
+
+  it('keeps identical concurrent invalid submissions single-effect and cannot manufacture progress with prose', async () => {
+    const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) });
+    const payload = draft(value.ticket, value.capability, 'success');
+    const results = await Promise.all([1, 2, 3].map(() => validateReceiptForDispatch(value.directory, structuredClone(payload))));
+    expect(results.every((result) => result.valid === false)).toBe(true);
+    const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
+    const after = await readJson(intentFile);
+    expect(after.receipt_validation_exhaustions ?? 0).toBeLessThanOrEqual(1);
+    expect(after.validation_attempts).toBeLessThanOrEqual(2);
+    const changed = await validateReceiptForDispatch(value.directory, {
+      ...payload, evidence: { summary: 'new worker prose is not a repaired error' },
+    });
+    expect(changed.valid).toBe(false);
+    expect(changed.validation.exhausted).toBe(true);
+    expect(JSON.stringify(changed)).toMatch(/repeat|stall|progress/i);
+    expect((await readJson(intentFile)).physical_worker_dispatches).toBe(after.physical_worker_dispatches);
+    expect((await readJson(value.paths.active)).receipts).toHaveLength(0);
+  });
+
+  it.each(['verdict-value', 'unknown-top-level-key', 'unknown-test-key'])(
+    'exhausts unchanged validation defects despite changing %s text across service re-entry', async (kind) => {
+      const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG),
+        stage_id: 'review', role: 'reviewer', writable: false,
+        allowed_evidence_commands: ['npm run typecheck'] });
+      const base = draft(value.ticket, value.capability);
+      base.evidence.verdict = 'pass';
+      const malformed = (label) => {
+        const payload = structuredClone(base);
+        if (kind === 'verdict-value') {
+          payload.evidence.verdict = `invalid-${label}`;
+          payload.tests = 'the same additional invalid field';
+        }
+        if (kind === 'unknown-top-level-key') payload[`junk_${label}`] = true;
+        if (kind === 'unknown-test-key') payload.tests = [{ command: 'npm run typecheck',
+          passed: true, exit_code: 0, duration_ms: 1, [`junk_${label}`]: true }];
+        return payload;
+      };
+      const first = await validateReceiptForDispatch(value.directory, malformed('one'));
+      expect(first.valid).toBe(false);
+      expect(first.validation.exhausted).toBe(false);
+      const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
+      const initial = await readJson(intentFile);
+      // Each call reloads the durable dispatch intent. Renaming an offending
+      // value/property has not corrected the schema defect at this sink.
+      const second = await validateReceiptForDispatch(value.directory, malformed('two'));
+      expect(second.valid).toBe(false);
+      expect(second.validation.exhausted).toBe(true);
+      expect(JSON.stringify(second)).toMatch(/repeat|stall|progress/i);
+      const concurrent = await Promise.all(['three', 'four'].map((label) =>
+        validateReceiptForDispatch(value.directory, malformed(label))));
+      expect(concurrent.every((result) => result.valid === false && result.validation.exhausted)).toBe(true);
+      const stopped = await readJson(intentFile);
+      expect(stopped.receipt_validation_exhaustions).toBe(1);
+      expect(stopped.physical_worker_dispatches).toBe(initial.physical_worker_dispatches);
+      expect(stopped.valid_draft_observed).not.toBe(true);
+      expect((await readJson(value.paths.active)).receipts).toHaveLength(0);
+      expect(await recordReceipt(value.directory, malformed('five'))).toMatchObject({ ok: false, rejected: true });
+      expect((await readJson(value.paths.active)).receipts).toHaveLength(0);
+    });
+
+  it('rechecks cancellation and write scope after a v4 correction attestation before persistence', async () => {
+    for (const fault of ['scope', 'cancel']) {
+      const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) });
+      const payload = draft(value.ticket, value.capability);
+      expect((await validateReceiptForDispatch(value.directory, payload)).valid).toBe(true);
+      if (fault === 'scope') await writeFile(path.join(value.directory, 'foreign.js'), 'export const foreign = true;\n');
+      else await abortRun(value.directory, 'operator cancelled before receipt persistence');
+      const before = await readJson(value.paths.active);
+      const result = await recordReceipt(value.directory, payload);
+      expect(result.ok).toBe(false);
+      expect((await readJson(value.paths.active)).receipts).toEqual(before.receipts);
+      expect((await readJson(value.paths.active)).tickets).toEqual(before.tickets);
+    }
+  });
+
+  it('carries repaired receipt evidence across four stopped workers without accepting stale capabilities', async () => {
+    const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) });
+    const originalTicket = structuredClone(value.ticket);
+    const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
+    let capability = value.capability;
+    let session = 'session-1';
+    let turn;
+    const invalidFields = { status: 'success', tests: 'bad', findings: 'bad', evidence: 'bad' };
+    for (let worker = 1; worker <= 3; worker += 1) {
+      const invalid = { ...draft(value.ticket, capability), ...invalidFields };
+      const first = await validateReceiptForDispatch(value.directory, invalid);
+      expect(first.valid).toBe(false);
+      // A second attempted stop has the same unresolved fields. Host transport
+      // termination is observed independently; it cannot be inferred from a
+      // worker's own claim to have stopped.
+      await validateReceiptForDispatch(value.directory, invalid);
+      const live = await nextRun(value.directory);
+      expect((live.actions ?? []).some((a) => a.type === 'dispatch_agent')).toBe(false);
+      expect(await observeCodexSubagentStop(value.paths, await readJson(value.paths.active), {
+        session_id: session, ...(turn ? { turn_id: turn } : {}),
+        agent_id: `agent-${worker}`, agent_type: 'default',
+      })).toMatchObject({ observed: true });
+      // Two competing NEXTs must adopt one persisted launch, including when
+      // the first response could have been lost before the caller saw it.
+      const results = await Promise.all([nextRun(value.directory), nextRun(value.directory)]);
+      const launches = results.flatMap((result) => result.actions ?? []).filter((a) => a.type === 'dispatch_agent');
+      expect(launches.length).toBeGreaterThan(0);
+      const launch = launches[0];
+      expect(launch.ticket).toEqual(originalTicket);
+      const intent = await readJson(intentFile);
+      expect(intent.physical_worker_dispatches).toBe(worker + 1);
+      expect((await readJson(value.paths.active)).tickets).toEqual([originalTicket]);
+      const stale = await validateReceiptForDispatch(value.directory, draft(value.ticket, capability));
+      expect(stale.valid).toBe(false);
+      session = `v4-parent-${worker + 1}`;
+      turn = `v4-turn-${worker + 1}`;
+      const env = { APE_HOST: 'codex', CODEX_CWD: value.directory };
+      const [pre] = await runProcess('bin/ape-hook.mjs', {
+        hook_event_name: 'PreToolUse', project_dir: value.directory, session_id: session,
+        turn_id: `parent-turn-${worker + 1}`, tool_use_id: `v4-spawn-${worker + 1}`,
+        tool_name: 'collaborationspawn_agent',
+        tool_input: { ...launch.dispatch.spawn_args, message: 'gAAAAABencrypted-v2-message' },
+      }, env);
+      expect(pre).toEqual({});
+      const [start] = await runProcess('bin/ape-hook.mjs', {
+        hook_event_name: 'SubagentStart', project_dir: value.directory, session_id: session,
+        turn_id: turn, agent_id: `agent-${worker + 1}`, agent_type: 'default', model: launch.dispatch.model.model,
+      }, env);
+      expect(start.hookSpecificOutput?.additionalContext).toBe(codexBootstrapOrientation());
+      const [bound] = await runProcess('bin/ape-hook.mjs', {
+        hook_event_name: 'PreToolUse', project_dir: value.directory, session_id: session,
+        turn_id: turn, tool_use_id: `v4-bind-${worker + 1}`, tool_name: 'ape_bind',
+        tool_input: launch.dispatch.bootstrap_args, model: launch.dispatch.model.model,
+      }, env);
+      capability = /APE_RECEIPT_CAPABILITY=([A-Za-z0-9_-]{32,256})/
+        .exec(bound.hookSpecificOutput?.additionalContext ?? '')?.[1];
+      expect(capability).toBeTruthy();
+      // Fix one *existing* schema defect between generations; the episode's
+      // progress is attributable and not a fresh worker ID or changed prose.
+      delete invalidFields[['status', 'tests', 'findings'][worker - 1]];
+    }
+    const final = draft(value.ticket, capability);
+    expect((await validateReceiptForDispatch(value.directory, final)).valid).toBe(true);
+    expect((await recordReceipt(value.directory, final)).ok).toBe(true);
+    expect((await readJson(intentFile)).physical_worker_dispatches).toBe(4);
+    expect((await readJson(value.paths.active)).receipts).toHaveLength(1);
+  }, 60_000);
+
   it('rechecks production ownership after exact capability-draft attestation and before receipt persistence', async () => {
     const value = await fixture();
     await writeFile(path.join(value.directory, 'value.js'), 'export const value = 22;\n');
@@ -372,8 +791,9 @@ describe('live receipt contract integration', () => {
     config.policy.max_physical_workers_per_ticket = 3;
     config.policy.max_validation_submissions_per_worker = 4;
     config.deadlines_ms.debug = 123_456;
-    const snapshot = executionPolicySnapshot(config);
-    const executionPolicy = { ...snapshot, version, limits: { ...snapshot.limits, version } };
+    const executionPolicy = historicalExecutionPolicy(version, {
+      max_physical_workers_per_ticket: 3, max_validation_submissions_per_worker: 4,
+    }, config);
     const value = await fixture('codex', { mode: 'debug', lane: 'full', stage_id: 'debug', role: 'debugger',
       writable: false, claimed_paths: [], deadline_at: new Date(Date.now() - 1_000).toISOString(),
       execution_policy: executionPolicy });
@@ -400,7 +820,7 @@ describe('live receipt contract integration', () => {
         expect(result).toEqual({ ok: false, reason: 'run is blocked' });
         break;
       }
-      const dispatched = result.actions.find((entry) => entry.type === 'dispatch_agent');
+      let dispatched = result.actions.find((entry) => entry.type === 'dispatch_agent');
       expect(dispatched).toMatchObject({ recovery_kind: 'redispatch_same_ticket', ticket: value.ticket });
       const intent = await readJson(intentFile);
       expect(intent).toMatchObject({ physical_worker_dispatches: worker + 1,
@@ -428,6 +848,30 @@ describe('live receipt contract integration', () => {
         tool_input: { ...dispatched.dispatch.spawn_args, message: 'gAAAAABencrypted-v2-message' },
       }, env);
       expect(launch).toEqual({});
+      if (worker === 1) {
+        // Codex accepted the pre-tool hook but rejected the native spawn.
+        // Revoke the never-bound generation, then exercise ordinary resume
+        // rather than inventing a receipt or widening the frozen allowance.
+        await dispatchIntents.expireClaudeIntent(value.paths, value.ticket.ticket_id);
+        const resumed = await resumeRun(value.directory);
+        dispatched = resumed.actions.find((entry) => entry.type === 'dispatch_agent');
+        expect(dispatched.ticket).toEqual(value.ticket);
+        const replacement = await readJson(intentFile);
+        expect(replacement).toMatchObject({ physical_worker_dispatches: worker + 1,
+          receipt_validation_exhaustions: worker, launch_generation: intent.launch_generation + 1 });
+        if (version === 2) {
+          expect(replacement).toMatchObject({ receipt_protocol_recovery: true,
+            immutable_ticket_deadline_at: value.ticket.deadline_at,
+            receipt_protocol_recovery_source: intent.receipt_protocol_recovery_source });
+        }
+        const [relaunched] = await runProcess('bin/ape-hook.mjs', {
+          hook_event_name: 'PreToolUse', project_dir: value.directory,
+          session_id: session, turn_id: `parent-turn-${worker + 1}`,
+          tool_use_id: `spawn-retry-${worker + 1}`, tool_name: 'collaborationspawn_agent',
+          tool_input: { ...dispatched.dispatch.spawn_args, message: 'gAAAAABencrypted-v2-message' },
+        }, env);
+        expect(relaunched).toEqual({});
+      }
       const [start] = await runProcess('bin/ape-hook.mjs', {
         hook_event_name: 'SubagentStart', project_dir: value.directory, session_id: session, turn_id: turn,
         agent_id: `agent-${worker + 1}`, agent_type: 'default', model: dispatched.dispatch.model.model,
@@ -2270,11 +2714,10 @@ describe('live receipt contract integration', () => {
     { mode: 'debug', lane: 'full', stage_id: 'debug', role: 'debugger', expectedDeadline: 900_000 },
     { mode: 'spike', lane: 'full', stage_id: 'spike', role: 'spike_researcher', expectedDeadline: 900_000 },
   ])('preserves the historical $mode horizon when stopped-worker recovery replaces an expired ticket', async ({ expectedDeadline, ...options }) => {
-    const snapshot = executionPolicySnapshot(DEFAULT_CONFIG);
     const value = await fixture('codex', {
       ...options,
       deadline_at: new Date(Date.now() - 1_000).toISOString(),
-      execution_policy: { ...snapshot, version: 2, limits: { ...snapshot.limits, version: 2 } },
+      execution_policy: historicalExecutionPolicy(2, {}, DEFAULT_CONFIG),
     });
     const originalTicket = structuredClone(value.ticket);
     const firstStop = (status) => ({

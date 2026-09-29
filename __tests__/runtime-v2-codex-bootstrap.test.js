@@ -16,6 +16,7 @@ import {
 } from '../lib/runtime/codex-bootstrap.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { finalizeTicket } from '../lib/runtime/schemas.js';
+import { historicalExecutionPolicy } from './historical-execution-policy-helper.js';
 
 const cleanups = [];
 const model = 'gpt-5.4-mini';
@@ -26,7 +27,7 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function fixture(options = {}) {
+async function fixture(options = {}, ticketOverrides = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'ape-codex-bootstrap-'));
   cleanups.push(directory);
   const paths = runtimePaths(directory);
@@ -38,6 +39,7 @@ async function fixture(options = {}) {
     issued_at: new Date().toISOString(), deadline_at: new Date(Date.now() + 300_000).toISOString(),
     output_schema: { type: 'object' }, required_checks: [], parent_hash: null,
     base_tree_sha: '0'.repeat(40), attempt: 1, writable: true,
+    ...ticketOverrides,
   });
   const state = { run_id: ticket.run_id, status: 'running', host: 'codex', tickets: [ticket], receipts: [], expired_tickets: [] };
   const prepared = await prepareCodexIntent(paths, ticket, 'worker', { bootstrap_protocol: 1, ...options });
@@ -77,6 +79,73 @@ async function onlyIntent(value) {
 }
 
 describe('Codex exact-generation native bootstrap', () => {
+  it.each([2, 3, 4])('keeps one worker reservation across unbound launches under policy v%s', async (version) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const limits = version === 4 ? { version: 4 } : historicalExecutionPolicy(version).limits;
+    const value = await fixture({}, { receipt_contract_version: 1, execution_limits: limits,
+      deadline_at: version >= 3 ? null : new Date(Date.now() + 3_600_000).toISOString() });
+    const retired = [];
+    const ticketBefore = JSON.stringify(value.ticket);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await launch(value);
+      await expect(prepareCodexIntent(value.paths, value.ticket, 'worker', { bootstrap_protocol: 1 }))
+        .rejects.toThrow(/already launched/u);
+      retired.push(value.prepared);
+      vi.setSystemTime(Date.now() + 60_001);
+      value.prepared = await prepareCodexIntent(value.paths, value.ticket, 'worker', { bootstrap_protocol: 1 });
+      expect(await onlyIntent(value)).toMatchObject({ status: 'prepared', physical_worker_dispatches: 1,
+        launch_generation: attempt + 2 });
+    }
+    const beforeReplay = JSON.stringify(await onlyIntent(value));
+    const replays = await Promise.all([1, 2].map(() => prepareCodexIntent(value.paths, value.ticket, 'worker', {
+      bootstrap_protocol: 1, allow_prepared_replay: true,
+    })));
+    expect(replays).toEqual([value.prepared, value.prepared]);
+    expect(JSON.stringify(await onlyIntent(value))).toBe(beforeReplay);
+    await launch(value);
+    for (const [index, old] of retired.entries()) {
+      const agent = `late-${index}`;
+      await recordCodexBootstrapCandidate(value.paths, candidate(agent));
+      expect((await bootstrapCodexSubagent(value.paths, value.state, bootstrap(value, agent, {
+        tool_input: old.bootstrap_args,
+      }))).valid).toBe(false);
+    }
+    await recordCodexBootstrapCandidate(value.paths, candidate());
+    expect((await bootstrapCodexSubagent(value.paths, value.state, bootstrap(value))).valid).toBe(true);
+    expect(await onlyIntent(value)).toMatchObject({ status: 'bound', physical_worker_dispatches: 1,
+      launch_generation: 5, bound_agent_id: 'child-one' });
+    expect(JSON.stringify(value.ticket)).toBe(ticketBefore);
+  });
+
+  it('charges bound workers while reusing an unbound replacement reservation', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const value = await fixture({}, { receipt_contract_version: 1,
+      execution_limits: historicalExecutionPolicy(3).limits, deadline_at: null });
+    await launch(value);
+    await recordCodexBootstrapCandidate(value.paths, candidate());
+    expect((await bootstrapCodexSubagent(value.paths, value.state, bootstrap(value))).valid).toBe(true);
+    await expect(prepareCodexIntent(value.paths, value.ticket, 'worker', { bootstrap_protocol: 1 }))
+      .rejects.toThrow(/already bound/u);
+    expect(await observeCodexSubagentStop(value.paths, value.state, bootstrap(value))).toMatchObject({ observed: true });
+    await expireClaudeIntent(value.paths, value.ticket.ticket_id);
+    value.prepared = await prepareCodexIntent(value.paths, value.ticket, 'worker', { bootstrap_protocol: 1 });
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await launch(value);
+      // The supported revocation path retains the same evidence as expiry.
+      await expireClaudeIntent(value.paths, value.ticket.ticket_id);
+      value.prepared = await prepareCodexIntent(value.paths, value.ticket, 'worker', { bootstrap_protocol: 1 });
+      expect((await onlyIntent(value)).physical_worker_dispatches).toBe(2);
+    }
+    await launch(value);
+    await recordCodexBootstrapCandidate(value.paths, candidate('child-two'));
+    expect((await bootstrapCodexSubagent(value.paths, value.state, bootstrap(value, 'child-two'))).valid).toBe(true);
+    expect(await observeCodexSubagentStop(value.paths, value.state, bootstrap(value, 'child-two'))).toMatchObject({ observed: true });
+    await expireClaudeIntent(value.paths, value.ticket.ticket_id);
+    await expect(prepareCodexIntent(value.paths, value.ticket, 'worker', { bootstrap_protocol: 1 }))
+      .rejects.toThrow(/exhausted its physical receipt-validation workers/u);
+    expect((await onlyIntent(value)).physical_worker_dispatches).toBe(2);
+  });
+
   it('derives a separate recoverable bootstrap bearer and persists only its hash', async () => {
     const value = await fixture();
     const { prepared } = value;

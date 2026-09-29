@@ -38,6 +38,12 @@ export const EXECUTION_POSITIVE_COUNTS = new Set([
 ]);
 
 export function assertExecutionPolicy(policy = {}) {
+  if (policy.version === 4) {
+    if (Object.keys(policy).some((key) => key !== 'version')) {
+      throw new Error('evidence-based execution limits cannot contain quotas or unknown fields');
+    }
+    return;
+  }
   if (policy.version !== undefined && ![2, 3].includes(policy.version)) {
     throw new Error('unsupported execution limits version');
   }
@@ -69,6 +75,7 @@ export function assertExecutionPolicy(policy = {}) {
 export function stageRecoveryLimits(stageId, run = {}) {
   const singleAttempt = ['test-reconcile', 'test-recheck'].includes(stageId);
   const limits = pipelineLimits(run);
+  if (limits.version === 4) return { max_stage_attempts: null, max_protocol_redispatches: null };
   return {
     max_stage_attempts: singleAttempt ? limits.max_reconciliation_stage_attempts : limits.max_stage_attempts,
     max_protocol_redispatches: singleAttempt ? limits.max_reconciliation_protocol_redispatches : limits.max_worker_protocol_redispatches_per_stage,
@@ -85,16 +92,18 @@ export function directedReplanLimit(run) {
   return limits.version >= 2 ? null : limits.max_directed_replans;
 }
 
+/** @returns {Readonly<Record<string, number>>} */
 export function pipelineLimits(run = {}) {
   const snapshot = run.execution_policy;
   if (snapshot && (
-    ![1, 2, 3].includes(snapshot.version) ||
+    ![1, 2, 3, 4].includes(snapshot.version) ||
     !snapshot.limits || typeof snapshot.limits !== 'object' || Array.isArray(snapshot.limits) ||
     (snapshot.version >= 2 && snapshot.limits?.version !== snapshot.version) ||
     (snapshot.version === 1 && snapshot.limits?.version !== undefined)
   )) throw new Error('unsupported or inconsistent immutable execution policy');
   const configured = snapshot ? snapshot.limits : run.execution_limits ?? run.policy ?? {};
   assertExecutionPolicy(configured);
+  if (configured.version === 4) return Object.freeze({ version: 4 });
   const progressBounded = [2, 3].includes(configured.version);
   const defaults = progressBounded ? CURRENT_EXECUTION_POLICY_DEFAULTS : EXECUTION_POLICY_DEFAULTS;
   /** @type {Record<string, number>} */
@@ -112,12 +121,19 @@ export function pipelineLimits(run = {}) {
 // mixed contracts must never silently turn off a historical deadline.
 export function workerDeadlinesEnabled(runOrTicket = {}) {
   const limits = pipelineLimits(runOrTicket);
-  return limits.version !== 3 || !(runOrTicket.execution_policy || runOrTicket.execution_limits);
+  return ![3, 4].includes(limits.version) || !(runOrTicket.execution_policy || runOrTicket.execution_limits);
 }
 
 export function receiptLimits(ticketOrIntent = {}) {
   ticketOrIntent ??= {};
   const bound = ticketOrIntent.receipt_limits ?? ticketOrIntent.execution_limits;
+  if (bound?.version === 4) {
+    if (Object.keys(bound).some((key) => !['version', 'max_physical_workers_per_ticket', 'max_validation_submissions_per_worker'].includes(key)) ||
+        ['max_physical_workers_per_ticket', 'max_validation_submissions_per_worker'].some((key) => bound[key] !== undefined && bound[key] !== null)) {
+      throw new Error('invalid evidence-based receipt authority');
+    }
+    return { version: 4, max_physical_workers_per_ticket: null, max_validation_submissions_per_worker: null };
+  }
   const fields = ticketOrIntent.capability_manifest?.field_bounds;
   const limits = {
     max_physical_workers_per_ticket: bound?.max_physical_workers_per_ticket
@@ -142,12 +158,10 @@ export function receiptLimits(ticketOrIntent = {}) {
 
 export function executionPolicySnapshot(config) {
   const limits = pipelineLimits({ execution_limits: {
-    version: 3,
-    ...Object.fromEntries(Object.entries(CURRENT_EXECUTION_POLICY_DEFAULTS)
-      .map(([key, fallback]) => [key, config.policy?.[key] === undefined ? fallback : config.policy[key]])),
+    version: 4,
   } });
   return {
-    version: 3,
+    version: 4,
     limits,
     fast_max_files: config.policy?.fast_max_files ?? 6,
     // Kept for command/suite watchdogs; v3 workers have no elapsed-time limit.

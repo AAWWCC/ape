@@ -2,10 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
 import { hashRecord } from '../lib/runtime/canonical.js';
 import {
-  executionConfigForRun, executionPolicySnapshot, pipelineLimits,
+  executionConfigForRun, pipelineLimits,
   directedReplanLimit, remediationCycleLimit, receiptLimits,
 } from '../lib/runtime/pipeline-limits.js';
 import { ExecutionLimitsSchema, finalizeTicket, validateTicket } from '../lib/runtime/schemas.js';
+import { historicalExecutionPolicy } from './historical-execution-policy-helper.js';
+
+// This suite preserves the v3-era contract. New admissions are tested in the
+// evidence-recovery-contract suite, independently of these frozen quotas.
+function frozenSnapshot(config) {
+  const overrides = Object.fromEntries(Object.entries(config.policy ?? {}).filter(([key]) =>
+    Object.hasOwn(historicalExecutionPolicy().limits, key)));
+  return historicalExecutionPolicy(3, overrides, config);
+}
 
 function ticket(execution_limits, attempt = 1) {
   return {
@@ -22,11 +31,11 @@ function ticket(execution_limits, attempt = 1) {
 }
 
 describe('immutable progress-based recovery authority', () => {
-  it('freezes only retained operating limits for new runs even with old config quotas', () => {
+  it('preserves frozen v3 operating limits even with old config quotas', () => {
     const config = structuredClone(DEFAULT_CONFIG);
     Object.assign(config.policy, { max_directed_replans: 0, max_remediation_cycles: 0,
       max_stage_attempts: 4, max_physical_workers_per_ticket: 5 });
-    const snapshot = executionPolicySnapshot(config);
+    const snapshot = frozenSnapshot(config);
     expect(snapshot.version).toBe(3);
     expect(snapshot.limits).toMatchObject({ version: 3, max_stage_attempts: 4,
       max_physical_workers_per_ticket: 5 });
@@ -44,7 +53,7 @@ describe('immutable progress-based recovery authority', () => {
   });
 
   it('honors historical zero and numeric quotas without changing snapshot bytes', () => {
-    const snapshot = { ...executionPolicySnapshot(DEFAULT_CONFIG), version: 1,
+    const snapshot = { ...frozenSnapshot(DEFAULT_CONFIG), version: 1,
       limits: pipelineLimits({ policy: { max_directed_replans: 0, max_remediation_cycles: 7 } }) };
     const before = JSON.stringify(snapshot);
     const run = { execution_policy: snapshot };
@@ -59,7 +68,7 @@ describe('immutable progress-based recovery authority', () => {
   });
 
   it('carries the new policy through serialized tickets beyond the former replan ceiling', () => {
-    const limits = executionPolicySnapshot(DEFAULT_CONFIG).limits;
+    const limits = frozenSnapshot(DEFAULT_CONFIG).limits;
     const issued = finalizeTicket(ticket(limits, 25));
     expect(issued.execution_limits).toEqual(limits);
     expect(issued.plan_recovery.attempt).toBe(25);
@@ -72,7 +81,7 @@ describe('immutable progress-based recovery authority', () => {
   });
 
   it('retains the exact representation and hash of legacy tickets', () => {
-    for (const limits of [undefined, pipelineLimits(), { ...executionPolicySnapshot(DEFAULT_CONFIG).limits, version: 2 }]) {
+    for (const limits of [undefined, pipelineLimits(), historicalExecutionPolicy(2).limits]) {
       const historical = ticket(limits, 2);
       historical.ticket_hash = hashRecord(historical, ['ticket_hash']);
       const bytes = JSON.stringify(historical);
@@ -84,9 +93,9 @@ describe('immutable progress-based recovery authority', () => {
 
   it('rejects unknown and mixed versions instead of silently broadening old authority', () => {
     const legacy = pipelineLimits();
-    const current = executionPolicySnapshot(DEFAULT_CONFIG).limits;
+    const current = frozenSnapshot(DEFAULT_CONFIG).limits;
     for (const limits of [
-      { ...legacy, version: 2 }, { ...current, version: 4 },
+      { ...legacy, version: 2 }, { ...current, version: 999 },
       { ...current, max_directed_replans: 10 }, { ...current, max_remediation_cycles: null },
     ]) {
       expect(ExecutionLimitsSchema.safeParse(limits).success).toBe(false);
@@ -94,14 +103,14 @@ describe('immutable progress-based recovery authority', () => {
     }
     for (const snapshot of [
       { version: 2, limits: legacy }, { version: 1, limits: current },
-      { version: 4, limits: current }, { version: 2 }, { version: 1 },
+      { version: 999, limits: current }, { version: 2 }, { version: 1 },
       { version: 1, limits: null },
     ]) expect(() => pipelineLimits({ execution_policy: snapshot, execution_limits: current,
       policy: { version: 2 } })).toThrow(/execution policy/);
   });
 
   it('keeps stage attempt, receipt, and safe-integer protections on new tickets', () => {
-    const limits = executionPolicySnapshot(DEFAULT_CONFIG).limits;
+    const limits = frozenSnapshot(DEFAULT_CONFIG).limits;
     expect(() => finalizeTicket({ ...ticket(limits, 3), attempt: 3 })).toThrow(/stage attempt policy/);
     for (const attempt of [Number.MAX_SAFE_INTEGER + 1, Infinity, 1.5, 0]) {
       expect(() => finalizeTicket(ticket(limits, attempt))).toThrow();

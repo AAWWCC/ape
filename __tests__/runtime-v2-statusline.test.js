@@ -817,7 +817,7 @@ describe('ape v2 statusline renderer', () => {
 
     for (const changed of [
       { ...bound, execution_policy_version: undefined },
-      { ...bound, execution_policy_version: 4 },
+      { ...bound, execution_policy_version: 5 },
       { ...bound, ticket_hash: 'd'.repeat(64) },
       { ...bound, expires_at: new Date(Date.now() + 60_000).toISOString() },
       { ...bound, execution_policy_version: undefined, expires_at: new Date(Date.now() + 60_000).toISOString() },

@@ -9,6 +9,10 @@ claims; it does not guarantee that a test, review, or code change is correct.
 
 ## Current status
 
+The unreleased recovery update admits execution policy v4: productive recovery
+uses recorded evidence instead of fixed retry counts. Repeated or missing evidence
+still blocks with a diagnostic, and historical tickets retain their exact authority.
+
 Version **2.27.0** removes worker-duration limits for new runs. Workers can
 continue until completion, a blocker, or explicit cancellation. Command/suite
 timeouts and operational timers remain separate, and historical run contracts

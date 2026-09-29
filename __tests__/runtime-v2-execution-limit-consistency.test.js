@@ -14,7 +14,8 @@ import {
 } from '../lib/runtime/input-guard.js';
 import { receiptOutputSchemaForTicket, validateReceiptDraft } from '../lib/runtime/receipt-validator.js';
 import { recoverReceiptLocked } from '../lib/runtime/receipt-service.js';
-import { executionConfigForRun, executionPolicySnapshot, pipelineLimits, receiptLimits } from '../lib/runtime/pipeline-limits.js';
+import { executionConfigForRun, pipelineLimits, receiptLimits } from '../lib/runtime/pipeline-limits.js';
+import { historicalExecutionPolicy } from './historical-execution-policy-helper.js';
 import { pipelineRunSpec, projectedPipeline } from '../lib/runtime/pipeline.js';
 import { evaluateRunReadiness } from '../lib/runtime/readiness.js';
 import { reduceRun } from '../lib/runtime/reducer.js';
@@ -87,7 +88,8 @@ function policyRun(limits = {}, overrides = {}) {
   Object.assign(config.policy, limits);
   return { run_id: 'run-policy-limits', mode: 'phase', lane: 'fast', status: 'running',
     stage: 'build', tickets: [], receipts: [], attempts: {}, remediation_cycles: 0,
-    execution_policy: executionPolicySnapshot(config), ...overrides };
+    execution_policy: historicalExecutionPolicy(3, Object.fromEntries(Object.entries(limits).filter(([key]) =>
+      Object.hasOwn(historicalExecutionPolicy().limits, key))), config), ...overrides };
 }
 
 function failedStage(run, stageId, evidence = {}) {
@@ -114,7 +116,9 @@ describe('operator execution policy stays exact across run and ticket boundaries
     config.gates.heartbeat_ms = 700;
     config.shipping.checks_registration_window_ms = 999;
     config.shipping.checks_registration_retry_delay_ms = 111;
-    const run = { execution_policy: executionPolicySnapshot(config) };
+    const run = { execution_policy: historicalExecutionPolicy(3,
+      Object.fromEntries(Object.entries(config.policy).filter(([key]) =>
+        Object.hasOwn(historicalExecutionPolicy().limits, key))), config) };
     const changed = structuredClone(DEFAULT_CONFIG);
     const resolved = executionConfigForRun(changed, run);
     const { max_directed_replans, max_remediation_cycles, ...currentPolicy } = config.policy;

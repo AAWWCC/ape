@@ -33,6 +33,8 @@ vi.mock('../lib/runtime/gates.js', async (importOriginal) => {
 });
 import { pollRemoteChecksAndMerge } from '../lib/runtime/gates.js';
 import { acquireRunLock } from '../lib/runtime/lock.js';
+import { executionPolicySnapshot } from '../lib/runtime/pipeline-limits.js';
+import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -417,6 +419,40 @@ describe('APE v2 re-gate service (regateRun)', () => {
     // A superseding completion record was appended and is queryable.
     const records = await queryHistory(paths, { run_id: runId });
     expect(records.some((record) => record.status === 'completed')).toBe(true);
+  });
+
+  it('executes five deliberate v4 re-gates and completes after the external environment is repaired', async () => {
+    const { project: dir, suite } = await gitProjectWithProbe();
+    const paths = runtimePaths(dir);
+    await atomicWriteJson(paths.config, {
+      shipping: { auto_merge: true, provider: 'github', required_remote_checks: false },
+      test_commands: { full: suite.command },
+    });
+    const tree = await currentTreeSha(dir);
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.shipping = { ...config.shipping, auto_merge: true, provider: 'github', required_remote_checks: false };
+    const blocked = { ...blockedAtGates('run-v4-five-regates', tree), execution_policy: executionPolicySnapshot(config) };
+    await atomicWriteJson(paths.active, blocked);
+    await archiveRun(paths, blocked, { ifAbsent: true });
+    for (let n = 1; n <= 5; n += 1) {
+      if (n === 5) await suite.arm();
+      await service.regateRun(dir, { reason: 'Operator requests another fresh external observation' });
+      const after = await readJson(paths.active);
+      expect(after.regate_attempts).toBe(n);
+      expect(await suite.executions()).toBe(n);
+      expect(after.status).toBe(n === 5 ? 'completed' : 'blocked');
+    }
+    const records = await queryHistory(paths, { run_id: blocked.run_id });
+    expect(records.some((record) => record.status === 'completed')).toBe(true);
+    expect((await readJson(path.join(paths.history, `${blocked.run_id}.json`))).status).toBe('blocked');
+  }, 30_000);
+
+  it('still rejects a noncanonical run ID before archiving v4 re-gate authority', async () => {
+    const dir = await bareProject();
+    const paths = runtimePaths(dir);
+    const invalid = { ...blockedAtGates('v4-five-regates', 'a'.repeat(40)),
+      execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) };
+    await expect(archiveRun(paths, invalid, { ifAbsent: true })).rejects.toThrow(/run id is invalid/);
   });
 
   it('re-gate executes the configured serialized variant instead of re-rolling the flaky parallel command (serial re-gate, 2.0.32)', async () => {

@@ -30,7 +30,7 @@ describe('prevention-first admission compiler', () => {
     args.classification.risk_triggers = ['auth'];
     const spec = pipelineRunSpec(args.input, args.classification, args.config);
     expect(spec.plan_contract_version).toBe(version);
-    expect(spec.execution_policy.version).toBe(3);
+    expect(spec.execution_policy.version).toBe(4);
     expect(spec.policy).toEqual({
       ...spec.execution_policy.limits,
       high_risk_security_review: false, design_assurance_required: false,
@@ -69,7 +69,7 @@ describe('prevention-first admission compiler', () => {
   it('shares the current immutable execution policy and progress-dependent dispatch forecast', () => {
     const args = fixture();
     const result = compileRunAdmissionContract(args);
-    expect(result.limits).toMatchObject({ version: 3, max_stage_attempts: 2 });
+    expect(result.limits).toMatchObject({ version: 4 });
     expect(result.limits).not.toHaveProperty('max_directed_replans');
     expect(result.limits).not.toHaveProperty('max_remediation_cycles');
     expect(result.limits).toEqual(pipelineLimits(pipelineRunSpec(args.input, args.classification, args.config)));
@@ -78,18 +78,18 @@ describe('prevention-first admission compiler', () => {
     expect(result.planner.template_hash).toBe(sha256(result.planner.template));
   });
 
-  it('retains finite worker and protocol bounds where recovery progress cannot change the count', () => {
+  it('reports evidence-dependent worker and protocol bounds for new admissions', () => {
     const forecast = fixture().projection.dispatch_bounds;
     expect(forecast.total).toBeNull();
     expect(forecast.total_semantics).toBe('progress-dependent-logical-ticket-upper-bound');
-    expect(forecast.null_semantics).toBe('depends-on-strict-subset-recovery-progress');
+    expect(forecast.null_semantics).toBe('depends-on-evidence-based-recovery-progress');
     expect(forecast.logical_ticket_upper_bound).toBeNull();
-    expect(forecast.protocol_replacement_ticket_upper_bound).toBe(14);
+    expect(forecast.protocol_replacement_ticket_upper_bound).toBeNull();
     expect(forecast.physical_dispatch_upper_bound).toBeNull();
     expect(forecast.receipt_validation_submission_upper_bound).toBeNull();
-    expect(forecast.physical_by_stage['test-reconcile']).toBe(2);
-    expect(forecast.physical_by_stage['test-recheck']).toBe(2);
-    expect(forecast.physical_by_stage.build).toBe(6);
+    expect(forecast.physical_by_stage['test-reconcile']).toBeNull();
+    expect(forecast.physical_by_stage['test-recheck']).toBeNull();
+    expect(forecast.physical_by_stage.build).toBeNull();
     expect(forecast.physical_by_stage['plan-replan']).toBeNull();
   });
 

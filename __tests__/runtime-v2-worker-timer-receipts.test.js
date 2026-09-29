@@ -13,6 +13,7 @@ vi.mock('../lib/runtime/claude-dispatch.js', async (importOriginal) => ({
 
 import { prepareCodexIntent } from '../lib/runtime/claude-dispatch.js';
 import { DEFAULT_CONFIG } from '../lib/runtime/config.js';
+import { historicalExecutionPolicy } from './historical-execution-policy-helper.js';
 import { executionPolicySnapshot, pipelineLimits } from '../lib/runtime/pipeline-limits.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { applyActions } from '../lib/runtime/receipt-service.js';
@@ -29,18 +30,15 @@ const stage = { id: 'build', role: 'implementer', model_tier: 'balanced', writab
   parallel_group: null, output_schema: {}, required_checks: [] };
 const tree = { current: async () => 'a'.repeat(40) };
 
-async function fixture(version = 3) {
+async function fixture(version = 4) {
   const directory = await mkdtemp(path.join(tmpdir(), 'ape-worker-timer-receipts-'));
   directories.push(directory);
   const config = structuredClone(DEFAULT_CONFIG);
   config.deadlines_ms.fast = 12_345;
-  const snapshot = executionPolicySnapshot(config);
+  const snapshot = version >= 4 ? executionPolicySnapshot(config) : historicalExecutionPolicy(version === 1 ? 2 : version, {}, config);
   if (version === 1) {
     snapshot.version = 1;
     snapshot.limits = pipelineLimits();
-  } else if (version === 2) {
-    snapshot.version = 2;
-    snapshot.limits = { ...snapshot.limits, version: 2 };
   }
   const state = {
     run_id: 'run-worker-timer', objective: 'Preserve worker lifetime across recovery',
@@ -54,7 +52,7 @@ async function fixture(version = 3) {
 }
 
 describe('receipt-service worker lifetime authority', () => {
-  it.each([1, 2, 3])('preserves version %s lifetime when issuing and retrying a stage', async (version) => {
+  it.each([1, 2, 3, 4])('preserves version %s lifetime when issuing and retrying a stage', async (version) => {
     const { paths, state, config, ticket } = await fixture(version);
     expect(validateTicket(ticket).valid).toBe(true);
     const sourceFile = path.join(paths.tickets, `${ticket.ticket_id.replaceAll(':', '_')}.json`);
@@ -67,12 +65,12 @@ describe('receipt-service worker lifetime authority', () => {
     expect(successor.attempt).toBe(2);
     expect(await readFile(sourceFile, 'utf8')).toBe(sourceBytes);
     for (const current of [ticket, successor]) {
-      if (version === 3) expect(current.deadline_at).toBeNull();
+      if (version >= 3) expect(current.deadline_at).toBeNull();
       else expect(Date.parse(current.deadline_at) - Date.parse(current.issued_at)).toBe(12_345);
     }
   });
 
-  it.each([2, 3])('uses version %s authority during same-ticket receipt protocol recovery', async (version) => {
+  it.each([2, 3, 4])('uses version %s authority during same-ticket receipt protocol recovery', async (version) => {
     const { paths, state, config, ticket } = await fixture(version);
     prepareCodexIntent.mockClear();
     const before = Date.now();
@@ -80,7 +78,7 @@ describe('receipt-service worker lifetime authority', () => {
       recovery_kind: 'redispatch_same_ticket' }], config, tree);
     const after = Date.now();
     const options = prepareCodexIntent.mock.calls[0][3];
-    if (version === 3) {
+    if (version >= 3) {
       expect(options).not.toHaveProperty('receipt_protocol_recovery_deadline_at');
     } else {
       expect(Date.parse(options.receipt_protocol_recovery_deadline_at)).toBeGreaterThanOrEqual(before + 12_345);

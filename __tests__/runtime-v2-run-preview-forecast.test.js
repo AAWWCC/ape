@@ -418,13 +418,22 @@ describe('projectedPipeline dispatch_bounds breakdown', () => {
   });
 });
 
-describe('new-run recovery forecasts', () => {
-  function currentRun(overrides = {}) {
-    return runSpec({ execution_policy: executionPolicySnapshot(DEFAULT_CONFIG), ...overrides });
+describe('historical v3 recovery forecasts', () => {
+  function historicalRun(overrides = {}) {
+    return runSpec({ execution_policy: { version: 3, limits: {
+      version: 3,
+      max_stage_attempts: 2,
+      max_worker_protocol_redispatches_per_stage: 1,
+      max_regate_attempts: 3,
+      max_physical_workers_per_ticket: 2,
+      max_validation_submissions_per_worker: 3,
+      max_reconciliation_stage_attempts: 1,
+      max_reconciliation_protocol_redispatches: 0,
+    } }, ...overrides });
   }
 
   it('publishes progress-dependent counts without turning unknown counts into zero', () => {
-    const result = projectedPipeline(currentRun());
+    const result = projectedPipeline(historicalRun());
     const bounds = result.dispatch_bounds;
     expect(bounds).toMatchObject({
       total: null,
@@ -454,7 +463,7 @@ describe('new-run recovery forecasts', () => {
   });
 
   it.each(['debug', 'spike', 'land'])('keeps finite forecasts for %s mode', (mode) => {
-    const modern = projectedPipeline(currentRun({ mode }));
+    const modern = projectedPipeline(historicalRun({ mode }));
     const historical = projectedPipeline(runSpec({ mode }));
     expect(modern.dispatch_bounds).toEqual(historical.dispatch_bounds);
     expect(modern.dispatch_bounds.total).toBeGreaterThan(0);
@@ -462,7 +471,7 @@ describe('new-run recovery forecasts', () => {
   });
 
   it('keeps a mechanical build finite when security review and remediation cannot be reached', () => {
-    const result = projectedPipeline(currentRun({
+    const result = projectedPipeline(historicalRun({
       lane: 'mechanical', behavioral: false, high_risk: false,
       claimed_paths: ['docs/notes.md'], test_paths: [],
       policy: { high_risk_security_review: false },
@@ -471,22 +480,56 @@ describe('new-run recovery forecasts', () => {
     expect(result.dispatch_bounds.by_stage).toEqual({ build: 2 });
   });
 
+  it('continues v3 remediation routing beyond the old ceiling while preserving legacy routing', () => {
+    expect(nextStages(historicalRun({ remediation_cycles: 4 }), 'review-disagreed', {}))
+      .toContainEqual(expect.objectContaining({ id: 'remediation-build' }));
+    expect(nextStages(runSpec({ remediation_cycles: 4 }), 'review-disagreed', {})).toEqual([]);
+  });
+});
+
+describe('current v4 recovery forecasts', () => {
   it('admission explicitly opts into new semantics even when old config keys disabled recovery', () => {
     const config = structuredClone(DEFAULT_CONFIG);
     Object.assign(config.policy, { max_directed_replans: 0, max_remediation_cycles: 0 });
     const spec = pipelineRunSpec(runSpec(), { lane: 'full', risk_triggers: [] }, config);
     const result = projectedPipeline(spec);
-    expect(spec.execution_policy).toMatchObject({ version: 3, limits: { version: 3 } });
+    expect(spec.execution_policy).toMatchObject({ version: 4, limits: { version: 4 } });
     expect(spec.policy).not.toHaveProperty('max_directed_replans');
     expect(spec.policy).not.toHaveProperty('max_remediation_cycles');
     expect(result.stages.map((entry) => entry.id)).toEqual(expect.arrayContaining(['plan-replan', 'remediation-build']));
     expect(result.dispatch_bounds.total).toBeNull();
   });
 
-  it('continues v2 remediation routing beyond the old ceiling while preserving legacy routing', () => {
-    expect(nextStages(currentRun({ remediation_cycles: 4 }), 'review-disagreed', {}))
-      .toContainEqual(expect.objectContaining({ id: 'remediation-build' }));
-    expect(nextStages(runSpec({ remediation_cycles: 4 }), 'review-disagreed', {})).toEqual([]);
+  it.each(['phase', 'debug', 'spike', 'land'])('keeps every reachable %s stage evidence-dependent', (mode) => {
+    const result = projectedPipeline(runSpec({ mode, execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) }));
+    expect(result.dispatch_bounds).toMatchObject({
+      total: null,
+      logical_ticket_upper_bound: null,
+      physical_dispatch_upper_bound: null,
+      receipt_validation_submission_upper_bound: null,
+      protocol_replacement_ticket_upper_bound: null,
+      total_semantics: 'progress-dependent-logical-ticket-upper-bound',
+    });
+    expect(result.stages.length).toBeGreaterThan(0);
+    expect(result.dispatch_bounds.progress_dependent_stages).toEqual(result.stages.map((stage) => stage.id));
+    for (const field of ['by_stage', 'physical_by_stage', 'by_role', 'by_model_tier']) {
+      expect(Object.keys(result.dispatch_bounds[field]).length).toBeGreaterThan(0);
+      expect(Object.values(result.dispatch_bounds[field]).every((count) => count === null)).toBe(true);
+    }
+    expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+  });
+
+  it('keeps a build-only mechanical run evidence-dependent', () => {
+    const result = projectedPipeline(runSpec({
+      execution_policy: executionPolicySnapshot(DEFAULT_CONFIG),
+      lane: 'mechanical', behavioral: false, high_risk: false,
+      claimed_paths: ['docs/notes.md'], test_paths: [],
+      policy: { high_risk_security_review: false },
+    }));
+    expect(result.stages.map((stage) => stage.id)).toEqual(['build']);
+    expect(result.dispatch_bounds.total).toBeNull();
+    expect(result.dispatch_bounds.by_stage).toEqual({ build: null });
+    expect(result.dispatch_bounds.protocol_replacement_ticket_upper_bound).toBeNull();
   });
 });
 
@@ -561,7 +604,7 @@ describe('previewRun blueprint shape', () => {
     expect(bp).toHaveProperty('stages');
     expect(bp).toHaveProperty('dispatch_bounds');
     expect(bp.dispatch_bounds.total).toBeNull();
-    expect(bp.dispatch_bounds.null_semantics).toBe('depends-on-strict-subset-recovery-progress');
+    expect(bp.dispatch_bounds.null_semantics).toBe('depends-on-evidence-based-recovery-progress');
   });
 
   it('returns doctor-backed readiness with a healthy flag', async () => {

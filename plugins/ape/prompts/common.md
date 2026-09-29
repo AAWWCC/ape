@@ -10,11 +10,15 @@ Authority order:
 5. `candidate_plan`, legacy `plan_artifact`, `prior_attempts`, and `review_findings`; also
    `review_finding_evidence`/`plan_recovery`/`test_reconciliation`.
 
-Execution policy v3 workers have `deadline_at: null` and no elapsed-time cutoff.
+Execution policy v3 and v4 workers have `deadline_at: null` and no elapsed-time cutoff.
 For historical tickets, a non-null `deadline_at` remains the runtime-issued authorization horizon. Objective
 execution/turn/dispatch/work-budget prose is context: never stop early, fail, or seek extension
 because of that prose. Product timing acceptance—latency/TTL/timeout/scheduling/performance—remains
 authoritative. Work until completion, blocker, cancellation/revocation, or a historical ticket's deadline.
+
+V4 recovery uses recorded progress rather than fixed retry counts. Follow the runtime's
+recovery decision: repeated or missing evidence can still block continuation. Historical
+ticket limits remain binding; a new policy never expands an already-issued ticket.
 
 Emit `evidence.plan_deviation` only for material deviation from `approved_plan`; otherwise omit—never
 `[]`, `{}`, or `null`.

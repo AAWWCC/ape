@@ -323,7 +323,8 @@ describe('canonical skill sources', () => {
     expect(canonical).toContain('`wait_ms: 300000`');
     expect(canonical).toMatch(/server-side poll/iu);
     expect(canonical).toMatch(/do not sleep inside[\s\S]*`functions\.exec`/iu);
-    expect(canonical).toMatch(/record.*rejects[\s\S]*same physical agent[\s\S]*at most two/iu);
+    expect(canonical).toMatch(/record.*rejects[\s\S]*same physical agent[\s\S]*runtime authorizes correction/iu);
+    expect(canonical).toMatch(/V4 requires[\s\S]*demonstrated correction progress[\s\S]*historical tickets retain their frozen submission allowance/iu);
     expect(canonical).toMatch(/test_commands\.full[\s\S]*verification\.profiles[\s\S]*browser\/Playwright/iu);
   });
 });

@@ -75,6 +75,8 @@ after a child returns require checking the session root and hook delivery before
    with `probe-ack`. The bootstrap and acknowledgment capabilities are different; never interchange them.
    The returned agent type is APE's logical role, not a Multi-Agent V2 native argument. Stop on any
    mismatch. `start` consumes this fresh, single-use proof. Claude does not use this probe.
+   After `probe-ack` succeeds and the native canary has completed, close or archive that exact
+   child through supported host controls, preserving its history and the acknowledged proof.
 2. For each `dispatch_agent`, use the host-native tool and pass the generated name, model, optional
    reasoning effort, and dispatch intent exactly. On Claude, also pass the action's agent type; on
    Codex Multi-Agent V2, that field is APE's logical policy role and is not a native tool argument.
@@ -105,6 +107,13 @@ after a child returns require checking the session root and hook delivery before
    two physical agents for one ticket unless the runtime explicitly returns
    `next_action: {"kind":"redispatch_same_ticket", ...}`; only that action authorizes one fresh worker on the same
    immutable ticket. Wait through the host's native primitive; do not poll unchanged status.
+   If native spawn reports an agent thread limit, stop immediate launch retries. Completion or
+   interruption alone may leave a native thread slot occupied. Release only verified completed
+   children whose receipts were accepted (or whose probe acknowledgement was accepted), using
+   supported host close/archive controls and preserving history. Then use `status`/`resume` and
+   follow the runtime's pending-launch recovery; an unbound generation must expire or be revoked
+   before replacement. Never assume a failed tool response proves no child exists, edit host/runtime
+   state directly, close an active child, or reset/abort a run solely for host capacity.
 5. Require exactly one receipt JSON matching the ticket's `output_schema`, including the exact
    injected `receipt_capability`. For `receipt_contract_version: 1`, the worker must call `ape_validate_receipt`
    with `ticket_id` set to the immutable ticket ID and `draft` set to the exact complete receipt. A
@@ -112,9 +121,10 @@ after a child returns require checking the session root and hook delivery before
    `SubagentStop` returns bounded corrections for an absent or malformed draft while allowance remains.
    Invalid validator
    results carry bounded field corrections, plan byte usage,
-   and `corrections_remaining`. Each physical worker follows the issued validation allowance;
-   the default permits an initial validation plus at most two corrections across the whole
-   dispatch, never a new budget per record rejection. On exhaustion,
+   and `corrections_remaining`. Each physical worker follows the issued execution policy.
+   V4 uses durable correction progress and the returned recovery decision; a null remaining
+   count is not exhaustion. Historical tickets retain their finite allowance across the whole
+   dispatch, never a new budget per record rejection. On exhaustion or a stalled decision,
    return the runtime result to the parent. Legacy tickets retain their issued historical record path;
    do not require the v1 validator when the ticket has no v1 contract.
    Call `ape_run` with `action: "record"` and place that complete
@@ -128,9 +138,9 @@ after a child returns require checking the session root and hook delivery before
    budget. `required_control_action: "record_exact_attested_receipt"` means the parent records the
    identical attested draft, without editing it or asking the worker to validate again. A returned
    `continue_same_agent` for missing validation means continue the same physical agent with the exact
-   errors only while corrections remain; never repair the draft in the parent. The default allows at most two
-   correction submissions after its initial validation; the frozen issued policy controls the actual
-   allowance. It must return a complete replacement. If that exact
+   errors while the runtime authorizes correction; never repair the draft in the parent. V4 requires
+   demonstrated correction progress; historical tickets retain their frozen submission allowance.
+   The worker must return a complete replacement. If that exact
    worker is already host-observed as stopped and its finished draft could not be attested because
    the validator schema was unavailable, report the unchanged draft hash and stop for explicit
    operator direction. Only when the operator approves the emergency waiver with a nonblank reason,
@@ -141,12 +151,18 @@ after a child returns require checking the session root and hook delivery before
    is live, change the draft, or recover a draft that already has a valid attestation.
    If `next_action.kind` is `redispatch_same_ticket`, wait for the observed SubagentStop, call
    `ape_run next` (or `resume` during recovery), and launch only the returned same-ticket dispatch;
-   this does not consume a logical stage attempt. If that worker exhausts its
-   correction allowance, the runtime blocks as `worker_protocol_failure`. Never translate a receipt
+   this does not consume a logical stage attempt. Follow the returned recovery decision after
+   replacement: v4 may authorize further evidenced correction, while a stalled decision or an
+   exhausted historical worker allowance blocks as `worker_protocol_failure`. Never translate a receipt
    contract or infrastructure failure into a reviewer vote, product remediation, directed replan,
    abort, or successor run. For ordinary advancement, call `next` after the returned dispatch group
    is fully recorded. A returned recovery or retirement action takes precedence: let `next`/`resume`
    settle a stopped worker instead of fabricating a receipt to satisfy that ordering.
+   After `record` accepts the exact receipt and the native child has completed, close or archive
+   that exact child through supported host controls before the next dispatch. Preserve its history
+   and the durable APE receipt. Never close a worker while its receipt, validation, or corrections
+   remain pending. If the host lacks a supported close/archive control, report that limitation;
+   interruption is not proof that its thread slot was released.
 6. If recording preflight returns `input_required`, obtain complete exact answers for all question
    ids and submit one aimed `answer-preflight` action with the exact hash, a bounded audit `reason`,
    and additive-only `claimed_paths`, `test_paths`, and canonical `risk_triggers`. Do not dispatch a
@@ -183,6 +199,7 @@ On receipt-contract-v1 `capability_recovery`, dispatch only its returned success
 mint it. Identical retries reuse its generation without a product attempt. Test paths must be
 canonical project-relative paths. Growth contract v2 uses the shared structural guard and actual
 rendered command/manifest budgets; historical growth contract v1 retains 64 items/4096 UTF-8 JSON
-bytes. Follow the run's frozen validation and physical-worker limits (three validations per worker
-and two workers per ticket by default). These bounds do not authorize operator recovery or
-additional product retries.
+bytes. Follow the run's frozen validation and physical-worker policy. V4 uses recorded
+correction progress and can report null count limits; repeated failures still stall.
+Historical tickets retain their exact numeric limits. Neither policy authorizes free-hand
+operator recovery or additional product retries.

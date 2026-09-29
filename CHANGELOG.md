@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Admit execution policy v4 with evidence-based stage, protocol, receipt and
+  reconciliation recovery, and explicit fresh re-gates without count quotas.
+- Permit resolved blockers alongside legitimate new findings; retain durable
+  stalled/cyclic recovery diagnostics and immutable historical policy semantics.
+- Reuse canonical never-bound Codex launch reservations while fencing retired
+  bearers and preserving bound-worker accounting and exact receipt attestation.
+- Document supported completed-child cleanup and regenerate public packages.
+
 ## 2.27.0 — 2026-09-27
 
 - Remove worker duration limits from new execution policy v3 runs. Elapsed time

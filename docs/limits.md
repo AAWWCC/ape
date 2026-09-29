@@ -37,29 +37,40 @@ used at once. Schema acceptance is not proof of a good plan or correct product.
 Execution settings are configurable operating policies, frozen at new-run START.
 Ticket/dispatch receipt limits are also bound to immutable authority. Changing
 project configuration affects subsequent runs. Legacy runs keep their frozen
-quotas and supported fallback semantics. New runs use execution policy v3, which
-removes worker duration limits as well as directed-replan and remediation count
-quotas, while preserving strictly shrinking blocker checks. See the generated
+quotas and supported fallback semantics. New runs use execution policy v4, which
+uses evidence-based recovery without small fixed retry counts. Resolved prior
+blockers can be accompanied by new findings; repeated, cyclic, missing or cosmetic
+evidence blocks with a recorded reason. See the generated
 [configuration reference](configuration.md).
 
 | Policy | Default and disposition |
 | --- | --- |
-| Product stage attempts | **Configurable:** 2, including the initial attempt. |
-| Directed replans | **Changed:** new runs have no fixed count quota. After the first directed replan, normalized assurance blockers must strictly shrink. Historical execution policies retain their quotas. |
-| Protocol redispatches | **Configurable:** 1 per ordinary stage. |
-| Remediation cycles | **Changed:** new runs have no fixed count quota. After the first cycle, normalized blockers must strictly shrink. Historical execution policies retain their quotas. |
-| Re-gates | **Configurable:** 3. |
-| Physical workers per ticket | **Configurable:** 2. Replacement N requires exact predecessor retirement and preserves lineage accounting; recovery cannot reset the budget. |
-| Validation submissions per worker | **Configurable:** 3. Exact successful replay remains idempotent. Exhaustion accounting does not loop once per configured submission. |
-| Reconciliation attempts / protocol redispatches | **Configurable:** 1 / 0. The single nonrecursive contradiction-reconciliation chain remains an architectural constraint. |
+| Product stage attempts | **Evidence-based:** useful partial repairs may continue; repeated failure evidence stalls. A read-only verifier can establish progress when an exact previously failed command passes; merely omitting it is insufficient. |
+| Directed replans | **Evidence-based:** the independent judge explicitly resolves a prior blocker against exact previous/current plans and related implementation and acceptance anchors. Substantive rewrites are allowed; cosmetic or unrelated edits are insufficient. Historical strict-subset rules remain. |
+| Protocol redispatches | **Evidence-based:** observed progress governs continuation. |
+| Remediation cycles | **Evidence-based:** resolved blockers plus new findings may advance when relevant authorized writer changes remain in the net diff between reviewed trees. Reverted edits cannot establish progress. |
+| Re-gates | **No fixed count quota:** each explicit request re-runs the complete gate suite. |
+| Physical workers per ticket | **Evidence-based:** replacement requires exact predecessor retirement and preserved lineage. A canonical modern Codex generation that never bound a child reuses its reserved slot after launch expiry/revocation; bound workers remain counted. |
+| Validation submissions per worker | **Evidence-based:** eliminating errors at schema-declared locations may advance; changing invalid values, unknown property names, array positions or diagnostic prose does not. Exact successful replay remains idempotent and the accepted draft must match its attestation. |
+| Reconciliation attempts / protocol redispatches | **Evidence-based:** a new contradiction episode requires a retained independently confirmed test correction to a resolved blocker and a different, nonrecurring blocker. Preserve independent reconciliation, exact confirmed test scope and nonrecursive routing; historical policies retain their single-cycle guard. |
 | Fast lane production files | **Configurable:** 6. Normalized exact files are counted cumulatively across validated receipts; known broad production directory claims select full for behavioral work. This is routing policy, not a universal task size. |
 | Worker deadlines | **Removed for new runs:** tickets carry `deadline_at: null`. Elapsed time does not revoke worker authority or trigger a retry. Explicit cancellation, revocation and confirmed-stop recovery remain. Historical execution policies v1 and v2 retain their frozen deadlines, including mode-aware replacement deadlines. |
 | Command/suite timeouts | **Configurable:** mechanical 15 minutes, fast 30, full 60 through the existing `deadlines_ms` keys. Zero or negative configured timeouts intentionally expire immediately. These bound subprocess execution, not the lifetime of new workers. |
 | Gate watch | **Configurable:** heartbeat 5 seconds, stale age 30 seconds, total spawns 2, inline grace 300 seconds, advisory poll delay 5 seconds. A verified live owner is stronger evidence than heartbeat age alone. |
 | Remote check registration | **Configurable:** 120-second registration window and 10-second retry advice. A pending CI check has no new global elapsed-run cutoff. |
 
-Attempt/worker/submission counts require positive safe integers. Optional recovery
-counts accept zero. Combined finite counters must fit safe-integer arithmetic
+Replacement v4 plan-judge tickets carry `plan_recovery_context`, binding the prior judge's
+ticket hash and candidate, alongside the existing `plan_recovery` blocker IDs. The judge's
+`evidence.plan_resolutions` names both candidate hashes, exact prior assurance IDs, typed
+implementation and acceptance anchors, and the rationale for each independently verified
+resolution. Requirement-to-workstream links establish relevance; prose need not repeat IDs.
+At least one cited coverage entry must change after whitespace normalization and
+deduplication. This detects unchanged or unrelated evidence; the independent judge supplies
+the semantic assessment of substantive repair. Missing resolutions cannot authorize another
+replan. Historical tickets never acquire this evidence requirement or a different schema hash.
+
+Historical attempt/worker/submission limits require positive safe integers; optional
+legacy recovery counts accept zero. All counters must fit safe-integer arithmetic
 before forecasts or allocation. Forecast totals that depend on future recovery
 progress are `null` (unknown), not zero or an invented numeric ceiling.
 Timer settings reject fractions and values outside their
@@ -68,7 +79,7 @@ numeric fallback and overflow into nearly immediate timers.
 The representable delay boundary follows [Node's timer behavior](https://nodejs.org/api/timers.html#settimeoutcallback-delay-args),
 not measurements of how long useful work should take.
 
-Strictly shrinking normalized blockers, serialized writers, the pipeline's two
+Grounded blocker progress, serialized writers, the pipeline's two
 independent review roles, lane escalation, one authoritative receipt, exact claims,
 and immutable provenance remain structural protections. Raising a retry policy
 cannot bypass them. The retired `policy.max_directed_replans` and

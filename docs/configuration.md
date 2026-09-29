@@ -24,12 +24,10 @@ positive safe integers. See [runtime limits](limits.md) for their purpose and tr
 Execution policy, command timeouts, fast-lane file routing, gate timing and remote-check
 registration timing are frozen when a new run starts. Changing configuration
 affects subsequent runs. Existing runs and issued tickets retain their original
-execution, receipt and artifact contracts. Optional retry counts accept zero;
-attempt, worker and submission counts require at least one. Combined counters
-must fit safe-integer arithmetic. These are configurable operating choices,
-not claims about an optimal number of attempts.
+execution, receipt and artifact contracts. Recovery counters must fit safe-integer
+arithmetic. Historical policies retain their original numeric limits.
 
-New runs use execution policy v3 and have no worker duration limit. Their tickets
+New runs use execution policy v4 and have no worker duration limit. Their tickets
 carry `deadline_at: null`; elapsed time does not expire worker authority or spend
 a retry. Explicit cancellation, revocation and recovery after a confirmed worker
 stop still apply. Historical execution policies v1 and v2 keep their frozen
@@ -37,14 +35,18 @@ worker deadlines. The existing `deadlines_ms` settings continue to bound command
 and test-suite execution; they do not set a worker time quota for new runs.
 Launch-token expiry, lock leases, polling and shutdown grace periods remain in force.
 
-New runs have no fixed count quota for directed replans or remediation cycles.
-After the first recovery, normalized blockers must strictly shrink; repeated,
-expanded, incomparable or malformed blocker sets stop recovery. Forecasts report
-`null` where a total depends on future recovery progress, meaning unknown rather
-than zero. Other retry, worker and submission limits remain in force.
+New runs have no fixed count quota for product retries, directed replans,
+remediation, protocol redispatches, receipt corrections, worker replacements,
+reconciliation or deliberate fresh re-gates. Recovery records resolved, remaining
+and added blockers. Resolving old blockers while discovering different legitimate
+findings can advance; repeated, cyclic, missing or cosmetic evidence stops recovery.
+Forecasts report `null` where a total depends on future evidence, meaning unknown
+rather than zero. Exact binding, receipt attestation, scope and resource limits remain.
 
-`policy.max_directed_replans` and `policy.max_remediation_cycles` are retired.
-Stored values are ignored for new runs, and setting either key is rejected.
+The `policy.max_*` recovery quota settings are retired, including stage attempts,
+directed replans, remediation, protocol redispatches, re-gates, physical workers,
+validation submissions and reconciliation attempts/redispatches.
+Stored values are ignored for new runs, and setting a retired key is rejected.
 Reading an older configuration leaves its file unchanged; the next ordinary
 configuration write removes those retired overrides and their provenance while
 preserving unrelated settings. Historical frozen execution policies keep their
@@ -65,13 +67,6 @@ checked byte-for-byte by `npm run docs:check`.
 | `shipping.target` | object or null | `null` | Explicit `{origin, repository, base}`, frozen at admission. Required for shipping; the canonical APE checkout can target only AAWWCC/ape. |
 | `shipping.checks_registration_window_ms` | number | `120000` | Time to allow remote CI checks to register before treating their absence as failure. |
 | `shipping.checks_registration_retry_delay_ms` | number | `10000` | Suggested polling delay while remote CI checks are registering. |
-| `policy.max_stage_attempts` | number | `2` | Initial product-stage attempt plus ordinary retries. |
-| `policy.max_worker_protocol_redispatches_per_stage` | number | `1` | Replacement stage dispatches for worker-protocol failure. |
-| `policy.max_regate_attempts` | number | `3` | Re-gates allowed after failed full-suite evidence. |
-| `policy.max_physical_workers_per_ticket` | number | `2` | Initial native worker plus replacements; prior workers must be retired. |
-| `policy.max_validation_submissions_per_worker` | number | `3` | Receipt-validation submissions available to each physical worker. |
-| `policy.max_reconciliation_stage_attempts` | number | `1` | Attempts for each reconciliation or recheck stage. |
-| `policy.max_reconciliation_protocol_redispatches` | number | `0` | Protocol replacements for each reconciliation or recheck stage. |
 | `policy.fast_max_files` | number | `6` | Maximum production-file scope for the fast lane. |
 | `policy.high_risk_security_review` | boolean | `true` | Add security review when a risk trigger is armed. |
 | `policy.design_assurance_required` | boolean | `true` | Require a feasibility check and executable evidence for each declared risk. |

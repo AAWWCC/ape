@@ -106,7 +106,10 @@ describe('ape v2 config set type validation against the defaults tree', () => {
       .rejects.toThrow(/policy\.fast_max_files/);
   });
 
-  it.each(['max_directed_replans', 'max_remediation_cycles'])('rejects retired recovery quota %s through every set route', async (name) => {
+  it.each(['max_directed_replans', 'max_remediation_cycles', 'max_stage_attempts',
+    'max_worker_protocol_redispatches_per_stage', 'max_regate_attempts',
+    'max_physical_workers_per_ticket', 'max_validation_submissions_per_worker',
+    'max_reconciliation_stage_attempts', 'max_reconciliation_protocol_redispatches'])('rejects retired recovery quota %s through every set route', async (name) => {
     const dir = project();
     const configPath = join(dir, 'config.json');
     await setRuntimeConfig(configPath, 'custom.marker', 'preserve');
@@ -114,7 +117,7 @@ describe('ape v2 config set type validation against the defaults tree', () => {
     for (const [key, value] of [
       [`policy.${name}`, 0],
       [`policy.${name}.nested`, 5],
-      ['policy', { [name]: 11, max_stage_attempts: 8 }],
+      ['policy', { [name]: 11, fast_max_files: 8 }],
     ]) {
       await expect(setRuntimeConfig(configPath, key, value))
         .rejects.toThrow(new RegExp(`policy\\.${name} is retired`));
@@ -144,17 +147,17 @@ describe('ape v2 config set type validation against the defaults tree', () => {
     const loaded = await loadRuntimeConfig(configPath);
     expect(loaded.policy).not.toHaveProperty('max_directed_replans');
     expect(loaded.policy).not.toHaveProperty('max_remediation_cycles');
-    expect(loaded.policy.max_stage_attempts).toBe(5);
+    expect(loaded.policy).not.toHaveProperty('max_stage_attempts');
     expect(readFileSync(configPath, 'utf8')).toBe(source);
 
     await setRuntimeConfig(configPath, 'shipping.auto_merge', true);
     const stored = JSON.parse(readFileSync(configPath, 'utf8'));
     expect(stored).toEqual({
-      policy: { max_stage_attempts: 5, operator_annotation: 'preserve' },
+      policy: { operator_annotation: 'preserve' },
       custom: { max_remediation_cycles: 17, marker: 'preserve' },
       shipping: { auto_merge: true },
       explicit_keys: [
-        'custom.marker', 'custom.max_remediation_cycles', 'policy.max_stage_attempts',
+        'custom.marker', 'custom.max_remediation_cycles',
         'policy.operator_annotation', 'shipping.auto_merge',
       ],
     });
