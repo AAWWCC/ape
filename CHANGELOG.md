@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.28.0 — 2026-09-29
 
 - Admit execution policy v4 with evidence-based stage, protocol, receipt and
   reconciliation recovery, and explicit fresh re-gates without count quotas.
