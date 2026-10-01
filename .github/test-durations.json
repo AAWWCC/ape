@@ -37,6 +37,7 @@
   "__tests__/runtime-v2-certification-protection-policy.test.js": 9,
   "__tests__/runtime-v2-character-policy-divergence.test.js": 18,
   "__tests__/runtime-v2-claude-dispatch.test.js": 14360,
+  "__tests__/runtime-v2-claude-permission-neutrality.test.js": 6220,
   "__tests__/runtime-v2-cli-entrypoints.test.js": 2207,
   "__tests__/runtime-v2-codex-binding-seam.test.js": 8429,
   "__tests__/runtime-v2-codex-bootstrap.test.js": 2000,

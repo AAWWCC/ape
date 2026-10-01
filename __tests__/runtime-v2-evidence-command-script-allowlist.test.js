@@ -1682,8 +1682,7 @@ describe('APE v2 hook binary evidence containment (cwd + operand precompute)', (
 
     for (const command of ['npm run snapshot-only', snapshotProfile.command]) {
       const response = await invokeHook(boundBashCall(dir, command, dir), dir);
-      expect(response.hookSpecificOutput?.permissionDecision, command).not.toBe('deny');
-      expect(response.decision, JSON.stringify(response)).not.toBe('block');
+      expect(response, command).toEqual({});
     }
     for (const command of ['npm run live-only', liveProfile.command]) {
       const response = await invokeHook(boundBashCall(dir, command, dir), dir);
@@ -1695,7 +1694,7 @@ describe('APE v2 hook binary evidence containment (cwd + operand precompute)', (
     const dir = hookProject();
     for (const command of ['npm test', 'node --test __tests__/x.test.mjs']) {
       const response = await invokeHook(boundBashCall(dir, command, dir), dir);
-      expect(response.hookSpecificOutput.permissionDecision, command).toBe('allow');
+      expect(response, command).toEqual({});
     }
   });
 
@@ -1703,7 +1702,7 @@ describe('APE v2 hook binary evidence containment (cwd + operand precompute)', (
     const dir = hookProject();
     const command = "cat 'app/trace/[traceId]/page.tsx'";
     const response = await invokeHook(boundBashCall(dir, command, dir), dir);
-    expect(response.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(response).toEqual({});
   });
 
   it('DENIES the same dynamic-route path when unquoted glob syntax reaches the hook', async () => {
@@ -1728,7 +1727,7 @@ describe('APE v2 hook binary evidence containment (cwd + operand precompute)', (
       'git diff --no-index -- src/is-even-2319-1.js /dev/null',
     ]) {
       const response = await invokeHook(boundBashCall(dir, command, dir), dir);
-      expect(response.hookSpecificOutput.permissionDecision, command).toBe('allow');
+      expect(response, command).toEqual({});
     }
   });
 
@@ -1841,7 +1840,7 @@ describe('APE v2 hook binary evidence containment (cwd + operand precompute)', (
       'cd not-yet-created && npm test',
     ]) {
       const response = await invokeHook(boundBashCall(dir, command, dir), dir);
-      expect(response.hookSpecificOutput.permissionDecision, command).toBe('allow');
+      expect(response, command).toEqual({});
     }
   });
 });

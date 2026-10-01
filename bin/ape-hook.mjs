@@ -1048,6 +1048,9 @@ try {
           ? 'APE bound receipt validation call admitted (draft valid)'
           : `APE bound receipt validation call admitted; ${formatDraftCorrections(receiptValidation?.corrections ?? [], ticket, receiptValidationBearer)}`
         : 'APE receipt validation denied: no exact active bound receipt-contract ticket matches receipt.ticket_id',
+      additional_context: bound && receiptValidation?.valid !== true
+        ? formatDraftCorrections(receiptValidation?.corrections ?? [], ticket, receiptValidationBearer)
+        : undefined,
     }))}\n`);
     process.exit(0);
   }

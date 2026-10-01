@@ -574,14 +574,7 @@ describe('every Codex plugin hook launcher is host-portable', () => {
       expect(result.code, result.stderr || result.stdout).toBe(0);
       expect(result.stderr).toBe('');
       const response = JSON.parse(result.stdout);
-      if (event === 'PreToolUse') {
-        expect(response.hookSpecificOutput).toMatchObject({
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'allow',
-        });
-      } else {
-        expect(response).toEqual({});
-      }
+      expect(response).toEqual({});
     },
   );
 });

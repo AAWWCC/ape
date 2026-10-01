@@ -268,7 +268,7 @@ describe('APE v2 control-plane ownership (installed hook binary)', () => {
       tool_name: 'mcp__plugin_ape_ape__ape_run',
       tool_input: { action: 'record' },
     }, dir);
-    expect(decision(response)).toBe('allow');
+    expect(response).toEqual({});
   });
 
   it('allows a main-session ape_run while the run is blocked', async () => {
@@ -279,7 +279,7 @@ describe('APE v2 control-plane ownership (installed hook binary)', () => {
       tool_name: 'mcp__plugin_ape_ape__ape_run',
       tool_input: { action: 'regate' },
     }, dir);
-    expect(decision(response)).toBe('allow');
+    expect(response).toEqual({});
   });
 });
 
@@ -338,7 +338,7 @@ describe('APE v2 corrupt-state control-plane recovery (installed hook binary)', 
         tool_name: tool,
         tool_input: { action: 'record' },
       }, dir);
-      expect(effectiveDecision(response), tool).toBe('allow');
+      expect(response, tool).toEqual({});
     }
   });
 

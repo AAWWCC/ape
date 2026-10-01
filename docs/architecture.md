@@ -109,6 +109,29 @@ Hooks enforce ticket rules on APE-owned shell, write, dispatch, control, and rec
 children cannot use parent control operations or ambiguous write/execute paths. External MCP calls
 still use host permissions; APE checks their repository effects at worker and receipt boundaries.
 
+### Host permission continuation
+
+An internal APE `allow` means only that APE has no restriction. For both Claude and Codex,
+unrestricted `PreToolUse` returns `{}` or, when context is required,
+`{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"..."}}`.
+Neither form approves the call or rewrites its input. APE restrictions still return
+`hookSpecificOutput.permissionDecision: "deny"` with the original `permissionDecisionReason`.
+Other lifecycle response shapes and internal authorization decisions remain unchanged.
+
+The [Claude hook contract](https://code.claude.com/docs/en/hooks#pretooluse-decision-control)
+leaves normal permission handling in place when no decision is returned. Affirmative `allow`
+can skip ordinary permission prompts; explicit deny and ask rules are still evaluated.
+APE therefore uses neutral continuation for no-run and active allowed calls. Required context,
+including bounded invalid-draft corrections for an exactly bound receipt-validation caller,
+travels separately in `additionalContext`. Unbound or mismatched callers remain denied and
+receive no correction context. Codex retains its existing neutral success behavior.
+
+The permission-neutrality regressions execute the source hook and packaged Claude hook to
+verify their JSON responses, denials, binding checks, and correction delivery. Separately labeled
+documentation-derived fixtures model ordinary prompts and explicit deny/ask rules; they are
+not observations of interactive Claude permission UI. `claude plugin validate` verifies package
+and schema compatibility, not interactive permission behavior.
+
 Remote completion and local cleanup are separate. `github-shipping.js` proves the exact pushed
 head was merged. `receipt-service.js` records cleanup as `returned`, `retained_dirty`, or
 `retained_error`. A local worktree conflict does not undo a proven merge.

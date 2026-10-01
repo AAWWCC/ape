@@ -204,7 +204,7 @@ async function launchAndBind(dir, { sessionId, agentId }) {
     tool_name: 'Agent',
     tool_input: { subagent_type: action.dispatch.agent_type, prompt, model: launchModel(action.dispatch) },
   });
-  expect(preToolDecision(launch)).toBe('allow');
+  expect(launch).toEqual({});
 
   const started = await invokeClaudeHook({
     hook_event_name: 'SubagentStart',
@@ -336,7 +336,7 @@ describe('APE v2 dispatch binding resume across the launch_expires_at boundary',
       tool_name: 'Write',
       tool_input: { file_path: path.join(dir, 'tests', 'new.test.js'), content: 'test' },
     });
-    expect(preToolDecision(write)).toBe('allow');
+    expect(write).toEqual({});
     void ticket;
   });
 

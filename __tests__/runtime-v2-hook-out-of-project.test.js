@@ -322,7 +322,7 @@ describe('APE v2 hook binary out-of-project writes', () => {
 
     const response = await invokeHook(preToolUseWrite(dir, path.join(scratch, 'notes.md')), dir);
 
-    expect(response.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(response).toEqual({});
   });
 
   it('allows a running-run out-of-project write but still denies the in-project one', async () => {
@@ -330,7 +330,7 @@ describe('APE v2 hook binary out-of-project writes', () => {
     const scratch = await outsideDir();
 
     const outside = await invokeHook(preToolUseWrite(dir, path.join(scratch, 'notes.md')), dir);
-    expect(outside.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(outside).toEqual({});
 
     const inside = await invokeHook(preToolUseWrite(dir, path.join(dir, 'src', 'value.js')), dir);
     expect(inside.hookSpecificOutput.permissionDecision).toBe('deny');

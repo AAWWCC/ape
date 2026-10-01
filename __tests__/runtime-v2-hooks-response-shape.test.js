@@ -9,7 +9,7 @@ import { formatHookResponse } from '../lib/runtime/hooks.js';
 describe('APE v2 host-compatible hook response shapes', () => {
   const claudeEvent = (event) => ({ host: 'claude', event });
 
-  it('keeps the permissionDecision shape on PreToolUse', () => {
+  it('keeps PreToolUse deny explicit and unrestricted continuation neutral', () => {
     const deny = formatHookResponse(claudeEvent('PreToolUse'), {
       decision: 'deny',
       reason: 'nope',
@@ -26,7 +26,7 @@ describe('APE v2 host-compatible hook response shapes', () => {
       decision: 'allow',
       reason: 'fine',
     });
-    expect(allow.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(allow).toEqual({});
   });
 
   it.each(['PostToolUse', 'PostToolUseFailure', 'SubagentStop'])(
@@ -96,8 +96,8 @@ describe('APE v2 host-compatible hook response shapes', () => {
     })).toEqual({});
   });
 
-  it('delivers trusted bootstrap context without changing Codex permission decisions', () => {
-    const event = { host: 'codex', event: 'PreToolUse' };
+  it.each(['claude', 'codex'])('delivers trusted context without changing %s permission decisions', (host) => {
+    const event = { host, event: 'PreToolUse' };
     const response = formatHookResponse(event, {
       decision: 'allow',
       additional_context: 'Authoritative native bootstrap context',
@@ -110,6 +110,9 @@ describe('APE v2 host-compatible hook response shapes', () => {
     });
     expect(formatHookResponse(event, {
       decision: 'deny', reason: 'bootstrap rejected', additional_context: 'must not leak',
-    }).hookSpecificOutput.additionalContext).toBeUndefined();
+    })).toEqual({ hookSpecificOutput: {
+      hookEventName: 'PreToolUse', permissionDecision: 'deny',
+      permissionDecisionReason: 'bootstrap rejected',
+    } });
   });
 });
