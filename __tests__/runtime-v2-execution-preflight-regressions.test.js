@@ -5,6 +5,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { evaluateGatePreflight, resolveSuiteSelection } from '../lib/runtime/gate-evaluation.js';
 import { startGateSuite } from '../lib/runtime/gate-watch.js';
+import { runtimePaths } from '../lib/runtime/paths.js';
+import { inspectGateOwnership } from '../lib/runtime/gate-launch-ownership.js';
 import { currentTreeSha, runGit } from '../lib/runtime/git.js';
 import { validateClaudePlugin, validateCodexPlugin } from '../lib/runtime/plugin-validation.js';
 import { runTestSuite } from '../lib/runtime/runner.js';
@@ -123,14 +125,19 @@ describe('verification execution contract identity', () => {
 
 describe('single-suite impacted deletion fallback', () => {
   it('returns a tooling failure for an empty detached command on Windows before spawning', async () => {
+    const root = await fixture();
+    const paths = runtimePaths(root);
+    const state = { run_id: 'run-empty-detached-command', lane: 'fast' };
     const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
     try {
       Object.defineProperty(process, 'platform', { ...descriptor, value: 'win32' });
-      const result = await startGateSuite('/synthetic/no-side-effects', {}, { lane: 'fast' }, {}, {
+      const result = await startGateSuite(root, paths, state, {}, {
         preflight: { passed: true }, strategy: 'single', suiteMode: 'full', suiteCommand: '   ', treeSha: 'a'.repeat(40),
       });
       expect(result.hit.full.verification).toMatchObject({ passed: false, tooling_failure: true });
       expect(result.hit.full.verification.output).toMatch(/must contain an executable/);
+      expect(result.watch).toBeUndefined();
+      expect(await inspectGateOwnership(root, paths, state)).toEqual({ absent: true });
     } finally {
       Object.defineProperty(process, 'platform', descriptor);
     }

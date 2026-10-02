@@ -376,6 +376,38 @@ function maximalPlannerPlan(preflightHash, targetBytes = 16_384) {
 }
 
 describe('live receipt contract integration', () => {
+  it.each(['file', 'path'])('records an attested %s-anchored contradiction without losing its recovery evidence', async (anchor) => {
+    const value = await fixture('codex', {
+      execution_policy: executionPolicySnapshot(DEFAULT_CONFIG),
+      test_paths: ['tests/value.test.js'],
+    });
+    const payload = {
+      ...draft(value.ticket, value.capability, 'failed'),
+      findings: [{ [anchor]: 'value.js', line: 1, summary: 'The authored expectation conflicts with the required value.' }],
+      evidence: {
+        failure_kind: 'test-contradiction',
+        test_contradiction: {
+          summary: 'The authored test requires incompatible values.',
+          test_paths: ['tests/value.test.js'],
+        },
+      },
+    };
+    const original = JSON.stringify(payload);
+    expect(await validateReceiptForDispatch(value.directory, payload)).toMatchObject({ valid: true });
+    const result = await recordReceipt(value.directory, payload);
+    expect(result.ok, JSON.stringify(result.errors)).toBe(true);
+    expect(result.run.status).toBe('running');
+    expect(result.run.tickets.at(-1)).toMatchObject({
+      stage_id: 'test-reconcile',
+      role: 'reviewer',
+      test_reconciliation: { test_paths: ['tests/value.test.js'] },
+    });
+    expect(result.run.recovery_progress['test-contradiction'][0].blockers)
+      .toEqual(['value.js:line:1:production']);
+    expect((await readJson(value.paths.active)).receipts[0].findings).toEqual(payload.findings);
+    expect(JSON.stringify(payload)).toBe(original);
+  });
+
   it('accepts five materially correcting drafts beyond the old validation quota and seals the exact sixth draft', async () => {
     const value = await fixture('codex', { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) });
     const payload = draft(value.ticket, value.capability);
