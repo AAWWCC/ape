@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -42,6 +43,7 @@ import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { currentTreeSha } from '../lib/runtime/git.js';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { archiveRun } from '../lib/runtime/history.js';
+import { readGateOwnership, readGateProof } from '../lib/runtime/spawn.js';
 import {
   GATE_INLINE_GRACE_MS,
   GATE_POLL_RETRY_DELAY_MS,
@@ -722,25 +724,37 @@ describe('APE v2 impacted gate D6 mid-watch drift and #268 nits', () => {
 
     const watch = (await readJson(runtimePaths(dir).active)).gates_watch;
     expect(watch).toBeTruthy();
-    // Ledger the live runner pid the test reads straight from gates_watch, so
-    // teardown can kill this still-blocking runner before removing its dirs.
     trackPid(watch?.pid);
-    // Hand-write an adoptable artifact (correct run_id + nonce from the live
-    // watch) whose durations are non-numeric strings. Only a Number.isFinite
-    // duration may accumulate; a crafted value must not poison timing with NaN.
-    await atomicWriteJson(watch.artifact_file, {
-      version: 1,
-      run_id: result.run.run_id,
-      nonce: watch.nonce,
-      cache_key: watch.cache_key,
-      passed: true,
-      duration_ms: '999',
-      verification: { passed: true, duration_ms: 'nope' },
-      recorded_at: new Date().toISOString(),
+    await full.arm();
+    const ownership = await readGateOwnership(watch.ownership_file);
+    let proof;
+    const deadline = Date.now() + 15_000;
+    do {
+      proof = await readGateProof(ownership);
+      if (proof?.cleanup?.status === 'confirmed' && !alive(watch.pid)) break;
+      await sleep(50);
+    } while (Date.now() < deadline);
+    expect(proof?.cleanup?.status).toBe('confirmed');
+    expect(proof?.artifact?.passed).toBe(true);
+    expect(alive(watch.pid)).toBe(false);
+    expect(await full.executions()).toBe(1);
+    // Preserve real, authenticated retirement evidence and alter only timing.
+    // Signing the fixture payload exercises normalization past authentication;
+    // a standalone unsigned result must never authorize live-work consumption.
+    proof.artifact.duration_ms = '999';
+    proof.artifact.verification.duration_ms = 'nope';
+    await atomicWriteJson(ownership.proof_file, {
+      generation: ownership.generation, payload: proof,
+      mac: createHmac('sha256', ownership.secret).update(JSON.stringify(proof)).digest('hex'),
     });
 
+    const completion = await gates.pollGateSuite(dir, runtimePaths(dir), result.run,
+      await loadRuntimeConfig(runtimePaths(dir).config));
+    expect(completion.ready?.artifact_duration_ms).toBe(0);
+    expect(completion.ready?.full?.verification.duration_ms).toBe('nope');
     const done = await drivePolls(dir);
     expect(done.run.status).toBe('completed');
     expect(Number.isFinite(done.run.timing.test_ms)).toBe(true);
+    expect(await full.executions()).toBe(1);
   });
 });

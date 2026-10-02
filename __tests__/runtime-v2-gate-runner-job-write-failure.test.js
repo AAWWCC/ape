@@ -4,6 +4,19 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const flags = vi.hoisted(() => ({ failJobWrite: false, blockedJob: null }));
+vi.mock('../lib/runtime/storage.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, async atomicWriteJson(file, value) {
+    // Preserve the real rename failure at the actual generation's job path.
+    if (flags.failJobWrite && String(file).endsWith('.job.json')) {
+      await mkdir(file, { recursive: true });
+      flags.blockedJob = file;
+    }
+    return actual.atomicWriteJson(file, value);
+  } };
+});
+
 // ===========================================================================
 // launchGateRunner's job-descriptor write carries no catch (roadmap entry
 // gate-runner-job-write-not-swallowed, run-fixture-ae3561b99c90's
@@ -83,13 +96,13 @@ vi.mock('../lib/runtime/gates.js', async (importOriginal) => {
 import { recordReceipt, startRun } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
-import { sha256 } from '../lib/runtime/canonical.js';
-import { currentTreeSha } from '../lib/runtime/git.js';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const cleanups = [];
 afterEach(async () => {
+  flags.failJobWrite = false;
+  flags.blockedJob = null;
   await Promise.all(
     cleanups
       .splice(0)
@@ -101,7 +114,7 @@ function git(cwd, ...args) {
   execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+    env: { ...process.env, GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_CONFIG_SYSTEM: process.platform === 'win32' ? 'NUL' : '/dev/null' },
   });
 }
 
@@ -154,16 +167,12 @@ describe('launchGateRunner job-descriptor write failure', () => {
     // evaluation time — see the header note for the exact formula this
     // mirrors (gates.js:499-501, :945-955).
     await writeFile(path.join(dir, 'notes', 'note.md'), '# note\n\nUpdated.\n');
-    const treeSha = await currentTreeSha(dir);
-    const cacheKey = `${treeSha}:${sha256({ command: suiteCommand })}`;
-    const stem = sha256(cacheKey);
-    const jobFile = path.join(runtimePaths(dir).runtime, 'gate-suite', `${stem}.job.json`);
 
     // Force the job write to fail deterministically and platform-/privilege-
     // independently: renaming a file onto an EXISTING DIRECTORY always fails
     // (EISDIR on POSIX) — never bypassable by a root test runner, unlike a
     // permission-based block would be.
-    await mkdir(jobFile, { recursive: true });
+    flags.failJobWrite = true;
 
     const receiptPromise = recordReceipt(dir, {
       ticket_id: build.ticket_id,
@@ -184,6 +193,7 @@ describe('launchGateRunner job-descriptor write failure', () => {
     // propagates all the way out here as a rejected promise instead.
     await expect(receiptPromise).resolves.toEqual(expect.objectContaining({ ok: true }));
     const recorded = await receiptPromise;
+    expect(flags.blockedJob, 'the write fault must hit the actual job destination').toBeTruthy();
 
     // The handled shape: gates fail closed exactly as the pre-existing
     // resolveRunnerEntry-null path already does (gates.js:1299) — a genuine

@@ -1,5 +1,5 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +20,8 @@ import {
 import { currentTreeSha } from '../lib/runtime/git.js';
 import { archiveRun } from '../lib/runtime/history.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
+import { gateOwnershipPath } from '../lib/runtime/gate-launch-ownership.js';
+import { readGateOwnership, readGateProof } from '../lib/runtime/spawn.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const VERSION_META = 'io.modelcontextprotocol/protocolVersion';
@@ -188,11 +190,20 @@ describe('APE v2 MCP task cancellation and compatibility', () => {
     git(projectDir, 'commit', '-qm', 'baseline');
 
     const started = path.join(outside, 'started');
+    const descendantStarted = path.join(outside, 'descendant-started');
     const probe = path.join(outside, 'gate.cjs');
+    const descendant = path.join(outside, 'descendant.cjs');
+    await writeFile(descendant, [
+      "const fs = require('node:fs');",
+      `fs.writeFileSync(${JSON.stringify(descendantStarted)}, String(process.pid));`,
+      "process.send('ready');",
+      'setInterval(() => {}, 1000);',
+    ].join('\n'));
     await writeFile(probe, [
       "const fs = require('node:fs');",
-      `fs.writeFileSync(${JSON.stringify(started)}, String(process.pid));`,
-      'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000);',
+      `const child = require('node:child_process').fork(${JSON.stringify(descendant)}, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });`,
+      `child.once('message', () => fs.writeFileSync(${JSON.stringify(started)}, String(process.pid)));`,
+      'setInterval(() => {}, 1000);',
     ].join('\n'));
     const paths = runtimePaths(projectDir);
     await mkdir(paths.runtime, { recursive: true });
@@ -253,6 +264,8 @@ describe('APE v2 MCP task cancellation and compatibility', () => {
     await archiveRun(paths, blocked, { ifAbsent: true });
 
     let runnerPid = null;
+    let suitePid = null;
+    let descendantPid = null;
     try {
       const created = await executeToolCall({
         jsonrpc: '2.0', id: 1, method: 'tools/call',
@@ -268,6 +281,14 @@ describe('APE v2 MCP task cancellation and compatibility', () => {
         await new Promise((resolve) => setTimeout(resolve, 2));
       }
       expect(await exists(started), 'the gate command must start before cancellation').toBe(true);
+      suitePid = Number(await readFile(started, 'utf8'));
+      descendantPid = Number(await readFile(descendantStarted, 'utf8'));
+      const ownership = await readGateOwnership(gateOwnershipPath(paths, blocked.run_id));
+      runnerPid = ownership.watch.pid;
+      for (const pid of [runnerPid, suitePid, descendantPid]) {
+        expect(pid).toBeGreaterThan(1);
+        expect(alive(pid), 'runner, suite and ordinary descendant must be live before cancellation').toBe(true);
+      }
       const cancelledAck = await handle({
         jsonrpc: '2.0', id: 2, method: 'tasks/cancel',
         params: { project_dir: projectDir, taskId: created.result.taskId, _meta: taskMeta() },
@@ -276,7 +297,7 @@ describe('APE v2 MCP task cancellation and compatibility', () => {
 
       const liveWatch = (await readJson(paths.active, null))?.gates_watch ?? null;
       expect(liveWatch, 'the task operation must persist the attributable gate watch').toBeTruthy();
-      runnerPid = liveWatch.pid;
+      expect(liveWatch).toMatchObject({ pid: runnerPid, generation: ownership.generation });
 
       let terminal = null;
       for (let index = 0; index < 300; index += 1) {
@@ -285,13 +306,25 @@ describe('APE v2 MCP task cancellation and compatibility', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       expect(terminal).toMatchObject({ status: 'cancelled' });
-      for (const file of [liveWatch.job_file, liveWatch.artifact_file, liveWatch.heartbeat_file]) {
-        expect(await exists(file)).toBe(false);
+      // Assert retirement before fallback teardown, independently of files.
+      for (const pid of [runnerPid, suitePid, descendantPid]) {
+        expect(alive(pid), 'cancelled must await runner, suite and ordinary descendant retirement').toBe(false);
       }
-      expect(runnerPid, 'the attributable gate watch must name a spawned suite runner').toBeGreaterThan(1);
-      expect(alive(runnerPid), 'cancelled must await the local runner handle being reaped').toBe(false);
+      const retained = await readGateOwnership(liveWatch.ownership_file);
+      expect(retained).toMatchObject({ run_id: blocked.run_id, generation: ownership.generation });
+      const proof = await readGateProof(retained);
+      expect(proof).toMatchObject({
+        cleanup: { status: 'confirmed' },
+        artifact: { run_id: blocked.run_id, nonce: ownership.generation, verification: { aborted: true } },
+      });
+      for (const file of [liveWatch.job_file, liveWatch.artifact_file, liveWatch.heartbeat_file]) {
+        expect(await exists(file), 'generation recovery evidence must survive cancellation').toBe(true);
+      }
     } finally {
       killTree(runnerPid);
+      for (const pid of [suitePid, descendantPid]) {
+        if (alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch {} }
+      }
       await shutdownOwnedTasks('task cancellation test cleanup');
     }
   });

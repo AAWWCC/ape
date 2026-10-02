@@ -122,6 +122,7 @@ describe('runTestSuite execution semantics', () => {
     expect(result.passed).toBe(false);
     expect(result.tooling_failure).toBe(false);
     expect(result.timed_out).toBe(true);
+    expect(result.cleanup?.status, 'timeout must include authenticated tree retirement').toBe('confirmed');
     // POSIX: killed by signal, so no exit code. win32's taskkill yields a
     // numeric code — there the timed_out marker is what admission must read.
     if (process.platform !== 'win32') expect(result.exit_code).toBe(null);
@@ -139,6 +140,7 @@ describe('runTestSuite execution semantics', () => {
     // Absent, not false: sha256(verification) feeds gate result hashes and
     // the suite cache, so the non-timeout shape must stay byte-identical.
     expect('timed_out' in result).toBe(false);
+    expect(result.cleanup?.status, 'success must include authenticated tree retirement').toBe('confirmed');
   });
 
   it('caps captured output at 200k plus at most one pipe chunk', async () => {
@@ -152,6 +154,7 @@ describe('runTestSuite execution semantics', () => {
     // The cap is checked before each append, so the overshoot is bounded by
     // one 64 KiB pipe chunk.
     expect(result.output.length).toBeLessThanOrEqual(200_000 + 65_536);
+    expect(result.cleanup?.status, 'output capture must finish after authenticated tree retirement').toBe('confirmed');
   }, 15_000);
 
   it('reports a malformed configured command as a tooling failure instead of rejecting', async () => {
