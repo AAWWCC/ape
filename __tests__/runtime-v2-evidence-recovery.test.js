@@ -159,6 +159,78 @@ function correctContradiction(run, id, revision) {
 }
 
 describe('evidence-based recovery beyond count ceilings', () => {
+  it.each(['file', 'path'])('does not treat changing a %s anchor to its alias as recovery progress', (anchor) => {
+    const run = state();
+    const writer = issue(run, { id: 'build', role: 'implementer' });
+    const finding = { [anchor]: 'src/value.js', line: 17, summary: 'The value is still wrong.' };
+    record(run, writer, { status: 'failed', findings: [finding] });
+    expect(run.status).toBe('running');
+    expect(run.tickets.at(-1).stage_id).toBe('build');
+    run.tree_sha = tree(2);
+    const alias = anchor === 'file' ? 'path' : 'file';
+    const actions = record(run, run.tickets.at(-1), { status: 'failed',
+      changed_files: ['src/value.js'],
+      findings: [{ [alias]: 'src/value.js', line: 17, summary: 'Different wording for the same defect.' }],
+    });
+    expectStopped(run, actions);
+    expect(run.blocked_recovery.reason_code).toBe('repeated_or_cyclic_failure');
+  });
+
+  it.each(['retained', 'reverted', 'same-path'])('links finding-free contradictions to independently corrected tests (%s)', (repair) => {
+    let run = state({ behavioral: true });
+    const testPaths = ['tests/value.test.js', 'tests/other.test.js'];
+    const source = issue(run, { id: 'build', role: 'implementer' }, { test_paths: testPaths });
+    const contradiction = (file, command) => ({
+      status: 'failed', findings: [],
+      tests: [{ command, passed: false, exit_code: 1, duration_ms: 1 }],
+      evidence: { failure_kind: 'test-contradiction', test_contradiction: {
+        summary: 'The declared authored test requires incompatible outcomes.', test_paths: [file],
+      } },
+    });
+    record(run, source, contradiction(testPaths[0], 'node tests/value.test.js'));
+    correctContradiction(run, 'confirmed-first-test', 2);
+    run = JSON.parse(JSON.stringify(run));
+    const actions = record(run, run.tickets.at(-1), contradiction(
+      repair === 'same-path' ? testPaths[0] : testPaths[1],
+      'node tests/value.test.js tests/other.test.js',
+    ), repair === 'reverted' ? { test_contradiction_recovery_diff: {
+      base_tree_sha: tree(1), head_tree_sha: tree(2), changed_files: ['src/value.js'],
+    } } : {});
+    if (repair === 'retained') {
+      expect(run.status).toBe('running');
+      expect(run.tickets.at(-1)).toMatchObject({ stage_id: 'test-reconcile',
+        test_reconciliation: { test_paths: [testPaths[1]] } });
+      expect(run.recovery_progress['test-contradiction'].map((entry) => entry.blockers)).toEqual([
+        ['tests/value.test.js:test-contradiction'], ['tests/other.test.js:test-contradiction'],
+      ]);
+    } else {
+      expectStopped(run, actions);
+      expect(run.blocked_recovery.reason_code).toBe(
+        repair === 'same-path' ? 'repeated_or_cyclic_failure' : 'stalled_progress',
+      );
+    }
+  });
+
+  it('does not credit correction of a still-open test for a dropped finding-free contradiction', () => {
+    const run = state({ behavioral: true });
+    const testPaths = ['tests/value.test.js', 'tests/other.test.js'];
+    const source = issue(run, { id: 'build', role: 'implementer' }, { test_paths: testPaths });
+    const report = (paths) => ({ status: 'failed', findings: [], evidence: {
+      failure_kind: 'test-contradiction', test_contradiction: { test_paths: paths },
+    } });
+    record(run, source, report(testPaths));
+    record(run, run.tickets.at(-1), { findings: [{ ...blocker('confirmed-other-test'),
+      file: testPaths[1], remediation: { owner: 'test', test_paths: [testPaths[1]] },
+    }], evidence: { verdict: 'fail' } });
+    const correction = run.tickets.at(-1);
+    Object.assign(correction, { claimed_paths: [testPaths[1]], test_paths: [testPaths[1]], test_scope: 'exact' });
+    run.tree_sha = tree(2);
+    record(run, correction, { changed_files: [testPaths[1]] });
+    const actions = record(run, run.tickets.at(-1), report([testPaths[1]]));
+    expectStopped(run, actions);
+    expect(run.blocked_recovery.reason_code).toBe('stalled_progress');
+  });
+
   it('admits three distinct independently corrected contradictions after restart, then stops recurrence', () => {
     let run = state({ behavioral: true, attempts: { build: 1 } });
     let writer = issue(run, { id: 'build', role: 'implementer' });

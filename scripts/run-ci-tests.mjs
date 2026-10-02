@@ -33,7 +33,9 @@ export const WINDOWS_SMOKE_TEST_FILES = SMOKE_TEST_FILES;
 export const NATIVE_RUNTIME_TEST_FILES = Object.freeze([
   '__tests__/runtime-v2-cli-entrypoints.test.js',
   '__tests__/runtime-v2-codex-windows-launchers.test.js',
+  '__tests__/runtime-v2-durable-gate-launch-ownership.test.js',
   '__tests__/runtime-v2-file-stat-compat.test.js',
+  '__tests__/runtime-v2-gate-launch-ownership-windows.test.js',
   '__tests__/runtime-v2-hook-output-flush.test.js',
   '__tests__/runtime-v2-lock-protocol.test.js',
   '__tests__/runtime-v2-native-platform.test.js',

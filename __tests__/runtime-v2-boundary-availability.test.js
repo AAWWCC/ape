@@ -42,9 +42,9 @@ describe('detached launch failures', () => {
     expect(result.combined).toContain('caller-survived');
   });
 
-  it('returns a tooling failure instead of publishing a watch for an unsuccessful spawn', async () => {
+  it('returns a tooling failure without a watch when ownership reservation has no cwd', async () => {
     const directory = await fixture();
-    // Synthetic preflight isolates a cwd removed between preflight and launch.
+    // Missing cwd prevents durable ownership reservation before any launch.
     const result = await startGateSuite(path.join(directory, 'removed-cwd'), runtimePaths(directory), {
       run_id: 'run-launch-failure', lane: 'fast',
     }, {}, {
@@ -54,7 +54,7 @@ describe('detached launch failures', () => {
     });
     expect(result.watch).toBeUndefined();
     expect(result.hit.full).toMatchObject({ passed: false, verification: { tooling_failure: true } });
-    expect(result.hit.full.verification.output).toMatch(/process could not start.*ENOENT/);
+    expect(result.hit.full.verification.output).toMatch(/ownership reservation failed \(ENOENT\); no runner was launched/);
   });
 });
 

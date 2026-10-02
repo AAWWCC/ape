@@ -8,6 +8,9 @@ import { startGateSuite, pollGateSuite } from '../lib/runtime/gate-watch.js';
 import { evaluateGates } from '../lib/runtime/gate-evaluation.js';
 import { currentTreeSha, diffFiles } from '../lib/runtime/git.js';
 import { sha256 } from '../lib/runtime/canonical.js';
+import { runtimePaths } from '../lib/runtime/paths.js';
+import { atomicWriteJson } from '../lib/runtime/storage.js';
+import { acknowledgeGateConsumption } from '../lib/runtime/gate-launch-ownership.js';
 
 const cleanups = [];
 afterEach(async () => {
@@ -247,6 +250,12 @@ async function detachedGate(project, paths, state, config) {
     ...ready.ctx, full: ready.full, cached: ready.cached,
   });
   delete state.gates_watch;
+  state.gates = verdict;
+  // Model the lifecycle's two durable sinks before admitting another suite.
+  const durablePaths = runtimePaths(project);
+  await atomicWriteJson(path.join(durablePaths.runs, `${state.run_id}.json`), state);
+  await atomicWriteJson(durablePaths.active, state);
+  await acknowledgeGateConsumption(paths, state);
   return verdict;
 }
 
