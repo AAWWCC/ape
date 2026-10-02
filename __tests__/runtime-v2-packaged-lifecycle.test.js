@@ -98,7 +98,7 @@ async function bind(value, host, action, ordinal) {
   if (host === 'claude') {
     const launch = await value.hook({ hook_event_name: 'PreToolUse', session_id: session, tool_use_id: `launch-${ordinal}`, tool_name: 'Agent',
       tool_input: { subagent_type: dispatch.agent_type, prompt: dispatch.dispatch_intent.prompt, model: dispatch.model.model } });
-    expect(launch.hookSpecificOutput?.permissionDecision).toBe('allow');
+    expect(launch).toEqual({});
     const started = await value.hook({ hook_event_name: 'SubagentStart', session_id: session, agent_id: agent, agent_type: dispatch.agent_type });
     return started.hookSpecificOutput?.additionalContext ?? '';
   }

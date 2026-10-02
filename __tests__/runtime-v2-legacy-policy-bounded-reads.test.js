@@ -29,10 +29,13 @@ function hook(f, command) {
       is_subagent: true, ticket_id: 'run-evidence:review:r', tool_name: 'Bash', tool_input: { command } }),
   });
 }
-function decision(result) {
+function response(result) {
   expect(result.error).toBeUndefined();
   expect(result.status, result.stderr).toBe(0);
-  return JSON.parse(result.stdout).hookSpecificOutput.permissionDecision;
+  return JSON.parse(result.stdout);
+}
+function decision(result) {
+  return response(result).hookSpecificOutput.permissionDecision;
 }
 function plan(f) {
   const candidate = { version: 1, requirements: [{ id: 'R1', requirement: 'Build the value', workstreams: ['build'] }],
@@ -50,15 +53,15 @@ describe('bounded reads on legacy authority policy paths', () => {
     writeFileSync(f.config, JSON.stringify({ policy: { evidence_scripts: ['verify'], command_profiles: [
       { id: 'measure', command: 'node tool.js --measure', roles: ['reviewer'], effect: 'read' },
     ] } }));
-    expect(decision(hook(f, 'node tool.js --measure'))).toBe('allow');
-    expect(decision(hook(f, 'npm run verify'))).toBe('allow');
+    expect(response(hook(f, 'node tool.js --measure'))).toEqual({});
+    expect(response(hook(f, 'npm run verify'))).toEqual({});
     expect(decision(hook(f, 'npm run unknown'))).toBe('deny');
   });
 
   it.skipIf(process.platform === 'win32')('returns the restrictive floor for FIFO config on the real hook', () => {
     const f = fixture();
     execFileSync('mkfifo', [f.config]);
-    expect(decision(hook(f, 'npm run test'))).toBe('allow');
+    expect(response(hook(f, 'npm run test'))).toEqual({});
     expect(decision(hook(f, 'npm run unknown'))).toBe('deny');
   });
 

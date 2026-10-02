@@ -1,3 +1,8 @@
+import { normalizeLifecycleEvent as neutralNormalize, evaluateLifecyclePolicy as neutralPolicy,
+  parseDeletionCommand as neutralDeletion, pathResolvesWithinClaims as neutralWithin,
+  pathResolvesOutsideProject as neutralOutside } from '../lib/runtime/hooks.js';
+import { widenedTestClaims as neutralTestClaims } from '../lib/runtime/path-scope.js';
+import { readJson as neutralReadJson } from '../lib/runtime/storage.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -495,7 +500,11 @@ function invokeHook(input, cwd) {
     child.on('error', reject);
     child.on('close', (code) => {
       if (code !== 0) reject(new Error(stderr));
-      else resolve(JSON.parse(stdout));
+      else {
+        const response = JSON.parse(stdout);
+        policyInputs.set(response, input);
+        resolve(response);
+      }
     });
     child.stdin.end(`${JSON.stringify(input)}\n`);
   });
@@ -520,8 +529,8 @@ describe('APE v2 hook binary deletion channel (path + role resolution)', () => {
       boundBashCall(dir, 'run-del:build:b', 'rm src/value.js'),
       dir,
     );
-    expect(response.hookSpecificOutput.permissionDecision).toBe('allow');
-    expect(response.hookSpecificOutput.permissionDecisionReason)
+    expect(response).toEqual({});
+    expect(await allowedPolicyReason(response))
       .toBe('deletion authorized by run-del:build:b');
   });
 
@@ -531,7 +540,7 @@ describe('APE v2 hook binary deletion channel (path + role resolution)', () => {
       boundBashCall(dir, 'run-del:build:b', 'git rm --cached src/value.js'),
       dir,
     );
-    expect(response.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(response).toEqual({});
   });
 
   it('denies an rm outside the ticket claims', async () => {
@@ -582,7 +591,7 @@ describe('APE v2 hook binary deletion channel (path + role resolution)', () => {
       boundBashCall(dir, 'run-del:test:t', 'rm __tests__/sample.test.js'),
       dir,
     );
-    expect(test.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(test).toEqual({});
   });
 
   it('denies rm -rf on an out-of-project path', async () => {
@@ -627,8 +636,8 @@ describe('APE v2 hook binary deletion channel (path + role resolution)', () => {
       { ...boundBashCall(dir, 'run-del:build:b', 'rm value.js'), cwd: path.join(dir, 'src') },
       dir,
     );
-    expect(response.hookSpecificOutput.permissionDecision).toBe('allow');
-    expect(response.hookSpecificOutput.permissionDecisionReason)
+    expect(response).toEqual({});
+    expect(await allowedPolicyReason(response))
       .toBe('deletion authorized by run-del:build:b');
   });
 
@@ -746,8 +755,8 @@ describe('APE v2 hook binary deletion main-session guard (is_subagent)', () => {
       boundBashCall(dir, 'run-del:build:b', 'rm src/value.js'),
       dir,
     );
-    expect(response.hookSpecificOutput.permissionDecision).toBe('allow');
-    expect(response.hookSpecificOutput.permissionDecisionReason)
+    expect(response).toEqual({});
+    expect(await allowedPolicyReason(response))
       .toBe('deletion authorized by run-del:build:b');
   });
 });
@@ -820,8 +829,37 @@ describe('APE v2 hook binary deletion channel: `=`-initial targets (finding 3)',
       { ...boundBashCall(dir, 'run-del:build:b', 'rm value.js'), cwd: path.join(dir, 'src') },
       dir,
     );
-    expect(response.hookSpecificOutput.permissionDecision).toBe('allow');
-    expect(response.hookSpecificOutput.permissionDecisionReason)
+    expect(response).toEqual({});
+    expect(await allowedPolicyReason(response))
       .toBe('deletion authorized by run-del:build:b');
   });
 });
+
+const policyInputs = new WeakMap();
+
+// Retain the old authorization-reason assertion through the policy API;
+// neutral host output deliberately carries no permissionDecisionReason.
+async function allowedPolicyReason(response) {
+  const input = policyInputs.get(response);
+  const event = neutralNormalize(input, { CLAUDECODE: '1' });
+  const state = await neutralReadJson(runtimePaths(event.project_dir).active);
+  const ticket = state.tickets?.find((entry) => entry.ticket_id === event.ticket_id) ?? null;
+  const claims = ticket?.role === 'test_writer'
+    ? neutralTestClaims(ticket.test_paths) : ticket?.claimed_paths ?? [];
+  if (event.targets.length) {
+    event.out_of_project = (await Promise.all(event.targets.map((target) =>
+      neutralOutside(event.project_dir, target.target_path)))).every(Boolean);
+    if (ticket) event.path_safe = (await Promise.all(event.targets.map((target) =>
+      neutralWithin(event.project_dir, target.file, claims)))).every(Boolean);
+  }
+  const deletion = neutralDeletion(event.command ?? '');
+  if (deletion && ticket) {
+    const files = deletion.targets.map((target) =>
+      path.relative(event.project_dir, path.resolve(input.cwd ?? event.project_dir, target)));
+    event.deletion = { targets: files, safe: (await Promise.all(files.map((file) =>
+      neutralWithin(event.project_dir, file, claims)))).every(Boolean) };
+  }
+  const result = neutralPolicy(event, { state, ticket });
+  expect(result.decision).toBe('allow');
+  return result.reason;
+}

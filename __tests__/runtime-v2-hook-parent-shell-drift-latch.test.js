@@ -99,7 +99,7 @@ async function inspectGitStatus(dir) {
     tool_input: { command: 'git status' },
   };
   const pre = await invokeHook(dir, { hook_event_name: 'PreToolUse', ...shared });
-  expect(pre).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+  expect(pre).toEqual({});
   git(dir, 'status');
   return invokeHook(dir, { hook_event_name: 'PostToolUse', ...shared });
 }
@@ -153,7 +153,7 @@ describe('a denied parent-shell change cannot become sole-worker evidence at a l
       ['Bash', { command: 'git status' }],
     ]) {
       const response = await invokeHook(dir, { hook_event_name: 'PreToolUse', tool_name, tool_input });
-      expect(response).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+      expect(response).toEqual({});
     }
     expect(await inspectGitStatus(dir)).toEqual({});
     expectDriftBlock(await agentPost(dir));
@@ -170,7 +170,7 @@ describe('a denied parent-shell change cannot become sole-worker evidence at a l
         file_path: path.join(dir, 'src', 'value.js'), old_string: parentChange, new_string: original,
       },
     });
-    expect(repair).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+    expect(repair).toEqual({});
     // Editing to a third value is not evidence that the refused bytes were
     // restored. The result remains denied until exact restoration is observed.
     await writeFile(path.join(dir, 'src', 'value.js'), workerChange);
@@ -217,7 +217,7 @@ describe('a denied parent-shell change cannot become sole-worker evidence at a l
       tool_input: { command: 'opaque-inspection-command' },
     };
     const pre = await invokeHook(dir, { hook_event_name: 'PreToolUse', ...shared });
-    expect(pre).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+    expect(pre).toEqual({});
     expect(await invokeHook(dir, { hook_event_name: 'PostToolUse', ...shared })).toEqual({});
     // Duplicate delivery still refers to the same command observation. It
     // must not fall back to the run baseline or re-diff its old pre snapshot
@@ -263,7 +263,7 @@ describe('a denied parent-shell change cannot become sole-worker evidence at a l
         tool_input: { command },
       };
       const pre = await invokeHook(dir, { hook_event_name: 'PreToolUse', ...shared });
-      expect(pre).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+      expect(pre).toEqual({});
       git(dir, ...command.split(' ').slice(1));
       expect(await readFile(path.join(dir, 'src', 'worker.js'), 'utf8')).toBe(helperChange);
       expectDriftBlock(await invokeHook(dir, { hook_event_name: 'PostToolUse', ...shared }));

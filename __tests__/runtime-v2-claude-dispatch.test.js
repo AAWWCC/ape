@@ -213,8 +213,7 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
       tool_input: toolInput,
     });
 
-    if (toolName.startsWith('mcp__')) expect(response).toEqual({});
-    else expect(decision(response)).toBe('allow');
+    expect(response).toEqual({});
   });
 
   it('prepares a bounded one-time nonce without persisting its plaintext', async () => {
@@ -411,10 +410,10 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
     };
 
     const first = await invokeClaudeHook({ ...base, tool_use_id: 'slow-planning-launch' });
-    expect(decision(first)).toBe('allow');
+    expect(first).toEqual({});
 
     const identicalRetry = await invokeClaudeHook({ ...base, tool_use_id: 'slow-planning-launch' });
-    expect(decision(identicalRetry)).toBe('allow');
+    expect(identicalRetry).toEqual({});
 
     const bound = await invokeClaudeHook({
       hook_event_name: 'SubagentStart',
@@ -447,7 +446,7 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
         model: launchModel(action.dispatch),
       },
     });
-    expect(decision(launch)).toBe('allow');
+    expect(launch).toEqual({});
 
     const { file, intent } = await readOnlyIntent(dir);
     const {
@@ -485,7 +484,7 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
       tool_name: 'Write',
       tool_input: { file_path: path.join(dir, 'tests', 'legacy.test.js'), content: 'test' },
     });
-    expect(decision(write)).toBe('allow');
+    expect(write).toEqual({});
   });
 
   it('denies a prepared intent once its ticket deadline has elapsed', async () => {
@@ -540,7 +539,7 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
         description: 'APE test writer',
       },
     });
-    expect(decision(launch)).toBe('allow');
+    expect(launch).toEqual({});
 
     const started = await invokeClaudeHook({
       hook_event_name: 'SubagentStart',
@@ -567,7 +566,7 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
       tool_name: 'Write',
       tool_input: { file_path: path.join(dir, 'tests', 'new.test.js'), content: 'test' },
     });
-    expect(decision(boundWrite)).toBe('allow');
+    expect(boundWrite).toEqual({});
 
     const forgedWrite = await invokeClaudeHook({
       hook_event_name: 'PreToolUse',
@@ -609,7 +608,7 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
       tool_use_id: 'agent-tool-use-first',
       tool_input: { subagent_type: action.dispatch.agent_type, prompt, model },
     });
-    expect(decision(first)).toBe('allow');
+    expect(first).toEqual({});
 
     // A lost-response retry must repeat the exact host-observed model, not
     // merely another spelling in the same ticket-approved Claude family.
@@ -632,7 +631,7 @@ describe('APE v2 standard Claude Agent dispatch binding', () => {
       tool_use_id: 'agent-tool-use-first',
       tool_input: { subagent_type: action.dispatch.agent_type, prompt, model },
     });
-    expect(decision(identicalLostResponseRetry)).toBe('allow');
+    expect(identicalLostResponseRetry).toEqual({});
 
     const replay = await invokeClaudeHook({
       ...base,
@@ -1262,7 +1261,7 @@ describe('APE v2 standard Claude Agent dispatch through the shipped hook bundle'
         model: launchModel(action.dispatch),
       },
     }, hookBundle);
-    expect(decision(launch)).toBe('allow');
+    expect(launch).toEqual({});
 
     await invokeClaudeHook({
       hook_event_name: 'SubagentStart',
@@ -1281,7 +1280,7 @@ describe('APE v2 standard Claude Agent dispatch through the shipped hook bundle'
       tool_name: 'Write',
       tool_input: { file_path: path.join(dir, 'tests', 'new.test.js'), content: 'test' },
     }, hookBundle);
-    expect(decision(boundWrite)).toBe('allow');
+    expect(boundWrite).toEqual({});
 
     const forgedWrite = await invokeClaudeHook({
       hook_event_name: 'PreToolUse',

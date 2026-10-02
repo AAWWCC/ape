@@ -1156,7 +1156,9 @@ describe('live receipt contract integration', () => {
         draft: preSubmitDraft,
       },
     }, { APE_HOST: 'claude', CLAUDECODE: '1' });
-    expect(preSubmit.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(preSubmit).toEqual({ hookSpecificOutput: {
+      hookEventName: 'PreToolUse', additionalContext: expect.any(String),
+    } });
     expect(JSON.stringify(preSubmit)).not.toContain(preSubmitValue.capability);
 
     const recordValue = await fixture();
@@ -1373,7 +1375,9 @@ describe('live receipt contract integration', () => {
         draft: withSubstitutedCanonical(preSubmitValue),
       },
     }, { APE_HOST: 'claude', CLAUDECODE: '1' });
-    expect(preSubmit.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(preSubmit).toEqual({ hookSpecificOutput: {
+      hookEventName: 'PreToolUse', additionalContext: expect.any(String),
+    } });
     expect(JSON.stringify(preSubmit)).not.toContain(preSubmitValue.capability);
 
     const validationValue = await fixture();
@@ -2252,11 +2256,10 @@ describe('live receipt contract integration', () => {
         draft: draft(value.ticket, value.capability, 'not-a-status'),
       },
     }, { APE_HOST: 'claude', CLAUDECODE: '1' });
-    expect(response.hookSpecificOutput).toMatchObject({
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'allow',
-    });
-    expect(response.hookSpecificOutput.permissionDecisionReason).toMatch(/status.*not-a-status/i);
+    expect(response).toEqual({ hookSpecificOutput: {
+      hookEventName: 'PreToolUse', additionalContext: expect.any(String),
+    } });
+    expect(response.hookSpecificOutput.additionalContext).toMatch(/status.*not-a-status/i);
   });
 
   it('keeps validation, real hook, and record corrections identical', async () => {
@@ -2286,8 +2289,8 @@ describe('live receipt contract integration', () => {
     });
     expect(recorded.corrections).toEqual(validation.corrections);
     for (const correction of validation.corrections) {
-      expect(hook.hookSpecificOutput.permissionDecisionReason).toContain(correction.field);
-      expect(hook.hookSpecificOutput.permissionDecisionReason).toContain(correction.issue);
+      expect(hook.hookSpecificOutput.additionalContext).toContain(correction.field);
+      expect(hook.hookSpecificOutput.additionalContext).toContain(correction.issue);
     }
   });
 
@@ -2392,9 +2395,9 @@ describe('live receipt contract integration', () => {
         failure_domain: 'orchestration',
       });
       expect(recorded.corrections).toEqual(validation.corrections);
-      expect(hook.hookSpecificOutput.permissionDecisionReason)
+      expect(hook.hookSpecificOutput.additionalContext)
         .toContain(validation.corrections[0].field);
-      expect(hook.hookSpecificOutput.permissionDecisionReason)
+      expect(hook.hookSpecificOutput.additionalContext)
         .toContain(validation.corrections[0].issue);
     }
   }, 30_000);

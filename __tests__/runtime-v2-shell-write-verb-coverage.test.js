@@ -154,10 +154,10 @@ function agentPostEvent(dir) {
   };
 }
 
-// Current Claude and Codex hook contracts share the PreToolUse
-// hookSpecificOutput shape and the post-event top-level block shape.
+// Both hosts use hookSpecificOutput for PreToolUse denials and neutral success;
+// post-event denials use the top-level block shape.
 function preDecision(response) {
-  return response.hookSpecificOutput.permissionDecision;
+  return response.hookSpecificOutput?.permissionDecision;
 }
 
 function postSurfacedDrift(response) {
@@ -171,6 +171,7 @@ async function mainSessionMutationOutcome(dir, command, mutate, host = 'claude')
   if (preDecision(pre) === 'deny') {
     return { interdicted: true, stage: 'pre-deny', pre, post: null };
   }
+  expect(pre).toEqual({});
   await mutate(dir);
   const post = await invokeHook(bashEvent('PostToolUse', dir, command), dir, host);
   return { interdicted: postSurfacedDrift(post), stage: 'post', pre, post };
@@ -278,7 +279,7 @@ describe('APE v2 shell-write verb coverage guardrails', () => {
     const dir = await project();
     for (const command of ['git status', 'git diff', 'git log -1']) {
       const response = await invokeHook(bashEvent('PreToolUse', dir, command), dir);
-      expect(preDecision(response, 'claude'), command).toBe('allow');
+      expect(response, command).toEqual({});
     }
   });
 
@@ -297,7 +298,7 @@ describe('APE v2 shell-write verb coverage guardrails', () => {
     const dir = await ungovernedProject();
     const command = 'touch src/new-file.js';
     const pre = await invokeHook(bashEvent('PreToolUse', dir, command), dir);
-    expect(preDecision(pre, 'claude')).toBe('allow');
+    expect(pre).toEqual({});
     await mkdir(path.join(dir, 'src'), { recursive: true });
     await createClaimedFile(dir);
     const post = await invokeHook(bashEvent('PostToolUse', dir, command), dir);
@@ -310,7 +311,7 @@ describe('APE v2 shell-write verb coverage guardrails', () => {
     const dir = await project('completed');
     const command = 'git apply changes.diff';
     const pre = await invokeHook(bashEvent('PreToolUse', dir, command), dir);
-    expect(preDecision(pre, 'claude')).toBe('allow');
+    expect(pre).toEqual({});
     await rewriteClaimedFile(dir);
     const post = await invokeHook(bashEvent('PostToolUse', dir, command), dir);
     expect(post).toEqual({});

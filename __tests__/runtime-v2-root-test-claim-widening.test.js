@@ -1,3 +1,8 @@
+import { normalizeLifecycleEvent as neutralNormalize, evaluateLifecyclePolicy as neutralPolicy,
+  parseDeletionCommand as neutralDeletion, pathResolvesWithinClaims as neutralWithin,
+  pathResolvesOutsideProject as neutralOutside } from '../lib/runtime/hooks.js';
+import { widenedTestClaims as neutralTestClaims } from '../lib/runtime/path-scope.js';
+import { readJson as neutralReadJson } from '../lib/runtime/storage.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -121,7 +126,11 @@ function invokeHook(input, cwd) {
     child.on('error', reject);
     child.on('close', (code) => {
       if (code !== 0) reject(new Error(stderr));
-      else resolve(JSON.parse(stdout));
+      else {
+        const response = JSON.parse(stdout);
+        policyInputs.set(response, input);
+        resolve(response);
+      }
     });
     child.stdin.end(`${JSON.stringify(input)}\n`);
   });
@@ -149,8 +158,8 @@ describe('APE v2 hook binary: root-level test claim resolution', () => {
       boundWriteCall(dir, 'run-root:test:root', 'server.test.js'),
       dir,
     );
-    expect(response.hookSpecificOutput.permissionDecision).toBe('allow');
-    expect(response.hookSpecificOutput.permissionDecisionReason)
+    expect(response).toEqual({});
+    expect(await allowedPolicyReason(response))
       .toMatch(/write authorized by run-root:test:root/);
   });
 
@@ -183,8 +192,8 @@ describe('APE v2 hook binary: root-level test claim resolution', () => {
       boundWriteCall(dir, 'run-root:test:nested', 'tests/extra.test.js'),
       dir,
     );
-    expect(response.hookSpecificOutput.permissionDecision).toBe('allow');
-    expect(response.hookSpecificOutput.permissionDecisionReason)
+    expect(response).toEqual({});
+    expect(await allowedPolicyReason(response))
       .toMatch(/write authorized by run-root:test:nested/);
   });
 
@@ -205,8 +214,37 @@ describe('APE v2 hook binary: root-level test claim resolution', () => {
       },
       dir,
     );
-    expect(response.hookSpecificOutput.permissionDecision).toBe('allow');
-    expect(response.hookSpecificOutput.permissionDecisionReason)
+    expect(response).toEqual({});
+    expect(await allowedPolicyReason(response))
       .toBe('deletion authorized by run-root:test:root');
   });
 });
+
+const policyInputs = new WeakMap();
+
+// Retain the old authorization-reason assertion through the policy API;
+// neutral host output deliberately carries no permissionDecisionReason.
+async function allowedPolicyReason(response) {
+  const input = policyInputs.get(response);
+  const event = neutralNormalize(input, { CLAUDECODE: '1' });
+  const state = await neutralReadJson(runtimePaths(event.project_dir).active);
+  const ticket = state.tickets?.find((entry) => entry.ticket_id === event.ticket_id) ?? null;
+  const claims = ticket?.role === 'test_writer'
+    ? neutralTestClaims(ticket.test_paths) : ticket?.claimed_paths ?? [];
+  if (event.targets.length) {
+    event.out_of_project = (await Promise.all(event.targets.map((target) =>
+      neutralOutside(event.project_dir, target.target_path)))).every(Boolean);
+    if (ticket) event.path_safe = (await Promise.all(event.targets.map((target) =>
+      neutralWithin(event.project_dir, target.file, claims)))).every(Boolean);
+  }
+  const deletion = neutralDeletion(event.command ?? '');
+  if (deletion && ticket) {
+    const files = deletion.targets.map((target) =>
+      path.relative(event.project_dir, path.resolve(input.cwd ?? event.project_dir, target)));
+    event.deletion = { targets: files, safe: (await Promise.all(files.map((file) =>
+      neutralWithin(event.project_dir, file, claims)))).every(Boolean) };
+  }
+  const result = neutralPolicy(event, { state, ticket });
+  expect(result.decision).toBe('allow');
+  return result.reason;
+}

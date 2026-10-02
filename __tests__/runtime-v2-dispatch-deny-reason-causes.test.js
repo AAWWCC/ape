@@ -183,7 +183,7 @@ async function launchAndBind(dir, { sessionId, agentId }) {
     tool_name: 'Agent',
     tool_input: { subagent_type: action.dispatch.agent_type, prompt, model: launchModel(action.dispatch) },
   });
-  expect(decision(launch)).toBe('allow');
+  expect(launch).toEqual({});
 
   const started = await invokeClaudeHook({
     hook_event_name: 'SubagentStart',
@@ -395,7 +395,7 @@ describe('APE v2 Claude subagent binding denial names its cause', () => {
         fileName: 'admitted.test.js',
       }),
     );
-    expect(decision(boundWrite)).toBe('allow');
+    expect(boundWrite).toEqual({});
 
     // A payload denied today (an identity with no prior binding at all) must
     // still be denied.

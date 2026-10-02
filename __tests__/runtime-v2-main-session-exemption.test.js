@@ -13,7 +13,7 @@ import { evaluateLifecyclePolicy } from '../lib/runtime/hooks.js';
 // attaches no agent identity, so it must no longer qualify for the pre-policy
 // main-session exemption in bin/ape-hook.mjs and must end in a deny at the
 // host-neutral one-owner branch. Genuine main-session calls (no binding at
-// all) keep the exemption byte-for-byte — the recovery-deadlock guarantee —
+// all) keep the exemption with neutral output — the recovery-deadlock guarantee —
 // and the widening never leaks past CONTROL_PLANE_TOOLS, boundary events, or
 // an empty-string binding.
 
@@ -110,7 +110,9 @@ describe('APE v2 identity-less bound control-plane calls (unit)', () => {
           },
           { state: { status }, ticket: null },
         );
-        expect(result.decision, `${tool} @ ${status}`).toBe('allow');
+        expect(result, `${tool} @ ${status}`).toEqual({
+          decision: 'allow', reason: 'explicitly safe non-writing tool',
+        });
       }
     }
     const codexManaged = evaluateLifecyclePolicy(
@@ -173,7 +175,6 @@ const hookBinary = path.join(root, 'bin', 'ape-hook.mjs');
 const cleanups = [];
 
 const PENDING_TICKET_ID = 'run-1:build:ticket-1';
-const EXEMPTION_REASON = 'APE control-plane MCP call is exempt from the stage guard';
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -272,10 +273,7 @@ function invokeHook(input, env = codexEnv()) {
   });
 }
 
-// Claude PreToolUse responses ride in hookSpecificOutput. Codex deny responses
-// carry a decision; neutral JSON is the documented allow shape.
-const claudeDecision = (response) => response.hookSpecificOutput.permissionDecision;
-const claudeReason = (response) => response.hookSpecificOutput.permissionDecisionReason;
+// Both hosts continue neutrally; this helper classifies denial cases only.
 const codexDecision = (response) =>
   response.hookSpecificOutput?.permissionDecision === 'deny' || response.decision === 'block'
     ? 'deny'
@@ -310,8 +308,8 @@ describe('APE v2 main-session exemption binding hardening (source hook binary)',
   });
 
   // GREEN guardrail G1: a genuine main-session control-plane call — no
-  // binding — keeps the exemption byte-for-byte while the run is running.
-  it('keeps the claude main-session exemption byte-for-byte while running (G1)', async () => {
+  // binding — keeps the exemption with neutral output while the run is running.
+  it('keeps the claude main-session exemption neutral while running (G1)', async () => {
     const dir = await project('running');
     for (const tool of CONTROL_TOOLS) {
       const response = await invokeHook({
@@ -320,14 +318,13 @@ describe('APE v2 main-session exemption binding hardening (source hook binary)',
         tool_name: tool,
         tool_input: { action: 'record' },
       }, claudeEnv());
-      expect(claudeDecision(response), tool).toBe('allow');
-      expect(claudeReason(response), tool).toBe(EXEMPTION_REASON);
+      expect(response, tool).toEqual({});
     }
   });
 
   // GREEN guardrail G1 (blocked arm): recovery must never deadlock — the
   // exemption holds identically while the run is blocked.
-  it('keeps the claude main-session exemption byte-for-byte while blocked (G1)', async () => {
+  it('keeps the claude main-session exemption neutral while blocked (G1)', async () => {
     const dir = await project('blocked');
     for (const tool of CONTROL_TOOLS) {
       const response = await invokeHook({
@@ -336,8 +333,7 @@ describe('APE v2 main-session exemption binding hardening (source hook binary)',
         tool_name: tool,
         tool_input: { action: 'regate' },
       }, claudeEnv());
-      expect(claudeDecision(response), tool).toBe('allow');
-      expect(claudeReason(response), tool).toBe(EXEMPTION_REASON);
+      expect(response, tool).toEqual({});
     }
   });
 
@@ -351,7 +347,7 @@ describe('APE v2 main-session exemption binding hardening (source hook binary)',
       tool_name: 'mcp__plugin_ape_ape__ape_run',
       tool_input: { action: 'record' },
     }, claudeEnv());
-    expect(claudeDecision(response)).toBe('allow');
+    expect(response).toEqual({});
   });
 
   // GREEN guardrail G3: the codex main session (no binding, no identity)
@@ -364,7 +360,7 @@ describe('APE v2 main-session exemption binding hardening (source hook binary)',
       tool_name: 'mcp__plugin_ape_ape__ape_run',
       tool_input: { action: 'record' },
     });
-    expect(codexDecision(response)).toBe('allow');
+    expect(response).toEqual({});
   });
 
   // GREEN guardrail G8: with no active.json at all there is no run to guard —
@@ -379,6 +375,6 @@ describe('APE v2 main-session exemption binding hardening (source hook binary)',
       tool_name: 'mcp__plugin_ape_ape__ape_run',
       tool_input: { action: 'next' },
     });
-    expect(codexDecision(response)).toBe('allow');
+    expect(response).toEqual({});
   });
 });

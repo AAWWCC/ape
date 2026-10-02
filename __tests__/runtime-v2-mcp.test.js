@@ -1121,7 +1121,7 @@ describe('APE v2 MCP public surface', () => {
           model: action.dispatch.model.model,
         },
       });
-      expect(launch.hookSpecificOutput.permissionDecision).toBe('allow');
+      expect(launch).toEqual({});
       const started = await invokeClaudeHook({
         hook_event_name: 'SubagentStart',
         project_dir: scratch,

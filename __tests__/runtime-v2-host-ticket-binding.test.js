@@ -104,7 +104,7 @@ describe('APE v2 installed hook ticket binding', () => {
         ticket_id: 'run-1:build:ticket-1',
       }, 'codex');
 
-      expect(decision(response, 'codex')).toBe('allow');
+      expect(response).toEqual({});
     },
   );
 
@@ -220,7 +220,7 @@ describe('APE v2 installed hook ticket binding', () => {
     // get through, or the run can never be attributed or aborted from-session.
     for (const tool of ['mcp__plugin_ape_ape__ape_run', 'ape_run', 'mcp__plugin_ape_ape__ape_config']) {
       const allowed = await invokeHook({ ...base, tool_name: tool, tool_input: { action: 'record' } }, 'claude');
-      expect(decision(allowed, 'claude'), tool).toBe('allow');
+      expect(allowed, tool).toEqual({});
     }
   });
 });
