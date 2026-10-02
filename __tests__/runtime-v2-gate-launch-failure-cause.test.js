@@ -57,7 +57,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // anchor the fix must keep true — post-fix, both must hold simultaneously.
 // ===========================================================================
 
-const flags = vi.hoisted(() => ({ forceRunnerEntryMissing: false }));
+const flags = vi.hoisted(() => ({ forceRunnerEntryMissing: false, failJobWrite: false, blockedJob: null }));
+
+vi.mock('../lib/runtime/storage.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, async atomicWriteJson(file, value) {
+    // Fault the real generation-specific destination immediately before the
+    // write instead of relying on the old cache-derived scratch filename.
+    if (flags.failJobWrite && String(file).endsWith('.job.json')) {
+      await mkdir(file, { recursive: true });
+      flags.blockedJob = file;
+    }
+    return actual.atomicWriteJson(file, value);
+  } };
+});
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal();
@@ -81,7 +94,6 @@ vi.mock('node:fs', async (importOriginal) => {
 import { startGateSuite } from '../lib/runtime/gates.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { currentTreeSha } from '../lib/runtime/git.js';
-import { sha256 } from '../lib/runtime/canonical.js';
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 });
 
@@ -90,6 +102,8 @@ const OLD_GENERIC_MESSAGE = 'gate runner entry could not be resolved; cannot run
 const cleanups = [];
 afterEach(async () => {
   flags.forceRunnerEntryMissing = false;
+  flags.failJobWrite = false;
+  flags.blockedJob = null;
   await Promise.all(
     cleanups
       .splice(0)
@@ -156,15 +170,13 @@ describe('gate-launch failure cause is surfaced, not discarded (gate-launch-fail
         head_tree_sha: treeSha,
       }],
     });
-    const cacheKey = `${treeSha}:${sha256({ command: suiteCommand })}`;
-    const stem = sha256(cacheKey);
-    const jobFile = path.join(paths.runtime, 'gate-suite', `${stem}.job.json`);
     // Renaming a file onto an existing DIRECTORY always fails (EISDIR on
     // POSIX), deterministically and independent of privilege level — never
     // bypassable by a root test runner, unlike a permission-based block.
-    await mkdir(jobFile, { recursive: true });
+    flags.failJobWrite = true;
 
     const jobWriteResult = await startGateSuite(dir, paths, state, config);
+    expect(flags.blockedJob, 'the write fault must hit the actual job destination').toBeTruthy();
     expect(jobWriteResult.watch).toBeUndefined();
     expect(jobWriteResult.hit).toBeTruthy();
     const jobWriteMessage = jobWriteResult.hit.full.verification.output;
@@ -178,7 +190,8 @@ describe('gate-launch failure cause is surfaced, not discarded (gate-launch-fail
     expect(jobWriteMessage).toMatch(/EISDIR|EPERM/);
     expect(jobWriteMessage).not.toBe(OLD_GENERIC_MESSAGE);
 
-    await rm(jobFile, { recursive: true, force: true });
+    flags.failJobWrite = false;
+    await rm(flags.blockedJob, { recursive: true, force: true });
 
     // --- (2) genuine runner-entry resolution failure -----------------------
     flags.forceRunnerEntryMissing = true;

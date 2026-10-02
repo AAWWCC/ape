@@ -97,6 +97,7 @@ function stateFor(treeSha, {
   regateAttempts = undefined,
 } = {}) {
   return {
+    run_id: 'run-gates-verification',
     lane,
     high_risk: highRisk,
     ...(policy === undefined ? {} : { policy }),

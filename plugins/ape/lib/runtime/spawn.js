@@ -1,6 +1,9 @@
 import { spawn } from 'node:child_process';
+import { createHmac, randomUUID } from 'node:crypto';
+import { createServer, createConnection } from 'node:net';
+import path from 'node:path';
 import { constants, realpathSync } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { open, rename } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { lstatFile, statFileHandle } from './file-stats.js';
@@ -9,7 +12,7 @@ import { lstatFile, statFileHandle } from './file-stats.js';
 // can inspect manifests without acquiring the runtime's storage dependency graph.
 export async function readBoundedRegularFileUtf8(file, { maxBytes = 256 * 1024 } = {}) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new RangeError('invalid file byte limit');
-  const regular = (metadata) => metadata.isFile() && !metadata.isSymbolicLink() && metadata.size <= maxBytes;
+  const regular = (metadata) => metadata.isFile() && !metadata.isSymbolicLink() && metadata.nlink === 1 && metadata.size <= maxBytes;
   const same = (left, right) => ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs']
     .every((key) => left[key] === right[key]);
   const unsafe = () => Object.assign(new Error('file must be a stable bounded regular file'), {
@@ -40,6 +43,207 @@ export async function readBoundedRegularFileUtf8(file, { maxBytes = 256 * 1024 }
 const DEFAULT_KILL_GRACE_MS = 10_000;
 const DEFAULT_DRAIN_MS = 5_000;
 const SUITE_SUPERVISOR_SENTINEL = '--ape-suite-supervisor';
+
+// The proof broker is outside the suite's kill domain and outlives its
+// launching host. Disk PIDs are diagnostic only; a fresh private challenge
+// authenticates recovery. Every execution is fenced by a durable reservation.
+const GATE_BROKER_SENTINEL = '--ape-gate-proof-broker';
+const ownershipMac = (secret, value) => createHmac('sha256', secret).update(JSON.stringify(value)).digest('hex');
+
+async function writeOwnershipFile(file, value) {
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  const handle = await open(temporary, 'wx', 0o600);
+  try { await handle.writeFile(JSON.stringify(value)); await handle.sync(); }
+  finally { await handle.close(); }
+  await rename(temporary, file);
+  if (process.platform !== 'win32') {
+    const dir = await open(path.dirname(file), 'r');
+    try { await dir.sync(); } finally { await dir.close(); }
+  }
+}
+
+export async function readGateOwnership(file) {
+  return JSON.parse(await readBoundedRegularFileUtf8(file, { maxBytes: 1024 * 1024 }));
+}
+
+// The caller has validated the project/run and derived paths before invoking
+// this transport. A recycled TCP port cannot answer the generation challenge.
+export function queryGateBroker(record, action = 'inspect') {
+  return new Promise((resolve) => {
+    const challenge = randomUUID();
+    const request = { challenge, generation: record.generation, action };
+    let socket, text = '', done = false;
+    const finish = (value) => { if (done) return; done = true; clearTimeout(timer); socket?.destroy(); resolve(value); };
+    const timer = setTimeout(() => finish(null), 1000);
+    if (!Number.isInteger(record.port) || record.port < 1 || record.port > 65535 || typeof record.secret !== 'string') return finish(null);
+    socket = createConnection({ host: '127.0.0.1', port: record.port });
+    socket.on('error', () => finish(null));
+    socket.on('connect', () => socket.write(JSON.stringify({ ...request, mac: ownershipMac(record.secret, request) }) + '\n'));
+    socket.on('data', (chunk) => {
+      text += chunk;
+      if (text.length > 1024 * 1024) return finish(null);
+      if (!text.includes('\n')) return;
+      try {
+        const message = JSON.parse(text.trim());
+        const expected = ownershipMac(record.secret, { challenge, generation: record.generation, payload: message.payload });
+        finish(message.mac === expected ? message.payload : null);
+      } catch { finish(null); }
+    });
+  });
+}
+
+export async function readGateProof(record) {
+  try {
+    const proof = await readGateOwnership(record.proof_file);
+    if (proof.generation !== record.generation || proof.mac !== ownershipMac(record.secret, proof.payload)) return null;
+    return proof.payload;
+  } catch { return null; }
+}
+
+// Spawned only by the registered runner, with an IPC lifeline. The launch
+// owner can disappear after permission without destroying recoverable work;
+// loss of the runner instead stops the suite and publishes a separate proof.
+async function runGateProofBroker() {
+  let accepted = false;
+  process.once('message', async (input) => {
+    const message = /** @type {any} */ (input);
+    if (accepted || message?.type !== 'reserve' || typeof message.job_file !== 'string') return process.exit(1);
+    accepted = true;
+    let server;
+    const cancellation = new AbortController();
+    process.on('disconnect', () => cancellation.abort());
+    process.on('message', (m) => { if ((/** @type {any} */ (m))?.type === 'stop') cancellation.abort(); });
+    try {
+      const job = await readGateOwnership(message.job_file);
+      const record = await readGateOwnership(job.ownership_file);
+      if (record.phase !== 'reserved' || record.generation !== job.nonce || record.secret !== message.secret ||
+          record.host !== hostname() || record.project_dir !== job.project_dir ||
+          record.watch.job_file !== message.job_file || record.run_id !== job.run_id ||
+          job.artifact_file !== record.watch.artifact_file || job.heartbeat_file !== record.watch.heartbeat_file ||
+          JSON.stringify(job.plan) !== JSON.stringify(record.watch.plan)) throw new Error('ownership reservation mismatch');
+      record.watch.pid = message.runner_pid;
+      record.broker_pid = process.pid;
+      record.phase = 'registered';
+      let proof = null;
+      server = createServer((socket) => {
+        let input = '';
+        socket.setTimeout(1000, () => socket.destroy());
+        socket.on('error', () => {});
+        socket.on('data', (chunk) => {
+          input += chunk;
+          if (input.length > 4096) return socket.destroy();
+          if (!input.includes('\n')) return;
+          try {
+            const m = JSON.parse(input.trim());
+            const request = { challenge: m.challenge, generation: m.generation, action: m.action };
+            if (typeof m.challenge !== 'string' || m.challenge.length > 100 || m.generation !== record.generation ||
+                m.mac !== ownershipMac(record.secret, request)) return socket.destroy();
+            if (m.action === 'stop') cancellation.abort();
+            const payload = { watch: record.watch, generation: record.generation, proof };
+            socket.end(JSON.stringify({ payload, mac: ownershipMac(record.secret, { challenge: m.challenge, generation: record.generation, payload }) }) + '\n');
+          } catch { socket.destroy(); }
+        });
+      });
+      await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('invalid broker endpoint');
+      record.port = address.port;
+      await writeOwnershipFile(job.ownership_file, record);
+      const permitted = new Promise((resolve) => {
+        process.once('message', (input) => {
+          const m = /** @type {any} */ (input);
+          resolve(m?.type === 'execute' && m.generation === record.generation);
+        });
+        process.once('disconnect', () => resolve(false));
+      });
+      process.send?.({ type: 'registered', generation: record.generation });
+      const permission = await permitted;
+      const latest = await readGateOwnership(job.ownership_file);
+      if (latest.generation !== record.generation || latest.secret !== record.secret || latest.broker_pid !== process.pid) throw new Error('ownership changed before execution');
+      const started = Date.now();
+      const result = permission && !cancellation.signal.aborted
+        ? await spawnWithTimeout(job.plan.command, job.plan.args ?? [], {
+          cwd: job.suite_cwd ?? job.project_dir, shell: job.plan.shell === true,
+          supervise: true, signal: cancellation.signal, timeout_ms: job.timeout_ms,
+          collect: 'combined', max_output: 200_000,
+          env: { APE_GATE_RUNNER_JOB: undefined },
+        })
+        : { exit_code: null, timed_out: false, aborted: true, combined: '', spawn_error: null,
+          cleanup: { status: 'confirmed', cause: 'execution permission was not issued' } };
+      const duration = Date.now() - started;
+      const passed = result.cleanup?.status === 'confirmed' && !result.spawn_error && result.exit_code === 0 && !result.timed_out && !result.aborted;
+      const verification = { passed, exit_code: result.exit_code, duration_ms: duration,
+        output: result.spawn_error ? result.spawn_error.message : result.combined,
+        tooling_failure: Boolean(result.spawn_error),
+        ...(result.timed_out ? { timed_out: true } : {}), ...(result.aborted ? { aborted: true } : {}) };
+      proof = { cleanup: result.cleanup ?? { status: 'unknown', cause: 'missing containment proof' },
+        artifact: { version: 1, run_id: job.run_id, nonce: job.nonce, cache_key: job.cache_key,
+          passed, duration_ms: duration, verification, recorded_at: new Date().toISOString() },
+        retry: result.aborted === true };
+      await writeOwnershipFile(record.proof_file, { generation: record.generation, payload: proof, mac: ownershipMac(record.secret, proof) });
+      await writeOwnershipFile(job.artifact_file, proof.artifact);
+      process.send?.({ type: 'finished', generation: record.generation }, () => {});
+    } catch (error) {
+      process.send?.({ type: 'broker-error', cause: String(error?.message ?? error).slice(0, 1024) }, () => {});
+    } finally {
+      server?.close();
+      if (process.connected) process.disconnect();
+    }
+  });
+}
+
+export async function runOwnedGateJob(jobFile, job) {
+  const record = await readGateOwnership(job.ownership_file);
+  if (record.phase !== 'reserved' || record.generation !== job.nonce || record.watch.job_file !== jobFile) return;
+  const broker = spawn(process.execPath, [resolveSuiteSupervisorEntry(), GATE_BROKER_SENTINEL], {
+    cwd: job.project_dir, detached: true, windowsHide: true,
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    env: { ...process.env, APE_GATE_RUNNER_JOB: undefined },
+  });
+  let beatRunning = null;
+  const beat = () => {
+    if (!beatRunning) beatRunning = writeOwnershipFile(job.heartbeat_file, { pid: process.pid, beat_at: Date.now() })
+      .catch(() => {}).finally(() => { beatRunning = null; });
+  };
+  beat();
+  const heartbeat = setInterval(beat, job.heartbeat_ms ?? 5000);
+  const stop = () => { if (broker.connected) broker.send({ type: 'stop' }, () => {}); };
+  process.on('SIGTERM', stop);
+  process.on('SIGINT', stop);
+  await new Promise((resolve) => {
+    let permitted = false;
+    const timer = setTimeout(() => { if (!permitted && broker.connected) broker.disconnect(); }, 30_000);
+    broker.once('error', () => { clearTimeout(timer); resolve(); });
+    broker.once('exit', () => { clearTimeout(timer); resolve(); });
+    process.once('disconnect', () => { if (!permitted && broker.connected) broker.disconnect(); });
+    broker.on('message', (input) => {
+      const m = /** @type {any} */ (input);
+      if (m?.generation !== job.nonce) return;
+      if (m.type === 'registered') {
+        if (!process.connected) { broker.disconnect(); return; }
+        process.once('message', (input) => {
+          const permission = /** @type {any} */ (input);
+          if (permission?.type !== 'execute' || permission.generation !== job.nonce) { broker.disconnect(); return; }
+          permitted = true;
+          clearTimeout(timer);
+          broker.send(permission);
+          process.disconnect();
+        });
+        process.send?.(m);
+      }
+    });
+    broker.once('spawn', () => broker.send({ type: 'reserve', job_file: jobFile, secret: record.secret, runner_pid: process.pid }));
+  });
+  clearInterval(heartbeat);
+  if (beatRunning) await beatRunning;
+  process.off('SIGTERM', stop);
+  process.off('SIGINT', stop);
+}
+
+if (process.argv[2] === GATE_BROKER_SENTINEL && process.send) {
+  try { if (realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) runGateProofBroker(); }
+  catch { /* only the unbundled broker entry may execute */ }
+}
 
 // Source callers live in lib/runtime; bundled callers live in dist. Always
 // launch the packaged unbundled helper: import.meta.url itself names the MCP
@@ -174,6 +378,7 @@ function killTree(child, signal) {
 // the kill. Callers whose results feed sha256 hashes must translate it to an
 // absent-when-false field so every non-timeout hash stays byte-identical.
 export function spawnWithTimeout(command, args, options = {}) {
+  if (options.supervise === true && process.platform === 'win32') return spawnWindowsOwned(command, args ?? [], options);
   const killGraceMs = options.kill_grace_ms ?? DEFAULT_KILL_GRACE_MS;
   const drainMs = options.drain_ms ?? DEFAULT_DRAIN_MS;
   const combinedMode = options.collect !== 'separate';
@@ -226,7 +431,7 @@ export function spawnWithTimeout(command, args, options = {}) {
     let failsafeTimer = null;
     let drainTimer = null;
 
-    const settle = (spawnError = null) => {
+    const settle = async (spawnError = null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutTimer);
@@ -237,6 +442,27 @@ export function spawnWithTimeout(command, args, options = {}) {
       if (supervised && child.connected) {
         try { child.disconnect(); } catch { /* already disconnected */ }
       }
+      let cleanup;
+      if (supervised) {
+        cleanup = { status: 'unknown', cause: 'process-group retirement was not observed' };
+        if (!child.pid) cleanup = { status: 'confirmed', cause: 'no process was created' };
+        else {
+          const deadline = Date.now() + Math.max(1000, killGraceMs);
+          do {
+            try { process.kill(-child.pid, 0); }
+            catch (error) {
+              cleanup = error?.code === 'ESRCH'
+                ? { status: 'confirmed', cause: 'owned process group is empty' }
+                : { status: 'unknown', cause: `process-group query failed (${error?.code ?? 'unknown'})` };
+              if (error?.code === 'ESRCH') break;
+              // A denied probe supplies no retirement evidence. Keep probing
+              // within the same bounded retirement window: only ESRCH can
+              // confirm emptiness, and a persistent denial stays unknown.
+            }
+            await sleep(10);
+          } while (Date.now() < deadline);
+        }
+      }
       resolve({
         exit_code: completion ? completion.exit_code : exitInfo?.code ?? null,
         signal: completion ? completion.signal : exitInfo?.signal ?? null,
@@ -246,6 +472,7 @@ export function spawnWithTimeout(command, args, options = {}) {
         stderr,
         combined,
         spawn_error: spawnError ?? supervisorError,
+        ...(cleanup ? { cleanup } : {}),
       });
     };
     const collect = (chunk, stream) => {
@@ -417,6 +644,209 @@ export function spawnWithTimeout(command, args, options = {}) {
   });
 }
 
+// Fixed interop program, compiled in memory by the built-in Windows
+// PowerShell. Command data arrives as JSON on private stdin, never as code.
+// JOB_LIST places the process in its job atomically at creation; HANDLE_LIST
+// prevents the job and control handles from reaching ordinary descendants.
+const WINDOWS_JOB_SOURCE = String.raw`
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Diagnostics;
+public static class ApeOwnedJob {
+  [StructLayout(LayoutKind.Sequential)] struct IO { public ulong a,b,c,d,e,f; }
+  [StructLayout(LayoutKind.Sequential)] struct BasicLimit {
+    public long processTime,jobTime; public uint flags; public UIntPtr minWS,maxWS;
+    public uint active; public UIntPtr affinity; public uint priority,scheduling;
+  }
+  [StructLayout(LayoutKind.Sequential)] struct Limit {
+    public BasicLimit basic; public IO io; public UIntPtr processMemory,jobMemory,peakProcess,peakJob;
+  }
+  [StructLayout(LayoutKind.Sequential)] struct Accounting {
+    public long user,kernel,periodUser,periodKernel; public uint faults,total,active,terminated;
+  }
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] struct Startup {
+    public int cb; public string reserved,desktop,title; public uint x,y,xsize,ysize,xchars,ychars,fill,flags;
+    public ushort show,reservedSize; public IntPtr reservedData,input,output,error;
+  }
+  [StructLayout(LayoutKind.Sequential)] struct StartupEx { public Startup start; public IntPtr attributes; }
+  [StructLayout(LayoutKind.Sequential)] struct ProcessInfo { public IntPtr process,thread; public uint pid,tid; }
+  [StructLayout(LayoutKind.Sequential)] struct Security { public int length; public IntPtr descriptor; public int inherit; }
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateJobObjectW(IntPtr security,string name);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job,int info,ref Limit value,int size);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job,int info,out Accounting value,int size,IntPtr returned);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateJobObject(IntPtr job,uint code);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool InitializeProcThreadAttributeList(IntPtr list,int count,uint flags,ref IntPtr size);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool UpdateProcThreadAttribute(IntPtr list,uint flags,IntPtr attribute,IntPtr value,IntPtr size,IntPtr previous,IntPtr returned);
+  [DllImport("kernel32.dll")] static extern void DeleteProcThreadAttributeList(IntPtr list);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool CreateProcessW(string app,StringBuilder command,IntPtr processSecurity,IntPtr threadSecurity,bool inherit,uint flags,IntPtr env,string cwd,ref StartupEx startup,out ProcessInfo info);
+  [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int kind);
+  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool DuplicateHandle(IntPtr process,IntPtr source,IntPtr target,out IntPtr copy,uint access,bool inherit,uint options);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateFileW(string name,uint access,uint share,ref Security security,uint creation,uint flags,IntPtr template);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle,uint ms);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr process,out uint code);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  static Exception Failure(string operation) { return new Exception(operation + " failed (" + Marshal.GetLastWin32Error() + ")"); }
+  static string Quote(string value) {
+    if (value.Length>0 && value.IndexOfAny(new char[]{' ','\t','\n','\v','"'})<0) return value;
+    var b = new StringBuilder("\""); int slashes=0;
+    foreach(char c in value) { if(c=='\\') { slashes++; continue; }
+      if(c=='"') { b.Append('\\',slashes*2+1); b.Append(c); }
+      else { b.Append('\\',slashes); b.Append(c); } slashes=0;
+    }
+    b.Append('\\',slashes*2); return b.Append('"').ToString();
+  }
+  public sealed class Result {
+    public object exit_code=null; public bool timed_out=false,aborted=false;
+    public string status="unknown",cause="completion proof unavailable",error=null;
+  }
+  static volatile bool disconnected;
+  public static Result Run(string command,string[] args,bool shell,string cwd,int timeout,int cleanupMs) {
+    var r=new Result(); IntPtr job=IntPtr.Zero,list=IntPtr.Zero,jobValue=IntPtr.Zero,handles=IntPtr.Zero;
+    IntPtr input=IntPtr.Zero,output=IntPtr.Zero,error=IntPtr.Zero; var pi=new ProcessInfo(); bool started=false;
+    try {
+      job=CreateJobObjectW(IntPtr.Zero,null); if(job==IntPtr.Zero) throw Failure("CreateJobObject");
+      var limit=new Limit(); limit.basic.flags=0x2000; // KILL_ON_JOB_CLOSE, no breakaway
+      if(!SetInformationJobObject(job,9,ref limit,Marshal.SizeOf(typeof(Limit)))) throw Failure("SetInformationJobObject");
+      var security=new Security(); security.length=Marshal.SizeOf(typeof(Security)); security.inherit=1;
+      input=CreateFileW("NUL",0x80000000,3,ref security,3,0,IntPtr.Zero);
+      if(input==new IntPtr(-1)) throw Failure("open NUL");
+      var self=GetCurrentProcess();
+      if(!DuplicateHandle(self,GetStdHandle(-11),self,out output,0,true,2) ||
+         !DuplicateHandle(self,GetStdHandle(-12),self,out error,0,true,2)) throw Failure("DuplicateHandle");
+      IntPtr bytes=IntPtr.Zero; InitializeProcThreadAttributeList(IntPtr.Zero,2,0,ref bytes);
+      list=Marshal.AllocHGlobal(bytes);
+      if(!InitializeProcThreadAttributeList(list,2,0,ref bytes)) throw Failure("InitializeProcThreadAttributeList");
+      jobValue=Marshal.AllocHGlobal(IntPtr.Size); Marshal.WriteIntPtr(jobValue,job);
+      handles=Marshal.AllocHGlobal(IntPtr.Size*3); Marshal.WriteIntPtr(handles,0,input); Marshal.WriteIntPtr(handles,IntPtr.Size,output); Marshal.WriteIntPtr(handles,IntPtr.Size*2,error);
+      if(!UpdateProcThreadAttribute(list,0,new IntPtr(0x2000D),jobValue,new IntPtr(IntPtr.Size),IntPtr.Zero,IntPtr.Zero) ||
+         !UpdateProcThreadAttribute(list,0,new IntPtr(0x20002),handles,new IntPtr(IntPtr.Size*3),IntPtr.Zero,IntPtr.Zero)) throw Failure("UpdateProcThreadAttribute");
+      var si=new StartupEx(); si.start.cb=Marshal.SizeOf(typeof(StartupEx)); si.start.flags=0x100;
+      si.start.input=input; si.start.output=output; si.start.error=error; si.attributes=list;
+      string executable=null; string line;
+      if(shell) { executable=Environment.GetEnvironmentVariable("ComSpec") ?? "C:\\Windows\\System32\\cmd.exe";
+        line=Quote(executable)+" /d /s /c \""+command;
+        foreach(string arg in args) line+=" "+arg; line+="\"";
+      } else { line=Quote(command); foreach(string arg in args) line+=" "+Quote(arg); }
+      // No suspended-create/assign gap: membership exists before any code runs.
+      if(!CreateProcessW(executable,new StringBuilder(line),IntPtr.Zero,IntPtr.Zero,true,0x08080000,IntPtr.Zero,cwd,ref si,out pi)) throw Failure("CreateProcessW with job list");
+      started=true; CloseHandle(pi.thread); pi.thread=IntPtr.Zero;
+      var lifeline=new Thread(()=>{ try { Console.In.ReadLine(); } catch {} disconnected=true; }); lifeline.IsBackground=true; lifeline.Start();
+      var clock=Stopwatch.StartNew();
+      for(;;) {
+        uint wait=WaitForSingleObject(pi.process,20);
+        if(wait==0) { uint code; if(!GetExitCodeProcess(pi.process,out code)) throw Failure("GetExitCodeProcess"); r.exit_code=(long)code; break; }
+        if(wait==0xFFFFFFFF) throw Failure("WaitForSingleObject");
+        if(disconnected) { r.aborted=true; break; }
+        if(timeout>=0 && clock.ElapsedMilliseconds>=timeout) { r.timed_out=true; break; }
+      }
+      // Release process references before accounting: only the broker retains
+      // the job handle, and no new admissions are possible after CreateProcess.
+      CloseHandle(pi.process); pi.process=IntPtr.Zero;
+      if(!TerminateJobObject(job,1)) throw Failure("TerminateJobObject");
+      clock.Restart();
+      do { Accounting account;
+        if(!QueryInformationJobObject(job,1,out account,Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero)) throw Failure("QueryInformationJobObject");
+        if(account.active==0) { r.status="confirmed"; r.cause="owned job ActiveProcesses is zero"; break; }
+        Thread.Sleep(10);
+      } while(clock.ElapsedMilliseconds<cleanupMs);
+    } catch(Exception e) { r.error=e.Message; r.cause=e.Message;
+      if(!started) { r.status="confirmed"; r.cause="process creation did not succeed"; }
+    } finally {
+      if(pi.thread!=IntPtr.Zero) CloseHandle(pi.thread); if(pi.process!=IntPtr.Zero) CloseHandle(pi.process);
+      if(job!=IntPtr.Zero) CloseHandle(job);
+      if(list!=IntPtr.Zero) { DeleteProcThreadAttributeList(list); Marshal.FreeHGlobal(list); }
+      if(jobValue!=IntPtr.Zero) Marshal.FreeHGlobal(jobValue); if(handles!=IntPtr.Zero) Marshal.FreeHGlobal(handles);
+      if(input!=IntPtr.Zero && input!=new IntPtr(-1)) CloseHandle(input);
+      if(output!=IntPtr.Zero) CloseHandle(output); if(error!=IntPtr.Zero) CloseHandle(error);
+    }
+    return r;
+  }
+}
+`;
+
+function spawnWindowsOwned(command, args, options) {
+  return new Promise((resolve) => {
+    const secret = randomUUID();
+    const pipeName = `ape-owned-${randomUUID()}`;
+    const pipe = `\\\\.\\pipe\\${pipeName}`;
+    let child, stdout = '', stderr = '', combined = '', settled = false;
+    let timer;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', stop);
+      server.close();
+      child?.stdin?.end();
+      child?.unref();
+      resolve({ signal: null, stdout, stderr, combined, ...result });
+    };
+    const unknown = (cause) => finish({ exit_code: null, timed_out: false,
+      spawn_error: new Error(cause), cleanup: { status: 'unknown', cause } });
+    const stop = () => { child?.stdin?.end('stop\n'); };
+    const server = createServer((socket) => {
+      let data = '';
+      socket.setTimeout(5000, () => socket.destroy());
+      socket.on('error', () => {});
+      socket.on('data', (chunk) => {
+        data += chunk;
+        if (data.length > 16384) return socket.destroy();
+        if (!data.includes('\n')) return;
+        try {
+          const message = JSON.parse(data.trim());
+          if (message.secret !== secret || !['confirmed', 'unknown'].includes(message.result?.status)) return socket.destroy();
+          const r = message.result;
+          socket.end();
+          finish({ exit_code: r.exit_code, timed_out: r.timed_out === true,
+            ...(r.aborted ? { aborted: true } : {}), spawn_error: r.error ? new Error(r.error) : null,
+            cleanup: { status: r.status, cause: r.cause } });
+        } catch { socket.destroy(); }
+      });
+    });
+    server.once('error', (e) => unknown(`Windows proof channel failed: ${e.message}`));
+    server.listen(pipe, () => {
+      if (options.signal?.aborted) {
+        finish({ exit_code: null, timed_out: false, aborted: true, spawn_error: null,
+          cleanup: { status: 'confirmed', cause: 'cancelled before process creation' } });
+        return;
+      }
+      const script = `$ErrorActionPreference='Stop'\nAdd-Type -TypeDefinition @'\n${WINDOWS_JOB_SOURCE}\n'@\n` +
+        `$c=ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadLine())))\n` +
+        `$r=[ApeOwnedJob]::Run([string]$c.command,[string[]]$c.args,[bool]$c.shell,[string]$c.cwd,[int]$c.timeout,[int]$c.cleanup)\n` +
+        `$p=New-Object System.IO.Pipes.NamedPipeClientStream('.', [string]$c.pipe, [System.IO.Pipes.PipeDirection]::Out)\n` +
+        `$p.Connect(5000)\n$w=New-Object System.IO.StreamWriter($p)\n` +
+        `$w.WriteLine((ConvertTo-Json -Compress -Depth 5 @{secret=$c.secret;result=$r}))\n$w.Flush()\n$w.Dispose()\n$p.Dispose()\n`;
+      const executable = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      try {
+        child = spawn(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+          cwd: options.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+          ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
+        });
+      } catch (e) { unknown(`Windows ownership broker could not start: ${e.message}`); return; }
+      const collect = (chunk, kind) => {
+        if (options.collect === 'separate') { if (kind === 'out') stdout += chunk; else stderr += chunk; }
+        else if (options.max_output === undefined || combined.length < options.max_output) combined += chunk;
+      };
+      child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (s) => collect(s, 'out')); child.stderr.on('data', (s) => collect(s, 'err'));
+      child.stdin.on('error', () => {});
+      child.once('error', (e) => unknown(`Windows ownership broker failed: ${e.message}`));
+      child.once('close', () => { if (!settled) unknown('Windows ownership broker closed without completion proof'); });
+      options.signal?.addEventListener('abort', stop, { once: true });
+      const timeout = Number.isFinite(options.timeout_ms) ? Math.max(0, Math.min(2147483647, options.timeout_ms)) : -1;
+      const cleanup = Math.max(1000, options.kill_grace_ms ?? DEFAULT_KILL_GRACE_MS);
+      // ASCII transport avoids Windows PowerShell's host code page changing
+      // Unicode command arguments or working directories before CreateProcessW.
+      child.stdin.write(Buffer.from(JSON.stringify({ command, args, shell: options.shell === true, cwd: options.cwd ?? process.cwd(),
+        timeout, cleanup, pipe: pipeName, secret }), 'utf8').toString('base64') + '\n');
+      if (timeout >= 0) timer = setTimeout(() => { stop(); unknown('Windows ownership proof deadline expired'); }, Math.min(2147483647, timeout + cleanup + 30000));
+    });
+  });
+}
+
 // Source and bundled runtime callers launch this unbundled module. A matching main
 // module, the private sentinel and an IPC endpoint are required; ordinary
 // imports do not start a supervisor.
@@ -441,7 +871,7 @@ export function spawnDetached(command, args, options = {}) {
   const child = spawn(command, args ?? [], {
     cwd: options.cwd,
     detached: true,
-    stdio: 'ignore',
+    stdio: options.ipc ? ['ignore', 'ignore', 'ignore', 'ipc'] : 'ignore',
     windowsHide: true,
     ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
   });
@@ -783,6 +1213,26 @@ function withinArmedLifetime(watch) {
 export async function killProcessTree(watch, options = {}) {
   try {
     if (!watch || typeof watch !== 'object') return;
+    if (watch.ownership_file || watch.generation) {
+      const unknown = { status: 'unknown', cause: 'gate broker retirement could not be confirmed' };
+      if (watch.host !== hostname() || !watch.ownership_file || !watch.generation) return unknown;
+      const record = await readGateOwnership(watch.ownership_file);
+      if (record.host !== watch.host || record.generation !== watch.generation || record.watch.nonce !== watch.nonce ||
+          record.watch.ownership_file !== watch.ownership_file || record.watch.job_file !== watch.job_file) return unknown;
+      const existing = await readGateProof(record);
+      if (existing?.cleanup?.status === 'confirmed') return existing.cleanup;
+      if (!await queryGateBroker(record, 'stop')) return unknown;
+      const deadline = Date.now() + (options.kill_grace_ms ?? DEFAULT_KILL_GRACE_MS) + DEFAULT_DRAIN_MS;
+      do {
+        const proof = await readGateProof(record);
+        if (proof?.cleanup?.status === 'confirmed') {
+          await awaitOwnedDetachedExit(watch.pid);
+          return proof.cleanup;
+        }
+        await sleep(20);
+      } while (Date.now() < deadline);
+      return unknown;
+    }
     // Exact host match, mirroring the A2 respawn fence's `watch.host ===
     // hostname()`. The old `typeof host === 'string' && host && host !==
     // hostname()` form skipped only a non-empty MISMATCH, so a watch carrying
