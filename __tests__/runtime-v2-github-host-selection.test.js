@@ -185,7 +185,7 @@ describe.each([
       // fixtures where `pr view` succeeded.
       view: { code: 0, output: `OPEN https://github.com/acme/repo/pull/7 - ${HEAD_SHA}\n` },
       create: { code: 0, output: 'https://github.com/acme/repo/pull/8\n' },
-      checks: { code: 0, output: 'All checks were successful\n' },
+      checks: { code: 0, output: JSON.stringify([{ name: 'test', bucket: 'pass' }]) },
       merge: { code: 0, output: '' },
       api: { code: 0, output: JSON.stringify([{ type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'test' }] } }]) },
     };

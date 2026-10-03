@@ -24,9 +24,9 @@ const NOW = Date.parse('2026-09-01T12:00:00Z');
 const target = { version: 1, provider: 'github', origin: 'https://github.com/acme/repo.git', repository: 'acme/repo', base: 'main', required_remote_checks: true };
 const config = { shipping: { provider: 'github', auto_merge: true, required_remote_checks: true, target, checks_registration_window_ms: 60_000 } };
 const outcomes = [
-  { name: 'passing', code: 0, output: 'build pass' },
-  { name: 'failed', code: 1, output: 'build fail' },
-  { name: 'pending', code: 8, output: 'build pending' },
+  { name: 'passing', code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) },
+  { name: 'failed', code: 1, output: JSON.stringify([{ name: 'build', bucket: 'fail' }]) },
+  { name: 'pending', code: 8, output: JSON.stringify([{ name: 'build', bucket: 'pending' }]) },
   { name: 'missing inside window', code: 1, output: 'no checks reported', age: 1_000 },
   { name: 'missing outside window', code: 1, output: 'no checks reported', age: 120_000 },
   { name: 'authentication error', code: 4, output: 'authentication required' },
@@ -212,10 +212,12 @@ describe.each([false, true])('terminal shipping with submitted=%s', submitted =>
     noSubmission();
     noCleanup();
     if (!submitted) {
-      if (outcome.name === 'failed') expect(result.failed).toBe('build fail');
+      if (outcome.name === 'failed') expect(result.failed).toMatch(/build/);
       if (outcome.name === 'missing inside window') expect(result.pending.reason).toBe('checks not yet registered');
       if (outcome.name === 'missing outside window') expect(result.failed).toMatch(/no remote checks registered/);
-      if (['pending', 'authentication error', 'unavailable', 'spawn error'].includes(outcome.name)) expect(result.pending.reason).toBe('checks running');
+      if (outcome.name === 'pending') expect(result.pending.reason).toBe('checks running');
+      if (outcome.name === 'authentication error') expect(JSON.stringify(result.pending)).toMatch(/auth/i);
+      if (['authentication error', 'unavailable', 'spawn error'].includes(outcome.name)) expect(result.pending.reason).not.toBe('checks running');
     }
   });
 

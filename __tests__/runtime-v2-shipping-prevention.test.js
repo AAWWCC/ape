@@ -115,7 +115,8 @@ describe('immutable observed merge evidence', () => {
     const previousSpawn = spawning.spawnWithTimeout.getMockImplementation();
     vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
       if (command !== 'gh') return previousSpawn(command, args, options);
-      return Promise.resolve({ exit_code: 0, timed_out: false, combined: args[1] === 'checks' ? 'test pass' : `MERGED ${prUrl} 2026-09-07T00:00:00Z ${pushedHead} ${mergeCommit} main` });
+      const output = args[1] === 'checks' ? JSON.stringify([{ name: 'test', bucket: 'pass' }]) : `MERGED ${prUrl} 2026-09-07T00:00:00Z ${pushedHead} ${mergeCommit} main`;
+      return Promise.resolve({ exit_code: 0, timed_out: false, spawn_error: null, stdout: output, stderr: '', combined: output });
     });
     const effects = [];
     vi.spyOn(git, 'runGit').mockImplementation(async (root, args, options) => {
@@ -156,7 +157,8 @@ describe('immutable observed merge evidence', () => {
     vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
       if (command !== 'gh') return originalSpawn(command, args, options);
       calls.push(args);
-      return Promise.resolve({ exit_code: 0, timed_out: false, combined: args[1] === 'checks' ? 'test pass\n' : `MERGED ${prUrl} 2026-09-05T00:00:00Z ${pushedHead} ${pushedHead} main\n` });
+      const output = args[1] === 'checks' ? JSON.stringify([{ name: 'test', bucket: 'pass' }]) : `MERGED ${prUrl} 2026-09-05T00:00:00Z ${pushedHead} ${pushedHead} main\n`;
+      return Promise.resolve({ exit_code: 0, timed_out: false, spawn_error: null, stdout: output, stderr: '', combined: output });
     });
     vi.spyOn(git, 'runGit').mockImplementation((root, args, options) => {
       if (args[0] === 'fetch') return Promise.resolve('');
@@ -193,10 +195,10 @@ describe('immutable observed merge evidence', () => {
     vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
       if (command !== 'gh') return originalSpawn(command, args, options);
       if (args[1] === 'merge') return Promise.resolve({ exit_code: 1, combined: 'Pull Request is not mergeable', timed_out: false });
-      const output = args[1] === 'checks' ? 'test pass\n'
+      const output = args[1] === 'checks' ? JSON.stringify([{ name: 'test', bucket: 'pass' }])
         : observation === 'command-race' && probes++ === 0 ? `OPEN ${prUrl} - ${pushedHead} - main\n`
           : `MERGED ${prUrl} 2026-09-05T00:00:00Z ${pushedHead} ${mergeCommit} main\n`;
-      return Promise.resolve({ exit_code: 0, combined: output, timed_out: false });
+      return Promise.resolve({ exit_code: 0, stdout: output, stderr: '', combined: output, timed_out: false });
     });
     vi.spyOn(git, 'runGit').mockImplementation((root, args, options) => {
       if (args[0] === 'fetch') return Promise.resolve('');
@@ -229,7 +231,8 @@ describe('immutable observed merge evidence', () => {
     const originalSpawn = spawning.spawnWithTimeout.getMockImplementation();
     vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
       if (command !== 'gh') return originalSpawn(command, args, options);
-      return Promise.resolve({ exit_code: 0, timed_out: false, combined: args[1] === 'checks' ? 'test pass\n' : `MERGED ${observedUrl} 2026-09-05T00:00:00Z ${observedHead} ${mergeCommit} main\n` });
+      const output = args[1] === 'checks' ? JSON.stringify([{ name: 'test', bucket: 'pass' }]) : `MERGED ${observedUrl} 2026-09-05T00:00:00Z ${observedHead} ${mergeCommit} main\n`;
+      return Promise.resolve({ exit_code: 0, timed_out: false, spawn_error: null, stdout: output, stderr: '', combined: output });
     });
     const mutations = [];
     vi.spyOn(git, 'runGit').mockImplementation((root, args, options) => {
