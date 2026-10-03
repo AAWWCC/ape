@@ -435,12 +435,15 @@ disable the checkout registration in `.claude/settings.local.json` when using th
 { "disabledMcpjsonServers": ["ape"] }
 ```
 
-Regenerate the host packages with `npm run package:plugins`. Codex development updates can then use
-`npm run reinstall:codex` after explicit installation approval. The installer defaults to
-the dedicated `ape-dev` local marketplace and verifies its source and selected version.
-For this public development checkout, enable `shipping.codex_dev_refresh` once to install
-the verified merged build automatically after each successful Codex shipment. The run
-reports `codex_plugin_refresh`; a failed refresh is retried with `ape_run resume` without
-repeating the shipment. Start a new host task and verify the new loaded snapshot; a running
+Regenerate the host packages with `npm run package:plugins`. Development updates can use
+`npm run reinstall:codex` or `npm run reinstall:claude` after explicit installation approval.
+Both use the dedicated `ape-dev` local marketplace; Claude installs at local scope for the
+current checkout and preserves existing user-scope installations.
+For this public development checkout, enable `shipping.codex_dev_refresh` and
+`shipping.claude_dev_refresh` once. A successful Codex or Claude shipment automatically
+updates only that host's `ape@ape-dev` from the verified merged build. Other repositories
+and plugins cannot trigger it. The run reports `codex_plugin_refresh` or
+`claude_plugin_refresh`; a failed refresh is retried with `ape_run resume` without
+repeating the shipment. Start a new host session and verify the new loaded snapshot; a running
 desktop app may require a restart. See [loaded bundles](architecture.md#loaded-bundles). Both generated MCP
 declarations launch the local bundle over stdio. A hosted APE broker is outside this release.

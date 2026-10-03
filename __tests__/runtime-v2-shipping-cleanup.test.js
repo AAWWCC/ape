@@ -8,9 +8,11 @@ import { applyActions, reconcileTerminalCheckout } from '../lib/runtime/receipt-
 import { resumeRun } from '../lib/runtime/lifecycle-service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
-import { refreshCodexAfterShip } from '../lib/runtime/post-ship.js';
+import { refreshDevPluginAfterShip } from '../lib/runtime/post-ship.js';
 import { sha256 } from '../lib/runtime/canonical.js';
 import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identity.js';
+import { compactStatus } from '../lib/runtime/status-service.js';
+import { renderStatusDoc } from '../lib/runtime/status-doc.js';
 import { projectRunDiagnostic } from '../lib/runtime/diagnostics.js';
 
 const roots = [];
@@ -19,17 +21,20 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-async function refreshFixture() {
+async function refreshFixture(host, repository = 'AAWWCC/ape') {
   const context = await fixture();
   const { root, head: base } = context;
-  await git.runGit(root, ['remote', 'add', 'origin', 'https://github.com/AAWWCC/ape.git']);
+  const origin = `https://github.com/${repository}.git`;
+  const packagePath = host === 'claude' ? 'plugins/ape-claude/.claude-plugin' : 'plugins/ape/.codex-plugin';
+  const stateKey = `${host}_plugin_refresh`;
+  await git.runGit(root, ['remote', 'add', 'origin', origin]);
   await mkdir(path.join(root, 'scripts'));
-  await mkdir(path.join(root, 'plugins/ape/.codex-plugin'), { recursive: true });
-  await writeFile(path.join(root, 'plugins/ape/.codex-plugin/plugin.json'), JSON.stringify({ name: 'ape', version: '2.29.0' }));
-  await writeFile(path.join(root, 'scripts/reinstall-codex-plugin.mjs'), `
+  await mkdir(path.join(root, packagePath), { recursive: true });
+  await writeFile(path.join(root, packagePath, 'plugin.json'), JSON.stringify({ name: 'ape', version: '2.29.0' }));
+  await writeFile(path.join(root, `scripts/reinstall-${host}-plugin.mjs`), `
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 const saved = existsSync('.ape/runtime/active.json')
-  ? JSON.parse(readFileSync('.ape/runtime/active.json', 'utf8')).codex_plugin_refresh
+  ? JSON.parse(readFileSync('.ape/runtime/active.json', 'utf8'))[${JSON.stringify(stateKey)}]
   : JSON.parse(readFileSync('.git/refresh-state.json', 'utf8'));
 if (saved.status !== 'installing') process.exit(19);
 appendFileSync('.git/refresh-calls.ndjson', JSON.stringify(process.argv.slice(2)) + '\\n');
@@ -41,10 +46,10 @@ if (existsSync('.git/refresh-fail')) { console.error('synthetic refresh failure'
   const tree = await git.runGit(root, ['rev-parse', 'HEAD^{tree}']);
   await git.runGit(root, ['update-ref', 'refs/remotes/origin/main', head]);
   await git.runGit(root, ['update-ref', `refs/heads/${context.branch}`, head]);
-  const target = { origin: 'https://github.com/AAWWCC/ape.git', repository: 'AAWWCC/ape', base: 'main' };
-  const config = { shipping: { codex_dev_refresh: true, provider: 'github', required_remote_checks: true, target } };
+  const target = { origin, repository, base: 'main' };
+  const config = { shipping: { [`${host}_dev_refresh`]: true, provider: 'github', required_remote_checks: true, target } };
   const state = {
-    schema_version: '2.0.0', version: 2, host: 'codex', run_id: 'run-post-ship-test',
+    schema_version: '2.0.0', version: 2, host, run_id: 'run-post-ship-test',
     status: 'completed', stage: 'complete', mode: 'phase', lane: 'full', dispatch_state: 'none',
     objective: 'Ship the test-owned APE fixture', created_at: '2026-10-01T00:00:00.000Z',
     branch: context.branch, base_branch: 'main', base_commit_sha: base,
@@ -60,82 +65,95 @@ if (existsSync('.git/refresh-fail')) { console.error('synthetic refresh failure'
   state.admitted_start_identity_hash = admittedStartIdentityHash(state);
   const saved = [];
   const save = async () => {
-    saved.push(structuredClone(state.codex_plugin_refresh));
-    await writeFile(path.join(root, '.git/refresh-state.json'), JSON.stringify(state.codex_plugin_refresh));
+    saved.push(structuredClone(state[stateKey]));
+    await writeFile(path.join(root, '.git/refresh-state.json'), JSON.stringify(state[stateKey]));
   };
   const calls = async () => (await readFile(path.join(root, '.git/refresh-calls.ndjson'), 'utf8'))
     .trim().split('\n').map(line => JSON.parse(line));
   return { ...context, state, config, save, saved, calls };
 }
 
-describe('automatic Codex development refresh after shipping', () => {
+describe.each(['codex', 'claude'])('automatic %s development refresh after shipping', host => {
+  const stateKey = `${host}_plugin_refresh`;
   it('refreshes on terminal receipt cleanup and resumes a failed install without shipping again', async () => {
-    const c = await refreshFixture();
+    const c = await refreshFixture(host);
     const paths = runtimePaths(c.root);
     await atomicWriteJson(paths.config, c.config);
     await writeFile(path.join(c.root, '.git/refresh-fail'), 'fail');
     const actions = await applyActions(paths, c.state, [{ type: 'release_lock' }, { type: 'persist_state' }], c.config);
-    expect(actions.map(action => action.type)).toEqual(['checkout_cleanup', 'codex_plugin_refresh', 'release_lock']);
-    expect(await readJson(paths.active)).toMatchObject({ status: 'completed', checkout_cleanup: { status: 'returned' }, codex_plugin_refresh: { status: 'failed' } });
+    expect(actions.map(action => action.type)).toEqual(['checkout_cleanup', stateKey, 'release_lock']);
+    expect(await readJson(paths.active)).toMatchObject({ status: 'completed', checkout_cleanup: { status: 'returned' }, [stateKey]: { status: 'failed' } });
     const head = await git.runGit(c.root, ['rev-parse', 'HEAD']);
     await rm(path.join(c.root, '.git/refresh-fail'));
     const resumed = await resumeRun(c.root);
-    expect(resumed).toMatchObject({ ok: true, dispatch_state: 'none', run: { status: 'completed', codex_plugin_refresh: { status: 'installed' } } });
-    expect(resumed.actions.map(action => action.type)).toEqual(['checkout_cleanup', 'codex_plugin_refresh']);
-    expect((await c.calls()).map(args => args[3])).toEqual([c.state.codex_plugin_refresh.cachebuster, c.state.codex_plugin_refresh.cachebuster]);
+    expect(resumed).toMatchObject({ ok: true, dispatch_state: 'none', run: { status: 'completed', [stateKey]: { status: 'installed' } } });
+    expect(resumed.actions.map(action => action.type)).toEqual(['checkout_cleanup', stateKey]);
+    expect((await c.calls()).map(args => args[3])).toEqual([c.state[stateKey].cachebuster, c.state[stateKey].cachebuster]);
     expect(await git.runGit(c.root, ['rev-parse', 'HEAD'])).toBe(head);
     expect((await readJson(paths.active)).merge).toEqual(c.state.merge);
+    expect(await compactStatus(c.root)).toMatchObject({ [stateKey]: { status: 'installed', plugin_id: 'ape@ape-dev' } });
+    const document = renderStatusDoc(resumed.run);
+    expect(document).toContain(host === 'claude' ? 'new Claude session' : 'new Codex chat');
   });
 
   it('persists the installation identity before execution and installs the verified shipped tree once', async () => {
-    const c = await refreshFixture();
-    const result = await refreshCodexAfterShip({ root: c.root }, c.state, c.config, c.save);
+    const c = await refreshFixture(host);
+    const result = await refreshDevPluginAfterShip({ root: c.root }, c.state, c.config, c.save);
     expect(result).toMatchObject({ status: 'installed', plugin_id: 'ape@ape-dev', activation: 'new_session_required', tree_sha: c.state.gates.tree_sha });
+    expect(c.state[host === 'claude' ? 'codex_plugin_refresh' : 'claude_plugin_refresh']).toBeUndefined();
     expect(c.saved.map(value => value.status)).toEqual(['installing', 'installed']);
-    expect(await c.calls()).toEqual([['--marketplace', 'ape-dev', '--cachebuster', result.cachebuster, '--preserve-open-tasks']]);
-    expect(await refreshCodexAfterShip({ root: c.root }, c.state, c.config, c.save)).toBeNull();
+    expect(await c.calls()).toEqual([['--marketplace', 'ape-dev', '--cachebuster', result.cachebuster, ...(host === 'codex' ? ['--preserve-open-tasks'] : [])]]);
+    expect(await refreshDevPluginAfterShip({ root: c.root }, c.state, c.config, c.save)).toBeNull();
     expect(await c.calls()).toHaveLength(1);
   });
 
-  it.each(['disabled', 'claude', 'blocked', 'shipping', 'not-github', 'cleanup-pending'])('does not install for %s', async scenario => {
-    const c = await refreshFixture();
-    if (scenario === 'disabled') c.config.shipping.codex_dev_refresh = false;
-    if (scenario === 'claude') c.state.host = 'claude';
+  it.each(['disabled', 'other-host-disabled', 'unknown-host', 'blocked', 'shipping', 'not-github', 'cleanup-pending'])('does not install for %s', async scenario => {
+    const c = await refreshFixture(host);
+    if (scenario === 'disabled') c.config.shipping[`${host}_dev_refresh`] = false;
+    if (scenario === 'other-host-disabled') c.state.host = host === 'claude' ? 'codex' : 'claude';
+    if (scenario === 'unknown-host') c.state.host = 'unknown';
     if (['blocked', 'shipping'].includes(scenario)) c.state.status = scenario;
     if (scenario === 'not-github') c.state.merge.provider = 'other';
     if (scenario === 'cleanup-pending') c.state.checkout_cleanup.status = 'retained_dirty';
-    expect(await refreshCodexAfterShip({ root: c.root }, c.state, c.config, c.save)).toBeNull();
+    expect(await refreshDevPluginAfterShip({ root: c.root }, c.state, c.config, c.save)).toBeNull();
     expect(c.saved).toEqual([]);
     await expect(c.calls()).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('refuses a verified shipment of a different repository', async () => {
+    const c = await refreshFixture(host, 'example/fixture');
+    const result = await refreshDevPluginAfterShip({ root: c.root }, c.state, c.config, c.save);
+    expect(result).toMatchObject({ status: 'failed', reason: expect.stringContaining('canonical public APE') });
+    await expect(c.calls()).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it.each(['dirty', 'wrong-branch', 'wrong-tree', 'wrong-origin', 'admission-drift'])('refuses installation after %s', async scenario => {
-    const c = await refreshFixture();
+    const c = await refreshFixture(host);
     if (scenario === 'dirty') await writeFile(path.join(c.root, 'unrelated.txt'), 'new local work');
     if (scenario === 'wrong-branch') await git.runGit(c.root, ['switch', '-c', 'unrelated']);
     if (scenario === 'wrong-tree') c.state.gates.tree_sha = 'f'.repeat(40);
     if (scenario === 'wrong-origin') await git.runGit(c.root, ['remote', 'set-url', 'origin', 'https://github.com/example/other.git']);
     if (scenario === 'admission-drift') c.state.shipping_target.repository = 'example/other';
-    const result = await refreshCodexAfterShip({ root: c.root }, c.state, c.config, c.save);
+    const result = await refreshDevPluginAfterShip({ root: c.root }, c.state, c.config, c.save);
     expect(result.status).toBe('failed');
     expect(c.state.status).toBe('completed');
     await expect(c.calls()).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('reports an installation failure independently of shipping and reuses its version on recovery', async () => {
-    const c = await refreshFixture();
+    const c = await refreshFixture(host);
     await writeFile(path.join(c.root, '.git/refresh-fail'), 'fail');
-    const failed = await refreshCodexAfterShip({ root: c.root }, c.state, c.config, c.save);
+    const failed = await refreshDevPluginAfterShip({ root: c.root }, c.state, c.config, c.save);
     expect(failed).toMatchObject({ status: 'failed', reason: expect.stringContaining('synthetic refresh failure') });
     expect(c.state.status).toBe('completed');
     expect(projectRunDiagnostic(c.state)).toMatchObject({ reason_code: 'post_ship_refresh_pending', next_safe_action: 'ape_run resume' });
     await writeFile(path.join(c.root, 'local-work.txt'), 'preserve local work');
-    const retained = await refreshCodexAfterShip({ root: c.root }, c.state, c.config, c.save);
+    const retained = await refreshDevPluginAfterShip({ root: c.root }, c.state, c.config, c.save);
     expect(retained).toMatchObject({ status: 'failed', cachebuster: failed.cachebuster });
     expect(await c.calls()).toHaveLength(1);
     await rm(path.join(c.root, 'local-work.txt'));
     await rm(path.join(c.root, '.git/refresh-fail'));
-    const recovered = await refreshCodexAfterShip({ root: c.root }, c.state, c.config, c.save);
+    const recovered = await refreshDevPluginAfterShip({ root: c.root }, c.state, c.config, c.save);
     expect(recovered.status).toBe('installed');
     expect(recovered.cachebuster).toBe(failed.cachebuster);
     expect((await c.calls()).map(args => args[3])).toEqual([failed.cachebuster, failed.cachebuster]);

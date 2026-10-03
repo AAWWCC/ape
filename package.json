@@ -74,6 +74,7 @@
     "smoke:plugins": "node scripts/smoke-plugin-mcp.mjs",
     "smoke:marketplaces": "node scripts/smoke-marketplace-install.mjs",
     "reinstall:codex": "node scripts/reinstall-codex-plugin.mjs",
+    "reinstall:claude": "node scripts/reinstall-claude-plugin.mjs",
     "statusline:svg": "node scripts/render-statusline-svg.mjs",
     "benchmark:verify": "node scripts/benchmark-v2.mjs",
     "validate:claude": "claude plugin validate ./plugins/ape-claude && claude plugin validate ./plugins/ape-claude --strict",

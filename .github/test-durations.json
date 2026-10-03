@@ -36,6 +36,7 @@
   "__tests__/runtime-v2-certification-prompt-preparation.test.js": 202,
   "__tests__/runtime-v2-certification-protection-policy.test.js": 9,
   "__tests__/runtime-v2-character-policy-divergence.test.js": 18,
+  "__tests__/runtime-v2-claude-dev-refresh.test.js": 26399,
   "__tests__/runtime-v2-claude-dispatch.test.js": 14360,
   "__tests__/runtime-v2-claude-permission-neutrality.test.js": 6220,
   "__tests__/runtime-v2-cli-entrypoints.test.js": 2207,

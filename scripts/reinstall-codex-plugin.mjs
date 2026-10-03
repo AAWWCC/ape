@@ -14,29 +14,25 @@
  */
 
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import {
-  access,
   cp,
-  lstat,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
   realpath,
-  rename,
   rm,
   writeFile,
 } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { withDirLock } from '../lib/runtime/lock.js';
+import { DevPluginError as UsageError, STRICT_SEMVER, exists, assertRegularTree, atomicWrite, promoteInstalledTree } from './dev-plugin-files.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PLUGIN_ROOT = join(dirname(SCRIPT_DIR), 'plugins', 'ape');
 const SAFE_SEGMENT = /^[a-z0-9][a-z0-9._-]*$/i;
-const STRICT_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
 // Deliberately top-level and closed. These are the Codex plugin's complete
 // shipped runtime surfaces; development state and documentation cannot enter
@@ -74,8 +70,6 @@ const REQUIRED_RUNTIME_FILES = Object.freeze([
   'skills/run/SKILL.md',
   'THIRD_PARTY_NOTICES.md',
 ]);
-
-class UsageError extends Error {}
 
 function usage() {
   return (
@@ -136,28 +130,6 @@ function sanitizeCachebuster(value) {
 
 function withCachebuster(version, cachebuster) {
   return `${version.split('+', 1)[0]}+codex.${cachebuster}`;
-}
-
-async function exists(path) {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function assertRegularTree(root) {
-  const entries = await readdir(root, { withFileTypes: true });
-  for (const entry of entries) {
-    const target = join(root, entry.name);
-    const metadata = await lstat(target);
-    if (metadata.isSymbolicLink()) {
-      throw new UsageError(`staged plugin refuses symbolic link: ${target}`);
-    }
-    if (metadata.isDirectory()) await assertRegularTree(target);
-    else if (!metadata.isFile()) throw new UsageError(`staged plugin refuses special file: ${target}`);
-  }
 }
 
 async function stagePlugin(pluginRoot, stagedPluginRoot, manifest, nextVersion) {
@@ -289,18 +261,6 @@ async function codexJson(codexBin, args, cwd, codexHome) {
   }
 }
 
-async function atomicWrite(file, contents) {
-  await mkdir(dirname(file), { recursive: true });
-  const transaction = await mkdtemp(join(dirname(file), '.ape-write-'));
-  try {
-    const prepared = join(transaction, 'prepared');
-    await writeFile(prepared, contents);
-    await rename(prepared, file);
-  } finally {
-    await rm(transaction, { recursive: true, force: true });
-  }
-}
-
 async function prepareDevelopmentMarketplace(args, codexHome, cwd, pluginName, nextVersion) {
   const root = join(codexHome, 'dev-plugins', args.marketplace);
   const listed = await codexJson(args.codexBin, ['plugin', 'marketplace', 'list'], cwd, codexHome);
@@ -396,70 +356,6 @@ async function installDevelopmentSource(args, codexHome, cwd, marketplace, cache
   }
   process.stdout.write(`Verified registered source and selected version: ${pluginName}@${args.marketplace} ${nextVersion}\n`);
   process.stdout.write(`Recovery copies of previous cache versions: ${backupRoot}\n`);
-}
-
-async function treeDigest(root) {
-  const hash = createHash('sha256');
-  async function visit(directory) {
-    const entries = (await readdir(directory, { withFileTypes: true }))
-      .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
-    for (const entry of entries) {
-      const target = join(directory, entry.name);
-      const normalized = relative(root, target).split(sep).join('/');
-      const metadata = await lstat(target);
-      if (metadata.isSymbolicLink()) throw new UsageError(`installed plugin contains symbolic link: ${target}`);
-      if (metadata.isDirectory()) {
-        hash.update(`d\0${normalized}\0`);
-        await visit(target);
-      } else if (metadata.isFile()) {
-        hash.update(`f\0${normalized}\0`);
-        hash.update(await readFile(target));
-      } else {
-        throw new UsageError(`installed plugin contains special file: ${target}`);
-      }
-    }
-  }
-  await visit(root);
-  return hash.digest('hex');
-}
-
-async function promoteInstalledTree(installedRoot, cacheRoot, nextVersion) {
-  await mkdir(cacheRoot, { recursive: true });
-  const destination = join(cacheRoot, nextVersion);
-  if (await exists(destination)) {
-    const [installedDigest, destinationDigest] = await Promise.all([
-      treeDigest(installedRoot),
-      treeDigest(destination),
-    ]);
-    if (installedDigest !== destinationDigest) {
-      throw new UsageError(`cache version ${nextVersion} already exists with different content; use a new cachebuster`);
-    }
-    return { destination, reused: true };
-  }
-  const transactionRoot = await mkdtemp(join(cacheRoot, '.ape-install-'));
-  const prepared = join(transactionRoot, 'plugin');
-  try {
-    await cp(installedRoot, prepared, { recursive: true, preserveTimestamps: true });
-    if (await treeDigest(prepared) !== await treeDigest(installedRoot)) {
-      throw new Error('prepared cache tree failed content verification');
-    }
-    try {
-      await rename(prepared, destination);
-      return { destination, reused: false };
-    } catch (error) {
-      if (!['EEXIST', 'ENOTEMPTY'].includes(error?.code) || !(await exists(destination))) throw error;
-      const [preparedDigest, destinationDigest] = await Promise.all([
-        treeDigest(prepared),
-        treeDigest(destination),
-      ]);
-      if (preparedDigest !== destinationDigest) {
-        throw new UsageError(`cache version ${nextVersion} was concurrently installed with different content; use a new cachebuster`);
-      }
-      return { destination, reused: true };
-    }
-  } finally {
-    await rm(transactionRoot, { recursive: true, force: true });
-  }
 }
 
 async function main(argv) {

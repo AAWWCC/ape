@@ -78,16 +78,19 @@ update a running process.
 `loaded-module-drift` checks an actual loaded bundle stamp when available. Running source cannot
 prove which bundle another process loaded.
 
-For the canonical public APE checkout, `shipping.codex_dev_refresh: true` opts into an
-automatic `ape@ape-dev` installation after an observed GitHub merge and successful checkout
-cleanup. `post-ship.js` revalidates the frozen target, clean `main`, and exact gate-attested
+For the canonical public APE checkout, `shipping.codex_dev_refresh: true` enables the
+Codex follow-up and `shipping.claude_dev_refresh: true` enables the Claude follow-up.
+Only the host that completed the run refreshes its `ape@ape-dev` installation after an
+observed GitHub merge and successful checkout cleanup. `post-ship.js` revalidates the frozen target, clean `main`, and exact gate-attested
 tree before invoking the repository installer. The receipt-effects lock serializes it;
 the installation version is persisted before execution and reused after interruption.
 A successful refresh is not repeated. A failed refresh leaves the shipment completed and
 can be retried with `ape_run resume`. It never grants shipping or reinstall authority to
-other repositories. After Codex installs the build, the installer restores older pinned
-cache paths and verifies the new registered source and selected version. Its process-owned
-lock is recoverable after a crash. Installation does not hot-reload open chats.
+other repositories or plugins. Each installer publishes immutable development versions,
+restores older pinned paths, and verifies the selected version. Claude additionally verifies
+the installed package bytes and uses local installation scope for this checkout. The
+installers share immutable file helpers and process-owned locks that recover after a crash.
+Installation does not establish activation in an existing host session.
 
 ## Bundle reachability
 
