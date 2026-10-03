@@ -159,6 +159,65 @@ describe('settle-instead-of-reject failure modes', () => {
   });
 });
 
+describe.each([false, true])('bounded separate collection (supervise=%s)', (supervise) => {
+  const limit = 64;
+  const cases = [
+    ['below limit', 31, 17, false],
+    ['exact boundary', limit, limit, false],
+    ['stdout overflow', limit + 1, 17, false],
+    ['stderr overflow', 17, limit + 1, false],
+    ['both streams overflow', limit + 1, limit + 1, false],
+    ['oversized single writes', 131072, 131072, false],
+    ['multiple writes', 193, 257, true],
+  ];
+  it.each(cases)('%s preserves bounded prefixes, truncation evidence and exit status', async (_name, outSize, errSize, chunked) => {
+    // Callbacks drain every write before exit, so clipping is the collector's
+    // behavior rather than an artifact of process.exit dropping pipe data.
+    const script = `
+      const write = (stream, data) => new Promise(resolve => stream.write(data, resolve));
+      (async () => {
+        for (const [stream, char, size] of [[process.stdout, 'o', ${outSize}], [process.stderr, 'e', ${errSize}]]) {
+          const stride = ${chunked ? 17 : 131072};
+          for (let offset = 0; offset < size; offset += stride) {
+            await write(stream, char.repeat(Math.min(stride, size - offset)));
+            ${chunked ? 'await new Promise(resolve => setTimeout(resolve, 2));' : ''}
+          }
+        }
+        process.exitCode = 7;
+      })();
+    `;
+    const result = await spawnWithTimeout(process.execPath, ['-e', script], {
+      supervise, collect: 'separate', max_output: limit, timeout_ms: 15000,
+    });
+    expect(result).toMatchObject({ exit_code: 7, signal: null, timed_out: false, spawn_error: null });
+    expect(result.stdout).toBe('o'.repeat(Math.min(outSize, limit)));
+    expect(result.stderr).toBe('e'.repeat(Math.min(errSize, limit)));
+    expect(result.stdout_truncated).toBe(outSize > limit);
+    expect(result.stderr_truncated).toBe(errSize > limit);
+    expect(result.combined).toBe('');
+  }, 20000);
+
+  it('keeps unlimited separate collection when max_output is absent', async () => {
+    const result = await spawnWithTimeout(process.execPath, ['-e', `
+      process.stdout.write('o'.repeat(131072), () => {
+        process.stderr.write('e'.repeat(131073), () => { process.exitCode = 7; });
+      });
+    `], { supervise, collect: 'separate', timeout_ms: 15000 });
+    expect(result.exit_code).toBe(7);
+    expect(result.stdout).toBe('o'.repeat(131072));
+    expect(result.stderr).toBe('e'.repeat(131073));
+    expect(result.stdout_truncated).not.toBe(true);
+    expect(result.stderr_truncated).not.toBe(true);
+  }, 20000);
+
+  it('a zero cap discards output and reports each affected stream', async () => {
+    const result = await spawnWithTimeout(process.execPath, ['-e', 'process.stdout.write("o");'], {
+      supervise, collect: 'separate', max_output: 0, timeout_ms: 15000,
+    });
+    expect(result).toMatchObject({ exit_code: 0, stdout: '', stderr: '', stdout_truncated: true, stderr_truncated: false });
+  }, 20000);
+});
+
 describe('collection modes', () => {
   it('separate collection keeps stdout and stderr apart for parsers', async () => {
     const result = await spawnWithTimeout(
