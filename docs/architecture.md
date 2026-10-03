@@ -71,12 +71,23 @@ bounded cleanup.
 Hosts run the bundles they loaded from `dist/`, not the current source. A rebuild alone does not
 update a running process.
 
-- Cached plugin: rebuild, explicitly reinstall, then start a new host task.
+- Cached plugin: rebuild, reinstall from a durable local development marketplace, then verify the loaded version in a new host task (restart the desktop app if it retains the old snapshot).
 - Checkout-loaded plugin: rebuild, then restart the MCP server/session.
 
 `ape_config doctor` reports `bundle-drift` between the checkout and executing bundle.
 `loaded-module-drift` checks an actual loaded bundle stamp when available. Running source cannot
 prove which bundle another process loaded.
+
+For the canonical public APE checkout, `shipping.codex_dev_refresh: true` opts into an
+automatic `ape@ape-dev` installation after an observed GitHub merge and successful checkout
+cleanup. `post-ship.js` revalidates the frozen target, clean `main`, and exact gate-attested
+tree before invoking the repository installer. The receipt-effects lock serializes it;
+the installation version is persisted before execution and reused after interruption.
+A successful refresh is not repeated. A failed refresh leaves the shipment completed and
+can be retried with `ape_run resume`. It never grants shipping or reinstall authority to
+other repositories. After Codex installs the build, the installer restores older pinned
+cache paths and verifies the new registered source and selected version. Its process-owned
+lock is recoverable after a crash. Installation does not hot-reload open chats.
 
 ## Bundle reachability
 

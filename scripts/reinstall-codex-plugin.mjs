@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Reinstall a lean local Codex plugin without invalidating open tasks.
+ * Reinstall a lean local Codex development plugin with recoverable old snapshots.
  *
  * The public repository marketplace points at the generated Codex package.
- * This wrapper applies a cache-only build-metadata suffix without mutating the
- * canonical package manifest. It stages that allowlisted package in a temporary marketplace, lets the
- * supported Codex installer validate and install it under an isolated
- * temporary CODEX_HOME, then atomically promotes that exact installed tree to
- * the real personal cache. Existing immutable cache versions are never moved
- * or deleted, so already-open tasks retain their pinned paths. Cache promotion
- * does not invalidate a running desktop app's in-memory plugin snapshot; its
- * activation must be checked in a fresh task before relying on the update.
+ * Validate an allowlisted package in an isolated home, publish an immutable
+ * version in a dedicated local marketplace, then install from that source.
+ * Source and selected versions must agree so a host refresh cannot undo the
+ * development installation. The canonical package manifest stays unchanged.
+ * Codex prunes older caches during installation; archive them outside its active
+ * cache so discovery cannot select an older build again. Run while workers are idle.
+ * Existing chats can lose their pinned cache paths. This does not hot-reload
+ * a running desktop app; verify activation separately in a fresh task.
  */
 
 import { spawn } from 'node:child_process';
@@ -23,6 +23,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   writeFile,
@@ -30,6 +31,7 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { withDirLock } from '../lib/runtime/lock.js';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PLUGIN_ROOT = join(dirname(SCRIPT_DIR), 'plugins', 'ape');
@@ -79,17 +81,18 @@ function usage() {
   return (
     'usage: node scripts/reinstall-codex-plugin.mjs ' +
     '[--plugin-root <path>] [--marketplace <name>] [--cachebuster <token>] ' +
-    '[--codex-home <path>] [--codex-bin <path>]\n'
+    '[--codex-home <path>] [--codex-bin <path>] [--preserve-open-tasks]\n'
   );
 }
 
 function parseArgs(argv) {
   const values = {
     pluginRoot: DEFAULT_PLUGIN_ROOT,
-    marketplace: 'ape',
+    marketplace: 'ape-dev',
     cachebuster: defaultCachebuster(),
     codexHome: process.env.CODEX_HOME || join(homedir(), '.codex'),
     codexBin: 'codex',
+    preserveOpenTasks: false,
   };
   const flags = new Map([
     ['--plugin-root', 'pluginRoot'],
@@ -101,6 +104,10 @@ function parseArgs(argv) {
 
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
+    if (flag === '--preserve-open-tasks') {
+      values.preserveOpenTasks = true;
+      continue;
+    }
     const key = flags.get(flag);
     if (!key) throw new UsageError(`unknown argument: ${flag}`);
     const value = argv[index + 1];
@@ -239,7 +246,7 @@ async function createStagingMarketplace(root, marketplaceName, pluginName) {
   );
 }
 
-function runCodex(codexBin, args, cwd, codexHome) {
+function runCodex(codexBin, args, cwd, codexHome, capture = false) {
   return new Promise((resolvePromise, reject) => {
     const isScript = /\.m?js$/i.test(codexBin);
     const cmd = isScript ? process.execPath : codexBin;
@@ -247,15 +254,148 @@ function runCodex(codexBin, args, cwd, codexHome) {
     const child = spawn(cmd, commandArgs, {
       cwd,
       env: { ...process.env, CODEX_HOME: codexHome },
-      stdio: 'inherit',
+      stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'],
     });
+    let output = '';
+    let oversized = false;
+    if (capture) {
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => {
+        if (oversized) return;
+        output += chunk;
+        if (Buffer.byteLength(output) > 1024 * 1024) {
+          oversized = true;
+          output = '';
+          child.kill();
+        }
+      });
+    }
     child.once('error', reject);
     child.once('exit', (code, signal) => {
-      if (signal) reject(new Error(`${cmd} terminated by signal ${signal}`));
+      if (oversized) reject(new Error('Codex JSON output exceeds 1 MiB'));
+      else if (signal) reject(new Error(`${cmd} terminated by signal ${signal}`));
       else if (code !== 0) reject(new Error(`${cmd} ${args.join(' ')} exited with code ${code}`));
-      else resolvePromise();
+      else resolvePromise(output);
     });
   });
+}
+
+async function codexJson(codexBin, args, cwd, codexHome) {
+  const output = await runCodex(codexBin, [...args, '--json'], cwd, codexHome, true);
+  try {
+    return JSON.parse(output);
+  } catch {
+    throw new Error(`Codex returned invalid JSON for ${args.join(' ')}`);
+  }
+}
+
+async function atomicWrite(file, contents) {
+  await mkdir(dirname(file), { recursive: true });
+  const transaction = await mkdtemp(join(dirname(file), '.ape-write-'));
+  try {
+    const prepared = join(transaction, 'prepared');
+    await writeFile(prepared, contents);
+    await rename(prepared, file);
+  } finally {
+    await rm(transaction, { recursive: true, force: true });
+  }
+}
+
+async function prepareDevelopmentMarketplace(args, codexHome, cwd, pluginName, nextVersion) {
+  const root = join(codexHome, 'dev-plugins', args.marketplace);
+  const listed = await codexJson(args.codexBin, ['plugin', 'marketplace', 'list'], cwd, codexHome);
+  if (!Array.isArray(listed.marketplaces)) throw new Error('Codex returned no marketplace inventory');
+  const matches = listed.marketplaces.filter((entry) => entry.name === args.marketplace);
+  if (matches.length > 1) throw new UsageError(`ambiguous marketplace: ${args.marketplace}`);
+  const existing = matches[0];
+  if (existing) {
+    const actual = await realpath(existing.root);
+    const expected = await realpath(root).catch((error) => {
+      if (error.code !== 'ENOENT') throw error;
+      return null;
+    });
+    if (existing.marketplaceSource?.sourceType !== 'local' || actual !== expected) {
+      throw new UsageError(`refusing to replace marketplace ${args.marketplace}; use a dedicated local development marketplace at ${root}`);
+    }
+  }
+  const file = join(root, '.agents', 'plugins', 'marketplace.json');
+  const previous = await readFile(file, 'utf8').catch((error) => {
+    if (error.code !== 'ENOENT') throw error;
+    return null;
+  });
+  const catalog = previous === null ? {
+    name: args.marketplace,
+    interface: { displayName: 'APE Local Development' },
+    plugins: [],
+  } : JSON.parse(previous);
+  if (catalog.name !== args.marketplace || !Array.isArray(catalog.plugins)) {
+    throw new UsageError(`invalid development marketplace: ${file}`);
+  }
+  const entries = catalog.plugins.filter((entry) => entry.name === pluginName);
+  if (entries.length > 1) throw new UsageError(`duplicate plugin in development marketplace: ${pluginName}`);
+  const entry = entries[0] ?? {
+    name: pluginName,
+    policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' },
+    category: 'Engineering',
+  };
+  const updated = { ...entry, source: { source: 'local', path: `./versions/${pluginName}/${nextVersion}` } };
+  catalog.plugins = entries.length
+    ? catalog.plugins.map((candidate) => candidate.name === pluginName ? updated : candidate)
+    : [...catalog.plugins, updated];
+  return { root, file, previous, contents: `${JSON.stringify(catalog, null, 2)}\n` };
+}
+
+async function retainCache(cacheRoot, backupRoot) {
+  const entries = await readdir(cacheRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) {
+      throw new UsageError(`unexpected entry in plugin cache: ${entry.name}`);
+    }
+    await promoteInstalledTree(join(cacheRoot, entry.name), backupRoot, entry.name);
+  }
+  return entries.map((entry) => entry.name);
+}
+
+async function installDevelopmentSource(args, codexHome, cwd, marketplace, cacheRoot, pluginName, nextVersion) {
+  const backupRoot = join(marketplace.root, 'retained-cache', pluginName);
+  const versions = await retainCache(cacheRoot, backupRoot);
+  await atomicWrite(marketplace.file, marketplace.contents);
+  let installError = null;
+  try {
+    await runCodex(args.codexBin, ['plugin', 'marketplace', 'add', marketplace.root, '--json'], cwd, codexHome);
+    await runCodex(args.codexBin, ['plugin', 'add', `${pluginName}@${args.marketplace}`, '--json'], cwd, codexHome);
+  } catch (error) {
+    installError = error;
+  }
+  if (installError) {
+    if (marketplace.previous === null) await rm(marketplace.file);
+    else await atomicWrite(marketplace.file, marketplace.previous);
+    // Recover failed installations without overwriting concurrent edits. On
+    // success, restoring old cache directories would make Codex select them
+    // again when their version sorts ahead of the new build metadata.
+    try {
+      for (const version of versions) {
+        await promoteInstalledTree(join(backupRoot, version), cacheRoot, version);
+      }
+    } catch (error) {
+      throw new Error(`could not restore caches after installation failure; recovery copies remain at ${backupRoot}: ${error.message}`);
+    }
+    throw installError;
+  }
+  if (args.preserveOpenTasks) {
+    for (const version of versions) {
+      await promoteInstalledTree(join(backupRoot, version), cacheRoot, version);
+    }
+  }
+  const listed = await codexJson(args.codexBin, ['plugin', 'list', '--marketplace', args.marketplace], cwd, codexHome);
+  const selected = listed.installed?.find((entry) => entry.pluginId === `${pluginName}@${args.marketplace}`);
+  const source = join(marketplace.root, 'versions', pluginName, nextVersion);
+  if (selected?.version !== nextVersion || selected.source?.source !== 'local' ||
+      typeof selected.source.path !== 'string' || await realpath(selected.source.path) !== await realpath(source)) {
+    throw new Error(`Codex did not select ${pluginName}@${args.marketplace} version ${nextVersion}; desktop activation is unverified`);
+  }
+  process.stdout.write(`Verified registered source and selected version: ${pluginName}@${args.marketplace} ${nextVersion}\n`);
+  process.stdout.write(`Recovery copies of previous cache versions: ${backupRoot}\n`);
 }
 
 async function treeDigest(root) {
@@ -349,6 +489,7 @@ async function main(argv) {
   const stagedPluginRoot = join(marketplaceRoot, 'plugins', pluginName);
   const temporaryCodexHome = join(temporaryRoot, 'codex-home');
   const cacheRoot = join(codexHome, 'plugins', 'cache', args.marketplace, pluginName);
+  const lock = join(codexHome, 'dev-plugins', `.ape-reinstall-${args.marketplace}.lock`);
 
   try {
     // Codex validates CODEX_HOME before it evaluates a plugin subcommand. The
@@ -377,18 +518,38 @@ async function main(argv) {
       throw new Error('Codex installed a manifest whose name or version differs from staging');
     }
     await validateStagedPlugin(installedRoot, installedManifest);
-    const promoted = await promoteInstalledTree(installedRoot, cacheRoot, nextVersion);
-    const fileCount = await countFiles(promoted.destination);
-    process.stdout.write(
-      `${promoted.reused ? 'Reused' : 'Installed'} lean cache ${nextVersion}: ${fileCount} files.\n`,
-    );
+    await withDirLock(lock, async () => {
+      const marketplace = await prepareDevelopmentMarketplace(args, codexHome, temporaryRoot, pluginName, nextVersion);
+      if (args.preserveOpenTasks) {
+        const versions = await readdir(cacheRoot).catch(error => {
+          if (error.code !== 'ENOENT') throw error;
+          return [];
+        });
+        if (versions.some(version => version > nextVersion && !version.startsWith('.'))) {
+          throw new UsageError('preserving open tasks requires a development version newer than all retained cache versions');
+        }
+      }
+      await promoteInstalledTree(installedRoot, join(marketplace.root, 'versions', pluginName), nextVersion);
+      const promoted = await promoteInstalledTree(installedRoot, cacheRoot, nextVersion);
+      await installDevelopmentSource(args, codexHome, temporaryRoot, marketplace, cacheRoot, pluginName, nextVersion);
+      const fileCount = await countFiles(promoted.destination);
+      process.stdout.write(
+        `${promoted.reused ? 'Reused' : 'Installed'} lean cache ${nextVersion}: ${fileCount} files.\n`,
+      );
+    }, {
+      staleMs: 30_000, heartbeatMs: 1_000, busyMs: 1_000,
+      requireProcessIdentity: true,
+      busyMessage: `another reinstall holds ${lock}; retry after it finishes`,
+    });
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
 
-  process.stdout.write(`Installed cache version: ${nextVersion} (source remains ${version})\n`);
+  process.stdout.write(`Installed development version: ${nextVersion} (canonical package remains ${version})\n`);
   process.stdout.write(
-    'Existing cache versions remain available to open tasks.\n',
+    args.preserveOpenTasks
+      ? 'Previous pinned cache paths were restored and the new selected version was verified.\n'
+      : 'Previous versions are archived outside the active cache. Open tasks can lose their pinned paths and need a host refresh; do not reinstall while workers are active.\n',
   );
   process.stdout.write(
     `Desktop activation is not verified by this command. A running app may retain its previous plugin snapshot; verify that a fresh task loads ${nextVersion} before starting an APE run.\n`,
