@@ -253,6 +253,7 @@
   "__tests__/runtime-v2-rest-state-lever-guidance.test.js": 69,
   "__tests__/runtime-v2-rest-state-ship-self-disclosure.test.js": 41,
   "__tests__/runtime-v2-resume-contract.test.js": 2000,
+  "__tests__/runtime-v2-retire-invalidated-gate-generations.test.js": 85064.650625,
   "__tests__/runtime-v2-retry-remediation-evidence.test.js": 8128,
   "__tests__/runtime-v2-review-findings-ticket-notice.test.js": 6890,
   "__tests__/runtime-v2-review-recovery-net-diff.test.js": 9019,
