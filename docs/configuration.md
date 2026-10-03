@@ -63,6 +63,7 @@ checked byte-for-byte by `npm run docs:check`.
 | `version` | number | `2` | Runtime-owned schema version; cannot be set. |
 | `shipping.auto_merge` | boolean | `false` | Hold passing work for an audited `ship`; set `true` to merge automatically. |
 | `shipping.codex_dev_refresh` | boolean | `false` | Automatically refresh `ape@ape-dev` after a verified public APE shipment and clean return to `main`; installation is recorded separately from desktop activation. |
+| `shipping.claude_dev_refresh` | boolean | `false` | Refresh the local Claude `ape@ape-dev` installation after a verified public APE shipment from Claude and clean return to `main`; other repositories and plugins are excluded. |
 | `shipping.provider` | string | `"github"` | Shipping provider; GitHub is the only implementation. |
 | `shipping.required_remote_checks` | boolean | `true` | Require remote CI; use `false` only for a project intentionally without CI. |
 | `shipping.target` | object or null | `null` | Explicit `{origin, repository, base}`, frozen at admission. Required for shipping; the canonical APE checkout can target only AAWWCC/ape. |
