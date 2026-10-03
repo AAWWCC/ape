@@ -187,6 +187,7 @@ const PROBE_SRC = [
   'const [mode, counter, argvdump, arm, sleepStr, blockStr] = a;',
   'const tail = a.slice(6);',
   'const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);',
+  "fs.writeFileSync(counter + '.pid', String(process.pid));",
   "try { fs.appendFileSync(counter, 'x'); } catch (e) {}",
   'try { fs.writeFileSync(argvdump, JSON.stringify(tail)); } catch (e) {}',
   "const sleepMs = Number(sleepStr || '0');",
@@ -232,6 +233,7 @@ function makeSuite(outside, probe, name, { mode = 'auto', sleepMs = 0, blockTime
   const base = `node "${probe}" ${mode} "${counter}" "${argvdump}" "${armPath}" ${sleepMs} ${blockTimeoutMs}`;
   return {
     command: template ? `${base} {paths}` : base,
+    pid: async () => Number(await readFile(counter + '.pid', 'utf8')),
     arm: () => writeFile(armPath, 'go\n'),
     executions: async () => {
       try {
@@ -701,7 +703,7 @@ describe('APE v2 sequential-union polyglot merge gate', () => {
     // api runs first (fast pass), web blocks second, giving a window to mutate
     // the tree between runner A completing and runner B being adopted.
     const api = makeRunner(outside, probe, { id: 'api', owns: OWNS_API });
-    const web = makeRunner(outside, probe, { id: 'web', owns: OWNS_WEB, fullMode: 'block' });
+    const web = makeRunner(outside, probe, { id: 'web', owns: OWNS_WEB, fullMode: 'block', blockTimeoutMs: 120000 });
     await writeConfig(dir, { runners: [api.config, web.config], requiredRemoteChecks: true, cache: true });
 
     const { result } = await buildToGate(dir, BOTH_CLAIMS, () => mutateBoth(dir));
@@ -713,6 +715,10 @@ describe('APE v2 sequential-union polyglot merge gate', () => {
     expect(await api.full.executions()).toBe(1);
     expect(await web.full.executions()).toBeGreaterThanOrEqual(1);
 
+    const suitePid = await web.full.pid();
+    trackPid(suitePid);
+    expect(alive(suitePid), 'second suite must be alive before invalidation').toBe(true);
+
     const cacheFile = path.join(runtimePaths(dir).runtime, 'suite-cache.json');
     const before = Object.keys((await readJson(cacheFile, { results: {} })).results).length;
 
@@ -723,9 +729,13 @@ describe('APE v2 sequential-union polyglot merge gate', () => {
     const blocked = await drivePolls(dir, { tries: 60, delay: 100 });
     expect(blocked.run.status).toBe('blocked');
 
+    expect(await waitFor(() => !alive(suitePid)),
+      'drift must retire the live suite before fallback teardown, not merely block its result').toBe(true);
+    expect(alive(suitePid)).toBe(false);
+
     const after = Object.keys((await readJson(cacheFile, { results: {} })).results).length;
     expect(after).toBe(before); // no new suite-cache entry persisted for the drifted tree
-  });
+  }, 45000);
 
   it('fails closed and runs ZERO runner suites when block_on_orphan meets an unowned change (T10)', async () => {
     const { dir, outside, probe } = await makeProject({ 'docs/orphan/note.md': '# orphan\n' });

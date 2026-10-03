@@ -203,6 +203,16 @@ Final-stage `record`, `regate`, and `ship` run quick gates, then start the confi
 suite in a detached process. After `gates.inline_grace_ms`, a still-running suite
 returns state `gating`.
 
+Tree, preflight, or resolved suite changes invalidate a running gate generation.
+Inline and explicit polls record that invalidation before requesting authenticated
+broker cancellation. A generation's suite and descendants must have confirmed
+retirement before its failure is consumed or a replacement can start. Cancellation
+uses the existing bounded escalation; it never relies on a stale PID as proof.
+Incomplete cleanup retains ownership and reports recoverable guidance. Restore
+broker access and use `next` or `resume`; an audited `regate` cannot bypass unknown
+retirement. Invalidation survives restart and a reverted configuration change.
+Generation artifacts are removed only after retirement and both state writes.
+
 While `gating` or `shipping`, call `next` with optional `wait_ms`. Polling releases
 the receipt lock between checks. Limits are `GATE_NEXT_MAX_WAIT_MS` (300000 ms)
 and `GATE_NEXT_POLL_FLOOR_MS` (250 ms). If gating enters required-check shipping,
