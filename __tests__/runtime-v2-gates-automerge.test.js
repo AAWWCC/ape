@@ -676,8 +676,8 @@ describe('autoMergeGithub', () => {
     });
   });
 
-  // The bounded, resumable poll that replaces the in-call watch loop: ONE
-  // non-watch `gh pr checks`, a head-guarded re-probe, then the runtime merge —
+  // The bounded, resumable poll first observes terminal PR state, then for OPEN
+  // runs ONE non-watch `gh pr checks`, a head-guarded re-probe, and the merge —
   // every gh call carrying a selector persisted in shipping_watch (A1).
   describe('poll-phase remote checks and merge (pollRemoteChecksAndMerge)', () => {
     const checksConfig = { shipping: { ...config.shipping, required_remote_checks: true } };
@@ -707,7 +707,7 @@ describe('autoMergeGithub', () => {
       ghResponses.mergeLeavesOpen = true;
       const open = { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA} - main` };
       const drift = { code: 0, output: `${route === 'auto-fallback' ? 'OPEN' : 'MERGED'} ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA} ${MERGE_SHA} release` };
-      ghResponses.view = route === 'auto-fallback' ? [open, open, drift] : [open, drift];
+      ghResponses.view = route === 'auto-fallback' ? [open, open, open, drift] : [open, open, drift];
       if (route !== 'immediate-observation') ghResponses.merge = { code: 1, output: 'branch policy prohibits the merge' };
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
       expect(result.failed).toMatch(/base/);
@@ -755,11 +755,13 @@ describe('autoMergeGithub', () => {
       ghResponses.mergeLeavesOpen = true;
       ghResponses.view = [
         { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
+        { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
         { code: 0, output: `${observation}\n` },
       ];
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
       expect(result.failed).toMatch(reason);
       expect(result.merged).toBeUndefined();
+      expect(ghCalls.filter((call) => call[2] === 'merge')).toHaveLength(1);
       expect(gitCalls.some((args) => ['fetch', 'switch', 'pull', 'branch'].includes(args[0]))).toBe(false);
     });
 
@@ -767,6 +769,7 @@ describe('autoMergeGithub', () => {
       const dir = await project(['src/kept.js']);
       ghResponses.mergeLeavesOpen = true;
       ghResponses.view = [
+        { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
         { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
         { code: 1, output: 'temporary transport fault' },
       ];
@@ -782,6 +785,7 @@ describe('autoMergeGithub', () => {
       const dir = await project(['src/kept.js']);
       ghResponses.mergeLeavesOpen = true;
       ghResponses.view = [
+        { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
         { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
         { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` },
       ];
@@ -933,6 +937,7 @@ describe('autoMergeGithub', () => {
       ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
       ghResponses.view = [
         { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
+        { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
         { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` },
       ];
       ghResponses.merge = {
@@ -951,7 +956,7 @@ describe('autoMergeGithub', () => {
         merged_at: '2026-07-09T12:00:00Z',
         provenance: 'observed-after-merge-command',
       });
-      expect(ghCalls.filter((call) => call[2] === 'view')).toHaveLength(2);
+      expect(ghCalls.filter((call) => call[2] === 'view')).toHaveLength(3);
       expect(ghCalls.filter((call) => call[2] === 'merge')).toHaveLength(1);
       expect(gitCalls).toContainEqual(['switch', 'main']);
     });
@@ -962,6 +967,7 @@ describe('autoMergeGithub', () => {
       ghResponses.tracked = 'src/kept.js\0';
       ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
       ghResponses.view = [
+        { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
         { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
         { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${driftedHead}\n` },
       ];

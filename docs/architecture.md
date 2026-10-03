@@ -154,6 +154,17 @@ This binding adds no fields to stored targets or admission commitments. Existing
 authority, PR URL, base, head, and attested merge-tree checks still apply; unsupported hosts
 and unbound legacy runs remain unable to ship.
 
+Persisted and resumed shipping polls observe the frozen PR before waiting on CI. MERGED and
+CLOSED reconcile independently of failed, pending, missing, or unavailable checks, including
+authentication errors, whether or not a merge request was already submitted. Terminal polls
+never submit another merge. An unsubmitted OPEN PR still requires passing required checks
+and a fresh exact PR observation before submission; submitted watches only observe completion.
+
+MERGED completion requires the frozen repository, URL, base, and pushed head plus the observed
+merge commit's ancestry on the admitted/fetched base and its exact gate-attested tree. A later
+base commit does not replace that proof. Provenance distinguishes an external merge from one
+observed after a merge command. CLOSED without merging blocks with regate or new-run guidance.
+
 Remote completion and local cleanup are separate. `github-shipping.js` proves the exact pushed
 head was merged. `receipt-service.js` records cleanup as `returned`, `retained_dirty`, or
 `retained_error`. A local worktree conflict does not undo a proven merge.
