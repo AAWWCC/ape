@@ -247,6 +247,18 @@ PR needs passing required checks and a fresh matching PR observation before a
 merge request; an already submitted watch never resubmits. Guarded local cleanup
 follows proven completion and may retain local work without undoing the merge.
 
+Checks polling reads a complete JSON bucket collection from stdout, bounded to
+65,536 string units per stream. Only validated failed buckets take the CI-failure
+path and require `regate`; only an intact successful all-pass observation can
+advance merge admission. Pending checks (exit 8) remain non-authorizing.
+Transport errors, malformed/empty output and truncated or oversized evidence
+retain the shipping cursor and passed gates: retry `ape_run next`. Authentication
+errors (exit 4) require restoring `gh` authentication/access for the admitted
+GitHub host/repository before retrying. Status, resume and history report that
+distinction without retaining raw error text. A later valid observation clears
+the stale error guidance. Older watches without observation metadata remain
+retryable.
+
 ### Recovery actions
 
 - `regate`: rerun a failed merge gate within the attempt budget.

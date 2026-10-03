@@ -122,6 +122,23 @@ function expectDiagnostic(value, reason, action) {
 }
 
 describe('unified public run diagnostics', () => {
+  it('keeps historical watches without observation metadata readable and retryable', async () => {
+    const state = runState({
+      status: 'shipping', stage: 'merge', gates: { passed: true },
+      shipping_watch: {
+        provider: 'github', pr_url: 'https://github.com/acme/repo/pull/7',
+        branch: 'feature/tested', base: 'main', head_oid: 'a'.repeat(40),
+        created_at: '2026-08-22T05:00:00.000Z', poll_count: 1,
+        last_poll_at: null, last_checks_summary: null,
+      },
+    });
+    const { status } = await statusFor(state);
+    expectDiagnostic(status.diagnostic, 'shipping', 'ape_run next');
+    expect(explainRun(state)).toContain('ape_run next');
+    expect(renderStatusDoc(state)).toContain('ape_run next');
+    expect(status.diagnostic.failed_checks).toEqual([]);
+  });
+
   it('agrees with the scheduler when only recording the attested receipt remains', async () => {
     const ticketId = 'run-fixture-diagnostics:implement:ticket';
     const { dir, status } = await statusFor(runState({

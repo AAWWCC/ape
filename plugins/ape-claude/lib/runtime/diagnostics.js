@@ -7,6 +7,12 @@ const MERGE_PROVENANCE_VALUES = new Set(Object.values(MERGE_PROVENANCE));
 
 const MAX_FAILED_CHECKS = 32;
 const MAX_IDENTIFIER_LENGTH = 128;
+// Optional watch metadata conveys retry guidance only, never check authority.
+export function shippingObservationGuidance(observation) {
+  if (observation === 'authentication_required') return 'Restore gh authentication/access for the admitted GitHub host/repository, then retry ape_run next.';
+  if (observation === 'observation_error') return 'Remote checks could not be observed reliably; retry ape_run next.';
+  return null;
+}
 // Counts are limited by exact numeric representation, not a run-size policy.
 export const MAX_DIAGNOSTIC_NUMBER = Number.MAX_SAFE_INTEGER;
 
@@ -26,6 +32,8 @@ const DEFINITIONS = Object.freeze({
   blocked: ['ape_run abort or ape_run override reset', 'The run is blocked outside a recoverable gate transition; use an audited exit.'],
   shipping_hold: ['ape_run ship', 'All gates passed and shipping awaits an explicit audited ship action.'],
   shipping: ['ape_run next', 'Shipping is in progress; poll it through the scheduler.'],
+  shipping_authentication_required: [shippingObservationGuidance('authentication_required'), 'Shipping retains the passed gates and frozen target while authentication is repaired.'],
+  shipping_observation_error: [shippingObservationGuidance('observation_error'), 'Shipping retains the passed gates and frozen target while observation is retried.'],
   cleanup_pending: ['ape_run resume', 'The run is terminal but checkout cleanup has not returned; resume to finish cleanup safely.'],
   post_ship_refresh_pending: ['ape_run resume', 'Shipping completed, but the configured local APE development plugin refresh needs recovery; resume retries that refresh without shipping again.'],
   completed: ['check host prerequisites, then ape_run start', 'The run completed and a new run may be started.'],
@@ -197,7 +205,12 @@ function classify(state, archived, corrupt, suppliedDispatch, archiveVerified) {
   if (status === 'blocked' && stage === 'merge' &&
       ownData(state, 'block_reason').value === AUTO_MERGE_HOLD_REASON) return 'shipping_hold';
   if (status === 'blocked') return 'blocked';
-  if (status === 'shipping') return 'shipping';
+  if (status === 'shipping') {
+    const observation = ownData(ownData(state, 'shipping_watch').value, 'checks_observation').value;
+    if (observation === 'authentication_required') return 'shipping_authentication_required';
+    if (observation === 'observation_error') return 'shipping_observation_error';
+    return 'shipping';
+  }
   if (status === 'input_required') {
     const kind = ownData(ownData(state, 'input_required').value, 'kind').value;
     if (kind === 'receipt_retry') return 'receipt_retry_input_required';

@@ -293,6 +293,22 @@ describe('bounded orchestration history metrics', () => {
 });
 
 describe('typed and hard-bounded response projection', () => {
+  it('keeps a legacy shipping cursor retryable without inventing observation or merge evidence', () => {
+    const projected = projectRunResponse({
+      ok: true,
+      run: {
+        run_id: 'run-legacy-shipping', status: 'shipping', stage: 'merge',
+        tickets: [], receipts: [], gates: { passed: true },
+        shipping_watch: { provider: 'github', pr_url: 'https://github.com/acme/repo/pull/7', poll_count: 2 },
+      },
+      actions: [{ type: 'shipping_pending', reason: 'checks running', retry_after_ms: 1000 }],
+    });
+    expect(projected.run.status).toBe('shipping');
+    expect(projected.next_action.kind).toBe('wait');
+    expect(projected.run.merge).toBeUndefined();
+    expect(JSON.stringify(projected)).not.toMatch(/regate|authentication required/i);
+  });
+
   it('maps recovery metadata to the locked next_action vocabulary', () => {
     expect(NEXT_ACTION_KINDS).toEqual([
       'continue_same_agent',

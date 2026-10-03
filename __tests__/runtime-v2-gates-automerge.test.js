@@ -151,7 +151,7 @@ describe('autoMergeGithub', () => {
       // fixtures where `pr view` succeeded.
       view: { code: 0, output: `OPEN https://github.com/acme/repo/pull/7 - ${HEAD_SHA}\n` },
       create: { code: 0, output: 'https://github.com/acme/repo/pull/8\n' },
-      checks: { code: 0, output: 'All checks were successful\n' },
+      checks: { code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) },
       merge: { code: 0, output: '' },
       api: { code: 0, output: JSON.stringify([{ type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'test' }] } }]) },
     };
@@ -808,7 +808,7 @@ describe('autoMergeGithub', () => {
     it('polls checks exactly once WITHOUT --watch and WITH the persisted selector, then merges WITH the selector and cleans up (A1)', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
-      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.checks = { code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) };
       ghResponses.view = { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` };
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
       expect(result.merged).toBeDefined();
@@ -827,7 +827,7 @@ describe('autoMergeGithub', () => {
     it('reports the proven remote merge even when another worktree owns the local base branch', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
-      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.checks = { code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) };
       ghResponses.view = { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` };
       gitResponses.switchBaseError = "fatal: 'main' is already used by worktree at '/tmp/other-worktree'";
 
@@ -842,7 +842,7 @@ describe('autoMergeGithub', () => {
     it('enables GitHub auto-merge when branch policy rejects an immediate green merge', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
-      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.checks = { code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) };
       ghResponses.view = { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` };
       ghResponses.merge = [
         {
@@ -934,7 +934,7 @@ describe('autoMergeGithub', () => {
     it('reconciles a merge-command race when GitHub merged the exact pushed head before reporting not mergeable', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
-      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.checks = { code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) };
       ghResponses.view = [
         { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
         { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
@@ -965,7 +965,7 @@ describe('autoMergeGithub', () => {
       const dir = await project(['src/kept.js']);
       const driftedHead = 'd'.repeat(40);
       ghResponses.tracked = 'src/kept.js\0';
-      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.checks = { code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) };
       ghResponses.view = [
         { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
         { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` },
@@ -987,7 +987,7 @@ describe('autoMergeGithub', () => {
     it('an already-MERGED probe at the pushed head completes idempotently with observed/external provenance and never re-merges (A2)', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
-      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.checks = { code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) };
       ghResponses.view = { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` };
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
       expect(result.merged).toBeDefined();
@@ -1000,7 +1000,7 @@ describe('autoMergeGithub', () => {
     it('aligns a tree-identical divergent land base to the observed squash commit after ff-only cleanup cannot apply', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
-      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.checks = { code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) };
       ghResponses.view = { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` };
       gitResponses.branch = 'main';
       gitResponses.pullBaseError = 'fatal: Not possible to fast-forward, aborting.';
@@ -1018,7 +1018,7 @@ describe('autoMergeGithub', () => {
     it('never rewrites a divergent base when its checkout tree differs from the observed squash tree', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
-      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.checks = { code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) };
       ghResponses.view = { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${HEAD_SHA}\n` };
       gitResponses.branch = 'main';
       gitResponses.pullBaseError = 'fatal: Not possible to fast-forward, aborting.';
@@ -1034,7 +1034,7 @@ describe('autoMergeGithub', () => {
     it('refuses a drifted-head MERGED probe as an external-merge/head-drift block, never a completion (A2)', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
-      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.checks = { code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) };
       ghResponses.view = { code: 0, output: `MERGED ${WATCH_PR} 2026-07-09T12:00:00Z ${'d'.repeat(40)}\n` };
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
       expect(result.merged).toBeUndefined();
@@ -1047,7 +1047,7 @@ describe('autoMergeGithub', () => {
     it('refuses a CLOSED (human-closed) probe as an honest block, never pending-forever (A4)', async () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
-      ghResponses.checks = { code: 0, output: 'All checks were successful\n' };
+      ghResponses.checks = { code: 0, output: JSON.stringify([{ name: 'build', bucket: 'pass' }]) };
       ghResponses.view = { code: 0, output: `CLOSED ${WATCH_PR} - ${'d'.repeat(40)}\n` };
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
       expect(result.merged).toBeUndefined();
@@ -1094,7 +1094,7 @@ describe('autoMergeGithub', () => {
       const dir = await project(['src/kept.js']);
       ghResponses.tracked = 'src/kept.js\0';
       ghResponses.view = { code: 0, output: `OPEN ${WATCH_PR} - ${HEAD_SHA}\n` };
-      ghResponses.checks = { code: 1, output: 'X  lint  1m2s  https://github.com/acme/repo/runs/1\n' };
+      ghResponses.checks = { code: 1, output: JSON.stringify([{ name: 'lint', bucket: 'fail' }]) };
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
       expect(result.failed).toBeDefined();
       expect(String(result.failed)).toMatch(/lint/);
@@ -1220,7 +1220,7 @@ describe('autoMergeGithub', () => {
       // A colorized failing row: CSI colour codes, a BEL, and a DEL byte.
       ghResponses.checks = {
         code: 1,
-        output: '\x1b[31mX\x1b[0m  lint  \x1b[1m1m2s\x1b[0m  https://github.com/acme/repo/runs/1\x07\x7f\n',
+        output: JSON.stringify([{ name: '\x1b[31mlint\x1b[0m\x07\x7f', bucket: 'fail' }]),
       };
       const result = await gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig);
       expect(result.failed).toBeDefined();

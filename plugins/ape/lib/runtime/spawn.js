@@ -369,8 +369,8 @@ function killTree(child, signal) {
 // timeout_ms (callers own their defaults; no timer is armed without one),
 // kill_grace_ms (SIGTERM -> SIGKILL escalation window), drain_ms (post-exit
 // stdio wait), collect ('combined' default | 'separate'), max_output
-// (combined only; checked before append, so output overshoots by at most one
-// pipe chunk — byte-identical to the historical runner cap), signal, supervise
+// (strict per-stream string-length limit in separate mode; combined mode keeps
+// its historical before-append cap), signal, supervise
 // (POSIX suites: keep an owned group leader until tree cleanup).
 //
 // Result: { exit_code, signal, timed_out, stdout, stderr, combined,
@@ -416,6 +416,8 @@ export function spawnWithTimeout(command, args, options = {}) {
     let stdout = '';
     let stderr = '';
     let combined = '';
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
     let timedOut = false;
     let aborted = false;
     // Whether the timeout's force-kill has already been delivered to the tree.
@@ -471,6 +473,7 @@ export function spawnWithTimeout(command, args, options = {}) {
         stdout,
         stderr,
         combined,
+        ...(!combinedMode ? { stdout_truncated: stdoutTruncated, stderr_truncated: stderrTruncated } : {}),
         spawn_error: spawnError ?? supervisorError,
         ...(cleanup ? { cleanup } : {}),
       });
@@ -481,9 +484,13 @@ export function spawnWithTimeout(command, args, options = {}) {
         // the historical overshoot-by-at-most-one-chunk cap semantics.
         if (maxOutput === undefined || combined.length < maxOutput) combined += chunk;
       } else if (stream === 'stdout') {
-        stdout += chunk;
+        const part = maxOutput === undefined ? chunk : chunk.slice(0, Math.max(0, maxOutput - stdout.length));
+        stdoutTruncated ||= part.length < chunk.length;
+        stdout += part;
       } else {
-        stderr += chunk;
+        const part = maxOutput === undefined ? chunk : chunk.slice(0, Math.max(0, maxOutput - stderr.length));
+        stderrTruncated ||= part.length < chunk.length;
+        stderr += part;
       }
     };
     child.stdout.setEncoding('utf8');
@@ -773,6 +780,7 @@ function spawnWindowsOwned(command, args, options) {
     const pipeName = `ape-owned-${randomUUID()}`;
     const pipe = `\\\\.\\pipe\\${pipeName}`;
     let child, stdout = '', stderr = '', combined = '', settled = false;
+    let stdoutTruncated = false, stderrTruncated = false;
     let timer, drainTimer, completion;
     let brokerClosed = false;
     const finish = (result) => {
@@ -784,7 +792,8 @@ function spawnWindowsOwned(command, args, options) {
       server.close();
       child?.stdin?.end();
       child?.unref();
-      resolve({ signal: null, stdout, stderr, combined, ...result });
+      resolve({ signal: null, stdout, stderr, combined,
+        ...(options.collect === 'separate' ? { stdout_truncated: stdoutTruncated, stderr_truncated: stderrTruncated } : {}), ...result });
     };
     const unknown = (cause) => finish({ exit_code: null, timed_out: false,
       spawn_error: new Error(cause), cleanup: { status: 'unknown', cause } });
@@ -831,7 +840,7 @@ function spawnWindowsOwned(command, args, options) {
           cleanup: { status: 'confirmed', cause: 'cancelled before process creation' } });
         return;
       }
-      const script = `$ErrorActionPreference='Stop'\nAdd-Type -TypeDefinition @'\n${WINDOWS_JOB_SOURCE}\n'@\n` +
+      const script = `$ProgressPreference='SilentlyContinue'\n$ErrorActionPreference='Stop'\nAdd-Type -TypeDefinition @'\n${WINDOWS_JOB_SOURCE}\n'@\n` +
         `$c=ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadLine())))\n` +
         `$r=[ApeOwnedJob]::Run([string]$c.command,[string[]]$c.args,[bool]$c.shell,[string]$c.cwd,[int]$c.timeout,[int]$c.cleanup)\n` +
         `$p=New-Object System.IO.Pipes.NamedPipeClientStream('.', [string]$c.pipe, [System.IO.Pipes.PipeDirection]::Out)\n` +
@@ -845,7 +854,12 @@ function spawnWindowsOwned(command, args, options) {
         });
       } catch (e) { unknown(`Windows ownership broker could not start: ${e.message}`); return; }
       const collect = (chunk, kind) => {
-        if (options.collect === 'separate') { if (kind === 'out') stdout += chunk; else stderr += chunk; }
+        if (options.collect === 'separate') {
+          const length = kind === 'out' ? stdout.length : stderr.length;
+          const part = options.max_output === undefined ? chunk : chunk.slice(0, Math.max(0, options.max_output - length));
+          if (kind === 'out') { stdoutTruncated ||= part.length < chunk.length; stdout += part; }
+          else { stderrTruncated ||= part.length < chunk.length; stderr += part; }
+        }
         else if (options.max_output === undefined || combined.length < options.max_output) combined += chunk;
       };
       child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');

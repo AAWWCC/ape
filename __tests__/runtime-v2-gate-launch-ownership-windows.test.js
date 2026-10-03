@@ -172,10 +172,89 @@ async function barrierOwner(root, scenario, publish = true) {
   return { child, event };
 }
 
+// Capture the actual launch in a separate process; mocks cannot affect native tests.
+// Native mode inserts progress before compilation without changing Job/proof code.
+async function progressOwner(root, native, limit) {
+  const spawnUrl = pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../lib/runtime/spawn.js')).href;
+  const ownerFile = path.join(root, 'progress-owner.mjs');
+  await writeFile(ownerFile, `
+    import cp from 'node:child_process';
+    import net from 'node:net';
+    import {EventEmitter} from 'node:events';
+    import {syncBuiltinESMExports} from 'node:module';
+    const original = cp.spawn;
+    const native = ${JSON.stringify(native)};
+    let preamble = null, intercepted = 0;
+    if (!native) {
+      Object.defineProperty(process, 'platform', {value:'win32'});
+      net.createServer = () => {
+        const server = new EventEmitter();
+        server.listen = (_pipe, ready) => { queueMicrotask(ready); return server; };
+        server.close = () => server;
+        return server;
+      };
+    }
+    cp.spawn = function(command, args, options) {
+      if (!String(command).toLowerCase().endsWith('powershell.exe')) throw new Error('unexpected launch');
+      const at = args.indexOf('-EncodedCommand');
+      if (at < 0) throw new Error('missing encoded broker');
+      let script = Buffer.from(args[at + 1], 'base64').toString('utf16le');
+      const boundary = script.indexOf('Add-Type -TypeDefinition');
+      if (boundary < 0) throw new Error('missing compilation boundary');
+      intercepted++;
+      preamble = script.slice(0, boundary);
+      if (!native) throw new Error('capture-only launch');
+      script = script.slice(0, boundary) +
+        'Write-Progress -Activity "APE diagnostic leakage fixture" -Status "Before compilation" -PercentComplete 50\\n' +
+        script.slice(boundary);
+      args = [...args];
+      args[at + 1] = Buffer.from(script, 'utf16le').toString('base64');
+      return original.call(this, command, args, options);
+    };
+    syncBuiltinESMExports();
+    const {spawnWithTimeout} = await import(${JSON.stringify(spawnUrl)});
+    const result = await spawnWithTimeout(process.execPath, ['-e', 'process.exitCode = 0'], {
+      cwd:${JSON.stringify(root)}, supervise:true, collect:'separate',
+      timeout_ms:30000, drain_ms:5000,
+      ...${JSON.stringify(limit === undefined ? {} : {max_output:limit})},
+    });
+    process.stdout.write(JSON.stringify({preamble, intercepted, result}));
+  `);
+  return spawnWithTimeout(process.execPath, [ownerFile], {
+    cwd:root, collect:'separate', timeout_ms:40000,
+  });
+}
+
+describe('Windows broker launch construction (isolated transport capture)', () => {
+  it('suppresses broker progress before compilation while retaining stop-on-error', async () => {
+    const root = await fixture();
+    const captured = await progressOwner(root, false);
+    expect(captured).toMatchObject({exit_code:0, timed_out:false, spawn_error:null, stderr:''});
+    const launch = JSON.parse(captured.stdout);
+    expect(launch.intercepted).toBe(1);
+    expect(launch.preamble).toMatch(/\$ProgressPreference\s*=\s*['"]SilentlyContinue['"]/i);
+    expect(launch.preamble).toMatch(/\$ErrorActionPreference\s*=\s*['"]Stop['"]/i);
+    expect(launch.result.cleanup.status).toBe('unknown');
+  }, 45000);
+});
+
 // The general durable-gate file runs receipt/REGATE/SHIP, both state sinks,
 // lock recovery and sequential generations on every native OS. These arms
 // specifically require Windows Job Object behavior, not a mocked platform.
 describe.skipIf(!windows)('Windows native ownership and completion proof', () => {
+  it.each([undefined, 64, 0])('does not collect forced broker progress for a silent child with cap %s', async (limit) => {
+    const root = await fixture();
+    const observed = await progressOwner(root, true, limit);
+    expect(observed).toMatchObject({exit_code:0, timed_out:false, spawn_error:null, stderr:''});
+    const {intercepted, result} = JSON.parse(observed.stdout);
+    expect(intercepted).toBe(1);
+    expect(result).toMatchObject({
+      exit_code:0, timed_out:false, spawn_error:null, stdout:'', stderr:'', combined:'',
+      stdout_truncated:false, stderr_truncated:false,
+      cleanup:{status:'confirmed', cause:'owned job ActiveProcesses is zero'},
+    });
+  }, 50000);
+
   it.each(['success', 'output', 'timeout', 'missing'])(
     'waits for real broker close and output drain after %s retirement proof', async (scenario) => {
       const root = await fixture();

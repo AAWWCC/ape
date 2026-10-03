@@ -282,6 +282,7 @@
   "__tests__/runtime-v2-shell-write-verb-coverage.test.js": 6000,
   "__tests__/runtime-v2-ship-deleted-paths.test.js": 14152,
   "__tests__/runtime-v2-ship.test.js": 10623,
+  "__tests__/runtime-v2-shipping-check-observation.test.js": 7117.607040999999,
   "__tests__/runtime-v2-shipping-cleanup.test.js": 2357,
   "__tests__/runtime-v2-shipping-prevention.test.js": 1000,
   "__tests__/runtime-v2-shipping-terminal-reconciliation.test.js": 1000,
