@@ -436,6 +436,11 @@ disable the checkout registration in `.claude/settings.local.json` when using th
 ```
 
 Regenerate the host packages with `npm run package:plugins`. Codex development updates can then use
-`npm run reinstall:codex` after explicit installation approval. Start a new host task to load
-the new snapshot; see [loaded bundles](architecture.md#loaded-bundles). Both generated MCP
+`npm run reinstall:codex` after explicit installation approval. The installer defaults to
+the dedicated `ape-dev` local marketplace and verifies its source and selected version.
+For this public development checkout, enable `shipping.codex_dev_refresh` once to install
+the verified merged build automatically after each successful Codex shipment. The run
+reports `codex_plugin_refresh`; a failed refresh is retried with `ape_run resume` without
+repeating the shipment. Start a new host task and verify the new loaded snapshot; a running
+desktop app may require a restart. See [loaded bundles](architecture.md#loaded-bundles). Both generated MCP
 declarations launch the local bundle over stdio. A hosted APE broker is outside this release.
