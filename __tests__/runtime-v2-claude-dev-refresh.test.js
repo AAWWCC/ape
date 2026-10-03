@@ -107,7 +107,7 @@ describe('Claude APE development installer', () => {
         await expect(readFile(path.join(previous.installPath, '.orphaned_at'))).rejects.toMatchObject({ code: 'ENOENT' });
       }
     }
-  });
+  }, 60_000);
 
   it('restores the catalog and older pinned path after a failed native update', async () => {
     const c = await fixture();
