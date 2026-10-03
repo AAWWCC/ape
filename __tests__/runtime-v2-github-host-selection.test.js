@@ -372,7 +372,7 @@ describe.each([
     gitResponses.branch = 'main';
     const result = await checked(() => gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig));
     expect(result.merged.url).toBe(WATCH_PR);
-    expect(targets.map(call => call.args[1])).toEqual(['checks', 'view', 'merge', 'view']);
+    expect(targets.map(call => call.args[1])).toEqual(['view', 'checks', 'view', 'merge', 'view']);
     for (const call of targets) expect(call.args[2]).toBe(WATCH_PR);
   });
 
@@ -397,13 +397,14 @@ describe.each([
     const dir = await project(['src/kept.js']);
     ghResponses.view = [
       { code: 0, output: 'OPEN ' + WATCH_PR + ' - ' + HEAD_SHA },
+      { code: 0, output: 'OPEN ' + WATCH_PR + ' - ' + HEAD_SHA },
       { code: 0, output: 'MERGED ' + WATCH_PR + ' 2026-07-09T12:00:00Z ' + HEAD_SHA },
     ];
     ghResponses.merge = { code: 1, output: 'Pull Request is not mergeable' };
     const result = await checked(() => gatesModule.pollRemoteChecksAndMerge(dir, watchState(), checksConfig));
     expect(result.merged).toMatchObject({ url: WATCH_PR, provenance: 'observed-after-merge-command' });
     expect(ghRouteCalls.merge).toBe(1);
-    expect(ghRouteCalls.view).toBe(2);
+    expect(ghRouteCalls.view).toBe(3);
   });
 
   it.each(['OPEN', 'MERGED'])('re-enters a submitted merge with a bound %s observation and no second mutation', async (status) => {
@@ -417,7 +418,7 @@ describe.each([
     else expect(result.pending.merge_request_submitted).toBe(true);
     expect(ghRouteCalls.merge).toBe(0);
     expect(ghRouteCalls.create).toBe(0);
-    expect(targets.map(call => call.args[1])).toEqual(['checks', 'view']);
+    expect(targets.map(call => call.args[1])).toEqual(['view']);
   });
 
   it('keeps supported historical version-1 commitments byte-stable during merged re-entry', async () => {

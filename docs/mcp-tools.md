@@ -236,6 +236,17 @@ Existing consent and origin, PR URL, base, head, and merge-tree checks still app
 Stored admission commitments remain unchanged; unsupported hosts and unbound
 legacy runs cannot ship.
 
+Each persisted or resumed shipping poll observes the PR before waiting on checks.
+MERGED and CLOSED reconcile even when checks fail, remain pending, are missing,
+or cannot be read (including authentication errors). Neither terminal state
+submits another merge request. MERGED requires the exact frozen repository,
+URL, base, pushed head, and observed merge commit ancestry and gate-attested tree;
+provenance records whether a merge command had been submitted. CLOSED without
+merging blocks with guidance to regate or start a new run. An unsubmitted OPEN
+PR needs passing required checks and a fresh matching PR observation before a
+merge request; an already submitted watch never resubmits. Guarded local cleanup
+follows proven completion and may retain local work without undoing the merge.
+
 ### Recovery actions
 
 - `regate`: rerun a failed merge gate within the attempt budget.

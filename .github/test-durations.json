@@ -284,6 +284,7 @@
   "__tests__/runtime-v2-ship.test.js": 10623,
   "__tests__/runtime-v2-shipping-cleanup.test.js": 2357,
   "__tests__/runtime-v2-shipping-prevention.test.js": 1000,
+  "__tests__/runtime-v2-shipping-terminal-reconciliation.test.js": 1000,
   "__tests__/runtime-v2-spawn-serial-isolation.test.js": 128,
   "__tests__/runtime-v2-spawn.test.js": 3218,
   "__tests__/runtime-v2-start-admission-prelock.test.js": 1945,
