@@ -134,6 +134,7 @@ const OWNER_MANIFEST = [
     owner: 'lib/runtime/github-shipping.js',
     facade: 'lib/runtime/gates.js',
     symbols: ['autoMergeGithub', 'pollRemoteChecksAndMerge'],
+    consumes: ['lib/runtime/shipping-target.js'],
   },
   {
     domain: 'deterministic scheduler reducer',
@@ -875,6 +876,17 @@ describe('runtime-v2 module boundaries: forbidden ownership fixtures use the pro
       { 'fixture/dependency.js': "import { run } from './owner.js';\nexport function helper() { return run(); }\n" },
     );
     expect(result.findings.map((finding) => finding.code)).toContain('runtime-import-cycle');
+  });
+
+  it('accepts shipping consuming target validation but rejects a target-to-shipping back-edge', () => {
+    const files = new Map([
+      ['fixture/github-shipping.js', "import { binding } from './shipping-target.js';\nexport function ship() { return binding(); }\n"],
+      ['fixture/shipping-target.js', "export function binding() { return { host: 'github.com', repository: 'acme/repo' }; }\n"],
+    ]);
+    const inspect = () => analyzeBoundaries({ files, manifest: [], graphFiles: [...files.keys()] });
+    expect(inspect().findings).toEqual([]);
+    files.set('fixture/shipping-target.js', "import { ship } from './github-shipping.js';\nexport function binding() { return ship(); }\n");
+    expect(inspect().findings.map(finding => finding.code)).toContain('runtime-import-cycle');
   });
 
   it('rejects a prohibited one-way owner back-edge even when it is not cyclic', () => {

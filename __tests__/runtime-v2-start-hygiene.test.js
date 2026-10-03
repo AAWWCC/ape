@@ -964,7 +964,7 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
       `${'c'.repeat(40)}:refs/heads/ape/phase-public`,
     ]);
     for (const entry of harness.events.filter((candidate) => candidate.kind === 'gh')) {
-      expect(entry.args.slice(-2)).toEqual(['--repo', 'AAWWCC/ape']);
+      expect(entry.args.slice(-2)).toEqual(['--repo', 'github.com/AAWWCC/ape']);
     }
     expect(harness.events.find((entry) =>
       entry.kind === 'gh' && entry.args[1] === 'merge')?.args)
@@ -1019,7 +1019,7 @@ describe('APE v2 public-origin and frozen auto-merge authority', () => {
         continue;
       }
       expect(entry.args).toContain(FIXTURE_PUBLIC_PR_URL);
-      expect(entry.args.slice(-2)).toEqual(['--repo', 'AAWWCC/ape']);
+      expect(entry.args.slice(-2)).toEqual(['--repo', 'github.com/AAWWCC/ape']);
     }
   });
 

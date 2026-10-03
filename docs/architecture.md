@@ -132,6 +132,14 @@ documentation-derived fixtures model ordinary prompts and explicit deny/ask rule
 not observations of interactive Claude permission UI. `claude plugin validate` verifies package
 and schema compatibility, not interactive permission behavior.
 
+`shipping-target.js` owns the ephemeral GitHub CLI binding derived from the validated frozen
+origin and repository. PR commands select `--repo github.com/owner/repo`; API reads select
+`--hostname github.com` and concrete repository endpoints. Ambient `GH_HOST` and `GH_REPO`
+cannot redirect these commands, including queued merges and resumed persisted watches.
+This binding adds no fields to stored targets or admission commitments. Existing origin,
+authority, PR URL, base, head, and attested merge-tree checks still apply; unsupported hosts
+and unbound legacy runs remain unable to ship.
+
 Remote completion and local cleanup are separate. `github-shipping.js` proves the exact pushed
 head was merged. `receipt-service.js` records cleanup as `returned`, `retained_dirty`, or
 `retained_error`. A local worktree conflict does not undo a proven merge.

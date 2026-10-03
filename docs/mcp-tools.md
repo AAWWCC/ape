@@ -229,6 +229,13 @@ without repeatedly asking the operator to say continue.
 Before branch creation, start compares the local remote-tracking base with the
 server's branch tip. Shipping repeats the check before its first Git mutation.
 
+Repository-scoped GitHub CLI commands explicitly select the admitted `github.com`
+repository, regardless of `GH_HOST` or `GH_REPO`. This applies to PR creation,
+observations, checks, merges, protection API reads, and resumed shipping watches.
+Existing consent and origin, PR URL, base, head, and merge-tree checks still apply.
+Stored admission commitments remain unchanged; unsupported hosts and unbound
+legacy runs cannot ship.
+
 ### Recovery actions
 
 - `regate`: rerun a failed merge gate within the attempt budget.

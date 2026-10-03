@@ -270,7 +270,7 @@ describe('autoMergeGithub', () => {
       'gh', 'pr', 'view', 'feat/thing',
       '--json', 'url,state,mergedAt,headRefOid,mergeCommit,baseRefName',
       '--jq', '[.state, .url, (.mergedAt // "-"), .headRefOid, (.mergeCommit.oid // "-"), .baseRefName] | join(" ")',
-      '--repo', 'acme/repo',
+      '--repo', 'github.com/acme/repo',
     ]);
     expect(ghCalls.some((call) => call[2] === 'create')).toBe(false);
   });
