@@ -8,7 +8,7 @@ import { startGateSuite, pollGateSuite } from '../lib/runtime/gates.js';
 import { currentTreeSha } from '../lib/runtime/git.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson } from '../lib/runtime/storage.js';
-import { spawnWithTimeout } from '../lib/runtime/spawn.js';
+import { readGateProof, spawnWithTimeout } from '../lib/runtime/spawn.js';
 import { withReceiptLock } from '../lib/runtime/service.js';
 
 // All executable fixtures are synthetic and live outside the governed project.
@@ -262,7 +262,11 @@ fs.promises.rename = async (from, to, ...rest) => {
   return rename(from, to, ...rest);
 };
 syncBuiltinESMExports();
+const observe = (phase, attempt, result) => request.consume && process.send?.({event:'fixture-progress', phase, attempt,
+  actions: result?.actions?.slice(-8).map((action) => ({type:action.type,
+    summary:typeof action.summary === 'string' ? action.summary.slice(0,512) : undefined}))});
 try {
+  observe('service-start');
   let result;
   if (request.action === 'launch') {
     if (request.entry === 'receipt') {
@@ -306,9 +310,12 @@ try {
     else result = await service.nextRun(request.project);
   } else result = await service.nextRun(request.project);
   if ((request.secondRunner || request.consume) && request.action === 'launch') {
+    observe('launch-returned', undefined, result);
     fs.writeFileSync(path.join(request.outside, 'one.release'), 'go');
     for (let attempts = 0; attempts < 400; attempts++) {
+      observe('poll-start', attempts);
       result = await service.nextRun(request.project);
+      observe('poll-returned', attempts, result);
       await new Promise((r) => setTimeout(r, 25));
     }
     throw new Error('second runner did not reach publication barrier');
@@ -329,12 +336,20 @@ async function invoke(f, request, childEnv = {}) {
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (/^(APE_|CODEX_CWD$|CLAUDE_PROJECT_DIR$|NODE_OPTIONS$)/.test(key)) delete env[key];
   Object.assign(env, childEnv);
-  const child = spawn(process.execPath, [path.join(f.outside, 'owner.mjs'), input], { cwd: f.project, env, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn(process.execPath, [path.join(f.outside, 'owner.mjs'), input], { cwd: f.project, env,
+    stdio: request.consume ? ['ignore', 'ignore', 'pipe', 'ipc'] : ['ignore', 'ignore', 'pipe'] });
   children.push(child);
   let stderr = '';
-  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.stderr.on('data', (chunk) => { stderr = (stderr + chunk).slice(-4096); });
+  const progress = [];
+  child.on('message', (message) => {
+    if (message?.event !== 'fixture-progress') return;
+    progress.push(message);
+    if (progress.length > 8) progress.shift();
+  });
   const exited = new Promise((resolve, reject) => { child.once('exit', resolve); child.once('error', reject); });
-  return { child, exited, response, result: async () => {
+  return { child, exited, response, diagnostics: () => ({exit_code:child.exitCode,
+    signal:child.signalCode, stderr, progress:[...progress]}), result: async () => {
     await until(() => exists(response), `service response (${stderr})`);
     return json(response);
   } };
@@ -351,6 +366,46 @@ function safeArtifactDiagnostic(artifact) {
   return { run_id: artifact.run_id, nonce: artifact.nonce, cache_key: artifact.cache_key,
     passed: artifact.passed, verification: verification && { exit_code: verification.exit_code,
       tooling_failure: verification.tooling_failure, timed_out: verification.timed_out, aborted: verification.aborted } };
+}
+async function consumptionBarrier(f, owner) {
+  const barrierFile = path.join(f.outside, 'publication-barrier.json');
+  try {
+    await until(async () => {
+      if (await exists(barrierFile)) return true;
+      if (await exists(owner.response)) throw new Error('controller returned before confirmed consumption');
+      if (owner.child.exitCode !== null || owner.child.signalCode !== null) {
+        throw new Error('controller exited before confirmed consumption');
+      }
+      return false;
+    }, 'confirmed result consumption');
+  } catch (error) {
+    // Observe before fallback teardown. Select fields explicitly: ownership
+    // secrets, proof MACs and command output must never enter diagnostics.
+    const state = await json(f.paths.active).catch(() => null);
+    const response = await json(owner.response).catch(() => null);
+    const dir = path.join(f.paths.runtime, 'gate-suite');
+    const files = await readdir(dir).catch(() => []);
+    const ownership = [];
+    for (const name of files.filter((file) => file.endsWith('.ownership.json')).slice(0,8)) {
+      const record = await json(path.join(dir,name)).catch(() => null);
+      const proof = record && await readGateProof(record).catch(() => null);
+      ownership.push({generation:record?.generation, phase:record?.phase,
+        runner_alive:alive(record?.watch?.pid), broker_alive:alive(record?.broker_pid),
+        cleanup:proof?.cleanup && {status:proof.cleanup.status, cause:proof.cleanup.cause?.slice(0,512)},
+        result_published:proof?.producers?.result_published,
+        heartbeat_drained:proof?.producers?.heartbeat_drained,
+        acknowledgement_available:typeof record?.proof_file === 'string' && await exists(record.proof_file + '.producers.json'),
+        artifact:safeArtifactDiagnostic(proof?.artifact)});
+    }
+    throw new Error(error.message + ': ' + JSON.stringify({controller:owner.diagnostics(),
+      response:response && {error:response.error?.slice(0,512), code:response.code,
+        actions:response.result?.actions?.slice(-8).map((action) => ({type:action.type,
+          summary:action.summary?.slice(0,512)}))},
+      state:state && {status:state.status, stage:state.stage, nonce:state.gates_watch?.nonce,
+        poll_count:state.gates_watch?.poll_count, last_summary:state.gates_watch?.last_summary?.slice(0,512),
+        full_suite:safeArtifactDiagnostic(state.gates?.checks?.full_suite)}, ownership}));
+  }
+  return json(barrierFile);
 }
 async function finishService(f, entry) {
   await writeFile(path.join(f.outside, 'one.release'), 'go');
@@ -462,9 +517,7 @@ describe('durable gate ownership at the state-publication sink (native)', () => 
     const f = await fixture();
     await serviceHarness(f);
     const owner = await invoke(f, { action: 'launch', entry: 'receipt', sink, fault: 'crash', consume: true });
-    const barrierFile = path.join(f.outside, 'publication-barrier.json');
-    await until(() => exists(barrierFile), 'confirmed result consumption');
-    const barrier = await json(barrierFile);
+    const barrier = await consumptionBarrier(f, owner);
     expect(barrier.gates.checks.full_suite.passed).toBe(true);
     expect(await records(f)).toHaveLength(1);
     expect((await members(f)).every((pid) => !alive(pid)), 'consumption may follow only confirmed retirement').toBe(true);

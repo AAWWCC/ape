@@ -96,6 +96,18 @@ export async function readGateProof(record) {
   try {
     const proof = await readGateOwnership(record.proof_file);
     if (proof.generation !== record.generation || proof.mac !== ownershipMac(record.secret, proof.payload)) return null;
+    // The broker's proof is immutable after exit. Its runner acknowledges
+    // heartbeat drain separately, bound to these exact authenticated bytes.
+    if (proof.payload?.producers?.result_published === true && proof.payload.producers.heartbeat_drained !== true) {
+      try {
+        const completion = await readGateOwnership(`${record.proof_file}.producers.json`);
+        if (completion.generation === record.generation &&
+            completion.mac === ownershipMac(record.secret, completion.payload) &&
+            completion.payload?.proof_mac === proof.mac && completion.payload.heartbeat_drained === true) {
+          return { ...proof.payload, producers: { ...proof.payload.producers, heartbeat_drained: true } };
+        }
+      } catch { /* Missing or incomplete producer evidence never grants cleanup. */ }
+    }
     return proof.payload;
   } catch { return null; }
 }
@@ -182,6 +194,10 @@ async function runGateProofBroker() {
         retry: result.aborted === true };
       await writeOwnershipFile(record.proof_file, { generation: record.generation, payload: proof, mac: ownershipMac(record.secret, proof) });
       await writeOwnershipFile(job.artifact_file, proof.artifact);
+      if (proof.cleanup.status === 'confirmed') {
+        proof = { ...proof, producers: { result_published: true, heartbeat_drained: false } };
+        await writeOwnershipFile(record.proof_file, { generation: record.generation, payload: proof, mac: ownershipMac(record.secret, proof) });
+      }
       process.send?.({ type: 'finished', generation: record.generation }, () => {});
     } catch (error) {
       process.send?.({ type: 'broker-error', cause: String(error?.message ?? error).slice(0, 1024) }, () => {});
@@ -201,9 +217,10 @@ export async function runOwnedGateJob(jobFile, job) {
     env: { ...process.env, APE_GATE_RUNNER_JOB: undefined },
   });
   let beatRunning = null;
+  let beatFailed = false;
   const beat = () => {
     if (!beatRunning) beatRunning = writeOwnershipFile(job.heartbeat_file, { pid: process.pid, beat_at: Date.now() })
-      .catch(() => {}).finally(() => { beatRunning = null; });
+      .catch(() => { beatFailed = true; }).finally(() => { beatRunning = null; });
   };
   beat();
   const heartbeat = setInterval(beat, job.heartbeat_ms ?? 5000);
@@ -236,6 +253,16 @@ export async function runOwnedGateJob(jobFile, job) {
   });
   clearInterval(heartbeat);
   if (beatRunning) await beatRunning;
+  // Broker exit hands completion authority to its runner. The broker has
+  // finished every result/proof write, and no heartbeat can start after the
+  // interval is stopped. Never infer this boundary from PID disappearance.
+  const proof = await readGateProof(record);
+  if (!beatFailed && proof?.producers?.result_published === true) {
+    const published = await readGateOwnership(record.proof_file);
+    const completed = { proof_mac: published.mac, heartbeat_drained: true };
+    await writeOwnershipFile(`${record.proof_file}.producers.json`, { generation: record.generation,
+      payload: completed, mac: ownershipMac(record.secret, completed) });
+  }
   process.off('SIGTERM', stop);
   process.off('SIGINT', stop);
 }
@@ -370,7 +397,8 @@ function killTree(child, signal) {
 // kill_grace_ms (SIGTERM -> SIGKILL escalation window), drain_ms (post-exit
 // stdio wait), collect ('combined' default | 'separate'), max_output
 // (strict per-stream string-length limit in separate mode; combined mode keeps
-// its historical before-append cap), signal, supervise
+// its historical before-append cap), stdout_bytes (separate mode only: collect
+// stdout as a Buffer in stdout_bytes without decoding), signal, supervise
 // (POSIX suites: keep an owned group leader until tree cleanup).
 //
 // Result: { exit_code, signal, timed_out, stdout, stderr, combined,
@@ -382,6 +410,7 @@ export function spawnWithTimeout(command, args, options = {}) {
   const killGraceMs = options.kill_grace_ms ?? DEFAULT_KILL_GRACE_MS;
   const drainMs = options.drain_ms ?? DEFAULT_DRAIN_MS;
   const combinedMode = options.collect !== 'separate';
+  const binaryStdout = !combinedMode && options.stdout_bytes === true;
   const maxOutput = options.max_output;
   // Windows retains the existing live parent chain and taskkill /T behavior.
   const supervised = options.supervise === true && process.platform !== 'win32';
@@ -414,6 +443,8 @@ export function spawnWithTimeout(command, args, options = {}) {
       return;
     }
     let stdout = '';
+    const stdoutChunks = [];
+    let stdoutBytes = 0;
     let stderr = '';
     let combined = '';
     let stdoutTruncated = false;
@@ -471,6 +502,7 @@ export function spawnWithTimeout(command, args, options = {}) {
         timed_out: timedOut,
         ...(aborted ? { aborted: true } : {}),
         stdout,
+        ...(binaryStdout ? { stdout_bytes: Buffer.concat(stdoutChunks, stdoutBytes) } : {}),
         stderr,
         combined,
         ...(!combinedMode ? { stdout_truncated: stdoutTruncated, stderr_truncated: stderrTruncated } : {}),
@@ -484,6 +516,13 @@ export function spawnWithTimeout(command, args, options = {}) {
         // the historical overshoot-by-at-most-one-chunk cap semantics.
         if (maxOutput === undefined || combined.length < maxOutput) combined += chunk;
       } else if (stream === 'stdout') {
+        if (binaryStdout) {
+          const part = maxOutput === undefined ? chunk : chunk.subarray(0, Math.max(0, maxOutput - stdoutBytes));
+          stdoutTruncated ||= part.length < chunk.length;
+          stdoutChunks.push(part);
+          stdoutBytes += part.length;
+          return;
+        }
         const part = maxOutput === undefined ? chunk : chunk.slice(0, Math.max(0, maxOutput - stdout.length));
         stdoutTruncated ||= part.length < chunk.length;
         stdout += part;
@@ -493,7 +532,7 @@ export function spawnWithTimeout(command, args, options = {}) {
         stderr += part;
       }
     };
-    child.stdout.setEncoding('utf8');
+    if (!binaryStdout) child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => collect(chunk, 'stdout'));
     child.stderr.on('data', (chunk) => collect(chunk, 'stderr'));
