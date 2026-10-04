@@ -252,6 +252,93 @@ describe('receipt claims comparison end-to-end', () => {
 });
 
 describe('currentTreeSha persistent-index warm path', () => {
+  // Linux filesystems accept arbitrary filename bytes; macOS filesystems may
+  // reject invalid UTF-8 with EILSEQ. Windows cannot represent this fixture.
+  // U+FFFD is a distinct legal filename, not an alias for the raw 0xff byte.
+  // Decode only Git's ASCII metadata, keeping tree-entry names as Buffers.
+  function treeEntriesByFilenameBytes(dir, tree) {
+    const output = execFileSync('git', ['ls-tree', '-r', '-z', tree], { cwd: dir, env: GIT_ENV });
+    const entries = new Map();
+    for (let start = 0; start < output.length;) {
+      const end = output.indexOf(0, start);
+      const tab = output.indexOf(9, start);
+      expect(end).toBeGreaterThan(tab);
+      const metadata = output.subarray(start, tab).toString('ascii').split(' ');
+      entries.set(output.subarray(tab + 1, end).toString('hex'), metadata[2]);
+      start = end + 1;
+    }
+    return entries;
+  }
+
+  const rawFilenameCases = ['cold', 'warm', 'corrupt-cache'].flatMap((mode) =>
+    ['modified-with-alias', 'deleted-with-alias', 'untracked-with-alias', 'modified-without-alias']
+      .map((change) => ({ mode, change })));
+
+  it.skipIf(process.platform === 'win32').each(rawFilenameCases)(
+    'preserves filesystem-supported filename bytes ($mode, $change)', async ({ mode, change }) => {
+      const dir = await project();
+      let rawName = Buffer.from([0x78, 0xff, 0x2e, 0x6a, 0x73]);
+      const aliasName = Buffer.from('x\ufffd.js');
+      const filenamePath = (name) => Buffer.concat([Buffer.from(`${dir}${path.sep}`), name]);
+      let rawPath = filenamePath(rawName);
+      // Probe only fixture creation, before Git or currentTreeSha runs. Keep
+      // all behavioral assertions active on filesystems that reject 0xff by
+      // using a distinct representable byte sequence there. Do not catch Git,
+      // snapshot, permission, or other setup errors as filesystem limitations.
+      try {
+        await writeFile(rawPath, 'filename capability probe\n');
+      } catch (error) {
+        if (error.code !== 'EILSEQ') throw error;
+        rawName = Buffer.from('x\u4e2d.js');
+        rawPath = filenamePath(rawName);
+        await writeFile(rawPath, 'filename capability probe\n');
+      }
+      await rm(rawPath);
+      const hasAlias = change !== 'modified-without-alias';
+      const isUntracked = change === 'untracked-with-alias';
+      if (!isUntracked) await writeFile(rawPath, 'raw baseline\n');
+      if (hasAlias) await writeFile(path.join(dir, aliasName.toString()), 'alias stays unchanged\n');
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-qm', 'distinct raw-byte and replacement-character paths');
+      const baseline = git(dir, 'rev-parse', 'HEAD^{tree}');
+      const baselineEntries = treeEntriesByFilenameBytes(dir, baseline);
+      expect(baselineEntries.has(rawName.toString('hex'))).toBe(!isUntracked);
+      expect(baselineEntries.has(aliasName.toString('hex'))).toBe(hasAlias);
+
+      if (mode !== 'cold') {
+        await mkdir(runtimePaths(dir).runtime, { recursive: true });
+        // Seed a valid cache using real Git, independently of the function
+        // under test so failure occurs at the changed-content assertion.
+        execFileSync('git', ['read-tree', 'HEAD'], {
+          cwd: dir, env: { ...GIT_ENV, GIT_INDEX_FILE: runtimePaths(dir).treeIndex },
+        });
+        if (mode === 'corrupt-cache') await writeFile(runtimePaths(dir).treeIndex, 'invalid index\n');
+      }
+      if (change === 'deleted-with-alias') await rm(rawPath);
+      else await writeFile(rawPath, 'raw changed content\n');
+      // A user index containing a different staged blob must remain intact.
+      await writeFile(path.join(dir, 'plain.js'), 'staged user content\n');
+      git(dir, 'add', 'plain.js');
+      await writeFile(path.join(dir, 'plain.js'), 'worktree user content\n');
+      const indexBefore = await readFile(path.join(dir, '.git', 'index'));
+      const expected = referenceTreeSha(dir);
+      const observed = await currentTreeSha(dir);
+      expect(observed).toBe(expected);
+      expect(observed).not.toBe(baseline);
+      const entries = treeEntriesByFilenameBytes(dir, observed);
+      if (change === 'deleted-with-alias') expect(entries.has(rawName.toString('hex'))).toBe(false);
+      else {
+        const blob = execFileSync('git', ['hash-object', '--stdin'], {
+          cwd: dir, env: GIT_ENV, encoding: 'utf8', input: 'raw changed content\n',
+        }).trim();
+        expect(entries.get(rawName.toString('hex'))).toBe(blob);
+      }
+      expect(entries.get(aliasName.toString('hex'))).toBe(baselineEntries.get(aliasName.toString('hex')));
+      expect(git(dir, 'show', `${observed}:plain.js`)).toBe('worktree user content');
+      expect(await readFile(path.join(dir, '.git', 'index'))).toEqual(indexBefore);
+    },
+  );
+
   it.each([false, true])('observes projects that ignore the entire reserved directory (warm: %s)', async (warm) => {
     const dir = await project();
     await writeFile(path.join(dir, '.gitignore'), '.ape/\n');
@@ -456,6 +543,120 @@ describe('currentTreeSha persistent-index warm path', () => {
     // .ape is the project-root marker resolveProjectRoot walks up to; the
     // cache must not plant it.
     expect(existsSync(path.join(dir, '.ape'))).toBe(false);
+  });
+});
+
+describe('currentTreeSha excludes live files before Git observes them', () => {
+  // A real clean filter runs after Git enumerates untracked paths but before
+  // their blobs enter the private index. Deleting the later sorted path here
+  // reproduces the vanished-file failure without scheduler timing or a mock
+  // of currentTreeSha, its Git commands, or its error handling.
+  async function disappearingFixture(mode, suffix) {
+    const dir = await project();
+    const outside = mkdtempSync(path.join(tmpdir(), 'ape-snapshot-boundary-'));
+    cleanups.push(outside);
+    await mkdir(path.join(dir, '.ape'));
+    await writeFile(path.join(dir, '.ape', 'config.json'), 'reserved HEAD bytes\n');
+    git(dir, 'add', '.ape/config.json');
+    git(dir, 'commit', '-qm', 'reserved baseline');
+    const folder = mode === 'cold' ? '.ape' : '.ape/runtime';
+    await mkdir(path.join(dir, folder), { recursive: true });
+    const trigger = `${folder}/00-trigger`;
+    const victim = `${folder}/zz-generation.${suffix}.tmp`;
+    const marker = path.join(outside, 'observed');
+    const filter = path.join(outside, 'filter.cjs');
+    await writeFile(filter, `const fs=require('node:fs');
+fs.rmSync(${JSON.stringify(path.join(dir, victim))});
+fs.writeFileSync(${JSON.stringify(marker)}, 'excluded file reached Git hashing');
+process.stdout.write(fs.readFileSync(0));\n`);
+    const quote = (value) => '"' + value.replaceAll('\\', '/').replaceAll('"', '\\"') + '"';
+    git(dir, 'config', 'filter.snapshot-race.clean', `${quote(process.execPath)} ${quote(filter)}`);
+    git(dir, 'config', 'filter.snapshot-race.required', 'true');
+    await writeFile(path.join(dir, '.gitattributes'), `${trigger} filter=snapshot-race\n`);
+
+    // Independent expected contents: no add/reset result is used as an oracle.
+    // Check the complete path inventory and every expected blob.
+    const expected = new Map([
+      ['.ape/config.json', 'reserved HEAD bytes\n'],
+      ['.gitattributes', `${trigger} filter=snapshot-race\n`],
+      ['.gitignore', 'ignored.log\n'],
+      ['café.js', 'unstaged café\n'],
+      ['staged file.md', 'worktree overrides staged bytes\n'],
+      ['-dash.txt', 'leading dash\n'],
+      ['literal[1].txt', 'literal brackets\n'],
+      [' trailing .txt', 'space boundary\n'],
+      ['café new.txt', 'untracked UTF-8\n'],
+    ]);
+    await writeFile(path.join(dir, 'staged file.md'), 'staged bytes\n');
+    git(dir, 'add', '--', 'staged file.md');
+    git(dir, 'rm', '--', 'docs/My Doc.md');
+    await rm(path.join(dir, 'plain.js'));
+    for (const [file, content] of expected) {
+      if (!file.startsWith('.ape/')) await writeFile(path.join(dir, file), content);
+    }
+    await writeFile(path.join(dir, 'ignored.log'), 'not user evidence\n');
+    await writeFile(path.join(dir, '.ape', 'config.json'), 'live reserved edit\n');
+    git(dir, 'add', '.ape/config.json');
+    const arm = async () => {
+      await writeFile(path.join(dir, trigger), 'trigger\n');
+      await writeFile(path.join(dir, victim), 'live producer temporary bytes\n');
+    };
+    await arm();
+    const indexBefore = await readFile(path.join(dir, '.git', 'index'));
+
+    // Prove this is the actual Git failure independently of production. The
+    // control has its own index and cannot modify the user's staged contents.
+    const env = { ...GIT_ENV, GIT_INDEX_FILE: path.join(outside, 'control-index') };
+    execFileSync('git', ['read-tree', 'HEAD'], { cwd: dir, env });
+    const control = spawnSync('git', ['add', '-A'], { cwd: dir, env, encoding: 'utf8' });
+    expect(control.error).toBeUndefined();
+    expect(control.status).not.toBe(0);
+    expect(control.stderr).toContain(victim);
+    expect(await readFile(marker, 'utf8')).toBe('excluded file reached Git hashing');
+    expect(existsSync(path.join(dir, victim))).toBe(false);
+    expect(await readFile(path.join(dir, '.git', 'index'))).toEqual(indexBefore);
+    await rm(marker);
+    await arm();
+    if (mode === 'corrupt-cache') await writeFile(runtimePaths(dir).treeIndex, 'invalid index forces cold fallback\n');
+    return { dir, marker, expected, indexBefore };
+  }
+
+  async function assertContents(dir, tree, expected) {
+    const names = execFileSync('git', ['ls-tree', '-r', '--name-only', '-z', tree],
+      { cwd: dir, env: GIT_ENV, encoding: 'utf8' }).split('\0').filter(Boolean);
+    expect(names.sort()).toEqual([...expected.keys()].sort());
+    for (const [file, content] of expected) {
+      expect(execFileSync('git', ['show', `${tree}:${file}`],
+        { cwd: dir, env: GIT_ENV, encoding: 'utf8' }), file).toBe(content);
+    }
+  }
+
+  it.each(['cold', 'corrupt-cache'].flatMap((mode) => ['proof.producers', 'heartbeat'].map((suffix) => ({ mode, suffix }))))(
+    'does not observe a disappearing excluded $suffix file through $mode staging', async ({ mode, suffix }) => {
+      const f = await disappearingFixture(mode, suffix);
+      const tree = await currentTreeSha(f.dir);
+      expect(existsSync(f.marker), 'excluded filter must never reach the staging sink').toBe(false);
+      await assertContents(f.dir, tree, f.expected);
+      expect(await readFile(path.join(f.dir, '.git', 'index'))).toEqual(f.indexBefore);
+
+      // Repeated and concurrent warm writers must agree with the independently
+      // checked cold tree, even while the excluded filter remains armed.
+      await mkdir(runtimePaths(f.dir).runtime, { recursive: true });
+      expect(await Promise.all([currentTreeSha(f.dir), currentTreeSha(f.dir)])).toEqual([tree, tree]);
+      expect(existsSync(f.marker)).toBe(false);
+      expect(await readFile(path.join(f.dir, '.git', 'index'))).toEqual(f.indexBefore);
+    });
+
+  it.each([false, true])('surfaces genuine eligible-file Git failures and preserves the index (warm: %s)', async (warm) => {
+    const dir = await project();
+    if (warm) await mkdir(runtimePaths(dir).runtime, { recursive: true });
+    await writeFile(path.join(dir, '.gitattributes'), 'café.js filter=reject-user\n');
+    git(dir, 'config', 'filter.reject-user.clean', 'exit 19');
+    git(dir, 'config', 'filter.reject-user.required', 'true');
+    await writeFile(path.join(dir, 'café.js'), 'must not silently omit this change\n');
+    const before = await readFile(path.join(dir, '.git', 'index'));
+    await expect(currentTreeSha(dir)).rejects.toThrow(/filter|failed/);
+    expect(await readFile(path.join(dir, '.git', 'index'))).toEqual(before);
   });
 });
 

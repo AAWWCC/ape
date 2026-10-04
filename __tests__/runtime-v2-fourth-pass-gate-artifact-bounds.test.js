@@ -39,6 +39,7 @@ async function pollFixture(strategy, oversized) {
   });
   const payload = {
     cleanup: { status: 'confirmed' },
+    producers: { result_published: true, heartbeat_drained: true },
     artifact: {
       run_id: state.run_id, nonce: generation, cache_key: watch.cache_key, passed: true,
       verification: { passed: true, exit_code: 0, duration_ms: 1 },
