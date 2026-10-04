@@ -147,6 +147,7 @@
   "__tests__/runtime-v2-host-ticket-binding.test.js": 4271,
   "__tests__/runtime-v2-impacted-gate.test.js": 15341,
   "__tests__/runtime-v2-importer-determinism-toctou.test.js": 124,
+  "__tests__/runtime-v2-inline-multirunner-gate-artifact-cleanup.test.js": 67190,
   "__tests__/runtime-v2-issued-receipt-schema.test.js": 2104,
   "__tests__/runtime-v2-kill-process-tree-stale-pid.test.js": 1269,
   "__tests__/runtime-v2-larp.test.js": 428,
