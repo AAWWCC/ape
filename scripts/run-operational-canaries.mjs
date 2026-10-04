@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,8 +27,8 @@ try {
   fail(`cannot read replay corpus: ${error?.message ?? String(error)}`);
 }
 
-if (corpus?.schema_version !== 1 || !Array.isArray(corpus.cases) || corpus.cases.length === 0) {
-  fail('replay corpus must use schema_version 1 and contain at least one case');
+if (corpus?.schema_version !== 2 || !Array.isArray(corpus.cases) || corpus.cases.length === 0) {
+  fail('replay corpus must use schema_version 2 and contain at least one case');
 }
 
 const requiredKeys = [
@@ -36,7 +37,6 @@ const requiredKeys = [
   'observed_failure',
   'recovery_contract',
   'test_file',
-  'test_anchor',
 ];
 const ids = new Set();
 const coverageTests = new Set();
@@ -52,18 +52,10 @@ for (const entry of corpus.cases) {
   if (!/^__tests__\/runtime-v2-[a-z0-9-]+\.test\.js$/.test(entry.test_file)) {
     fail(`replay case ${entry.id} carries an unsafe or non-runtime test_file`);
   }
-  const testPath = path.join(ROOT, entry.test_file);
-  let source;
-  try {
-    source = readFileSync(testPath, 'utf8');
-  } catch (error) {
-    fail(`replay case ${entry.id} cannot read ${entry.test_file}: ${error?.message ?? String(error)}`);
-  }
-  const executableAnchor = ["it", "test", "describe"].some((declaration) =>
-    source.includes(`${declaration}('${entry.test_anchor}`)
-    || source.includes(`${declaration}(\"${entry.test_anchor}`));
-  if (!executableAnchor) {
-    fail(`replay case ${entry.id} executable anchor is absent from ${entry.test_file}`);
+  if (!Array.isArray(entry.test_names) || entry.test_names.length === 0
+    || entry.test_names.some((name) => typeof name !== 'string' || !name || name.trim() !== name)
+    || new Set(entry.test_names).size !== entry.test_names.length) {
+    fail(`replay case ${entry.id} requires a nonempty unique test_names inventory of exact leaf identities`);
   }
   coverageTests.add(entry.test_file);
 }
@@ -99,14 +91,55 @@ for (const id of expected) {
 
 const vitest = path.join(ROOT, 'node_modules', 'vitest', 'vitest.mjs');
 const selectedTests = [...new Set([TEST, ...BASELINE_TESTS, ...coverageTests])];
-const result = spawnSync(process.execPath, [
-  vitest,
-  'run',
-  '--maxWorkers=3',
-  ...selectedTests,
-], {
-  cwd: ROOT,
-  stdio: 'inherit',
-});
-if (result.error) fail(result.error.message);
-process.exitCode = result.status ?? 1;
+// A fresh private directory binds evidence to this invocation, including concurrent
+// invocations and retries after a child crash. Never consume a prior report.
+const reportDirectory = mkdtempSync(path.join(tmpdir(), 'ape-operational-canary-'));
+let failure;
+try {
+  const reportFile = path.join(reportDirectory, 'results.json');
+  const result = spawnSync(process.execPath, [
+    vitest, 'run', '--maxWorkers=3', '--reporter=default', '--reporter=json',
+    `--outputFile.json=${reportFile}`, ...selectedTests,
+  ], { cwd: ROOT, stdio: 'inherit' });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`runner failed (${result.signal ?? result.status ?? 'unknown exit'})`);
+  const report = JSON.parse(readFileSync(reportFile, 'utf8'));
+  if (!Array.isArray(report?.testResults)) throw new Error('missing structured testResults');
+  // Check identities before aggregate counters so missing/skipped diagnostics name
+  // the exact requirement even when the rest of the run is green.
+  for (const entry of corpus.cases) {
+    const files = report.testResults.filter((file) => file.name === path.join(ROOT, entry.test_file));
+    for (const name of entry.test_names) {
+      const label = `replay case ${entry.id}: ${entry.test_file} :: ${name}`;
+      if (files.length !== 1 || !Array.isArray(files[0].assertionResults)) {
+        throw new Error(`${label} missing or incomplete file execution evidence`);
+      }
+      const assertions = files[0].assertionResults.filter((assertion) => assertion.fullName === name);
+      if (assertions.length !== 1) throw new Error(`${label} missing or ambiguous test execution evidence`);
+      if (assertions[0].status !== 'passed') {
+        throw new Error(`${label} not passed (${assertions[0].status ?? 'missing status'}; skipped/pending cases do not execute)`);
+      }
+    }
+  }
+  for (const file of selectedTests) {
+    const results = report.testResults.filter((result) => result.name === path.join(ROOT, file));
+    if (results.length !== 1 || results[0].status !== 'passed'
+      || !Array.isArray(results[0].assertionResults) || results[0].assertionResults.length === 0) {
+      throw new Error(`missing, incomplete or failed report for ${file}`);
+    }
+  }
+  const assertions = report.testResults.flatMap((file) => file.assertionResults ?? []);
+  if (report.success !== true || report.numFailedTests !== 0 || report.numFailedTestSuites !== 0
+    || !Number.isInteger(report.numTotalTests) || report.numTotalTests !== assertions.length
+    || !Number.isInteger(report.numPassedTests) || report.numPassedTests <= 0
+    || report.numPassedTests !== assertions.filter((assertion) => assertion.status === 'passed').length
+    || assertions.some((assertion) => !['passed', 'pending', 'todo', 'skipped'].includes(assertion.status))) {
+    throw new Error('incomplete or failed structured runner report');
+  }
+  process.stdout.write(`operational-canary: all ${corpus.cases.reduce((total, entry) => total + entry.test_names.length, 0)} required identities executed and passed\n`);
+} catch (error) {
+  failure = error?.message ?? String(error);
+} finally {
+  rmSync(reportDirectory, { recursive: true, force: true });
+}
+if (failure) fail(failure);

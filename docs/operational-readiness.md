@@ -29,6 +29,20 @@ npm run release:reproducible
 
 `operational:canary` checks the synthetic replay corpus and exercises the scheduler,
 native binding, dispatch, schemas, receipts, diagnostics, and simulated shipping.
+Each schema-version-2 corpus `test_names` entry names an exact Vitest full leaf identity in its
+declared file, including suite ancestry and expanded parameterized scenarios.
+Suite requirements enumerate every promised descendant; adding or renaming a
+scenario requires reviewing that inventory. Legacy `test_anchor` labels are
+descriptive only and cannot establish execution.
+
+The command requires a successful current-run Vitest JSON report, passing file
+results, and exactly one passing result for every required identity. Source
+comments, prefix matches, unrelated passing tests, skipped parents or leaves,
+and todo cases cannot satisfy a requirement. Missing, malformed, incomplete or
+failed reports fail the gate. Each invocation uses a fresh temporary report
+directory and cleans it afterward, preventing reuse across retries or concurrent
+runs. The replay test and three baseline test files remain selected alongside
+the corpus files. These are offline execution checks, not live certification.
 CI runs it without host or GitHub credentials. Never copy objectives, tickets,
 receipts, hashes, paths, or prose from `.ape/runtime/` into the corpus.
 

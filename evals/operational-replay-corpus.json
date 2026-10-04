@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "description": "Synthetic, non-sensitive prevention and bounded fallback contracts required before release; these are not historical or live-host success certificates.",
   "cases": [
     {
@@ -8,7 +8,10 @@
       "observed_failure": "Codex encrypted the relayed launch message before APE could attest it, allowing contract or receipt-schema omissions to reach a child.",
       "recovery_contract": "The launch message and SubagentStart establish only provisional bootstrap identity. The child discovers the exact ape_bind name, binds with unchanged launch arguments, and acknowledges trusted post-bind hook-injected authority before stage work.",
       "test_file": "__tests__/runtime-v2-adapters.test.js",
-      "test_anchor": "codex-dispatch-envelope returns a static bootstrap and canonical hook context"
+      "test_anchor": "codex-dispatch-envelope returns a static bootstrap and canonical hook context",
+      "test_names": [
+        "APE v2 adapter conformance codex-dispatch-envelope returns a static bootstrap and canonical hook context"
+      ]
     },
     {
       "id": "plan-directed-replan",
@@ -16,7 +19,10 @@
       "observed_failure": "A material but correctable plan disagreement terminally blocked the run.",
       "recovery_contract": "One scheduler-owned directed replan carries structured missing-assurance feedback before a repeated defect blocks.",
       "test_file": "__tests__/runtime-v2-bounded-false-block-recovery.test.js",
-      "test_anchor": "plan-directed-replan"
+      "test_anchor": "plan-directed-replan",
+      "test_names": [
+        "APE v2 bounded false-block recovery operational replay corpus plan-directed-replan issues a schema-valid second ticket only for strict-subset progress"
+      ]
     },
     {
       "id": "test-contradiction-verification",
@@ -24,7 +30,10 @@
       "observed_failure": "An implementer contradiction claim terminally blocked without independent adjudication.",
       "recovery_contract": "One read-only reconciliation dispatch validates the claim and either resumes or blocks with structured evidence.",
       "test_file": "__tests__/runtime-v2-bounded-false-block-recovery.test.js",
-      "test_anchor": "test-contradiction-verification"
+      "test_anchor": "test-contradiction-verification",
+      "test_names": [
+        "APE v2 bounded false-block recovery operational replay corpus test-contradiction-verification reconciles once, rechecks exact test scope, and resumes the original writer"
+      ]
     },
     {
       "id": "stable-review-finding-identity",
@@ -32,7 +41,10 @@
       "observed_failure": "Equivalent review findings with wording drift consumed distinct remediation cycles.",
       "recovery_contract": "Canonical finding identity is derived from material evidence rather than prose wording.",
       "test_file": "__tests__/runtime-v2-bounded-false-block-recovery.test.js",
-      "test_anchor": "stable-review-finding-identity"
+      "test_anchor": "stable-review-finding-identity",
+      "test_names": [
+        "APE v2 bounded false-block recovery operational replay corpus stable-review-finding-identity converges same-anchor findings despite new IDs and wording"
+      ]
     },
     {
       "id": "actionable-scope-denial",
@@ -40,7 +52,10 @@
       "observed_failure": "A capability or path denial did not state the exact safe recovery shape.",
       "recovery_contract": "The refusal names additive claims and whether the current run can expand or requires a successor.",
       "test_file": "__tests__/runtime-v2-bounded-false-block-recovery.test.js",
-      "test_anchor": "actionable-scope-denial"
+      "test_anchor": "actionable-scope-denial",
+      "test_names": [
+        "APE v2 bounded false-block recovery operational replay corpus actionable-scope-denial preserves exact additive paths, role, and successor requirements"
+      ]
     },
     {
       "id": "protected-branch-shipping",
@@ -48,7 +63,10 @@
       "observed_failure": "A protected branch requiring auto-merge was treated as a terminal shipping failure.",
       "recovery_contract": "Authorized shipping enables auto-merge and polls the exact pushed head to completion.",
       "test_file": "__tests__/runtime-v2-gates-automerge.test.js",
-      "test_anchor": "enables GitHub auto-merge when branch policy rejects an immediate green merge"
+      "test_anchor": "enables GitHub auto-merge when branch policy rejects an immediate green merge",
+      "test_names": [
+        "autoMergeGithub poll-phase remote checks and merge (pollRemoteChecksAndMerge) enables GitHub auto-merge when branch policy rejects an immediate green merge"
+      ]
     },
     {
       "id": "nonbehavioral-test-stage-omission",
@@ -56,7 +74,10 @@
       "observed_failure": "Non-behavioral work was required to manufacture current-run red-test evidence.",
       "recovery_contract": "Non-behavioral phase work omits preflight and test-writer stages.",
       "test_file": "__tests__/runtime-v2-core-lane-surface.test.js",
-      "test_anchor": "projects no test-writer stage for a non-behavioral full run"
+      "test_anchor": "projects no test-writer stage for a non-behavioral full run",
+      "test_names": [
+        "non-behavioral phase scheduling projects no test-writer stage for a non-behavioral full run"
+      ]
     },
     {
       "id": "versioned-terminal-diagnostics",
@@ -64,7 +85,19 @@
       "observed_failure": "Historical outcomes could not be attributed to an APE or dispatch-protocol version and collapsed to generic blocked status.",
       "recovery_contract": "New terminal records retain runtime and protocol provenance plus a stable terminal reason code.",
       "test_file": "__tests__/runtime-v2-versioned-terminal-diagnostics.test.js",
-      "test_anchor": "versioned-terminal-diagnostics"
+      "test_anchor": "versioned-terminal-diagnostics",
+      "test_names": [
+        "versioned-terminal-diagnostics stamps new Codex runs once with release, runtime, plugin, protocol, and envelope provenance",
+        "versioned-terminal-diagnostics hash-binds a stable terminal code and exposes it through privacy-safe explain",
+        "versioned-terminal-diagnostics classifies structured recovery outcomes without depending on future prose wording",
+        "versioned-terminal-diagnostics classifies aborted runs by runtime-owned terminal stage instead of one opaque bucket",
+        "versioned-terminal-diagnostics preserves bounded terminal recovery evidence while projecting only privacy-safe counts",
+        "versioned-terminal-diagnostics aggregates version cohorts and derived legacy reasons without rewriting legacy records",
+        "versioned-terminal-diagnostics filters terminal outcomes by exact release and protocol cohorts while treating Claude launch versions as not applicable",
+        "versioned-terminal-diagnostics retains plan_replan_ceiling_exhausted recovery through immutable history and its wire summary",
+        "versioned-terminal-diagnostics retains plan_progress_not_strict_subset recovery through immutable history and its wire summary",
+        "versioned-terminal-diagnostics retains plan_rejected_after_directed_replan recovery through immutable history and its wire summary"
+      ]
     },
     {
       "id": "omitted-preflight-audit-reason",
@@ -72,7 +105,10 @@
       "observed_failure": "An omitted audit reason produced a generic unsupported-undefined error before the actionable handler diagnostic.",
       "recovery_contract": "The MCP schema declares conditional audit requirements and omitted optional fields reach the specific missing-reason diagnostic.",
       "test_file": "__tests__/runtime-v2-mcp.test.js",
-      "test_anchor": "preserves the answer-preflight reason diagnostic when reason is omitted over MCP"
+      "test_anchor": "preserves the answer-preflight reason diagnostic when reason is omitted over MCP",
+      "test_names": [
+        "APE v2 MCP public surface preserves the answer-preflight reason diagnostic when reason is omitted over MCP"
+      ]
     },
     {
       "id": "native-bootstrap-phase-and-catalog-contract",
@@ -80,7 +116,10 @@
       "observed_failure": "A host-qualified catalog query returned no tool, and a child stopped for missing authority before making the binding call that supplies it.",
       "recovery_contract": "Search the bare registered ape_bind name, call with exact launch arguments, and check trusted authority only after binding returns; offline composition does not certify real model compliance.",
       "test_file": "__tests__/runtime-v2-mcp.test.js",
-      "test_anchor": "composes the registered MCP bootstrap contract with source hooks, acknowledgement, and single-use start proof offline"
+      "test_anchor": "composes the registered MCP bootstrap contract with source hooks, acknowledgement, and single-use start proof offline",
+      "test_names": [
+        "APE v2 MCP public surface composes the registered MCP bootstrap contract with source hooks, acknowledgement, and single-use start proof offline"
+      ]
     },
     {
       "id": "native-probe-failure-reporting",
@@ -88,7 +127,19 @@
       "observed_failure": "Expired launch windows and exact-token bootstrap rejections still appeared as ordinary waiting in parent diagnostics.",
       "recovery_contract": "Report the effective launch deadline and bounded current-generation failure without replacing a live reservation or overwriting accepted proof.",
       "test_file": "__tests__/runtime-v2-probe-diagnostics.test.js",
-      "test_anchor": "offline native probe failure reporting"
+      "test_anchor": "offline native probe failure reporting",
+      "test_names": [
+        "offline native probe failure reporting reads legacy failure status without publishing quarantine during read-only session guidance",
+        "offline native probe failure reporting records an early hook failure without claiming authority even if native evidence has recovered",
+        "offline native probe failure reporting ignores diagnostic writes without an exact launched probe token or fixed typed code",
+        "offline native probe failure reporting reports the elapsed launch deadline as failed without expiring or replacing its live reservation",
+        "offline native probe failure reporting distinguishes completed proof expiry from expiry before acknowledgement without changing proof",
+        "offline native probe failure reporting retains a bounded exact-token production rejection in probe status",
+        "offline native probe failure reporting distinguishes missing and conflicting native candidate evidence after the exact current token is presented",
+        "offline native probe failure reporting does not erase successful binding and acknowledgement proof when unrelated candidate evidence is malformed",
+        "offline native probe failure reporting does not assign an unbound malformed or zero-tool candidate to the newest probe without its token",
+        "offline native probe failure reporting does not write stale A diagnostic failure into replacement B"
+      ]
     },
     {
       "id": "native-canary-identity-isolation",
@@ -96,7 +147,33 @@
       "observed_failure": "Candidate corruption could release an exact canary, while a merely observed unrelated child could be falsely quarantined on a new turn.",
       "recovery_contract": "Immutable deny-only canary evidence survives candidate damage without classifying unrelated provisional children as canaries.",
       "test_file": "__tests__/runtime-v2-bootstrap-hook-integration.test.js",
-      "test_anchor": "native bootstrap source-hook integration"
+      "test_anchor": "native bootstrap source-hook integration",
+      "test_names": [
+        "native bootstrap source-hook integration delivers APE-bounded authority without host preview spilling",
+        "native bootstrap source-hook integration does not assign authority to a similarly named external MCP tool",
+        "native bootstrap source-hook integration keeps a stopped canary retired across session aliases and rejects a stale bootstrap replay",
+        "native bootstrap source-hook integration refuses parent, absent observation, extra identity arguments, and another project before context",
+        "native bootstrap source-hook integration keeps missing actual model evidence from becoming an unbound-main control call",
+        "native bootstrap source-hook integration uses domain-separated canary alias tombstones without quarantining a parent session alone",
+        "native bootstrap source-hook integration recovers exact canary aliases from a valid pre-alias bound projection",
+        "native bootstrap source-hook integration migrates a pre-alias bound child before replacing its mutable probe projection",
+        "native bootstrap source-hook integration persists only an exact-token rejection when candidate normalization denies the real bootstrap hook",
+        "native bootstrap source-hook integration binds an observed child through the parent-session session alias without agent_id",
+        "native bootstrap source-hook integration binds an observed child through the child-agent session alias without agent_id",
+        "native bootstrap source-hook integration injects bootstrap authority only at PreToolUse for the exact owned alias ape_bind",
+        "native bootstrap source-hook integration injects bootstrap authority only at PreToolUse for the exact owned alias mcp__ape__ape_bind",
+        "native bootstrap source-hook integration injects bootstrap authority only at PreToolUse for the exact owned alias mcp__plugin_ape_ape__ape_bind",
+        "native bootstrap source-hook integration admits only the same bootstrap invocation with wildcard-first hooks",
+        "native bootstrap source-hook integration admits only the same bootstrap invocation with ordinary-first hooks",
+        "native bootstrap source-hook integration admits only the same bootstrap invocation with concurrent hooks",
+        "native bootstrap source-hook integration does not erase known child identity on contradiction {\"model\":\"gpt-5.5\"}",
+        "native bootstrap source-hook integration does not erase known child identity on contradiction {\"is_subagent\":false}",
+        "native bootstrap source-hook integration does not erase known child identity on contradiction {\"agent_type\":\"conflicting-type\"}",
+        "native bootstrap source-hook integration keeps an explicit bound canary fenced through candidate-container damage in 'ordinary' mode",
+        "native bootstrap source-hook integration keeps an explicit bound canary fenced through candidate-container damage in 'wildcard' mode",
+        "native bootstrap source-hook integration does not mistake a never-APE child new turn for a canary in 'ordinary' mode",
+        "native bootstrap source-hook integration does not mistake a never-APE child new turn for a canary in 'wildcard' mode"
+      ]
     },
     {
       "id": "compiled-future-stage-contract",
@@ -104,7 +181,35 @@
       "observed_failure": "Optional capability lists previously allowed unreachable future models, missing artifact producers, or schema limits to be discovered after dispatch.",
       "recovery_contract": "One canonical pipeline compiles all reachable worker and runtime stages, consumer schemas, unchanged attempt limits, and a non-authoritative planner template before admission.",
       "test_file": "__tests__/runtime-v2-admission-compiler.test.js",
-      "test_anchor": "prevention-first admission compiler"
+      "test_anchor": "prevention-first admission compiler",
+      "test_names": [
+        "prevention-first admission compiler rejects future manifest overflow without an explicit capability request",
+        "prevention-first admission compiler checks every reachable role model even if the first worker has a valid model",
+        "prevention-first admission compiler shares the current immutable execution policy and progress-dependent dispatch forecast",
+        "prevention-first admission compiler reports evidence-dependent worker and protocol bounds for new admissions",
+        "prevention-first admission compiler rejects a historical numeric forecast presented for new admission",
+        "prevention-first admission compiler publishes runtime artifact producers and consumers through gates and conditional shipping",
+        "prevention-first admission compiler refuses malformed producer schemas and missing runtime gate producers",
+        "prevention-first admission compiler rejects altered artifact schemas and forecasts rather than certifying their producers",
+        "prevention-first admission compiler binds exact branch-sensitive review checks and rejects tampered variants",
+        "prevention-first admission compiler uses the actual green evidence contract and does not add red evidence or writers to read-only modes",
+        "prevention-first admission compiler keeps seventeen exact paths in a consumer-valid workstream",
+        "prevention-first admission compiler includes complete risk-assurance and required-profile shapes without inventing commands",
+        "prevention-first admission compiler preserves requirements beyond the former count ceiling",
+        "prevention-first admission compiler does not claim a representable plan when no exact evidence command exists",
+        "prevention-first admission compiler discloses concrete path resolution without rejecting broad approved scope",
+        "prevention-first admission compiler leaves template representability unknown without silently dropping authorized scope",
+        "prevention-first admission compiler does not add planning or writable authority to ordinary land and read-only investigations",
+        "prevention-first admission compiler projects the exact plan version undefined with one complete policy snapshot",
+        "prevention-first admission compiler projects the exact plan version 1 with one complete policy snapshot",
+        "prevention-first admission compiler projects the exact plan version 2 with one complete policy snapshot",
+        "prevention-first admission compiler refuses an actual projection missing the reachable preflight producer",
+        "prevention-first admission compiler refuses an actual projection missing the reachable plan producer",
+        "prevention-first admission compiler refuses an actual projection missing the reachable test producer",
+        "prevention-first admission compiler refuses an actual projection missing the reachable plan-check producer",
+        "prevention-first admission compiler refuses an actual projection missing the reachable review producer",
+        "prevention-first admission compiler refuses an actual projection missing the reachable test-reconcile producer"
+      ]
     },
     {
       "id": "reviewed-admission-drift",
@@ -112,7 +217,23 @@
       "observed_failure": "Preview could omit repository or command facts and start could consume changed inputs without the reviewed commitment.",
       "recovery_contract": "Read-only preview returns a complete bounded manifest and digest; public start checks exact reviewed inputs before branch, ticket, or worker mutation without treating the digest as human authorization.",
       "test_file": "__tests__/runtime-v2-admission-manifest.test.js",
-      "test_anchor": "reviewed admission manifest through real lifecycle boundary"
+      "test_anchor": "reviewed admission manifest through real lifecycle boundary",
+      "test_names": [
+        "reviewed admission manifest through real lifecycle boundary reports native reclamation limits before launch without rejecting feasible work or changing the digest",
+        "reviewed admission manifest through real lifecycle boundary preview is read-only and returns stable reviewed inputs, not an authorization assertion",
+        "reviewed admission manifest through real lifecycle boundary requires a digest before even creating runtime storage",
+        "reviewed admission manifest through real lifecycle boundary discloses staged runtime metadata even though unstaged runtime bookkeeping is excluded",
+        "reviewed admission manifest through real lifecycle boundary rejects reviewed input, index, and file drift before branch or worker mutation",
+        "reviewed admission manifest through real lifecycle boundary discloses staged, unstaged and unclaimed land paths without widening approved scope",
+        "reviewed admission manifest through real lifecycle boundary admits unchanged reviewed inputs and seals the original manifest",
+        "reviewed admission manifest through real lifecycle boundary requires approved generated outputs before issuing a writer ticket",
+        "reviewed admission manifest through real lifecycle boundary does not disguise a generator as verification or grant tracked writes to read-only workers",
+        "reviewed admission manifest through real lifecycle boundary distinguishes an unavailable executable from baseline test failure without running it",
+        "reviewed admission manifest through real lifecycle boundary rejects special changed files without opening a FIFO or mutating the index",
+        "reviewed admission manifest through real lifecycle boundary hashes a Git symlink itself without following its target",
+        "reviewed admission manifest through real lifecycle boundary checks run-local command executables even with an otherwise available capability catalog",
+        "reviewed admission manifest through real lifecycle boundary resolves Windows executable extensions and never treats a directory as an executable"
+      ]
     },
     {
       "id": "scheduled-base-command-prerequisites",
@@ -120,7 +241,36 @@
       "observed_failure": "A runner present on the preview checkout could disappear when start switched to its resolved base.",
       "recovery_contract": "Read-only immutable Git comparisons reject changed exact command prerequisites before mutation and admit differing commits whose relevant prerequisites remain unchanged.",
       "test_file": "__tests__/runtime-v2-admission-baseline.test.js",
-      "test_anchor": "command availability on the actual scheduled baseline"
+      "test_anchor": "command availability on the actual scheduled baseline",
+      "test_names": [
+        "command availability on the actual scheduled baseline separates explicit preload prerequisites from future test operands",
+        "command availability on the actual scheduled baseline follows a nested package script to its own manifest without comparing unrelated scripts",
+        "command availability on the actual scheduled baseline admits unchanged nested shell entries and npm start fallback without executing them",
+        "command availability on the actual scheduled baseline compares executed prerequisites without treating informational options or forwarded package flags as authority",
+        "command availability on the actual scheduled baseline bounds deeply nested package traversal",
+        "command availability on the actual scheduled baseline rejects a clean feature-only local executable before branch or ticket mutation",
+        "command availability on the actual scheduled baseline detects changed exact interpreter entry scripts even when node is available",
+        "command availability on the actual scheduled baseline rejects a feature-only env-wrapped entry in real preview without mutation",
+        "command availability on the actual scheduled baseline retains env-wrapped package and script entries in the baseline comparison",
+        "command availability on the actual scheduled baseline tracks a project-local delegate selected by literal env PATH",
+        "command availability on the actual scheduled baseline admits unchanged literal env-wrapped prerequisites without executing the script",
+        "command availability on the actual scheduled baseline includes extensionless interpreter entries and exact package-script executables",
+        "command availability on the actual scheduled baseline detects removed execute permissions as a tracked prerequisite change",
+        "command availability on the actual scheduled baseline checks only the selected package script and its execution-relevant manifest fields",
+        "command availability on the actual scheduled baseline checks a package script exact node entry even when the manifest is unchanged",
+        "command availability on the actual scheduled baseline resolves monorepo package scripts from their configured runner root",
+        "command availability on the actual scheduled baseline rejects a feature-only runner working directory without treating changed child files as directory drift",
+        "command availability on the actual scheduled baseline allows differing HEAD and base when exact prerequisites are unchanged",
+        "command availability on the actual scheduled baseline allows an admitted feature checkout with unchanged prerequisites to start from the base",
+        "command availability on the actual scheduled baseline bounds tracked manifest reads without exposing their content",
+        "command availability on the actual scheduled baseline does not follow a tracked manifest symlink outside the repository",
+        "command availability on the actual scheduled baseline does not invent missing planned test paths as baseline command dependencies",
+        "command availability on the actual scheduled baseline does not compare land or unborn runs against a checkout they will not use",
+        "command availability on the actual scheduled baseline blocks a feature-only literal shell environment entry in preview and start before mutation",
+        "command availability on the actual scheduled baseline blocks a feature-only nested package script entry in preview and start before mutation",
+        "command availability on the actual scheduled baseline blocks a feature-only npm start default entry in preview and start before mutation",
+        "command availability on the actual scheduled baseline blocks a feature-only explicit preload with inline code entry in preview and start before mutation"
+      ]
     },
     {
       "id": "admissible-receipt-rejection-guidance",
@@ -128,7 +278,23 @@
       "observed_failure": "A receipt rejection advised reset while the active lifecycle prohibited reset.",
       "recovery_contract": "The bounded shared descriptor advertises only state-eligible actions with explicit operator preconditions; unexplained tree mutation never triggers automatic abort, reset, or restoration.",
       "test_file": "__tests__/runtime-v2-receipt-recovery-guidance.test.js",
-      "test_anchor": "bounded receipt rejection recovery guidance"
+      "test_anchor": "bounded receipt rejection recovery guidance",
+      "test_names": [
+        "bounded receipt rejection recovery guidance bounds unknown input without copying identifiers, paths, errors, or capabilities",
+        "bounded receipt rejection recovery guidance retains safe recovery guidance through the emergency MCP response budget",
+        "bounded receipt rejection recovery guidance drops malformed recovery objects and strips untrusted prose from valid descriptors",
+        "bounded receipt rejection recovery guidance keeps the complete admission manifest and digest when only unrelated preview prose exceeds the budget",
+        "bounded receipt rejection recovery guidance refuses an oversized admission manifest without a usable digest or truncated ready claim",
+        "bounded receipt rejection recovery guidance never offers reset for starting",
+        "bounded receipt rejection recovery guidance never offers reset for planning",
+        "bounded receipt rejection recovery guidance never offers reset for running",
+        "bounded receipt rejection recovery guidance never offers reset for input_required",
+        "bounded receipt rejection recovery guidance never offers reset for gating",
+        "bounded receipt rejection recovery guidance never offers reset for shipping",
+        "bounded receipt rejection recovery guidance offers only operator-audited reset for blocked",
+        "bounded receipt rejection recovery guidance offers only operator-audited reset for aborted",
+        "bounded receipt rejection recovery guidance offers only operator-audited reset for completed"
+      ]
     },
     {
       "id": "frozen-shipping-and-tested-tree",
@@ -136,7 +302,44 @@
       "observed_failure": "Shipping could reach absent prerequisites, infer the wrong repository, or include staged content not covered by the passed gates.",
       "recovery_contract": "Admission and explicit SHIP validate frozen target, identity, prerequisites, policy, and exact gate-tested tree; simulated effects reject drift and preserve staged content on refusal.",
       "test_file": "__tests__/runtime-v2-shipping-prevention.test.js",
-      "test_anchor": "prevention-first shipping admission"
+      "test_anchor": "prevention-first shipping admission",
+      "test_names": [
+        "prevention-first shipping admission admits an explicitly configured non-APE project with stubbed prerequisite reads and no repository mutation",
+        "prevention-first shipping admission separates local produce-and-hold target admission from deferred shipping proof",
+        "prevention-first shipping admission fails before remote queries when configured signing is not non-interactively proven",
+        "prevention-first shipping admission blocks missing Git identity before any GitHub prerequisite query",
+        "prevention-first shipping admission keeps staged bytes, worktree, and HEAD unchanged when signing fails without an unsigned retry",
+        "prevention-first shipping admission refuses missing explicit target and never infers one from origin",
+        "prevention-first shipping admission refuses mismatched fetch and push origins",
+        "prevention-first shipping admission refuses newly redirected frozen transport before GitHub or staging effects",
+        "prevention-first shipping admission retains the public APE package guard without imposing it on other projects",
+        "prevention-first shipping admission rejects legacy unbound shipping before any staging or remote access",
+        "prevention-first shipping admission requires a structured admitted target even when a JSON string shares its raw SHA-256 digest",
+        "prevention-first shipping admission refuses untested pre-staged content without changing the real index or committing",
+        "prevention-first shipping admission ships an approved new file while retaining tracked reserved baseline configuration",
+        "prevention-first shipping admission stages the tested working version of an approved partially staged file",
+        "prevention-first shipping admission refuses to push when a commit hook changes the committed tree",
+        "prevention-first shipping admission refuses configuration target drift before any GitHub access or staging",
+        "prevention-first shipping admission refuses a forged cross-repository watch before polling",
+        "prevention-first shipping admission pins the verified commit even if HEAD changes at the intercepted push boundary",
+        "prevention-first shipping admission allows the audited one-shot SHIP consent without claiming admission-time auto consent",
+        "prevention-first shipping admission blocks shipping-requested admission for unverified authentication without exposing raw prerequisite data",
+        "prevention-first shipping admission blocks shipping-requested admission for no push permission without exposing raw prerequisite data",
+        "prevention-first shipping admission blocks shipping-requested admission for squash disabled without exposing raw prerequisite data",
+        "prevention-first shipping admission blocks shipping-requested admission for wrong repository response without exposing raw prerequisite data",
+        "prevention-first shipping admission blocks shipping-requested admission for loose or missing check protection without exposing raw prerequisite data",
+        "prevention-first shipping admission refuses a frozen transport redirected by insteadOf while named origin remains correct",
+        "prevention-first shipping admission refuses a frozen transport redirected by pushInsteadOf while named origin remains correct",
+        "prevention-first shipping admission rejects missing admission before effects even when target fields have a valid shape",
+        "prevention-first shipping admission rejects changed manifest digest before effects even when target fields have a valid shape",
+        "prevention-first shipping admission rejects retargeted commitment before effects even when target fields have a valid shape",
+        "prevention-first shipping admission checks empty unborn baseline against the full start commitment without inventing a preview SHA",
+        "prevention-first shipping admission checks nonempty unborn baseline against the full start commitment without inventing a preview SHA",
+        "prevention-first shipping admission checks null base without unborn admission against the full start commitment without inventing a preview SHA",
+        "prevention-first shipping admission rejects an untested staged reserved-path edit without changing the real index",
+        "prevention-first shipping admission rejects an untested staged reserved-path addition without changing the real index",
+        "prevention-first shipping admission rejects an untested staged reserved-path deletion without changing the real index"
+      ]
     },
     {
       "id": "current-command-prerequisites",
@@ -144,7 +347,44 @@
       "observed_failure": "Finding node or npm on PATH did not prove the configured entry script, package script, or shebang interpreter was available.",
       "recovery_contract": "Bounded read-only inspection identifies unavailable static command prerequisites before dispatch, while allowing a present test command to fail legitimately and planned test files to be authored later.",
       "test_file": "__tests__/runtime-v2-admission-command-prerequisites.test.js",
-      "test_anchor": "current command prerequisites before dispatch"
+      "test_anchor": "current command prerequisites before dispatch",
+      "test_names": [
+        "current command prerequisites before dispatch charges shared executable content once across many distinct admitted aliases",
+        "current command prerequisites before dispatch admits a present script that would fail and mutate a marker, without executing it",
+        "current command prerequisites before dispatch admits available package scripts and npm start default while inspecting no imports",
+        "current command prerequisites before dispatch accepts literal shell environment prefixes and failing builtins without executing them",
+        "current command prerequisites before dispatch identifies the exact selected package script for missing executables and cycles",
+        "current command prerequisites before dispatch admits a present env shebang interpreter without executing the failing script",
+        "current command prerequisites before dispatch admits a present literal env-wrapped entry in real preview without executing it",
+        "current command prerequisites before dispatch honors literal env PATH and refuses ambiguous environment resets or flags",
+        "current command prerequisites before dispatch keeps intentionally absent future node test paths separate from explicit preloads",
+        "current command prerequisites before dispatch accepts an available preload without treating inline code as a filename or running it",
+        "current command prerequisites before dispatch retains required script and preload checks after interpreter option values",
+        "current command prerequisites before dispatch retains real entry and package prerequisites when help is a script argument",
+        "current command prerequisites before dispatch allows an internal script symlink but rejects an escaping script link",
+        "current command prerequisites before dispatch bounds malformed, special, and oversized package manifests without leaking their bytes",
+        "current command prerequisites before dispatch blocks missing interpreter entry on HEAD=base before creating a branch or worker",
+        "current command prerequisites before dispatch blocks missing Node syntax-check entry on HEAD=base before creating a branch or worker",
+        "current command prerequisites before dispatch blocks missing Node long syntax-check entry on HEAD=base before creating a branch or worker",
+        "current command prerequisites before dispatch blocks missing package script on HEAD=base before creating a branch or worker",
+        "current command prerequisites before dispatch blocks missing package script entry on HEAD=base before creating a branch or worker",
+        "current command prerequisites before dispatch blocks missing shebang interpreter on HEAD=base before creating a branch or worker",
+        "current command prerequisites before dispatch blocks missing env shebang interpreter on HEAD=base before creating a branch or worker",
+        "current command prerequisites before dispatch blocks missing env-wrapped interpreter entry on HEAD=base before creating a branch or worker",
+        "current command prerequisites before dispatch blocks missing preload before inline evaluation on HEAD=base before creating a branch or worker",
+        "current command prerequisites before dispatch blocks missing preload after inline evaluation on HEAD=base before creating a branch or worker",
+        "current command prerequisites before dispatch blocks missing import before inline print on HEAD=base before creating a branch or worker",
+        "current command prerequisites before dispatch does not invent an entry file from interpreter options in bash -lc \"exit 1\"",
+        "current command prerequisites before dispatch does not invent an entry file from interpreter options in bash -o pipefail -c \"exit 1\"",
+        "current command prerequisites before dispatch does not invent an entry file from interpreter options in node --input-type module -e \"process.exit(1)\"",
+        "current command prerequisites before dispatch does not invent an entry file from interpreter options in node --stack-trace-limit 100 -e \"process.exit(1)\"",
+        "current command prerequisites before dispatch does not invent execution prerequisites for informational or forwarded arguments in node --help missing.js",
+        "current command prerequisites before dispatch does not invent execution prerequisites for informational or forwarded arguments in node --version --require ./missing.js",
+        "current command prerequisites before dispatch does not invent execution prerequisites for informational or forwarded arguments in node --require ./missing.js --help",
+        "current command prerequisites before dispatch does not invent execution prerequisites for informational or forwarded arguments in npm run missing --help",
+        "current command prerequisites before dispatch does not invent execution prerequisites for informational or forwarded arguments in npm --version run missing",
+        "current command prerequisites before dispatch does not invent execution prerequisites for informational or forwarded arguments in npm run check -- --prefix ../outside"
+      ]
     },
     {
       "id": "branch-exact-scheduler-review-checks",
@@ -152,7 +392,104 @@
       "observed_failure": "The projected review stage omitted targeted checks required by real fast and green-maintenance scheduler tickets.",
       "recovery_contract": "Actual successful reducer transitions must fit exact canonical ticket schemas and whole branch-specific check variants, including preflight escalation; synthetic reducer events are not native-host or filesystem certification.",
       "test_file": "__tests__/runtime-v2-prevention-pipeline-matrix.test.js",
-      "test_anchor": "prevention compiler against actual successful reducer transitions"
+      "test_anchor": "prevention compiler against actual successful reducer transitions",
+      "test_names": [
+        "prevention compiler against actual successful reducer transitions phase/auto->mechanical/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/auto->mechanical/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions phase/auto->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/auto->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions phase/auto->fast/red-first/v2",
+        "prevention compiler against actual successful reducer transitions phase/auto->fast/green-maintenance/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/auto->fast/green-maintenance/vlegacy/test-only",
+        "prevention compiler against actual successful reducer transitions phase/auto->fast/green-maintenance/v1",
+        "prevention compiler against actual successful reducer transitions phase/auto->fast/green-maintenance/v1/test-only",
+        "prevention compiler against actual successful reducer transitions phase/auto->fast/green-maintenance/v2",
+        "prevention compiler against actual successful reducer transitions phase/auto->fast/green-maintenance/v2/test-only",
+        "prevention compiler against actual successful reducer transitions phase/mechanical->mechanical/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/mechanical->mechanical/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions phase/mechanical->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/mechanical->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions phase/mechanical->fast/red-first/v2",
+        "prevention compiler against actual successful reducer transitions phase/mechanical->fast/green-maintenance/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/mechanical->fast/green-maintenance/vlegacy/test-only",
+        "prevention compiler against actual successful reducer transitions phase/mechanical->fast/green-maintenance/v1",
+        "prevention compiler against actual successful reducer transitions phase/mechanical->fast/green-maintenance/v1/test-only",
+        "prevention compiler against actual successful reducer transitions phase/mechanical->fast/green-maintenance/v2",
+        "prevention compiler against actual successful reducer transitions phase/mechanical->fast/green-maintenance/v2/test-only",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/red-first/v2",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/green-maintenance/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/green-maintenance/vlegacy/test-only",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/green-maintenance/v1",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/green-maintenance/v1/test-only",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/green-maintenance/v2",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/green-maintenance/v2/test-only",
+        "prevention compiler against actual successful reducer transitions phase/full->full/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/full->full/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions phase/full->full/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/full->full/red-first/v1",
+        "prevention compiler against actual successful reducer transitions phase/full->full/red-first/v2",
+        "prevention compiler against actual successful reducer transitions phase/full->full/green-maintenance/vlegacy",
+        "prevention compiler against actual successful reducer transitions phase/full->full/green-maintenance/vlegacy/test-only",
+        "prevention compiler against actual successful reducer transitions phase/full->full/green-maintenance/v1",
+        "prevention compiler against actual successful reducer transitions phase/full->full/green-maintenance/v1/test-only",
+        "prevention compiler against actual successful reducer transitions phase/full->full/green-maintenance/v2",
+        "prevention compiler against actual successful reducer transitions phase/full->full/green-maintenance/v2/test-only",
+        "prevention compiler against actual successful reducer transitions debug/auto->mechanical/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions debug/auto->mechanical/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions debug/auto->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions debug/auto->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions debug/mechanical->mechanical/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions debug/mechanical->mechanical/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions debug/mechanical->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions debug/mechanical->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions debug/fast->fast/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions debug/fast->fast/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions debug/fast->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions debug/fast->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions debug/full->full/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions debug/full->full/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions debug/full->full/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions debug/full->full/red-first/v1",
+        "prevention compiler against actual successful reducer transitions spike/auto->mechanical/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions spike/auto->mechanical/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions spike/auto->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions spike/auto->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions spike/mechanical->mechanical/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions spike/mechanical->mechanical/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions spike/mechanical->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions spike/mechanical->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions spike/fast->fast/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions spike/fast->fast/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions spike/fast->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions spike/fast->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions spike/full->full/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions spike/full->full/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions spike/full->full/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions spike/full->full/red-first/v1",
+        "prevention compiler against actual successful reducer transitions land/auto->mechanical/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions land/auto->mechanical/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions land/auto->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions land/auto->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions land/mechanical->mechanical/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions land/mechanical->mechanical/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions land/mechanical->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions land/mechanical->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions land/fast->fast/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions land/fast->fast/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions land/fast->fast/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions land/fast->fast/red-first/v1",
+        "prevention compiler against actual successful reducer transitions land/full->full/nonbehavioral/vlegacy",
+        "prevention compiler against actual successful reducer transitions land/full->full/nonbehavioral/v1",
+        "prevention compiler against actual successful reducer transitions land/full->full/red-first/vlegacy",
+        "prevention compiler against actual successful reducer transitions land/full->full/red-first/v1",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/red-first/v2/preflight-escalates",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/green-maintenance/v2/preflight-escalates",
+        "prevention compiler against actual successful reducer transitions phase/fast->fast/green-maintenance/v2/test-only/preflight-escalates"
+      ]
     },
     {
       "id": "supersession-prelock-admission",
@@ -160,7 +497,19 @@
       "observed_failure": "Malformed or unreviewed supersession inputs could create receipt-lock storage before admission and ancestor validation.",
       "recovery_contract": "Run the same read-only schema, ancestor and admission checks before the outer lock and again inside it; rejected inputs do not create storage or follow redirected ancestors.",
       "test_file": "__tests__/runtime-v2-start-admission-prelock.test.js",
-      "test_anchor": "supersession admission precedes receipt-lock storage"
+      "test_anchor": "supersession admission precedes receipt-lock storage",
+      "test_names": [
+        "supersession admission precedes receipt-lock storage refuses a missing preview digest without creating runtime ancestors",
+        "supersession admission precedes receipt-lock storage refuses stale reviewed inputs without creating runtime ancestors",
+        "supersession admission precedes receipt-lock storage refuses an undeliverable complete preview before start can mutate even with a supplied digest",
+        "supersession admission precedes receipt-lock storage rejects malformed supersedes_run 'string' before any lock write",
+        "supersession admission precedes receipt-lock storage rejects malformed supersedes_run 'number' before any lock write",
+        "supersession admission precedes receipt-lock storage rejects malformed supersedes_run 'boolean' before any lock write",
+        "supersession admission precedes receipt-lock storage rejects malformed supersedes_run 'object' before any lock write",
+        "supersession admission precedes receipt-lock storage rejects malformed supersedes_run 'array' before any lock write",
+        "supersession admission precedes receipt-lock storage does not write through a redirected .ape ancestor before refusal",
+        "supersession admission precedes receipt-lock storage does not write through a redirected runtime ancestor before refusal"
+      ]
     },
     {
       "id": "codex-model-input-response-framing",
@@ -168,7 +517,32 @@
       "observed_failure": "A complete saved Codex tool result could be truncated in the next model request because escaped MCP framing exceeded the host budget despite an inner JSON bound and a larger execution-wrapper setting.",
       "recovery_contract": "Compact repeated admitted metadata and bootstrap ticket bodies, preserve exact launch authority, measure escaped MCP framing, and refuse an undeliverable complete admission before mutation; do not retry the failed live campaign.",
       "test_file": "__tests__/runtime-v2-bounded-responses.test.js",
-      "test_anchor": "Codex bootstrap parent wire compaction"
+      "test_anchor": "Codex bootstrap parent wire compaction",
+      "test_names": [
+        "Codex bootstrap parent wire compaction keeps a high-escaping admitted parent response complete inside the framed MCP limit",
+        "Codex bootstrap parent wire compaction uses reference fallback when a below-budget inner run result exceeds the escaped MCP frame limit",
+        "Codex bootstrap parent wire compaction refuses an oversized complete preview before issuing a usable admission digest",
+        "Codex bootstrap parent wire compaction applies the same escaped frame bound to history projections",
+        "Codex bootstrap parent wire compaction references admitted metadata and the role schema below the global budget without changing launch authority",
+        "Codex bootstrap parent wire compaction uses the same admission reference in status and its nested state while leaving full preview unchanged",
+        "Codex bootstrap parent wire compaction keeps the unique objective when a bootstrap action has no run-level objective",
+        "Codex bootstrap parent wire compaction preserves plan contract 1 in bounded run and dispatch references",
+        "Codex bootstrap parent wire compaction preserves plan contract 2 in bounded run and dispatch references",
+        "Codex bootstrap parent wire compaction preserves existing under-budget full action tickets for Claude",
+        "Codex bootstrap parent wire compaction preserves existing under-budget full action tickets for legacy Codex",
+        "Codex bootstrap parent wire compaction preserves existing under-budget full action tickets for legacy receipt with bootstrap",
+        "Codex bootstrap parent wire compaction preserves existing under-budget full action tickets for unrecognized bootstrap",
+        "Codex bootstrap parent wire compaction keeps malformed or legacy admitted metadata complete for missing binding protocol",
+        "Codex bootstrap parent wire compaction keeps malformed or legacy admitted metadata complete for unsafe run id",
+        "Codex bootstrap parent wire compaction keeps malformed or legacy admitted metadata complete for unsupported admission version",
+        "Codex bootstrap parent wire compaction keeps malformed or legacy admitted metadata complete for missing manifest",
+        "Codex bootstrap parent wire compaction keeps malformed or legacy admitted metadata complete for array manifest",
+        "Codex bootstrap parent wire compaction keeps malformed or legacy admitted metadata complete for unreviewed manifest",
+        "Codex bootstrap parent wire compaction keeps malformed or legacy admitted metadata complete for not-ready manifest",
+        "Codex bootstrap parent wire compaction keeps malformed or legacy admitted metadata complete for invalid digest",
+        "Codex bootstrap parent wire compaction keeps malformed or legacy admitted metadata complete for mismatched digest",
+        "Codex bootstrap parent wire compaction keeps malformed or legacy admitted metadata complete for unknown admission field"
+      ]
     },
     {
       "id": "post-build-test-correction",
@@ -176,7 +550,18 @@
       "observed_failure": "A confirmed faulty test was corrected after implementation, but its passing result was rejected by inherited initial red-first admission.",
       "recovery_contract": "Independently confirmed exact-path corrections receive runtime-owned test-correction admission. Each participating runner must produce a stable passing or failing verdict before the original implementer retries; initial RED and scope remain unchanged.",
       "test_file": "__tests__/runtime-v2-post-build-test-recheck.test.js",
-      "test_anchor": "post-build test correction uses runtime-observed evidence"
+      "test_anchor": "post-build test correction uses runtime-observed evidence",
+      "test_names": [
+        "post-build test correction uses runtime-observed evidence admits a coherent green correction and resumes the original build without replacing red evidence",
+        "post-build test correction uses runtime-observed evidence admits a stable red correction for the resumed implementer without claiming green",
+        "post-build test correction uses runtime-observed evidence records mixed stable runner verdicts without misreporting the correction as green",
+        "post-build test correction uses runtime-observed evidence projects the correction check while preserving initial red-first in fast",
+        "post-build test correction uses runtime-observed evidence projects the correction check while preserving initial red-first in full",
+        "post-build test correction uses runtime-observed evidence refuses a correction that passes once and fails once (per-runner=false)",
+        "post-build test correction uses runtime-observed evidence refuses a correction that passes once and fails once (per-runner=true)",
+        "post-build test correction uses runtime-observed evidence refuses correction writes outside independently confirmed scope: src/value.js",
+        "post-build test correction uses runtime-observed evidence refuses correction writes outside independently confirmed scope: tests/sibling.test.js"
+      ]
     },
     {
       "id": "override-abort-terminal-reason",
@@ -184,7 +569,10 @@
       "observed_failure": "Override-abort wrote its explanation only to the audit log, leaving aborted run state and new history without the terminal reason.",
       "recovery_contract": "Persist the bounded override reason before new history is archived; repeated aborts preserve the original reason and existing immutable history.",
       "test_file": "__tests__/runtime-v2-core-terminal-history.test.js",
-      "test_anchor": "override abort archives a running run to history"
+      "test_anchor": "override abort archives a running run to history",
+      "test_names": [
+        "APE v2 blocked runs reach history (F7, service) override abort archives a running run to history"
+      ]
     }
   ]
 }
