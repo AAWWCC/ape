@@ -52,6 +52,32 @@ Passing these checks is not proof of a working live host.
 
 ## Live certification
 
+### Development reinstall refresh evidence
+
+`npm run smoke:marketplaces` runs release byte verification, the actual development
+reinstall helper and the Codex 0.153.4 app-server local-source refresh in separate
+owned temporary homes for default and `--preserve-open-tasks` modes. Host launches
+use isolated HOME/configuration environments and shell-free resolved executables.
+The operator's installation is not the fixture. Edge-host runs are informational
+and do not emit this pinned refresh certification.
+
+The executed request is `plugin/list` with
+`{cwds: [], marketplaceKinds: ['local'], forceRefetch: true}`, after `initialize`
+and `initialized`. See the [exact boundary and source references](architecture.md#supported-codex-development-refresh).
+Successful collection requires all three ordered original-path observations,
+source/cache byte equality, matching selected version and app-server localVersion,
+correlated completion, empty marketplace load errors and clean diagnostics.
+Timeout, early exit, overflow, malformed evidence or a failed operation prevents
+certification. Cleanup removes only each allocated fixture root after its refresh
+child closes; a crash may leave disposable fixtures for inspection.
+
+Measured pinned-host results: the original hook and runner files are absent after
+default reinstall and remain absent after refresh; preserve mode retains the same
+original bytes through both stages. Archive copies remain separate in both modes.
+The source version already matches during refresh, so a no-op is valid. Existing
+desktop session activation remains unverified. Synthetic prune and fault tests
+exercise validation and recovery; they cannot replace this real smoke gate.
+
 Codex is the sole required live host from APE 2.23.0 onward, as defined in
 [`compatibility.json`](../compatibility.json). Keep its exact Codex CLI 0.153.4 pin.
 A host failure requires a compatibility decision, not an implicit upgrade.
