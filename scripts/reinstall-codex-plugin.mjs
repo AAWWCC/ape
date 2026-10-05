@@ -28,6 +28,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { withDirLock } from '../lib/runtime/lock.js';
+import { resolveCodexInvocation } from './marketplace-host-invocation.mjs';
 import { DevPluginError as UsageError, STRICT_SEMVER, exists, assertRegularTree, atomicWrite, promoteInstalledTree } from './dev-plugin-files.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -85,7 +86,7 @@ function parseArgs(argv) {
     marketplace: 'ape-dev',
     cachebuster: defaultCachebuster(),
     codexHome: process.env.CODEX_HOME || join(homedir(), '.codex'),
-    codexBin: 'codex',
+    codexBin: undefined,
     preserveOpenTasks: false,
   };
   const flags = new Map([
@@ -218,12 +219,12 @@ async function createStagingMarketplace(root, marketplaceName, pluginName) {
   );
 }
 
-function runCodex(codexBin, args, cwd, codexHome, capture = false) {
+function runCodex(invocation, args, cwd, codexHome, capture = false) {
   return new Promise((resolvePromise, reject) => {
-    const isScript = /\.m?js$/i.test(codexBin);
-    const cmd = isScript ? process.execPath : codexBin;
-    const commandArgs = isScript ? [codexBin, ...args] : args;
+    const cmd = invocation.command;
+    const commandArgs = [...invocation.args, ...args];
     const child = spawn(cmd, commandArgs, {
+      shell: false,
       cwd,
       env: { ...process.env, CODEX_HOME: codexHome },
       stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'],
@@ -242,7 +243,9 @@ function runCodex(codexBin, args, cwd, codexHome, capture = false) {
         }
       });
     }
-    child.once('error', reject);
+    child.once('error', error => reject(new Error(
+      `Cannot launch Codex executable ${cmd}: ${error.message}. Check its path and permissions or PATH; use --codex-bin with a native executable or JavaScript entrypoint.`,
+    )));
     child.once('exit', (code, signal) => {
       if (oversized) reject(new Error('Codex JSON output exceeds 1 MiB'));
       else if (signal) reject(new Error(`${cmd} terminated by signal ${signal}`));
@@ -252,8 +255,8 @@ function runCodex(codexBin, args, cwd, codexHome, capture = false) {
   });
 }
 
-async function codexJson(codexBin, args, cwd, codexHome) {
-  const output = await runCodex(codexBin, [...args, '--json'], cwd, codexHome, true);
+async function codexJson(invocation, args, cwd, codexHome) {
+  const output = await runCodex(invocation, [...args, '--json'], cwd, codexHome, true);
   try {
     return JSON.parse(output);
   } catch {
@@ -263,7 +266,7 @@ async function codexJson(codexBin, args, cwd, codexHome) {
 
 async function prepareDevelopmentMarketplace(args, codexHome, cwd, pluginName, nextVersion) {
   const root = join(codexHome, 'dev-plugins', args.marketplace);
-  const listed = await codexJson(args.codexBin, ['plugin', 'marketplace', 'list'], cwd, codexHome);
+  const listed = await codexJson(args.codexInvocation, ['plugin', 'marketplace', 'list'], cwd, codexHome);
   if (!Array.isArray(listed.marketplaces)) throw new Error('Codex returned no marketplace inventory');
   const matches = listed.marketplaces.filter((entry) => entry.name === args.marketplace);
   if (matches.length > 1) throw new UsageError(`ambiguous marketplace: ${args.marketplace}`);
@@ -322,8 +325,8 @@ async function installDevelopmentSource(args, codexHome, cwd, marketplace, cache
   await atomicWrite(marketplace.file, marketplace.contents);
   let installError = null;
   try {
-    await runCodex(args.codexBin, ['plugin', 'marketplace', 'add', marketplace.root, '--json'], cwd, codexHome);
-    await runCodex(args.codexBin, ['plugin', 'add', `${pluginName}@${args.marketplace}`, '--json'], cwd, codexHome);
+    await runCodex(args.codexInvocation, ['plugin', 'marketplace', 'add', marketplace.root, '--json'], cwd, codexHome);
+    await runCodex(args.codexInvocation, ['plugin', 'add', `${pluginName}@${args.marketplace}`, '--json'], cwd, codexHome);
   } catch (error) {
     installError = error;
   }
@@ -347,7 +350,7 @@ async function installDevelopmentSource(args, codexHome, cwd, marketplace, cache
       await promoteInstalledTree(join(backupRoot, version), cacheRoot, version);
     }
   }
-  const listed = await codexJson(args.codexBin, ['plugin', 'list', '--marketplace', args.marketplace], cwd, codexHome);
+  const listed = await codexJson(args.codexInvocation, ['plugin', 'list', '--marketplace', args.marketplace], cwd, codexHome);
   const selected = listed.installed?.find((entry) => entry.pluginId === `${pluginName}@${args.marketplace}`);
   const source = join(marketplace.root, 'versions', pluginName, nextVersion);
   if (selected?.version !== nextVersion || selected.source?.source !== 'local' ||
@@ -360,6 +363,7 @@ async function installDevelopmentSource(args, codexHome, cwd, marketplace, cache
 
 async function main(argv) {
   const args = parseArgs(argv);
+  args.codexInvocation = await resolveCodexInvocation({ codexBin: args.codexBin });
   const pluginRoot = resolve(args.pluginRoot);
   const codexHome = resolve(args.codexHome);
   const manifestPath = join(pluginRoot, '.codex-plugin', 'plugin.json');
@@ -394,8 +398,8 @@ async function main(argv) {
     await mkdir(temporaryCodexHome, { recursive: true, mode: 0o700 });
     await stagePlugin(pluginRoot, stagedPluginRoot, manifest, nextVersion);
     await createStagingMarketplace(marketplaceRoot, stagingMarketplace, pluginName);
-    await runCodex(args.codexBin, ['plugin', 'marketplace', 'add', marketplaceRoot, '--json'], temporaryRoot, temporaryCodexHome);
-    await runCodex(args.codexBin, ['plugin', 'add', `${pluginName}@${stagingMarketplace}`, '--json'], temporaryRoot, temporaryCodexHome);
+    await runCodex(args.codexInvocation, ['plugin', 'marketplace', 'add', marketplaceRoot, '--json'], temporaryRoot, temporaryCodexHome);
+    await runCodex(args.codexInvocation, ['plugin', 'add', `${pluginName}@${stagingMarketplace}`, '--json'], temporaryRoot, temporaryCodexHome);
     const installedRoot = join(
       temporaryCodexHome,
       'plugins',

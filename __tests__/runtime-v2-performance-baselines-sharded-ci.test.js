@@ -206,11 +206,23 @@ describe('committed duration inventory and deterministic CI partition', () => {
     expect(workflow.match(/run-ci-tests\.mjs\s+shard\s+[123]\s+3/gu)).toHaveLength(3);
     expect(workflow.match(/run-ci-tests\.mjs\s+native/gu)).toHaveLength(1);
     expect(workflow).not.toMatch(/(?:npm test|vitest run)/u);
+    const native = workflow.split('\n  native-runtime:\n')[1]?.split('\n  full-suite:\n')[0];
+    expect(native).toBeDefined();
+    expect(native).toContain('windows-latest');
+    expect(native).toContain('version: 22.12.0');
+    expect(native).toContain('version: 24.15.0');
+    expect(native).toContain('node-version: ${{ matrix.node.version }}');
+    expect(native).toContain('node scripts/run-ci-tests.mjs native');
+    expect(native).not.toMatch(/continue-on-error:\s*true/u);
+    const aggregate = workflow.split('\n  full-suite:\n')[1]?.split('\n  marketplace-install-smoke:\n')[0];
+    expect(aggregate).toMatch(/needs:.*native-runtime/u);
+    expect(aggregate).toContain("job.result !== 'success'");
   });
 
   it('selects the bounded native process, recovery and package fixtures while preserving smoke import compatibility', async () => {
     const expected = [
       '__tests__/runtime-v2-cli-entrypoints.test.js',
+      '__tests__/runtime-v2-codex-default-launcher.test.js',
       '__tests__/runtime-v2-codex-windows-launchers.test.js',
       '__tests__/runtime-v2-durable-gate-launch-ownership.test.js',
       '__tests__/runtime-v2-file-stat-compat.test.js',
