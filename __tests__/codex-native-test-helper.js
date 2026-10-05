@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 import {
   acknowledgeBindingProbe,
@@ -6,30 +5,17 @@ import {
 } from '../lib/runtime/binding-probe.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { codexBootstrapOrientation, codexProbeReservationOrientation } from '../lib/runtime/codex-bootstrap.js';
-export function invokeCodexHook(root, input, args = []) {
-  return new Promise((resolve, reject) => {
-    const env = { ...process.env };
-    delete env.CLAUDECODE;
-    delete env.CLAUDE_CODE;
-    delete env.CLAUDE_PROJECT_DIR;
-    delete env.CODEX_CWD;
-    const child = spawn(process.execPath, [path.join(root, 'bin', 'ape-hook.mjs'), ...args], {
-      cwd: root,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code !== 0) reject(new Error(stderr));
-      else resolve(JSON.parse(stdout));
-    });
-    child.stdin.end(`${JSON.stringify(input)}\n`);
+export async function invokeCodexHook(root, input, args = []) {
+  const { runNativeJson } = await import('../test-support/native-process.js');
+  const env = { ...process.env };
+  delete env.CLAUDECODE;
+  delete env.CLAUDE_CODE;
+  delete env.CLAUDE_PROJECT_DIR;
+  delete env.CODEX_CWD;
+  return runNativeJson(process.execPath, [path.join(root, 'bin', 'ape-hook.mjs'), ...args], {
+    cwd: root,
+    env,
+    input: `${JSON.stringify(input)}\n`,
   });
 }
 

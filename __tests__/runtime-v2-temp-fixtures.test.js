@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -300,10 +301,20 @@ describe('removeTreeWithRetry option population is derived from REMOVE_TREE_OPTI
 describe('killAndWait', () => {
   const children = [];
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const child of children.splice(0)) {
       if (child.exitCode === null && child.signalCode === null) {
-        try { child.kill('SIGKILL'); } catch { /* already gone */ }
+        let timer;
+        const exit = new Promise((resolve, reject) => {
+          const done = () => { clearTimeout(timer); resolve(); };
+          child.once('exit', done);
+          timer = setTimeout(() => {
+            child.off('exit', done);
+            reject(new Error('fixture emergency cleanup could not confirm child exit'));
+          }, 5000);
+        });
+        try { child.kill('SIGKILL'); } catch { /* exit observation still required */ }
+        await exit;
       }
     }
   });
@@ -323,6 +334,7 @@ describe('killAndWait', () => {
         buffered += chunk;
         if (buffered.includes('READY')) {
           child.stdout.off('data', onData);
+          child.off('error', reject);
           resolve();
         }
       };
@@ -391,6 +403,126 @@ describe('killAndWait', () => {
     expect(Date.now() - startedAt).toBeLessThan(2000);
     expect(child.signalCode).toBe('SIGKILL');
   }, 10_000);
+});
+
+// Deterministic event ordering complements the real signal tests above.
+// These fake children model the ChildProcess public event surface; no private
+// implementation hooks or source assertions are involved.
+describe('killAndWait cleanup races and resource release', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  function childWith(kill) {
+    const child = new EventEmitter();
+    child.pid = 12345;
+    child.exitCode = null;
+    child.signalCode = null;
+    child.kill = vi.fn((signal) => kill(child, signal));
+    return child;
+  }
+
+  it('cleans timers even when exit occurs synchronously during kill, preserving caller listeners', async () => {
+    const { killAndWait } = await loadFixtures();
+    vi.useFakeTimers();
+    const child = childWith((self) => { self.exitCode = 0; self.emit('exit', 0, null); return true; });
+    const observer = vi.fn();
+    child.on('exit', observer);
+    await killAndWait(child, 'SIGTERM');
+    expect(observer).toHaveBeenCalledTimes(1);
+    expect(child.listeners('exit')).toEqual([observer]);
+    expect(child.listenerCount('error')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('releases owned exit/error listeners after a spawn error, without consuming later events', async () => {
+    const { killAndWait } = await loadFixtures();
+    vi.useFakeTimers();
+    const fault = Object.assign(new Error('fixture spawn ENOENT'), { code: 'ENOENT' });
+    const child = childWith(() => true);
+    child.pid = undefined; // A spawn failure never acquired a PID.
+    const observer = vi.fn();
+    child.on('error', observer);
+    const settled = [];
+    const completion = killAndWait(child, 'SIGTERM').then(
+      () => settled.push('resolved'), (error) => { settled.push(error); },
+    );
+    child.emit('error', fault);
+    await completion;
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toBeInstanceOf(Error);
+    expect(settled[0].message).toMatch(/ENOENT|spawn/i);
+    const firstSettlement = settled[0];
+    expect(child.listenerCount('exit')).toBe(0);
+    expect(child.listeners('error')).toEqual([observer]);
+    expect(vi.getTimerCount()).toBe(0);
+    child.emit('exit', 1, null);
+    child.emit('close', 1, null);
+    child.emit('error', fault);
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(settled).toEqual([firstSettlement]);
+    expect(observer).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not mistake successful signal delivery for confirmed retirement', async () => {
+    const { killAndWait } = await loadFixtures();
+    vi.useFakeTimers();
+    const child = childWith(() => true); // signal delivered, but never an exit observation
+    let result;
+    const completion = killAndWait(child, 'SIGKILL').then(
+      () => { result = { resolved: true }; }, (error) => { result = { error }; },
+    );
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(result?.error).toBeInstanceOf(Error);
+    expect(result.error.message).toMatch(/cleanup|exit|retir|confirm|timeout|timed.out/i);
+    await completion;
+    expect(child.listenerCount('exit')).toBe(0);
+    expect(child.listenerCount('error')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('rejects boundedly when cleanup authority fails, without claiming an exit', async () => {
+    const { killAndWait } = await loadFixtures();
+    vi.useFakeTimers();
+    const child = childWith(() => { throw Object.assign(new Error('fixture EPERM'), { code: 'EPERM' }); });
+    let result;
+    const completion = killAndWait(child, 'SIGTERM').then(
+      () => { result = { resolved: true }; }, (error) => { result = { error }; },
+    );
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(result?.error).toBeInstanceOf(Error);
+    expect(result.error.message).toMatch(/EPERM|cleanup|exit|retir|confirm/i);
+    await completion;
+    expect(child.listenerCount('exit')).toBe(0);
+    expect(child.listenerCount('error')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('awaits a real spawn failure and removes its own listeners', async () => {
+    // Isolate the regression: signalling Node's failed-spawn handle used to
+    // signal PID 0 on macOS and kill the entire Vitest process group.
+    const module = new URL('../test-support/temp-fixtures.js', import.meta.url).href;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', `
+      import { spawn } from 'node:child_process';
+      import { killAndWait } from ${JSON.stringify(module)};
+      const failed = spawn(${JSON.stringify(path.join(os.tmpdir(), `ape-no-executable-${process.pid}-${Date.now()}`))}, [], { stdio: 'ignore' });
+      const close = new Promise(resolve => failed.once('close', resolve));
+      let signalReceived = false;
+      process.on('SIGTERM', () => { signalReceived = true; });
+      let code;
+      try { await killAndWait(failed, 'SIGTERM'); } catch (error) { code = error.code; }
+      await close;
+      await new Promise(resolve => setTimeout(resolve, 50));
+      console.log(JSON.stringify({ code, signalReceived, exits: failed.listenerCount('exit'), errors: failed.listenerCount('error') }));
+    `], { detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.on('data', chunk => { output += chunk; });
+    const exit = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('spawn-failure fixture timed out')); }, 5000);
+      child.once('error', error => { clearTimeout(timer); reject(error); });
+      child.once('close', code => { clearTimeout(timer); resolve(code); });
+    });
+    expect(exit).toBe(0);
+    expect(JSON.parse(output)).toEqual({ code: 'ENOENT', signalReceived: false, exits: 0, errors: 0 });
+  });
 });
 
 describe('removeTreeWithRetry', () => {

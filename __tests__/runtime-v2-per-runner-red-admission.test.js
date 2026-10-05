@@ -161,6 +161,23 @@ function participantsOf(observation) {
 }
 
 describe('per-runner red-test admission (route-to-owning-runner)', () => {
+  it.skipIf(process.platform === 'win32')('names the owning runner and the actual supervisor failure', async () => {
+    const dir = await project({
+      files: { 'kill-group.cjs': 'process.kill(0, "SIGTERM");\n', 'tests/value.test.js': '// baseline\n' },
+      config: { runners: [{ id: 'native', root: '.', owns: ['tests/**'],
+        profile: { targeted_template: 'node kill-group.cjs {paths}' } }] },
+    });
+    const started = await startRun(dir, startInput({ test_paths: ['tests/value.test.js'] }));
+    expect(started.ok).toBe(true);
+    await writeFile(path.join(dir, 'tests', 'value.test.js'), THROW_TEST);
+    const result = await recordReceipt(dir, rawReceipt(started.run.tickets[0]));
+    expect(result).toMatchObject({ ok: false, rejected: true });
+    const message = result.errors.join(' ');
+    expect(message).toMatch(/runner 'native'/);
+    expect(message).toMatch(/Suite supervisor exited without reporting the command result/);
+    expect(message).not.toMatch(/configure its profile/);
+  }, 30_000);
+
   // CASE 1 (RED anchor). A scopeable owner (via profile.targeted_template) owning
   // the authored test admits red; the sealed observation carries a per-runner
   // breakdown naming that owner. A second UNSCOPEABLE runner that owns NO authored
