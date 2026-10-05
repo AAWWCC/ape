@@ -92,6 +92,34 @@ the installed package bytes and uses local installation scope for this checkout.
 installers share immutable file helpers and process-owned locks that recover after a crash.
 Installation does not establish activation in an existing host session.
 
+### Supported Codex development refresh
+
+`npm run smoke:marketplaces` certifies the local-source refresh boundary in
+`@openai/codex` **0.153.4**. After stdio app-server initialization with
+`clientInfo: {name: 'ape-marketplace-smoke', version: '1.0.0'}` and `initialized`,
+it sends `plugin/list` with
+`{cwds: [], marketplaceKinds: ['local'], forceRefetch: true}`. The
+[pinned handler](https://raw.githubusercontent.com/openai/codex/rust-v0.153.4/codex-rs/app-server/src/request_processors/plugins.rs)
+awaits local refresh before producing its listing. The
+[manager](https://raw.githubusercontent.com/openai/codex/rust-v0.153.4/codex-rs/core-plugins/src/manager.rs)
+uses `IfVersionChanged`: an already matching source version can complete without
+rematerializing the cache. A plain CLI list is not refresh evidence.
+
+The smoke requires correlated initialization and refresh responses, empty load
+errors, clean diagnostics and orderly process exit. It independently checks the
+CLI selected version, app-server `localVersion`, disk manifests and complete
+regular-file inventories against expected package bytes. Version-1 evidence
+freezes the original absolute hook and runner paths before reinstall and measures
+those same strings after reinstall and refresh. Archive copies, immutable source,
+selected cache and original files are distinct observations.
+
+Observed on the pinned host: default reinstall leaves original paths absent at
+both later observations; `--preserve-open-tasks` retains their original bytes at
+both. Archives survive in either mode. These results cover the supported
+same-version local-source refresh only. They do not promise arbitrary desktop
+refresh/restart retention, rematerialization or loaded-session activation.
+Activation remains explicitly `unverified`.
+
 ## Bundle reachability
 
 | Entry point | Bundle |

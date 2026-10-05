@@ -472,6 +472,16 @@ Regenerate the host packages with `npm run package:plugins`. Development updates
 `npm run reinstall:codex` or `npm run reinstall:claude` after explicit installation approval.
 Both use the dedicated `ape-dev` local marketplace; Claude installs at local scope for the
 current checkout and preserves existing user-scope installations.
+Codex archives old caches by default. `--preserve-open-tasks` restores their exact
+original paths, subject to its version-order guard. Archives alone do not keep
+those paths available, and refresh does not restore paths removed by default
+reinstall. The real `npm run smoke:marketplaces` gate checks Codex 0.153.4 using
+app-server `plugin/list` with `{cwds: [], marketplaceKinds: ['local'], forceRefetch: true}`
+after initialization. Default paths were absent and preserve-mode paths retained
+their bytes after this same-version refresh; selected source/version matched in
+both modes. This operation is a host protocol call, not an APE MCP tool. See the
+[supported refresh boundary](architecture.md#supported-codex-development-refresh).
+It leaves already-running session activation explicitly unverified.
 For this public development checkout, enable `shipping.codex_dev_refresh` and
 `shipping.claude_dev_refresh` once. A successful Codex or Claude shipment automatically
 updates only that host's `ape@ape-dev` from the verified merged build. Other repositories
