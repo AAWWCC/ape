@@ -14,6 +14,7 @@
 // test file.
 
 import { rm } from 'node:fs/promises';
+import { retireChild } from './native-process.js';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,61 +50,16 @@ export async function mapBounded(items, fn, limit) {
   return results;
 }
 
-// How long killAndWait waits for a signalled child to exit on its own before
-// escalating to SIGKILL. Long enough to never race a well-behaved handler's
-// graceful shutdown, short enough that a genuinely ignoring child is reaped
-// promptly rather than wedging a caller's teardown.
-const ESCALATE_AFTER_MS = 3_000;
-
 /**
  * Send `signal` to `child` and resolve only once the child has ACTUALLY
  * exited (its `exit` event has fired), never merely after the signal is
  * sent — so no caller can touch the child's files while it may still be
  * alive. Resolves promptly if the child has already exited. If the child
- * ignores the signal, escalates to SIGKILL after a bounded wait so this
- * never hangs forever.
+ * ignores the signal, escalates to SIGKILL after three seconds and rejects
+ * if exit still cannot be confirmed within the cleanup deadline.
  */
 export function killAndWait(child, signal) {
-  return new Promise((resolve, reject) => {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      resolve();
-      return;
-    }
-    let settled = false;
-    let escalateTimer = null;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      if (escalateTimer) clearTimeout(escalateTimer);
-      child.off('error', onError);
-      resolve();
-    };
-    const onError = (error) => {
-      if (settled) return;
-      settled = true;
-      if (escalateTimer) clearTimeout(escalateTimer);
-      reject(error);
-    };
-    child.once('exit', finish);
-    child.once('error', onError);
-    try {
-      child.kill(signal);
-    } catch {
-      // The child may already be gone (a race with its own exit); the
-      // 'exit' listener above still resolves once node observes it, or the
-      // already-exited fast path above already handled the common case.
-    }
-    if (signal !== 'SIGKILL') {
-      escalateTimer = setTimeout(() => {
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          // already gone
-        }
-      }, ESCALATE_AFTER_MS);
-      escalateTimer.unref?.();
-    }
-  });
+  return retireChild(child, signal);
 }
 
 const REMOVE_TREE_MAX_ATTEMPTS = 6;

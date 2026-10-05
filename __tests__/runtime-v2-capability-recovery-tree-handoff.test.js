@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,10 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 import { currentTreeSha } from '../lib/runtime/git.js';
 import { finalizeReceipt, finalizeTicket } from '../lib/runtime/schemas.js';
-import { validateStageReceipt } from '../lib/runtime/receipt-validator.js';
+import { receiptOutputSchemaForTicket, validateStageReceipt } from '../lib/runtime/receipt-validator.js';
+import { receiptDraftSchemaForTicket } from '../lib/runtime/receipt-draft-schema.js';
+import { sha256 } from '../lib/runtime/canonical.js';
+import { readRunContractManifest } from '../lib/runtime/run-contract.js';
 import { bindCodexDispatchContext, invokeCodexHook } from './codex-native-test-helper.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -22,12 +25,27 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-async function fixture() {
+const ADMITTED_PRODUCTION = ['src/value.js', 'scripts/native-test-process.mjs', '.github/test-durations.json'];
+const ADMITTED_TESTS = ['tests/value.test.js', 'tests/sibling.test.js'];
+
+async function fixture({ fullLane = false, productionPaths = ADMITTED_PRODUCTION,
+  testPaths = ADMITTED_TESTS, physicalTestPaths = testPaths, fullTestCommand = 'node --test' } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-tree-handoff-'));
   cleanups.push(dir);
   await mkdir(path.join(dir, 'src'));
   await mkdir(path.join(dir, 'tests'));
   await writeFile(path.join(dir, 'src/value.js'), V1);
+  if (fullLane) {
+    await mkdir(path.join(dir, 'scripts'));
+    await mkdir(path.join(dir, '.github'));
+    await writeFile(path.join(dir, 'scripts/native-test-process.mjs'), 'export const value = 1;\n');
+    await writeFile(path.join(dir, '.github/test-durations.json'), '{}\n');
+    for (const file of physicalTestPaths) {
+      await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
+      const modulePath = path.relative(path.dirname(file), 'src/value.js').replaceAll('\\', '/');
+      await writeFile(path.join(dir, file), TEST.replace('../src/value.js', modulePath));
+    }
+  }
   for (const args of [['init', '-q'], ['config', 'user.email', 'ape@example.test'],
     ['config', 'user.name', 'APE Test'], ['add', '.'], ['commit', '-qm', 'fixture']]) {
     execFileSync('git', args, { cwd: dir });
@@ -35,7 +53,7 @@ async function fixture() {
   const paths = runtimePaths(dir);
   await atomicWriteJson(paths.config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
-    test_commands: { full: 'node --test', targeted_template: 'node --test {paths}' },
+    test_commands: { full: fullTestCommand, targeted_template: 'node --test {paths}' },
   });
   const started = await startRun(dir, {
     objective: 'Preserve production work while recovering exact test authority',
@@ -43,9 +61,42 @@ async function fixture() {
     claimed_paths: ['src/value.js'], test_paths: [], requirements: [], risk_triggers: [],
     hooks_trusted: true, subagents_available: true, explicit_invocation: true,
     binding_protocol: 'native-v1', capability_contract_required: true,
+    ...(fullLane ? { lane: 'full', behavioral: true, plan_contract_version: 1,
+      claimed_paths: productionPaths, test_paths: testPaths } : {}),
   });
   expect(started.ok, JSON.stringify(started)).toBe(true);
-  const action = started.actions.find((entry) => entry.type === 'dispatch_agent');
+  let action = started.actions.find((entry) => entry.type === 'dispatch_agent');
+  if (fullLane) {
+    expect(started.run.lane).toBe('full');
+    expect(action.ticket.role).toBe('planner');
+    const planning = { dir, paths, action, ticket: action.ticket,
+      binding: await bindCodexDispatchContext(root, dir, action) };
+    const commands = planning.ticket.capability_manifest.plannable_evidence_commands ??
+      planning.ticket.capability_manifest.allowed_evidence_commands;
+    const command = commands.find((entry) => entry.startsWith('node --test'));
+    expect(command).toBeTruthy();
+    const candidate = { version: 1,
+      requirements: [{ id: 'R1', requirement: 'Keep recovery authority role-separated', workstreams: ['recovery'] }],
+      workstreams: [{ id: 'recovery', outcome: 'Admitted writers can complete their work',
+        paths: [...productionPaths, ...testPaths].map((file) => ({ path: file, action: 'modify' })),
+        steps: ['Exercise production and test work through authorized recovery'],
+        acceptance: ['Role switches preserve admitted scope and exact tests'], evidence_commands: [command] }],
+      risks: [], non_goals: ['Changing unadmitted files'] };
+    const planned = await seal(planning, { ...draft(planning), evidence: { candidate_plan: candidate } });
+    const reviews = planned.actions.filter((entry) => entry.type === 'dispatch_agent');
+    expect(reviews.map((entry) => entry.ticket.role).sort()).toEqual(['plan_checker', 'plan_critic']);
+    let reviewed;
+    for (const [index, review] of reviews.entries()) {
+      const value = { dir, paths, action: review, ticket: review.ticket,
+        binding: await bindCodexDispatchContext(root, dir, review, index + 2) };
+      reviewed = await seal(value, { ...draft(value), evidence: { verdict: 'agree' } });
+    }
+    action = reviewed.actions.find((entry) => entry.type === 'dispatch_agent');
+    expect(action.ticket).toMatchObject({ role: 'test_writer', stage_id: 'test',
+      claimed_paths: testPaths, test_paths: testPaths });
+    const binding = await bindCodexDispatchContext(root, dir, action, 4);
+    return { dir, paths, action, ticket: action.ticket, binding };
+  }
   expect(action.ticket.role).toBe('implementer');
   const binding = await bindCodexDispatchContext(root, dir, action);
   return { dir, paths, action, ticket: action.ticket, binding };
@@ -113,19 +164,652 @@ async function handoff(role = 'test_writer', { productionChange = true } = {}) {
     source, sourceReceipt, sourceFile, sourceBytes, payload };
 }
 
-async function prospective(value, changedFiles) {
+async function prospective(value, changedFiles, tests = []) {
   const state = await readJson(value.paths.active);
   const receipt = finalizeReceipt({
     ...value.sourceReceipt, receipt_id: randomUUID(), ticket_id: value.ticket.ticket_id,
     ticket_hash: value.ticket.ticket_hash, status: 'passed',
     agent: { ...value.sourceReceipt.agent, role: value.ticket.role, identity: value.binding.agentId },
     base_tree_sha: value.ticket.base_tree_sha, head_tree_sha: await currentTreeSha(value.dir),
-    changed_files: changedFiles, tests: [], findings: [], evidence: { summary: 'Successor work' },
+    changed_files: changedFiles, tests, findings: [], evidence: { summary: 'Successor work' },
     timing: { started_at: value.ticket.issued_at, completed_at: value.ticket.issued_at, duration_ms: 0 },
     previous_receipt_hash: state.receipts.at(-1).receipt_hash,
   });
   return { project_dir: value.dir, state, ticket: value.ticket, receipt };
 }
+
+async function recover(value, claims, ordinal) {
+  const payload = draft(value, claims);
+  const result = await seal(value, payload);
+  const action = result.actions.find((entry) => entry.type === 'dispatch_agent');
+  expect(action, JSON.stringify(result)).toBeTruthy();
+  const sourceReceipt = result.run.receipts.find((entry) => entry.ticket_id === value.ticket.ticket_id);
+  return { ...value, action, ticket: action.ticket, sourceReceipt, result, payload,
+    binding: await bindCodexDispatchContext(root, value.dir, action, ordinal) };
+}
+
+async function expectWritePermission(value, file, allowed) {
+  const result = await hook(value, { hook_event_name: 'PreToolUse', tool_name: 'Write',
+    tool_input: { file_path: path.join(value.dir, file), content: 'fixture edit\n' } });
+  if (allowed) expect(result, file).toEqual({});
+  else expect(result, file).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+}
+
+async function expectBoundScope(value, production, tests, writableClaims) {
+  expect(value.ticket.claimed_paths).toEqual(writableClaims);
+  expect(value.ticket.test_paths).toEqual(tests);
+  expect(value.ticket.output_schema).toEqual(receiptOutputSchemaForTicket(value.ticket));
+  expect(value.ticket.capability_manifest.receipt_schema.hash).toBe(sha256(value.ticket.output_schema));
+  const { ticket_hash: hash, ...body } = value.ticket;
+  expect(hash).toBe(sha256(body));
+  const state = await readJson(value.paths.active);
+  expect(state.claimed_paths).toEqual(production);
+  expect(state.test_paths).toEqual(tests);
+  const manifest = await readRunContractManifest(value.paths, value.ticket.capability_manifest.run_contract);
+  expect(manifest.capability_catalog.frozen_recovery_authority.run_scope)
+    .toMatchObject({ claimed_paths: production, test_paths: tests });
+  expect(manifest.receipt_contract.ticket_contracts.find((entry) => entry.ticket_id === value.ticket.ticket_id)
+    .recovery_authority).toMatchObject({ claimed_paths: writableClaims, test_paths: tests });
+}
+
+async function exactRemediationFixture({ productionPaths = ADMITTED_PRODUCTION,
+  testPaths = ADMITTED_TESTS, authoredSibling = null, physicalTestPaths = testPaths,
+  productionExpansion = null } = {}) {
+  // Freeze concrete executable files separately from directory-level authority.
+  // Include a sibling authored later so the build's evidence runs it as well.
+  const executableTests = [...new Set([...physicalTestPaths, ...(authoredSibling ? [authoredSibling] : [])])].sort();
+  const testArgs = ['--test', ...executableTests];
+  const fullTestCommand = `node ${testArgs.join(' ')}`;
+  const source = await fixture({ fullLane: true, productionPaths, testPaths, physicalTestPaths, fullTestCommand });
+  for (const file of physicalTestPaths) {
+    const content = await readFile(path.join(source.dir, file), 'utf8');
+    await writeThroughHooks(source, file, `${content}// authored fixture\n`);
+  }
+  if (authoredSibling) await writeThroughHooks(source, authoredSibling, TEST);
+  const authoredPaths = [...physicalTestPaths, ...(authoredSibling ? [authoredSibling] : [])];
+  const admittedTests = [...testPaths, ...authoredPaths.filter((file) => !testPaths.includes(file)).sort()];
+  const tested = await seal(source, draft(source));
+  const buildAction = tested.actions.find((entry) => entry.type === 'dispatch_agent');
+  expect(buildAction.ticket.role).toBe('implementer');
+  expect(buildAction.ticket.test_paths).toEqual(admittedTests);
+  const build = { ...source, action: buildAction, ticket: buildAction.ticket,
+    binding: await bindCodexDispatchContext(root, source.dir, buildAction, 5) };
+  await writeThroughHooks(build, 'src/value.js', V2);
+  const command = build.ticket.capability_manifest.allowed_evidence_commands.find((entry) =>
+    entry === fullTestCommand);
+  expect(command).toBe(fullTestCommand);
+  const startedAt = performance.now();
+  execFileSync(process.execPath, testArgs, { cwd: source.dir });
+  const duration = performance.now() - startedAt;
+  const built = await seal(build, { ...draft(build),
+    tests: [{ command, passed: true, exit_code: 0, duration_ms: duration }] });
+  let reviewed;
+  for (const [index, action] of built.actions.filter((entry) => entry.type === 'dispatch_agent').entries()) {
+    const reviewer = { ...source, action, ticket: action.ticket,
+      binding: await bindCodexDispatchContext(root, source.dir, action, 6 + index) };
+    const payload = { ...draft(reviewer), evidence: { verdict: 'pass' } };
+    if (action.ticket.role === 'reviewer') {
+      payload.evidence.verdict = 'fail';
+      payload.findings = [{ id: 'fixture.test-correction', file: 'tests/value.test.js', line: 2,
+        title: 'Add assertion context', detail: 'The assertion needs a diagnostic message.', blocking: true,
+        remediation: { owner: 'test', test_paths: ['tests/value.test.js'] } }];
+      if (productionExpansion) {
+        payload.evidence.scope_expansion = { claimed_paths: [productionExpansion],
+          reason: 'The production correction requires an independently admitted helper.' };
+        payload.findings = [{ id: 'fixture.production-correction', file: productionExpansion, line: 1,
+          title: 'Extract the helper', detail: 'The fix requires this additional production module.',
+          blocking: true, remediation: { owner: 'production' } }];
+      }
+    }
+    reviewed = await seal(reviewer, payload);
+  }
+  const action = reviewed.actions.find((entry) => entry.type === 'dispatch_agent');
+  if (productionExpansion) {
+    expect(action.ticket).toMatchObject({ stage_id: 'remediation-build', role: 'implementer',
+      claimed_paths: [...productionPaths, productionExpansion], test_paths: admittedTests });
+  } else {
+    expect(action.ticket).toMatchObject({ stage_id: 'remediation-test', role: 'test_writer',
+      test_scope: 'exact', test_paths: ['tests/value.test.js'], claimed_paths: ['tests/value.test.js'] });
+  }
+  return { ...source, action, ticket: action.ticket,
+    binding: await bindCodexDispatchContext(root, source.dir, action, 8) };
+}
+
+describe('role recovery preserves independently admitted authority', () => {
+  it.each(['retry', 'concurrent retry'])('retains an ordinary review production grant through role recovery and %s', async (boundary) => {
+    const helper = 'lib/helper.js';
+    const production = [...ADMITTED_PRODUCTION, helper];
+    const source = await exactRemediationFixture({ productionExpansion: helper });
+    const ticketFile = path.join(source.paths.tickets, `${source.ticket.ticket_id.replaceAll(':', '_')}.json`);
+    const ticketBytes = await readFile(ticketFile, 'utf8');
+    const manifestFile = path.join(source.dir, source.ticket.capability_manifest.run_contract.ref);
+    const manifestBytes = await readFile(manifestFile, 'utf8');
+    const manifest = await readRunContractManifest(source.paths, source.ticket.capability_manifest.run_contract);
+    // A real blocking review admitted the helper. The original run inventory
+    // deliberately remains older than the hashed remediation ticket contract.
+    expect(manifest.capability_catalog.frozen_recovery_authority.run_scope.claimed_paths)
+      .toEqual(ADMITTED_PRODUCTION);
+    expect(manifest.receipt_contract.ticket_contracts.find((entry) => entry.ticket_id === source.ticket.ticket_id)
+      .recovery_authority.claimed_paths).toEqual(production);
+    const admitted = await readJson(source.paths.active);
+    expect(admitted.claimed_paths).toEqual(production);
+    expect(admitted.receipts.some((receipt) => receipt.agent.role === 'reviewer' &&
+      receipt.evidence.scope_expansion?.claimed_paths.includes(helper))).toBe(true);
+    await expectWritePermission(source, helper, true);
+    // Neither dropping the mutable inventory nor adding an ambient grant can
+    // alter the authority authenticated by that ordinary review/ticket pair.
+    await atomicWriteJson(source.paths.active, { ...admitted,
+      claimed_paths: [...ADMITTED_PRODUCTION, 'lib/ambient.js'] });
+    const payload = draft(source, { required_role: 'test_writer' });
+    expect(await validateReceiptForDispatch(source.dir, payload, source.ticket.ticket_id))
+      .toMatchObject({ ok: true, valid: true });
+    expect(await hook(source, { hook_event_name: 'SubagentStop', last_assistant_message: JSON.stringify(payload) }))
+      .toEqual({});
+    const results = boundary === 'concurrent retry'
+      ? await Promise.all([recordReceipt(source.dir, payload), recordReceipt(source.dir, payload)])
+      : [await recordReceipt(source.dir, payload)];
+    for (const result of results) expect(result.ok, JSON.stringify(result)).toBe(true);
+    const action = results.flatMap((result) => result.actions).find((entry) => entry.type === 'dispatch_agent');
+    expect(action).toBeTruthy();
+    const testWriter = { ...source, action, ticket: action.ticket,
+      sourceReceipt: results[0].run.receipts.find((receipt) => receipt.ticket_id === source.ticket.ticket_id),
+      binding: await bindCodexDispatchContext(root, source.dir, action, 9) };
+    expect((await readJson(source.paths.active)).tickets.filter((ticket) =>
+      ticket.recovery_lineage?.source_ticket_id === source.ticket.ticket_id)).toHaveLength(1);
+    await expectBoundScope(testWriter, production, ADMITTED_TESTS, ADMITTED_TESTS);
+    await expectWritePermission(testWriter, helper, false);
+    await writeThroughHooks(testWriter, 'tests/value.test.js', `${TEST}// productive correction\n`);
+    const returned = await recover(testWriter, { required_role: 'implementer' }, 10);
+    await expectBoundScope(returned, production, ADMITTED_TESTS, production);
+    await expectWritePermission(returned, helper, true);
+    await expectWritePermission(returned, 'lib/ambient.js', false);
+    await expectWritePermission(returned, 'tests/value.test.js', false);
+    await mkdir(path.join(source.dir, 'lib'));
+    await writeThroughHooks(returned, helper, 'module.exports = { helper: true };\n');
+    const command = returned.ticket.capability_manifest.allowed_evidence_commands.find((entry) =>
+      entry.startsWith('node --test ') && ADMITTED_TESTS.every((file) => entry.includes(file)));
+    expect(command).toBeTruthy();
+    const startedAt = performance.now();
+    execFileSync(process.execPath, ['--test', ...ADMITTED_TESTS], { cwd: source.dir });
+    const tests = [{ command, passed: true, exit_code: 0, duration_ms: performance.now() - startedAt }];
+    expect(await validateStageReceipt(await prospective(returned, [helper], tests)))
+      .toMatchObject({ valid: true, actual_files: [helper] });
+    const beforeReplay = await readJson(source.paths.active);
+    expect((await recordReceipt(source.dir, payload)).ok).toBe(true);
+    const afterReplay = await readJson(source.paths.active);
+    expect(afterReplay.claimed_paths).toEqual(production);
+    expect(afterReplay.tickets).toEqual(beforeReplay.tickets);
+    expect(afterReplay.receipts).toEqual(beforeReplay.receipts);
+    expect(afterReplay.recovery_generation).toEqual(beforeReplay.recovery_generation);
+    expect(await readFile(ticketFile, 'utf8')).toBe(ticketBytes);
+    expect(await readFile(manifestFile, 'utf8')).toBe(manifestBytes);
+  }, 90_000);
+
+  it.each(['tests/sibling.test.js', 'tests/uncreated.test.js', 'TESTS/case-sibling.test.js'])(
+    'rejects an already-admitted directory descendant as an exact test expansion: %s', async (requested) => {
+      const exact = await exactRemediationFixture({ testPaths: ['tests'], physicalTestPaths: ADMITTED_TESTS });
+      expect(exact.ticket).toMatchObject({ test_scope: 'exact', test_paths: ['tests/value.test.js'] });
+      const manifest = await readRunContractManifest(exact.paths, exact.ticket.capability_manifest.run_contract);
+      expect(manifest.capability_catalog.frozen_recovery_authority.run_scope.test_paths).toEqual(['tests']);
+      await expectWritePermission(exact, requested, false);
+      const payload = draft(exact, { test_paths: [requested] });
+      // Local ticket specialization alone cannot see the broad admitted run
+      // directory. The authenticated aggregate must reject this at the sink.
+      expect(receiptDraftSchemaForTicket(exact.ticket).safeParse(payload).success).toBe(true);
+      await validateReceiptForDispatch(exact.dir, payload, exact.ticket.ticket_id);
+      async function snapshot(directory) {
+        const entries = await readdir(directory, { withFileTypes: true }).catch((error) => {
+          if (error.code === 'ENOENT') return [];
+          throw error;
+        });
+        return Object.fromEntries(await Promise.all(entries.map(async (entry) => {
+          const file = path.join(directory, entry.name);
+          return [entry.name, entry.isDirectory() ? await snapshot(file) : await readFile(file, 'utf8')];
+        })));
+      }
+      async function durableAuthority() {
+        return Object.fromEntries(await Promise.all([
+          'tickets', 'contracts', 'receipts', 'receiptTransactions', 'recoveryGenerations', 'recoverySelectors',
+        ].map(async (key) => [key, await snapshot(exact.paths[key])])));
+      }
+      const before = await durableAuthority();
+      const activeBefore = await readJson(exact.paths.active);
+      for (const results of [
+        await Promise.all([recordReceipt(exact.dir, payload), recordReceipt(exact.dir, payload)]),
+        [await recordReceipt(exact.dir, payload)],
+      ]) {
+        for (const result of results) {
+          expect(result).toMatchObject({ ok: false, rejected: true });
+          expect(result.errors.join(' ')).toMatch(/test_paths.*(?:already|colli|overlap|additive|admitted)/i);
+          expect(result.actions ?? []).toEqual([]);
+        }
+      }
+      expect(await durableAuthority()).toEqual(before);
+      const after = await readJson(exact.paths.active);
+      expect(after.tickets).toEqual(activeBefore.tickets);
+      expect(after.receipts).toEqual(activeBefore.receipts);
+      expect(after.recovery_generation).toEqual(activeBefore.recovery_generation);
+      await expectWritePermission(exact, requested, false);
+      // A disjoint path is still genuinely additive: the directory protection
+      // cannot become a blanket ban on exact-scope recovery.
+      const added = 'other-tests/new.test.js';
+      const successor = await recover(exact, { test_paths: [added] }, 9);
+      expect(successor.ticket).toMatchObject({ test_scope: 'exact',
+        claimed_paths: ['tests/value.test.js', added], test_paths: ['tests/value.test.js', added] });
+      await expectWritePermission(successor, added, true);
+      await expectWritePermission(successor, requested, false);
+    }, 90_000);
+
+  it.each([
+    ['exact sibling', 'tests/ordinary-admitted.test.js'],
+    ['case-folded sibling', 'tests/ORDINARY-ADMITTED.test.js'],
+  ])('rejects regranting an ordinary admitted %s despite a stale active inventory', async (_label, requested) => {
+    const sibling = 'tests/ordinary-admitted.test.js';
+    const exact = await exactRemediationFixture({ authoredSibling: sibling });
+    const admitted = await readJson(exact.paths.active);
+    expect(admitted.test_paths).toEqual([...ADMITTED_TESTS, sibling]);
+    expect(admitted.receipts.some((receipt) => receipt.status === 'passed' &&
+      receipt.agent.role === 'test_writer' && receipt.changed_files.includes(sibling))).toBe(true);
+    const manifest = await readRunContractManifest(exact.paths, exact.ticket.capability_manifest.run_contract);
+    expect(manifest.capability_catalog.frozen_recovery_authority.run_scope.test_paths).toEqual(ADMITTED_TESTS);
+    expect(manifest.receipt_contract.ticket_contracts.some((entry) =>
+      entry.recovery_authority?.test_paths.includes(sibling))).toBe(true);
+    expect(exact.ticket).toMatchObject({ test_scope: 'exact', test_paths: ['tests/value.test.js'] });
+    await expectWritePermission(exact, sibling, false);
+
+    // Remove only the mutable projection. The ordinary receipt and hashed
+    // ticket contracts still authenticate the sibling as already admitted.
+    await atomicWriteJson(exact.paths.active, { ...admitted, test_paths: ADMITTED_TESTS });
+    const payload = draft(exact, { test_paths: [requested] });
+    expect(receiptDraftSchemaForTicket(exact.ticket).safeParse(payload).success).toBe(true);
+    const validation = await validateReceiptForDispatch(exact.dir, payload, exact.ticket.ticket_id);
+    expect(validation.ok).toBe(true);
+
+    async function snapshot(directory) {
+      const entries = await readdir(directory, { withFileTypes: true }).catch((error) => {
+        if (error.code === 'ENOENT') return [];
+        throw error;
+      });
+      const result = {};
+      for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+        const file = path.join(directory, entry.name);
+        result[entry.name] = entry.isDirectory() ? await snapshot(file) : await readFile(file, 'utf8');
+      }
+      return result;
+    }
+    async function durableAuthority() {
+      return Object.fromEntries(await Promise.all([
+        'tickets', 'contracts', 'receipts', 'receiptTransactions', 'recoveryGenerations', 'recoverySelectors',
+      ].map(async (key) => [key, await snapshot(exact.paths[key])])));
+    }
+    const before = await durableAuthority();
+    const activeBefore = await readJson(exact.paths.active);
+    const siblingBytes = await readFile(path.join(exact.dir, sibling), 'utf8');
+    // Both concurrent callers and a later retry must reject before preparing
+    // a successor. Validation may reject earlier, but record remains a sink.
+    for (const results of [
+      await Promise.all([recordReceipt(exact.dir, payload), recordReceipt(exact.dir, payload)]),
+      [await recordReceipt(exact.dir, payload)],
+    ]) {
+      for (const result of results) {
+        expect(result).toMatchObject({ ok: false, rejected: true });
+        expect(result.errors.join(' ')).toMatch(/test_paths.*(?:already|colli|overlap|additive)/i);
+        expect(result.actions ?? []).toEqual([]);
+      }
+    }
+    expect(await durableAuthority()).toEqual(before);
+    const after = await readJson(exact.paths.active);
+    expect(after.tickets).toEqual(activeBefore.tickets);
+    expect(after.receipts).toEqual(activeBefore.receipts);
+    expect(after.recovery_generation).toEqual(activeBefore.recovery_generation);
+    expect(await readFile(path.join(exact.dir, sibling), 'utf8')).toBe(siblingBytes);
+    await expectWritePermission(exact, sibling, false);
+  }, 90_000);
+
+  it('allows a genuinely new exact test grant while retaining ordinary admitted siblings', async () => {
+    const sibling = 'tests/ordinary-admitted.test.js';
+    const added = 'tests/genuinely-new.test.js';
+    const exact = await exactRemediationFixture({ authoredSibling: sibling });
+    const admitted = await readJson(exact.paths.active);
+    await atomicWriteJson(exact.paths.active, { ...admitted, test_paths: ADMITTED_TESTS });
+    const successor = await recover(exact, { test_paths: [added] }, 9);
+    expect(successor.ticket).toMatchObject({ role: 'test_writer', test_scope: 'exact',
+      claimed_paths: ['tests/value.test.js', added], test_paths: ['tests/value.test.js', added] });
+    expect((await readJson(exact.paths.active)).test_paths).toEqual([...ADMITTED_TESTS, sibling, added]);
+    await expectWritePermission(successor, added, true);
+    await expectWritePermission(successor, sibling, false);
+    await expectWritePermission(successor, 'src/value.js', false);
+  }, 90_000);
+
+  it.each(['retry', 'concurrent retry'])(
+    'retains an ordinary admitted sibling across exact remediation and %s', async (boundary) => {
+      const sibling = 'tests/ordinary-admitted.test.js';
+      const tests = [...ADMITTED_TESTS, sibling];
+      const exact = await exactRemediationFixture({ authoredSibling: sibling });
+      const ticketFile = path.join(exact.paths.tickets, `${exact.ticket.ticket_id.replaceAll(':', '_')}.json`);
+      const ticketBytes = await readFile(ticketFile, 'utf8');
+      const manifestFile = path.join(exact.dir, exact.ticket.capability_manifest.run_contract.ref);
+      const manifestBytes = await readFile(manifestFile, 'utf8');
+      const manifest = await readRunContractManifest(exact.paths, exact.ticket.capability_manifest.run_contract);
+      // The sibling has genuine ordinary receipt authority, but neither the
+      // original run inventory nor this exact ticket names it.
+      expect(manifest.capability_catalog.frozen_recovery_authority.run_scope.test_paths).toEqual(ADMITTED_TESTS);
+      expect(exact.ticket.test_paths).toEqual(['tests/value.test.js']);
+      const admitted = await readJson(exact.paths.active);
+      expect(admitted.test_paths).toEqual(tests);
+      expect(admitted.receipts.some((receipt) => receipt.agent.role === 'test_writer' &&
+        receipt.status === 'passed' && receipt.changed_files.includes(sibling))).toBe(true);
+      const siblingBytes = await readFile(path.join(exact.dir, sibling), 'utf8');
+      const payload = draft(exact, { required_role: 'implementer' });
+      expect(await validateReceiptForDispatch(exact.dir, payload, exact.ticket.ticket_id))
+        .toMatchObject({ ok: true, valid: true });
+      expect(await hook(exact, { hook_event_name: 'SubagentStop', last_assistant_message: JSON.stringify(payload) }))
+        .toEqual({});
+      const results = boundary === 'concurrent retry'
+        ? await Promise.all([recordReceipt(exact.dir, payload), recordReceipt(exact.dir, payload)])
+        : [await recordReceipt(exact.dir, payload)];
+      for (const result of results) expect(result.ok, JSON.stringify(result)).toBe(true);
+      const action = results.flatMap((result) => result.actions).find((entry) => entry.type === 'dispatch_agent');
+      expect(action).toBeTruthy();
+      const production = { ...exact, action, ticket: action.ticket,
+        binding: await bindCodexDispatchContext(root, exact.dir, action, 9) };
+      expect((await readJson(exact.paths.active)).tickets.filter((ticket) =>
+        ticket.recovery_lineage?.source_ticket_id === exact.ticket.ticket_id)).toHaveLength(1);
+      await expectBoundScope(production, ADMITTED_PRODUCTION, tests, ADMITTED_PRODUCTION);
+      const command = 'node --test tests/ordinary-admitted.test.js tests/sibling.test.js tests/value.test.js';
+      expect(production.ticket.capability_manifest.allowed_evidence_commands).toContain(command);
+      await expectWritePermission(production, sibling, false);
+      await writeThroughHooks(production, 'src/value.js', `${V2}// productive exact recovery\n`);
+      execFileSync(process.execPath, ['--test', ...tests], { cwd: exact.dir });
+      const returned = await recover(production, { required_role: 'test_writer' }, 10);
+      expect(returned.ticket).toMatchObject({ test_scope: 'exact',
+        claimed_paths: ['tests/value.test.js'], test_paths: ['tests/value.test.js'] });
+      await expectWritePermission(returned, 'tests/value.test.js', true);
+      await expectWritePermission(returned, sibling, false);
+      const beforeReplay = await readJson(exact.paths.active);
+      expect(beforeReplay.test_paths).toEqual(tests);
+      expect((await recordReceipt(exact.dir, payload)).ok).toBe(true);
+      const afterReplay = await readJson(exact.paths.active);
+      expect(afterReplay.test_paths).toEqual(tests);
+      expect(afterReplay.tickets).toEqual(beforeReplay.tickets);
+      expect(afterReplay.receipts).toEqual(beforeReplay.receipts);
+      expect(afterReplay.recovery_generation).toEqual(beforeReplay.recovery_generation);
+      expect(await readFile(path.join(exact.dir, sibling), 'utf8')).toBe(siblingBytes);
+      expect(await readFile(ticketFile, 'utf8')).toBe(ticketBytes);
+      expect(await readFile(manifestFile, 'utf8')).toBe(manifestBytes);
+    }, 90_000);
+
+  it('retains a sibling first authored in the capability-failed receipt and executes it in successor evidence', async () => {
+    const source = await fixture({ fullLane: true });
+    const sibling = 'tests/new.test.js';
+    const tests = [...ADMITTED_TESTS, sibling];
+    const command = 'node --test tests/new.test.js tests/sibling.test.js tests/value.test.js';
+    const ticketFile = path.join(source.paths.tickets, `${source.ticket.ticket_id.replaceAll(':', '_')}.json`);
+    const ticketBytes = await readFile(ticketFile, 'utf8');
+    const manifestFile = path.join(source.dir, source.ticket.capability_manifest.run_contract.ref);
+    const manifestBytes = await readFile(manifestFile, 'utf8');
+    expect(source.ticket.test_paths).not.toContain(sibling);
+    // No preceding successful test receipt or explicit path expansion admits
+    // this sibling. Only the runtime-sealed diff of this failed receipt does.
+    await writeThroughHooks(source, sibling, TEST);
+    const build = await recover(source, { required_role: 'implementer' }, 5);
+    expect(build.sourceReceipt.changed_files).toEqual([sibling]);
+    expect(build.sourceReceipt.head_tree_sha).not.toBe(build.sourceReceipt.base_tree_sha);
+    expect(await readFile(path.join(source.dir, sibling), 'utf8')).toBe(TEST);
+    await expectBoundScope(build, ADMITTED_PRODUCTION, tests, ADMITTED_PRODUCTION);
+    expect(build.ticket.capability_manifest.allowed_evidence_commands).toContain(command);
+    await expectWritePermission(build, sibling, false);
+    await expectWritePermission(build, 'src/value.js', true);
+    await writeThroughHooks(build, 'src/value.js', V2);
+    // The generated path-based evidence command must actually run the newly
+    // authored test; a correct production implementation satisfies all three.
+    execFileSync(process.execPath, ['--test', ...tests], { cwd: source.dir });
+    const returned = await recover(build, { required_role: 'test_writer' }, 6);
+    await expectBoundScope(returned, ADMITTED_PRODUCTION, tests, tests);
+    await expectWritePermission(returned, sibling, true);
+    await expectWritePermission(returned, 'src/value.js', false);
+    const beforeReplay = await readJson(source.paths.active);
+    expect((await recordReceipt(source.dir, build.payload)).ok).toBe(true);
+    const afterReplay = await readJson(source.paths.active);
+    expect(afterReplay.test_paths).toEqual(tests);
+    expect(afterReplay.tickets).toEqual(beforeReplay.tickets);
+    expect(afterReplay.receipts).toEqual(beforeReplay.receipts);
+    expect(afterReplay.recovery_generation).toEqual(beforeReplay.recovery_generation);
+    expect(await readFile(ticketFile, 'utf8')).toBe(ticketBytes);
+    expect(await readFile(manifestFile, 'utf8')).toBe(manifestBytes);
+  }, 90_000);
+
+  it('retains a sibling admitted by an ordinary test receipt across role recovery and replay', async () => {
+    const source = await fixture({ fullLane: true });
+    const sibling = 'tests/authored-sibling.test.js';
+    const tests = [...ADMITTED_TESTS, sibling];
+    const command = 'node --test tests/authored-sibling.test.js tests/sibling.test.js tests/value.test.js';
+    // This is a normal test-writer admission, not a required_claims expansion.
+    // The runtime must discover the sibling from its independently sealed diff.
+    await writeThroughHooks(source, sibling, TEST);
+    const tested = await seal(source, draft(source));
+    expect(tested.run.receipts.find((entry) => entry.ticket_id === source.ticket.ticket_id)
+      .changed_files).toEqual([sibling]);
+    const action = tested.actions.find((entry) => entry.type === 'dispatch_agent');
+    expect(action.ticket).toMatchObject({ role: 'implementer', test_paths: tests });
+    const build = { ...source, action, ticket: action.ticket,
+      binding: await bindCodexDispatchContext(root, source.dir, action, 5) };
+    const ticketFile = path.join(source.paths.tickets, `${build.ticket.ticket_id.replaceAll(':', '_')}.json`);
+    const ticketBytes = await readFile(ticketFile, 'utf8');
+    const manifestFile = path.join(source.dir, build.ticket.capability_manifest.run_contract.ref);
+    const manifestBytes = await readFile(manifestFile, 'utf8');
+    const manifest = await readRunContractManifest(source.paths, build.ticket.capability_manifest.run_contract);
+    expect(manifest.capability_catalog.frozen_recovery_authority.run_scope.test_paths).toEqual(ADMITTED_TESTS);
+    expect(manifest.receipt_contract.ticket_contracts.find((entry) => entry.ticket_id === build.ticket.ticket_id)
+      .recovery_authority.test_paths).toEqual(tests);
+
+    const tester = await recover(build, { required_role: 'test_writer' }, 6);
+    await expectBoundScope(tester, ADMITTED_PRODUCTION, tests, tests);
+    expect(tester.ticket.capability_manifest.allowed_evidence_commands)
+      .toContain(command);
+    await expectWritePermission(tester, sibling, true);
+    await expectWritePermission(tester, 'src/value.js', false);
+    await writeThroughHooks(tester, sibling, `${TEST}// productive sibling correction\n`);
+
+    const returned = await recover(tester, { required_role: 'implementer' }, 7);
+    expect(returned.sourceReceipt.changed_files).toEqual([sibling]);
+    await expectBoundScope(returned, ADMITTED_PRODUCTION, tests, ADMITTED_PRODUCTION);
+    expect(returned.ticket.capability_manifest.allowed_evidence_commands)
+      .toContain(command);
+    await expectWritePermission(returned, sibling, false);
+    await expectWritePermission(returned, 'src/value.js', true);
+    const beforeReplay = await readJson(source.paths.active);
+    expect((await recordReceipt(source.dir, tester.payload)).ok).toBe(true);
+    const afterReplay = await readJson(source.paths.active);
+    expect(afterReplay.test_paths).toEqual(tests);
+    expect(afterReplay.tickets).toEqual(beforeReplay.tickets);
+    expect(afterReplay.receipts).toEqual(beforeReplay.receipts);
+    expect(afterReplay.recovery_generation).toEqual(beforeReplay.recovery_generation);
+    expect(await readFile(ticketFile, 'utf8')).toBe(ticketBytes);
+    expect(await readFile(manifestFile, 'utf8')).toBe(manifestBytes);
+  }, 90_000);
+
+  it('recovers the reported full-lane test-only ticket with a role-only request through validation, stop and record', async () => {
+    const source = await fixture({ fullLane: true });
+    const sourceFile = path.join(source.paths.tickets, `${source.ticket.ticket_id.replaceAll(':', '_')}.json`);
+    const sourceBytes = await readFile(sourceFile, 'utf8');
+    const manifestFile = path.join(source.dir, source.ticket.capability_manifest.run_contract.ref);
+    const manifestBytes = await readFile(manifestFile, 'utf8');
+    const successor = await recover(source, { required_role: 'implementer' }, 5);
+    expect(successor.ticket.role).toBe('implementer');
+    await expectBoundScope(successor, ADMITTED_PRODUCTION, ADMITTED_TESTS, ADMITTED_PRODUCTION);
+    for (const file of ADMITTED_PRODUCTION) await expectWritePermission(successor, file, true);
+    for (const file of [...ADMITTED_TESTS, 'src/unadmitted.js', '.ape/runtime/forged.json']) {
+      await expectWritePermission(successor, file, false);
+    }
+    // Real writes and independent receipt attribution prove useful authority,
+    // rather than merely inspecting the successor's path arrays.
+    await writeThroughHooks(successor, 'scripts/native-test-process.mjs', 'export const value = 2;\n');
+    await writeThroughHooks(successor, '.github/test-durations.json', '{"fixture":2}\n');
+    expect(await validateStageReceipt(await prospective(successor,
+      ['.github/test-durations.json', 'scripts/native-test-process.mjs'])))
+      .toMatchObject({ valid: true });
+    expect(await readFile(sourceFile, 'utf8')).toBe(sourceBytes);
+    expect(await readFile(manifestFile, 'utf8')).toBe(manifestBytes);
+  }, 60_000);
+
+  it('retains both inventories and prior additions across productive role round trips', async () => {
+    const source = await fixture({ fullLane: true });
+    const implementation = await recover(source, {
+      required_role: 'implementer', claimed_paths: ['src/added.js'], test_paths: ['tests/added.test.js'],
+    }, 5);
+    const production = [...ADMITTED_PRODUCTION, 'src/added.js'];
+    const tests = [...ADMITTED_TESTS, 'tests/added.test.js'];
+    await expectBoundScope(implementation, production, tests, production);
+    await writeThroughHooks(implementation, 'src/added.js', 'module.exports = 42;\n');
+    const tester = await recover(implementation, { required_role: 'test_writer' }, 6);
+    expect(tester.ticket.role).toBe('test_writer');
+    await expectBoundScope(tester, production, tests, tests);
+    await expectWritePermission(tester, 'tests/added.test.js', true);
+    for (const file of production) await expectWritePermission(tester, file, false);
+    await writeThroughHooks(tester, 'tests/added.test.js', "require('node:assert/strict').equal(42, 42);\n");
+    // A new canonical grant is material progress even when returning to an
+    // already-issued role. The original production paths must remain usable.
+    const returned = await recover(tester, {
+      required_role: 'implementer', claimed_paths: ['src/second.js'],
+    }, 7);
+    await expectBoundScope(returned, [...production, 'src/second.js'], tests, [...production, 'src/second.js']);
+    await expectWritePermission(returned, 'scripts/native-test-process.mjs', true);
+    await expectWritePermission(returned, 'tests/added.test.js', false);
+    expect((await recordReceipt(source.dir, implementation.payload)).ok).toBe(true);
+    expect((await readJson(source.paths.active)).tickets.at(-1)).toEqual(returned.ticket);
+  }, 60_000);
+
+  it('blocks an unchanged v4 role cycle without publishing another successor or generation', async () => {
+    const source = await fixture({ fullLane: true });
+    expect((await readJson(source.paths.active)).execution_policy.version).toBe(4);
+    const implementation = await recover(source, { required_role: 'implementer' }, 5);
+    const before = await readJson(source.paths.active);
+    const ticketFiles = (await readdir(source.paths.tickets)).sort();
+    const generations = (await readdir(source.paths.recoveryGenerations)).sort();
+    const payload = draft(implementation, { required_role: 'test_writer' });
+    const result = await seal(implementation, payload);
+    expect(result.actions.some((entry) => entry.type === 'dispatch_agent')).toBe(false);
+    expect(result.run).toMatchObject({ status: 'blocked', terminal_reason_code: 'capability_blocked' });
+    expect(result.run.block_reason).toMatch(/capability|progress|cycl/i);
+    expect(result.run.tickets).toEqual(before.tickets);
+    expect(result.run.recovery_generation).toEqual(before.recovery_generation);
+    expect((await readdir(source.paths.tickets)).sort()).toEqual(ticketFiles);
+    expect((await readdir(source.paths.recoveryGenerations)).sort()).toEqual(generations);
+    const replay = await recordReceipt(source.dir, payload);
+    expect(replay.ok).toBe(true);
+    expect(replay.run.tickets).toEqual(before.tickets);
+  }, 60_000);
+
+  it.each(['tests/value.test.js', 'src/unadmitted.js'])('rejects post-validation implementer drift in %s at the receipt and stop sinks', async (file) => {
+    const source = await fixture({ fullLane: true });
+    const value = await recover(source, { required_role: 'implementer' }, 5);
+    const payload = draft(value, { claimed_paths: ['src/new-authority.js'] });
+    expect(await validateReceiptForDispatch(value.dir, payload)).toMatchObject({ valid: true });
+    await expectWritePermission(value, file, false);
+    await writeFile(path.join(value.dir, file), 'module.exports = 99;\n');
+    expect((await validateStageReceipt(await prospective(value, [file]))).valid).toBe(false);
+    expect(await hook(value, { hook_event_name: 'SubagentStop', last_assistant_message: JSON.stringify(payload) }))
+      .toMatchObject({ decision: 'block' });
+  }, 60_000);
+
+  it('keeps successor schema semantics additive and role-specific', async () => {
+    const source = await fixture({ fullLane: true });
+    const value = await recover(source, { required_role: 'implementer' }, 5);
+    const roleEnum = value.ticket.output_schema.properties.evidence.properties.required_claims.properties.required_role.enum;
+    expect(roleEnum).toContain('test_writer');
+    expect(roleEnum).not.toContain('implementer');
+    for (const claims of [{ claimed_paths: ['src/new.js'] }, { required_role: 'test_writer' }]) {
+      expect(receiptDraftSchemaForTicket(value.ticket).safeParse(draft(value, claims)).success).toBe(true);
+    }
+    for (const claims of [{ claimed_paths: ['scripts/native-test-process.mjs'] },
+      { claimed_paths: ['.ape/runtime/forged.js'] }, { required_role: 'implementer' }]) {
+      expect(receiptDraftSchemaForTicket(value.ticket).safeParse(draft(value, claims)).success).toBe(false);
+    }
+  }, 60_000);
+
+  it('preserves an exact remediation subset through production recovery and a productive return', async () => {
+    const exact = await exactRemediationFixture();
+    const production = await recover(exact, { required_role: 'implementer' }, 9);
+    expect(production.ticket.claimed_paths).toEqual(ADMITTED_PRODUCTION);
+    await writeThroughHooks(production, 'src/value.js', `${V2}// productive correction\n`);
+    const returned = await recover(production, { required_role: 'test_writer' }, 10);
+    expect(returned.ticket).toMatchObject({ test_scope: 'exact',
+      test_paths: ['tests/value.test.js'], claimed_paths: ['tests/value.test.js'] });
+    expect((await readJson(exact.paths.active)).test_paths).toEqual(ADMITTED_TESTS);
+    await expectWritePermission(returned, 'tests/value.test.js', true);
+    await expectWritePermission(returned, 'tests/sibling.test.js', false);
+    await expectWritePermission(returned, 'src/value.js', false);
+    await writeFile(path.join(exact.dir, 'tests/sibling.test.js'), `${TEST}// unauthorized sibling\n`);
+    expect((await validateStageReceipt(await prospective(returned, ['tests/sibling.test.js']))).valid).toBe(false);
+    expect(await hook(returned, { hook_event_name: 'SubagentStop', last_assistant_message: JSON.stringify(draft(returned)) }))
+      .toMatchObject({ decision: 'block' });
+  }, 90_000);
+
+  it.each(['edit', 'delete', 'productive return'])
+  ('protects a configured nonstandard sibling test during exact implementation recovery: %s', async (operation) => {
+    // The broad production claim deliberately contains a configured test whose
+    // name cannot trigger conventional test-name heuristics. Its protection
+    // must survive narrowing the remediation writer to a different test.
+    const sibling = 'src/checks/rules.js';
+    const productionPaths = ['src', 'scripts/native-test-process.mjs', '.github/test-durations.json'];
+    const testPaths = [...ADMITTED_TESTS, sibling];
+    const exact = await exactRemediationFixture({ productionPaths, testPaths });
+    const ticketFile = path.join(exact.paths.tickets, `${exact.ticket.ticket_id.replaceAll(':', '_')}.json`);
+    const ticketBytes = await readFile(ticketFile, 'utf8');
+    const siblingBytes = await readFile(path.join(exact.dir, sibling), 'utf8');
+    const production = await recover(exact, { required_role: 'implementer' }, 9);
+    expect(production.ticket.claimed_paths).toEqual(productionPaths);
+    expect((await readJson(exact.paths.active)).test_paths).toEqual(testPaths);
+    await writeThroughHooks(production, 'src/value.js', `${V2}// productive correction\n`);
+    const payload = draft(production, { required_role: 'test_writer' });
+    expect(await validateReceiptForDispatch(exact.dir, payload)).toMatchObject({ valid: true });
+
+    // Soft assertions let each independent sink observe the defect even when
+    // the initial pre-write check has already admitted the forbidden action.
+    expect.soft(await hook(production, { hook_event_name: 'PreToolUse', tool_name: 'Write',
+      tool_input: { file_path: path.join(exact.dir, sibling), content: '// changed configured test\n' } }))
+      .toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+    expect.soft(await hook(production, { hook_event_name: 'PreToolUse', tool_name: 'Bash',
+      cwd: exact.dir, tool_input: { command: `rm ${sibling}` } }))
+      .toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+
+    if (operation === 'productive return') {
+      const returned = await recover(production, { required_role: 'test_writer' }, 10);
+      expect(returned.ticket).toMatchObject({ role: 'test_writer', test_scope: 'exact',
+        claimed_paths: ['tests/value.test.js'], test_paths: ['tests/value.test.js'] });
+      await expectWritePermission(returned, 'tests/value.test.js', true);
+      for (const file of [sibling, 'tests/sibling.test.js', 'src/value.js']) {
+        await expectWritePermission(returned, file, false);
+      }
+      await writeThroughHooks(returned, 'tests/value.test.js', `${TEST}// exact correction\n`);
+      expect(returned.ticket.required_checks).toContain('targeted-tests');
+      const missingEvidence = await validateStageReceipt(await prospective(returned, ['tests/value.test.js']));
+      expect(missingEvidence.valid).toBe(false);
+      expect(missingEvidence.errors).toContain('required targeted-tests evidence is missing');
+      const command = 'node --test tests/value.test.js';
+      expect(returned.ticket.capability_manifest.allowed_evidence_commands).toContain(command);
+      const startedAt = performance.now();
+      execFileSync(process.execPath, ['--test', 'tests/value.test.js'], { cwd: returned.dir });
+      const tests = [{ command, passed: true, exit_code: 0, duration_ms: performance.now() - startedAt }];
+      expect(await validateStageReceipt(await prospective(returned, ['tests/value.test.js'], tests)))
+        .toMatchObject({ valid: true, actual_files: ['tests/value.test.js'] });
+      expect(await readFile(path.join(exact.dir, sibling), 'utf8')).toBe(siblingBytes);
+      expect((await readJson(exact.paths.active)).test_paths).toEqual(testPaths);
+    } else {
+      // Inject the mutation after successful draft validation and immediately
+      // before the receipt/result sinks; an earlier permission check is not
+      // evidence that the tree still respects role separation at adoption.
+      if (operation === 'delete') await rm(path.join(exact.dir, sibling));
+      else await writeFile(path.join(exact.dir, sibling), '// changed configured test\n');
+      expect.soft((await validateStageReceipt(await prospective(production,
+        [sibling, 'src/value.js']))).valid).toBe(false);
+      expect.soft(await hook(production, { hook_event_name: 'SubagentStop',
+        last_assistant_message: JSON.stringify(payload) })).toMatchObject({ decision: 'block' });
+    }
+    expect(await readFile(ticketFile, 'utf8')).toBe(ticketBytes);
+  }, 90_000);
+});
 
 describe('capability recovery source-tree handoff', () => {
   it.each([true, false])('allows an unchanged read-only successor to finish (production handoff: %s)', async (productionChange) => {

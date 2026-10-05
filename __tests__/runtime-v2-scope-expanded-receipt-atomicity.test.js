@@ -550,14 +550,16 @@ import {
   validateReceiptForDispatch,
 } from '../lib/runtime/service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
-import { __runContractFault, readRunContractManifest } from '../lib/runtime/run-contract.js';
+import { __runContractFault, prepareTicketRunContract, readRunContractManifest,
+  runContractByteBudgets, runContractFieldBounds } from '../lib/runtime/run-contract.js';
+import { ticketCapabilityManifest } from '../lib/runtime/capability-manifest.js';
 import {
   bindCodexSubagent,
   bootstrapCodexSubagent,
   launchCodexIntent,
   prepareCodexIntent,
 } from '../lib/runtime/claude-dispatch.js';
-import { validateTicket } from '../lib/runtime/schemas.js';
+import { finalizeTicket, validateTicket } from '../lib/runtime/schemas.js';
 import { __receiptSchemaVersion, receiptOutputSchemaForTicket } from '../lib/runtime/receipt-validator.js';
 import { bindCodexDispatch } from './codex-native-test-helper.js';
 import { projectRunResponse } from '../lib/runtime/projection.js';
@@ -1208,6 +1210,161 @@ describe('APE v2 SCOPE_EXPANDED receipt atomicity across a crash (audit 1.3, inv
 
 describe('APE v2 bounded capability-recovery publication', () => {
   it.each(['prepared', 'published', 'concurrent'])(
+    'retains newly authored tests from the failed source receipt across %s recovery', async (boundary) => {
+      const dir = await project();
+      const paths = runtimePaths(dir);
+      const config = await readJson(paths.config);
+      await atomicWriteJson(paths.config, { ...config,
+        test_commands: { full: 'node --test', targeted_template: 'node --test {paths}' } });
+      const { ticket, capability } = await nativeCapabilityTicket(dir);
+      expect(ticket).toMatchObject({ role: 'test_writer', test_paths: ['tests/value.test.js'] });
+      const sibling = 'tests/new.test.js';
+      const tests = ['tests/value.test.js', sibling];
+      const sourceFile = path.join(paths.tickets, `${ticket.ticket_id.replaceAll(':', '_')}.json`);
+      const sourceBytes = await readFile(sourceFile, 'utf8');
+      const sourceManifestFile = path.join(dir, ticket.capability_manifest.run_contract.ref);
+      const sourceManifestBytes = await readFile(sourceManifestFile, 'utf8');
+      await writeFile(path.join(dir, sibling), AUTHORED_TEST);
+      const payload = capabilityReceipt(ticket, capability, { required_role: 'implementer' });
+      expect(await validateReceiptForDispatch(dir, payload)).toMatchObject({ valid: true });
+      // Inject after the final validation, at the durable preparation or
+      // publication sink; neither the worker nor a successful receipt adds it.
+      if (boundary === 'prepared') __crashControl.arm = { kind: 'prepared-transaction' };
+      if (boundary === 'published') __publicationFault.arm = { kind: 'crash-after-selector-publish' };
+      if (boundary !== 'concurrent') {
+        expect((await capturedRecord(dir, payload)).error).toBeInstanceOf(Error);
+        expect(boundary === 'prepared' ? __crashControl.fired : __publicationFault.fired).toBe(1);
+      }
+      const results = await Promise.all([recordReceipt(dir, payload), recordReceipt(dir, payload)]);
+      expect(results.every((result) => result.ok)).toBe(true);
+      const active = await readJson(paths.active);
+      expect(active.receipts).toHaveLength(1);
+      expect(active.receipts[0].changed_files).toEqual([sibling]);
+      expect(active.tickets).toHaveLength(2);
+      expect(active.test_paths).toEqual(tests);
+      expect(active.claimed_paths).toEqual(['src/value.js']);
+      const successor = active.tickets.at(-1);
+      expect(successor).toMatchObject({ role: 'implementer', claimed_paths: ['src/value.js'], test_paths: tests });
+      expect(successor.capability_manifest.allowed_evidence_commands)
+        .toContain('node --test tests/new.test.js tests/value.test.js');
+      const manifest = await readRunContractManifest(paths, successor.capability_manifest.run_contract);
+      expect(manifest.capability_catalog.frozen_recovery_authority.run_scope.test_paths).toEqual(tests);
+      expect(manifest.receipt_contract.ticket_contracts.find((entry) => entry.ticket_id === successor.ticket_id)
+        .recovery_authority.test_paths).toEqual(tests);
+      const [transactionName] = await readdir(paths.receiptTransactions);
+      const transaction = await readJson(path.join(paths.receiptTransactions, transactionName));
+      expect(transaction.prepared_effect.scope.state.test_paths).toEqual(tests);
+      expect(transaction.prepared_effect.scope.successor.test_paths).toEqual(tests);
+      const selectors = await runtimeSnapshot(paths.recoverySelectors);
+      const generations = await runtimeSnapshot(paths.recoveryGenerations);
+      expect(await recordReceipt(dir, payload)).toMatchObject({ ok: true, idempotent: true });
+      const replay = await readJson(paths.active);
+      expect(replay.test_paths).toEqual(tests);
+      expect(replay.tickets).toEqual(active.tickets);
+      expect(replay.receipts).toEqual(active.receipts);
+      expect(replay.recovery_generation).toEqual(active.recovery_generation);
+      expect(await runtimeSnapshot(paths.recoverySelectors)).toEqual(selectors);
+      expect(await runtimeSnapshot(paths.recoveryGenerations)).toEqual(generations);
+      expect(await readFile(path.join(dir, sibling), 'utf8')).toBe(AUTHORED_TEST);
+      expect(await readFile(sourceFile, 'utf8')).toBe(sourceBytes);
+      expect(await readFile(sourceManifestFile, 'utf8')).toBe(sourceManifestBytes);
+    },
+  );
+
+  it.each(['prepared', 'published', 'concurrent'])(
+    'publishes role-only production recovery exactly once across %s', async (boundary) => {
+      const dir = await project();
+      const { ticket, capability } = await nativeCapabilityTicket(dir);
+      expect(ticket).toMatchObject({ role: 'test_writer', claimed_paths: ['tests/value.test.js'] });
+      const paths = runtimePaths(dir);
+      const sourceFile = path.join(paths.tickets, `${ticket.ticket_id.replaceAll(':', '_')}.json`);
+      const sourceBytes = await readFile(sourceFile, 'utf8');
+      const payload = capabilityReceipt(ticket, capability, { required_role: 'implementer' });
+      expect(await validateReceiptForDispatch(dir, payload)).toMatchObject({ valid: true });
+      if (boundary === 'prepared') __crashControl.arm = { kind: 'prepared-transaction' };
+      if (boundary === 'published') __publicationFault.arm = { kind: 'crash-after-selector-publish' };
+      if (boundary !== 'concurrent') {
+        expect((await capturedRecord(dir, payload)).error).toBeInstanceOf(Error);
+        expect(boundary === 'prepared' ? __crashControl.fired : __publicationFault.fired).toBe(1);
+      }
+      const results = await Promise.all([recordReceipt(dir, payload), recordReceipt(dir, payload)]);
+      expect(results.every((result) => result.ok)).toBe(true);
+      const active = await readJson(paths.active);
+      expect(active.tickets).toHaveLength(2);
+      expect(active.receipts).toHaveLength(1);
+      expect(active.claimed_paths).toEqual(['src/value.js']);
+      expect(active.tickets.at(-1)).toMatchObject({ role: 'implementer',
+        claimed_paths: ['src/value.js'], test_paths: ['tests/value.test.js'] });
+      expect(await recordReceipt(dir, payload)).toMatchObject({ ok: true, idempotent: true });
+      expect((await readJson(paths.active)).tickets).toEqual(active.tickets);
+      expect((await readJson(paths.active)).recovery_generation).toEqual(active.recovery_generation);
+      expect(await readFile(sourceFile, 'utf8')).toBe(sourceBytes);
+    },
+  );
+
+  it.each(['historical', 'mixed-state', 'extra-authority'])(
+    'replays only a coherent historical role-only prepared envelope: %s', async (shape) => {
+      const dir = await project();
+      const { ticket, capability } = await nativeCapabilityTicket(dir);
+      const paths = runtimePaths(dir);
+      const before = await readJson(paths.active);
+      const payload = capabilityReceipt(ticket, capability, { required_role: 'implementer' });
+      expect(await validateReceiptForDispatch(dir, payload)).toMatchObject({ valid: true });
+      __crashControl.arm = { kind: 'prepared-transaction' };
+      expect((await capturedRecord(dir, payload)).error?.message).toMatch(/simulated crash/);
+      expect(__crashControl.fired).toBe(1);
+      const [name] = await readdir(paths.receiptTransactions);
+      const file = path.join(paths.receiptTransactions, name);
+      const transaction = await readJson(file);
+      const effect = transaction.prepared_effect;
+      // Synthetic previous-runtime fixture. Its role-only rule retained the
+      // source test-only scope, and state unioned that scope with production.
+      // Rebuild every dependent hash; the acceptance oracle is these explicit
+      // historical semantics, never the current scope-derivation helper.
+      const scope = { claimed_paths: ['tests/value.test.js'], test_paths: ['tests/value.test.js'] };
+      if (shape === 'extra-authority') scope.claimed_paths.push('private/escape.js');
+      const base = ticketCapabilityManifest({ ...before, ...scope }, { role: 'implementer' }, scope.test_paths);
+      const output = receiptOutputSchemaForTicket({ ...ticket, ...scope,
+        ticket_id: effect.successor_contract.ticket_id, role: 'implementer', capability_manifest: base });
+      const capabilityManifest = { ...base,
+        receipt_schema: { ref: 'ticket.output_schema', hash: sha256(output) },
+        field_bounds: runContractFieldBounds({ run: before,
+          manifest_growth_contract_version: before.capability_snapshot.manifest_growth_contract_version ?? 1 }),
+        byte_budgets: runContractByteBudgets(before) };
+      const preliminary = finalizeTicket({ ...effect.successor_contract, ...scope,
+        output_schema: output, capability_manifest: capabilityManifest });
+      const contract = await prepareTicketRunContract(paths, before, preliminary, capabilityManifest, preliminary.issued_at);
+      const successor = finalizeTicket({ ...preliminary,
+        capability_manifest: { ...capabilityManifest, run_contract: contract.pointer } });
+      effect.scope.successor = scope;
+      effect.scope.state = { claimed_paths: ['src/value.js', ...scope.claimed_paths], test_paths: scope.test_paths };
+      if (shape === 'mixed-state') effect.scope.state.claimed_paths = ['src/value.js'];
+      effect.successor_contract = successor;
+      effect.capability_manifest = successor.capability_manifest;
+      effect.run_contract = contract.pointer;
+      const { hash: _hash, ...generation } = effect.recovery_generation;
+      generation.successor_ticket_hash = successor.ticket_hash;
+      effect.recovery_generation = { ...generation, hash: sha256(generation) };
+      transaction.prepared_effect_hash = sha256(effect);
+      await atomicWriteJson(file, transaction);
+      const priorBytes = await runtimeSnapshot(paths.runtime);
+      const replay = await recordReceipt(dir, payload);
+      if (shape !== 'historical') {
+        expect(replay).toMatchObject({ ok: false, rejected: true });
+        expect(await runtimeSnapshot(paths.runtime)).toEqual(priorBytes);
+        return;
+      }
+      expect(replay.ok, JSON.stringify(replay)).toBe(true);
+      expect((await readJson(paths.active)).tickets.at(-1)).toEqual(successor);
+      const committed = await readJson(file);
+      expect(committed.prepared_effect).toEqual(effect);
+      expect(committed.prepared_effect_hash).toBe(transaction.prepared_effect_hash);
+      expect(await recordReceipt(dir, payload)).toMatchObject({ ok: true, idempotent: true });
+      expect((await readJson(paths.active)).tickets.at(-1)).toEqual(successor);
+    },
+  );
+
+  it.each(['prepared', 'published', 'concurrent'])(
     'preserves a production-bearing source and retained-base test successor across %s recovery',
     async (boundary) => {
       const dir = await project();
@@ -1522,7 +1679,8 @@ describe('APE v2 bounded capability-recovery publication', () => {
     expect(active.lane).toBe('full');
     expect(recovered.run.lane).toBe('full');
     expect(transaction.prepared_effect.lane).toBe('full');
-    expect(successor?.claimed_paths).toEqual(['src/value.js', ...added]);
+    expect(active.claimed_paths).toEqual(['src/value.js', ...added]);
+    expect(successor?.claimed_paths).toEqual(ticket.test_paths);
     expect(successor?.required_checks).toEqual(ticket.required_checks);
     expect(successor?.capability_manifest.risk_triggers)
       .toEqual(active.risk_triggers);
@@ -1663,7 +1821,7 @@ describe('APE v2 bounded capability-recovery publication', () => {
       stage_id: ticket.stage_id,
       role: ticket.role,
       objective: ticket.objective,
-      claimed_paths: ticket.claimed_paths,
+      claimed_paths: [...ticket.test_paths, 'tests/generated.test.js'],
       attempt: ticket.attempt,
       base_tree_sha: ticket.base_tree_sha,
       parent_hash: sourceReceipts[0].receipt_hash,
@@ -1780,7 +1938,7 @@ describe('APE v2 bounded capability-recovery publication', () => {
             test_paths: ticket.test_paths,
           },
           successor: {
-            claimed_paths: [...ticket.claimed_paths, 'src/generated.js'],
+            claimed_paths: ticket.test_paths,
             test_paths: ticket.test_paths,
           },
         },
@@ -1814,7 +1972,7 @@ describe('APE v2 bounded capability-recovery publication', () => {
           stage_id: ticket.stage_id,
           role: ticket.role,
           parent_hash: prepared.receipt.receipt_hash,
-          claimed_paths: [...ticket.claimed_paths, 'src/generated.js'],
+          claimed_paths: ticket.test_paths,
           test_paths: ticket.test_paths,
           issued_at: expect.any(String),
           deadline_at: null,
@@ -1940,7 +2098,8 @@ describe('APE v2 bounded capability-recovery publication', () => {
     const successors = adopted.tickets.filter((entry) => entry.ticket_id !== ticket.ticket_id);
     expect(adopted.status).toBe('running');
     expect(successors).toHaveLength(1);
-    expect(successors[0].claimed_paths).toContain('src/recovered.js');
+    expect(published.claimed_paths).toContain('src/recovered.js');
+    expect(successors[0].claimed_paths).toEqual(ticket.test_paths);
     expect(adopted.recovery_generation).toEqual(published.recovery_generation);
 
     const replayAgain = await recordReceipt(dir, payload);
@@ -2739,7 +2898,7 @@ describe('APE v2 second-review recovery closure', () => {
     expect(recovered.ok).toBe(true);
     const successor = recovered.actions.find((action) => action.type === 'dispatch_agent')?.ticket;
     expect(successor).toBeTruthy();
-    expect(successor.claimed_paths).toEqual([...ticket.claimed_paths, ...added]);
+    expect(successor.claimed_paths).toEqual(['src/value.js', ...added]);
     expect(successor.risk_triggers).toEqual(ticket.risk_triggers);
     expect(successor.model).toEqual(expectedModel);
     expect(successor.binding_protocol).toBe(ticket.binding_protocol);

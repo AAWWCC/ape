@@ -288,8 +288,25 @@ describe('double-run red-test admission flake screening (red-admission-flake-scr
     expect(result.rejected).toBe(true);
     const message = (result.errors ?? []).join(' ');
     expect(message).toMatch(/did not produce a test verdict/);
+    expect(message).toMatch(/timed out/);
+    expect(message).not.toMatch(/configure test_commands/);
     expect(message).not.toMatch(/nondeterministic/);
   }, 45_000);
+
+  it.skipIf(process.platform === 'win32')('reports the supervisor failure when the command terminates its own process group', async () => {
+    const dir = await redProject({
+      files: { 'kill-group.cjs': 'process.kill(0, "SIGTERM");\n' },
+      config: { test_commands: { full: 'node --test', targeted_template: 'node kill-group.cjs {paths}' } },
+    });
+    const started = await startRun(dir, startInput());
+    expect(started.ok).toBe(true);
+    await writeFile(path.join(dir, 'tests', 'value.test.js'), 'throw new Error("authored red");\n');
+    const result = await recordReceipt(dir, rawReceipt(started.run.tickets[0]));
+    expect(result).toMatchObject({ ok: false, rejected: true });
+    const message = result.errors.join(' ');
+    expect(message).toMatch(/Suite supervisor exited without reporting the command result/);
+    expect(message).not.toMatch(/configure test_commands/);
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
