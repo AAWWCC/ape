@@ -478,5 +478,8 @@ updates only that host's `ape@ape-dev` from the verified merged build. Other rep
 and plugins cannot trigger it. The run reports `codex_plugin_refresh` or
 `claude_plugin_refresh`; a failed refresh is retried with `ape_run resume` without
 repeating the shipment. Start a new host session and verify the new loaded snapshot; a running
-desktop app may require a restart. See [loaded bundles](architecture.md#loaded-bundles). Both generated MCP
+desktop app may require a restart. Codex recovery copies do not guarantee that existing
+chats retain their original hook or runner paths, even with `--preserve-open-tasks`.
+See the [Codex refresh contract](architecture.md#codex-development-refresh-contract)
+for the supported pinned-host request and path limits. Both generated MCP
 declarations launch the local bundle over stdio. A hosted APE broker is outside this release.
