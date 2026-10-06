@@ -46,6 +46,7 @@
   "__tests__/runtime-v2-codex-default-launcher.test.js": 2000,
   "__tests__/runtime-v2-codex-freeform-apply-patch.test.js": 2949,
   "__tests__/runtime-v2-codex-model-defaults.test.js": 769,
+  "__tests__/runtime-v2-codex-refresh-contract.test.js": 10803,
   "__tests__/runtime-v2-codex-windows-launchers.test.js": 7049,
   "__tests__/runtime-v2-config-codex-statusline.test.js": 222,
   "__tests__/runtime-v2-config-doc-parity.test.js": 6,

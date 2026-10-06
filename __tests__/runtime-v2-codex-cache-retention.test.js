@@ -15,13 +15,15 @@ afterEach(async () => {
   );
 });
 
-async function fixture({ fail = false, nativeFail = false, sourceType = 'local', omitRuntimeFile = false, omitGateRunner = false, omitFileStats = false } = {}) {
+async function fixture({ fail = false, nativeFail = false, sourceType = 'local', unrelatedMarketplace = false, omitRuntimeFile = false, omitGateRunner = false, omitFileStats = false } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'ape-cache-retention-test-'));
   temporaryRoots.push(root);
   const pluginRoot = path.join(root, 'plugin');
   const codexHome = path.join(root, 'codex-home');
   const cacheRoot = path.join(codexHome, 'plugins', 'cache', 'ape-dev', 'ape');
-  const marketplaceRoot = path.join(codexHome, 'dev-plugins', 'ape-dev');
+  const marketplaceRoot = unrelatedMarketplace
+    ? path.join(root, 'unrelated-marketplace')
+    : path.join(codexHome, 'dev-plugins', 'ape-dev');
   const marketplaceFile = path.join(marketplaceRoot, '.agents', 'plugins', 'marketplace.json');
   const oldVersion = '2.13.0+codex.zz-old';
   const oldRoot = path.join(cacheRoot, oldVersion);
@@ -303,6 +305,22 @@ describe('Codex plugin cache retention reinstall', () => {
     expect(result.stderr).toContain('refusing to replace marketplace ape-dev');
     expect(await readFile(context.marketplaceFile, 'utf8')).toBe(catalog);
     expect(await readdir(context.cacheRoot)).toEqual([context.oldVersion]);
+  });
+
+  it('refuses an unrelated local marketplace before replacing its catalog or target cache', async () => {
+    const context = await fixture({ unrelatedMarketplace: true });
+    const catalog = await readFile(context.marketplaceFile, 'utf8');
+    const selected = await readFile(path.join(context.codexHome, 'fake-installed.json'), 'utf8');
+    const result = await runFixture(context);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('refusing to replace marketplace ape-dev');
+    expect(await readFile(context.marketplaceFile, 'utf8')).toBe(catalog);
+    expect(await readFile(path.join(context.codexHome, 'fake-installed.json'), 'utf8')).toBe(selected);
+    expect(await readFile(path.join(context.oldRoot, 'old-task-sentinel.txt'), 'utf8')).toBe('still available\n');
+    expect(await readdir(context.cacheRoot)).toEqual([context.oldVersion]);
+    const calls = (await readFile(context.fakeCodexLog, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    expect(calls.some(args => args[0] === 'plugin' && args[1] === 'add' && args[2] === 'ape@ape-dev')).toBe(false);
+    expect(calls.some(args => args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add' && args[3] === context.marketplaceRoot)).toBe(false);
   });
 
   it('rejects changed bytes under an already published version without changing selection', async () => {

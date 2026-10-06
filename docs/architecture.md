@@ -86,11 +86,52 @@ tree before invoking the repository installer. The receipt-effects lock serializ
 the installation version is persisted before execution and reused after interruption.
 A successful refresh is not repeated. A failed refresh leaves the shipment completed and
 can be retried with `ape_run resume`. It never grants shipping or reinstall authority to
-other repositories or plugins. Each installer publishes immutable development versions,
-restores older pinned paths, and verifies the selected version. Claude additionally verifies
+other repositories or plugins. Each installer publishes immutable development versions
+and verifies the selected version. Codex archives older caches outside the active cache;
+`--preserve-open-tasks` attempts to restore their original paths, but subsequent host
+inventory, installation, or refresh can prune them. Claude additionally verifies
 the installed package bytes and uses local installation scope for this checkout. The
 installers share immutable file helpers and process-owned locks that recover after a crash.
 Installation does not establish activation in an existing host session.
+
+### Codex development refresh contract
+
+For pinned `@openai/codex` 0.153.4, an initialized app-server supports local refresh
+through JSON-RPC `plugin/list` with these parameters:
+
+```json
+{
+  "cwds": ["/absolute/disposable/scenario"],
+  "marketplaceKinds": ["local"],
+  "forceRefetch": true
+}
+```
+
+The request processor awaits the non-curated local cache refresh before responding.
+The manager refreshes when versions differ; equal source/cache versions can legitimately
+leave bytes untouched. See the immutable upstream
+[request processor](https://raw.githubusercontent.com/openai/codex/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/app-server/src/request_processors/plugins.rs),
+[parameter schema](https://raw.githubusercontent.com/openai/codex/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/app-server-protocol/schema/typescript/v2/PluginListParams.ts),
+[manager](https://raw.githubusercontent.com/openai/codex/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core-plugins/src/manager.rs),
+[loader](https://raw.githubusercontent.com/openai/codex/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core-plugins/src/loader.rs), and
+[store](https://raw.githubusercontent.com/openai/codex/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core-plugins/src/store.rs).
+
+The real-host acceptance test uses disposable `HOME` and `CODEX_HOME`, installs the
+normal marketplace package, and runs the development reinstall helper in both archive
+and preserve-open-tasks modes. After baseline discovery completes, the same app-server
+stays alive while the fixture advances its registered source to a new immutable version
+with changed bytes and leaves the active cache old. Forced local refresh must materialize
+the new version and bytes before any other host invocation; repeated refresh must leave
+them unchanged. Startup reconciliation or an equal-version no-op cannot prove this step.
+The test also checks selected source/version, canonical and release bytes, recovery
+copies, and the original hook/runner paths.
+
+Recovery copies under `dev-plugins/ape-dev/retained-cache/ape/<version>` preserve bytes
+for recovery, but do not keep the original `plugins/cache/ape-dev/ape/<version>` paths
+usable by existing chats. Host installation and refresh may remove old versions.
+Run reinstalls while workers are idle. A successful refresh in a separate app-server
+does not certify activation in the running desktop; verify the loaded version in a
+fresh task and restart the app if necessary.
 
 ## Bundle reachability
 
