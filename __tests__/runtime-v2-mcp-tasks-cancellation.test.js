@@ -195,14 +195,16 @@ describe('APE v2 MCP task cancellation and compatibility', () => {
     const descendant = path.join(outside, 'descendant.cjs');
     await writeFile(descendant, [
       "const fs = require('node:fs');",
-      `fs.writeFileSync(${JSON.stringify(descendantStarted)}, String(process.pid));`,
+      "const path = require('node:path');",
+      "fs.writeFileSync(path.join(__dirname, 'descendant-started'), String(process.pid));",
       "process.send('ready');",
       'setInterval(() => {}, 1000);',
     ].join('\n'));
     await writeFile(probe, [
       "const fs = require('node:fs');",
-      `const child = require('node:child_process').fork(${JSON.stringify(descendant)}, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });`,
-      `child.once('message', () => fs.writeFileSync(${JSON.stringify(started)}, String(process.pid)));`,
+      "const path = require('node:path');",
+      "const child = require('node:child_process').fork(path.join(__dirname, 'descendant.cjs'), [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });",
+      "child.once('message', () => fs.writeFileSync(path.join(__dirname, 'started'), String(process.pid)));",
       'setInterval(() => {}, 1000);',
     ].join('\n'));
     const paths = runtimePaths(projectDir);
