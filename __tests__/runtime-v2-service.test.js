@@ -258,8 +258,10 @@ describe('APE v2 service integration', () => {
     expect(reset.ok).toBe(true);
     expect(await exists(paths.active)).toBe(false);
     expect(await exists(statusDoc)).toBe(false);
-    // No run at all: active:false with run:null and no sealed key.
-    expect(await statusRun(dir)).toEqual({ ok: true, active: false, run: null });
+    // Execution is cleared; the unfinished task remains discoverable.
+    const status = await statusRun(dir);
+    expect(status).toMatchObject({ ok: true, active: false, run: null, work_recovery: { count: 1 } });
+    expect(status).not.toHaveProperty('sealed');
   });
 
   it('surfaces refused levers as ok:false with the reducer reason, never ok:true with a buried reject', async () => {

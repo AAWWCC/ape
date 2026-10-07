@@ -374,6 +374,33 @@ external tool cannot make an out-of-scope edit valid. See
 
 ## Artifact maintenance
 
+Blocked and aborted runs save unfinished work in `.ape/runtime/checkpoints/` before their
+terminal history is archived. Reset verifies that checkpoint before removing the active run.
+Protected local Git refs under `refs/ape/checkpoints/` retain the working tree and real index,
+including modified, deleted, and non-ignored untracked files. Ignored files are not backed up.
+These refs survive Git garbage collection; they are not pushed by ordinary APE shipping.
+Checkpoint metadata retains the original objective, scope, requirements, branch, and failure reason.
+
+`ape_status` reports `work_recovery` counts separately from the active run. With no active run,
+`ape_run resume` returns `recover_checkpoint` for one available checkpoint or `choose_checkpoint`
+when selection or storage inspection is needed. Discovery does not restore files or start workers.
+To recover a selected checkpoint, call `resume` with `checkpoint_id` and `explicit_invocation: true`.
+It merges saved work with the locally resolved default tip and restores it onto a new branch.
+Existing branches are retained. Newer dirty files, merge conflicts, and damaged checkpoint data
+stop recovery without overwriting the original working files. Fetch current remote refs before
+recovery when needed; normal shipping admission still checks remote freshness.
+
+Successful recovery returns `start_recovered_work` and `start_input`. Inspect the original blocker,
+then preview/start with complete current host attestations and the returned `checkpoint_id` and
+`supersedes_run`. Preview checks the restored checkout, base, and complete changed-file scope.
+Start uses a new run ID, current policy, fresh native binding, new workers, and new validation.
+The runtime records recovered file provenance, not inherited test results or worker receipts.
+A checkpoint stops appearing as unfinished after its fresh run starts durably; its Git backup remains.
+
+An explicit resume request authorizes this recovery flow. It does not authorize resetting an active
+blocked run, discarding newer edits, or selecting one task among several. Historical runs reset
+before checkpoint support retain their existing files/history but do not gain checkpoints retroactively.
+
 Run completion may compact older redundant snapshots while retaining recent ones.
 `maintenance-status` reads the last result without changes.
 

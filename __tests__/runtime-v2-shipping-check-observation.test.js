@@ -22,6 +22,11 @@ vi.mock('../lib/runtime/git.js', async importOriginal => ({
 vi.mock('../lib/runtime/spawn.js', async importOriginal => ({
   ...await importOriginal(), spawnWithTimeout: vi.fn(),
 }));
+// This suite models remote check observations with a fake Git implementation.
+// Checkpoint object/ref durability is exercised against real Git separately.
+vi.mock('../lib/runtime/work-checkpoints.js', async importOriginal => ({
+  ...await importOriginal(), saveWorkCheckpoint: vi.fn(async () => null),
+}));
 
 const BASE = 'a'.repeat(40), HEAD = 'b'.repeat(40), TREE = 'c'.repeat(40);
 const URL = 'https://github.com/acme/repo/pull/7';
