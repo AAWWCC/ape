@@ -60,8 +60,14 @@ function expectedStartupDiagnostic(line, expected) {
   if (expected.codexHome.startsWith('/tmp/') && text ===
       `WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf(${JSON.stringify(expected.codexHome)}))`) return true;
   const prefix = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\s+ERROR\s+codex_app_server:\s+/u;
-  return prefix.test(text) && text.replace(prefix, '') ===
-    'Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the bundled bubblewrap in the meantime.';
+  if (prefix.test(text) && text.replace(prefix, '') ===
+    'Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the bundled bubblewrap in the meantime.') return true;
+  // The host also warms its optional remote featured-plugin catalog at startup.
+  // This probe requests only local marketplaces and verifies their load errors,
+  // selected version and bytes independently; remote discovery is out of scope.
+  const featuredPrefix = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\s+WARN\s+codex_core_plugins::manager:\s+/u;
+  return featuredPrefix.test(text) && text.replace(featuredPrefix, '').startsWith(
+    'failed to warm featured plugin ids cache error=failed to send remote featured plugin request to https://chatgpt.com/backend-api/plugins/featured?platform=codex: ');
 }
 
 // Expected context is constructed by the caller from its owned fixture and

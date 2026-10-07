@@ -137,6 +137,18 @@ describe('pinned Codex refresh evidence validator (synthetic records)', () => {
     await expect(validate(observed, context)).rejects.toThrow(/refresh diagnostics/);
   });
 
+  it('tolerates remote featured-catalog warmup failure while rejecting local refresh errors', async () => {
+    const { expected, evidence } = refreshContract('default');
+    const warning = '\u001b[2m2026-10-07T02:05:36.138484Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mcodex_core_plugins::manager\u001b[0m\u001b[2m:\u001b[0m failed to warm featured plugin ids cache \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mfailed to send remote featured plugin request to https://chatgpt.com/backend-api/plugins/featured?platform=codex: error sending request for url (https://chatgpt.com/backend-api/plugins/featured?platform=codex)';
+    evidence.refresh.diagnostics = [warning];
+    await expect(validate(evidence, expected)).resolves.not.toBe(false);
+    evidence.refresh.response.result.marketplaceLoadErrors = [{ message: 'local marketplace failed' }];
+    await expect(validate(evidence, expected)).rejects.toThrow(/marketplace load errors/);
+    evidence.refresh.response.result.marketplaceLoadErrors = [];
+    evidence.refresh.diagnostics = [warning.replace('failed to warm featured plugin ids cache', 'failed to refresh local marketplace')];
+    await expect(validate(evidence, expected)).rejects.toThrow(/refresh diagnostics/);
+  });
+
   const faults = [
     ['missing refresh', (e) => { delete e.refresh; }],
     ['plain CLI listing', (e) => { e.refresh.transport = 'cli'; }],
