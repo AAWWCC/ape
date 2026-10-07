@@ -919,7 +919,7 @@ describe('APE v2 bounded recovery receipt admission', () => {
       },
     });
     expect(admitted.successor_guidance).toEqual({
-      version: 2,
+      version: 3,
       eligible: true,
       predecessor_run_id: admitted.run.run_id,
       retained_tree_sha: admitted.run.tree_sha,
@@ -927,8 +927,8 @@ describe('APE v2 bounded recovery receipt admission', () => {
       eligibility_reason: 'capability_blocked',
       structured_successor_supported: false,
       unavailable_reason: 'authenticated-host-approval-unavailable',
-      recovery_action: 'override-reset',
-      required_authorization: 'explicit-operator-override',
+      recovery_action: 'resume',
+      required_authorization: 'explicit-resume-invocation',
       automatic_start: false,
       automatic_ship: false,
       configuration_drift: { changed: false },

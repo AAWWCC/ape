@@ -181,6 +181,29 @@ const TOOLS = Object.freeze([
           type: 'string', pattern: '^checkpoint-[0-9a-f]{32}$',
           description: 'On resume, select saved unfinished work returned by status/resume; explicit_invocation:true authorizes restoration onto a new branch. On preview/start, bind the fresh run to that restored checkpoint. Existing runs and evidence are never revived.',
         },
+        expected_recovery_digest: {
+          type: 'string', pattern: '^[0-9a-f]{64}$',
+          description: 'Resume only: confirm the exact recovery_plan returned by discovery, with explicit_invocation:true. Binds task, checkout, index, configuration and ownership; changed plans require rediscovery.',
+        },
+        legacy_candidate_id: {
+          type: 'string', pattern: '^legacy-[0-9a-f]{32}$',
+          description: 'Resume only: the explicitly selected live legacy source returned by recovery discovery. Never guessed from a branch or stash message.',
+        },
+        legacy_run_id: {
+          type: 'string', description: 'Resume only: explicitly associate the selected legacy source with this saved task returned by discovery.',
+        },
+        recovery_context: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            objective: { type: 'string' }, mode: { type: 'string', enum: ['phase', 'debug', 'spike', 'land'] },
+            lane: { type: 'string', enum: ['auto', 'mechanical', 'fast', 'full'] }, host: { type: 'string', enum: ['claude', 'codex'] },
+            behavioral: { type: 'boolean' }, test_intent: { type: 'string' },
+            claimed_paths: { type: 'array', items: { type: 'string' } }, test_paths: { type: 'array', items: { type: 'string' } },
+            requirements: { type: 'array', items: { type: 'string' } }, completes: { type: 'array', items: { type: 'string' } },
+            risk_triggers: { type: 'array', items: { type: 'string' } },
+          },
+          description: 'Resume only: user-confirmed task context when a selected legacy source has no complete saved run. This is task evidence, never old receipt authority.',
+        },
         auto_merge_authorized: {
           type: 'boolean',
           description: 'Backward-compatible explicit override. Normally omit: explicit_invocation plus shipping.auto_merge:true automatically authorizes this run to push, open its pull request, and merge.',
@@ -639,6 +662,10 @@ function taskWireProjection(task) {
 
 function assertApeRunActionFields(input) {
   const action = input.action;
+  for (const field of ['expected_recovery_digest', 'legacy_candidate_id', 'legacy_run_id', 'recovery_context']) {
+    if (input[field] !== undefined && action !== 'resume') throw new Error(`${field} is accepted only by resume`);
+  }
+  if ((input.legacy_run_id !== undefined || input.recovery_context !== undefined) && !input.legacy_candidate_id) throw new Error('legacy task association requires legacy_candidate_id');
   if (input.checkpoint_id !== undefined && !['resume', 'preview', 'start'].includes(action)) {
     throw new Error('checkpoint_id is accepted only by resume, preview, and start');
   }
@@ -781,6 +808,10 @@ async function dispatchApeRun(projectDir, input) {
   }
   if (action === 'status') return statusRun(projectDir);
   if (action === 'resume') return resumeRun(projectDir, {
+    ...(input.expected_recovery_digest !== undefined ? { expected_recovery_digest: input.expected_recovery_digest } : {}),
+    ...(input.legacy_candidate_id !== undefined ? { legacy_candidate_id: input.legacy_candidate_id } : {}),
+    ...(input.legacy_run_id !== undefined ? { legacy_run_id: input.legacy_run_id } : {}),
+    ...(input.recovery_context !== undefined ? { recovery_context: input.recovery_context } : {}),
     ...(input.checkpoint_id !== undefined ? { checkpoint_id: input.checkpoint_id } : {}),
     ...(input.explicit_invocation !== undefined ? { explicit_invocation: input.explicit_invocation } : {}),
   });

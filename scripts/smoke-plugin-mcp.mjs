@@ -37,6 +37,9 @@ function assertToolContract(host, tools) {
     assertContract(actions.includes(action), host, `ape_run action enum is missing ${action}`);
   }
   assertContract(!actions.includes('extend-budget'), host, 'ape_run still exposes extend-budget');
+  for (const field of ['expected_recovery_digest', 'legacy_candidate_id', 'legacy_run_id', 'recovery_context']) {
+    assertContract(runSchema?.properties?.[field] !== undefined, host, `ape_run is missing task recovery field ${field}`);
+  }
   for (const field of ['execution_budget', 'max_worker_dispatches', 'max_active_seconds']) {
     assertContract(runSchema?.properties?.[field] === undefined, host, `ape_run still exposes ${field}`);
   }

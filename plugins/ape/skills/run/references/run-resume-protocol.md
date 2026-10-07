@@ -193,19 +193,19 @@ MCP call at the wrapper's yield boundary can expose a host transport retry. If a
 are scheduler-owned and serialized: production, test, and mixed/both findings select build; test
 then review; or test then build then review respectively.
 
-When a run is blocked, never start a structured successor: current host lifecycle hooks do not
-provide authenticated human provenance, and raw hook stdin or a copied prompt is not authority. If
-the user explicitly directs recovery, call `ape_run override` with `operation: "reset"`, the exact
-active `run_id` as confirmation when available, and a non-empty reason that records the user's
-direction. The reset is audited and saves a durable work checkpoint before clearing the run.
-Report the returned checkpoint ID and Git ref. Call `resume` to discover it, select its exact
-`checkpoint_id` with `explicit_invocation: true`, and follow `start_recovered_work` through a fresh
-preview/start with complete current facts. Recovery carries files and task context, never old
-worker authority or evidence. A checkpoint failure must leave the original run and files intact.
-Do not infer reset authority from the original run invocation, guidance, unrelated approval, or config.
-An existing explicit direction for this reset remains valid; do not request it again.
-Never reset automatically, recreate a retained diff from memory, or ship merely because recovery was
-authorized.
+When a run reaches a new terminal block, end that invocation. A later explicit resume request
+authorizes discovery through `ape_run resume`, followed by confirmation of its exact
+`recovery_plan.expected_recovery_digest` with `explicit_invocation: true`. Follow the resume skill's
+source-selection and recovery actions; no separate reset approval is needed for this same task.
+The runtime journals preservation before retirement and carries files and task context into fresh
+preview/start, never old worker authority or evidence. A replacement that blocks again ends the
+invocation; do not automatically create another replacement.
+Structured successor input remains unavailable: `explicit_invocation` is the established
+orchestrator attestation, not authenticated human provenance from raw hook input or a copied prompt.
+Manual `override reset`, `regate`, and `ship` remain compatible explicit levers. Never infer a new
+resume request from the original run invocation, unrelated approval, guidance, or configuration.
+Never recreate retained work from memory. Configured shipping belongs to the freshly admitted run;
+an intentional shipping hold or uncertain prior shipment must be resolved through its returned action.
 
 If the runtime reports an active bound dispatch, wait. If it reports
 `dispatch_retirement_pending`, wait for the original agent unless the flight is genuinely orphaned

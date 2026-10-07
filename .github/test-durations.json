@@ -316,6 +316,7 @@
   "__tests__/runtime-v2-suite-supervision.test.js": 9321,
   "__tests__/runtime-v2-task-crash-recovery.test.js": 2098,
   "__tests__/runtime-v2-task-native-recovery.test.js": 2623,
+  "__tests__/runtime-v2-task-resume.test.js": 28010,
   "__tests__/runtime-v2-temp-fixtures.test.js": 3835,
   "__tests__/runtime-v2-test-command-serialize-compose.test.js": 1698,
   "__tests__/runtime-v2-test-command-shuffle-compose.test.js": 2499,

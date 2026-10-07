@@ -43,8 +43,9 @@ describe('APE prevents late blocker discovery', () => {
     expect(run).toMatch(/independent high-risk subsystems/i);
     expect(run).toMatch(/roadmap/i);
     expect(protocol).toMatch(/authenticated human provenance/i);
-    expect(protocol).toMatch(/ape_run override[\s\S]{0,80}operation: "reset"/i);
-    expect(protocol).toMatch(/explicitly directs recovery/i);
+    expect(protocol).toMatch(/explicit resume request/i);
+    expect(protocol).toMatch(/recovery_plan.expected_recovery_digest/i);
+    expect(protocol).toMatch(/new terminal block, end that invocation/i);
     expect(protocol).not.toMatch(/prepare-successor|UserPromptSubmit/);
     expect(lifecycle).toContain("landStartPoint ?? baseCommitSha");
     expect(lifecycle).not.toContain("landStartPoint ?? base.start_point");
