@@ -51,6 +51,19 @@ function inventoryMatches(actual, expected) {
     [...expected].sort((a, b) => a.relative.localeCompare(b.relative)), 'inventory byte mismatch');
 }
 
+function expectedStartupDiagnostic(line, expected) {
+  const text = line.replace(/\u001b\[[0-9;]*m/gu, '').trim();
+  // These exact diagnostics are emitted by pinned Codex 0.153.4 on Linux
+  // before any refresh: disposable /tmp homes cannot create PATH aliases,
+  // and a missing system bwrap falls back to Codex's bundled bubblewrap.
+  // Bind the path exception to this fixture; other warnings/errors still fail.
+  if (expected.codexHome.startsWith('/tmp/') && text ===
+      `WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf(${JSON.stringify(expected.codexHome)}))`) return true;
+  const prefix = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\s+ERROR\s+codex_app_server:\s+/u;
+  return prefix.test(text) && text.replace(prefix, '') ===
+    'Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the bundled bubblewrap in the meantime.';
+}
+
 // Expected context is constructed by the caller from its owned fixture and
 // package bytes; self-declared context is never an authority for observations.
 export function validateCodexRefreshEvidence(evidence, expected) {
@@ -87,7 +100,8 @@ export function validateCodexRefreshEvidence(evidence, expected) {
   same(refresh.request.params, REFRESH_PARAMS, 'refresh scope');
   same(refresh.completion, { exitCode: 0, signal: null, timedOut: false, outputOverflow: false, earlyExit: false }, 'refresh completion');
   requireEvidence(Array.isArray(refresh.diagnostics) && refresh.diagnostics.every(line => typeof line === 'string' &&
-    !/error|warn|failed/iu.test(line)), `refresh diagnostics: ${JSON.stringify(refresh.diagnostics)}`);
+    (!/error|warn|failed/iu.test(line) || expectedStartupDiagnostic(line, expected))),
+  `refresh diagnostics: ${JSON.stringify(refresh.diagnostics)}`);
   const result = refresh.response.result;
   requireEvidence(Array.isArray(result?.marketplaces) && Array.isArray(result.featuredPluginIds), 'malformed refresh result');
   same(result.marketplaceLoadErrors, [], 'marketplace load errors');

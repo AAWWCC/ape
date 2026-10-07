@@ -109,6 +109,34 @@ describe('pinned Codex refresh evidence validator (synthetic records)', () => {
     expect(evidence.activation).toBe('unverified');
   });
 
+  it('accepts only the pinned Linux startup fallback diagnostics', async () => {
+    const { expected, evidence } = refreshContract('default');
+    const bubblewrap = '\u001b[2m2026-10-07T02:01:32.369247Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mcodex_app_server\u001b[0m\u001b[2m:\u001b[0m Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the bundled bubblewrap in the meantime.';
+    evidence.refresh.diagnostics = [bubblewrap];
+    await expect(validate(evidence, expected)).resolves.not.toBe(false);
+    evidence.refresh.diagnostics = [bubblewrap.replace('in the meantime.', 'but startup failed.')];
+    await expect(validate(evidence, expected)).rejects.toThrow(/refresh diagnostics/);
+    evidence.refresh.diagnostics = [bubblewrap, 'WARN failed to refresh configured plugin ape@ape-dev'];
+    await expect(validate(evidence, expected)).rejects.toThrow(/refresh diagnostics/);
+  });
+
+  it.skipIf(process.platform === 'win32')('binds the Linux PATH-alias warning to the exact owned home', async () => {
+    const { expected, evidence } = refreshContract('default');
+    const previousRoot = expected.ownedRoot;
+    const linuxRoot = '/tmp/ape-refresh-contract-one';
+    const relocate = value => typeof value === 'string' ? value.replaceAll(previousRoot, linuxRoot)
+      : Array.isArray(value) ? value.map(relocate)
+        : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, relocate(entry)]))
+          : value;
+    const context = relocate(expected);
+    const observed = relocate(evidence);
+    const warning = `WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf(${JSON.stringify(context.codexHome)}))`;
+    observed.refresh.diagnostics = [warning];
+    await expect(validate(observed, context)).resolves.not.toBe(false);
+    observed.refresh.diagnostics = [warning.replace(context.codexHome, '/tmp/unrelated/codex-home')];
+    await expect(validate(observed, context)).rejects.toThrow(/refresh diagnostics/);
+  });
+
   const faults = [
     ['missing refresh', (e) => { delete e.refresh; }],
     ['plain CLI listing', (e) => { e.refresh.transport = 'cli'; }],
