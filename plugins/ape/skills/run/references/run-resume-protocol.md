@@ -33,6 +33,14 @@ the same confirmed `hooks_trusted: true`, `subagents_available: true`, and
 trust/availability that has not been established. They carry
 identical complete prospective fields except `action`; start additionally requires
 `expected_admission_digest` copied unchanged from the ready preview's `admission_digest`.
+Large manifests use `admission_delivery` (version 1, kind `paged`) instead of an inline `admission`.
+Repeat the prospective preview inputs with `admission_page: { digest, offset: next_offset }`.
+Read and review each response separately; never emit all pages in one tool response. Require one
+digest and `total_utf8_bytes`, contiguous byte offsets starting at zero, each page's `sha256`, and
+final `next_offset: null` at the total length. Reconstruct the canonical JSON and verify its digest
+without printing the combined document. Only then use the delivery `digest` as
+`expected_admission_digest` and omit `admission_page` on start. A delivery summary is not a full
+manifest. Missing/corrupt pages stop review; `admission-drift` requires a fresh preview from zero.
 Review the full versioned admission manifest before any binding probe or stage dispatch. A
 missing/truncated manifest or `admission.ready !== true` is a stop, not dispatch permission.
 If prospective inputs change, obtain a fresh preview rather than reusing the digest. This

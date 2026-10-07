@@ -90,9 +90,27 @@ timings from at most the newest 20 history files under `.ape/runtime/`.
    and shipping. Use `ape_status` to read state, or `resume` to find the next action
    after interruption. `ape_run status` is a deprecated alias.
 
-Preview distinguishes a failing baseline from an unavailable runner. If the whole
-manifest cannot fit in the response, it refuses without issuing a usable digest.
-Existing legacy runs keep their original contracts.
+Preview distinguishes a failing baseline from an unavailable runner. Large manifests
+use read-only pages rather than rejecting the run. Existing legacy runs keep their contracts.
+
+An oversized preview returns `admission_summary: { version, ready }` and
+`admission_delivery: { version: 1, kind: "paged", digest, total_utf8_bytes, offset,
+next_offset, text, sha256 }`; it does not claim an inline `admission` or issue a top-level
+`admission_digest`. Text is a contiguous UTF-8 slice of the manifest's canonical JSON.
+Continue with the identical preview inputs plus `admission_page: { digest, offset: next_offset }`.
+This optional field is accepted only on preview and never becomes part of the admission hash.
+
+Read each page separately. Check its hash, the shared digest and total length, contiguous
+offsets from zero, and final `next_offset: null`. Reconstruct and verify the canonical manifest
+without printing it in one tool response. Review the full ready manifest before binding or
+dispatch, then use the delivery digest as `expected_admission_digest` and omit `admission_page`.
+Missing pages stop the parent protocol; the digest establishes consistency, not proof of reading.
+Every page re-evaluates admission without writing preview state. Changed inputs produce
+`admission-drift`; restart preview from zero. Malformed, out-of-range, or mid-character offsets
+produce `invalid-admission-page`. Retrying an unchanged page is deterministic.
+Admission previews fit within 40,000 framed UTF-8 bytes, including metadata and escaped text.
+This fits the measured default 10,000-token code-mode wrapper allowance; the general MCP
+response ceiling remains 48,000 bytes. Neither value limits the complete admission manifest.
 
 Start also validates objective, host, mode, lane, paths, requirements, risk, and
 available host capabilities. The main input rules are:
