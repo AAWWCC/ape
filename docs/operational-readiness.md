@@ -52,6 +52,14 @@ Passing these checks is not proof of a working live host.
 
 ## Live certification
 
+The marketplace smoke runs the development reinstall helper and a same-version
+Codex 0.153.4 local refresh in separate temporary homes for archive and
+`--preserve-open-tasks` modes. It verifies original paths, recovery copies,
+registered source, selected cache bytes, and correlated app-server completion.
+The full source suite separately exercises a version-advancing refresh. Neither
+check certifies activation in an already-running desktop session. See the
+[Codex refresh contract](architecture.md#codex-development-refresh-contract).
+
 Codex is the sole required live host from APE 2.23.0 onward, as defined in
 [`compatibility.json`](../compatibility.json). Keep its exact Codex CLI 0.153.4 pin.
 A host failure requires a compatibility decision, not an implicit upgrade.

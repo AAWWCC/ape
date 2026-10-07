@@ -111,6 +111,18 @@ before the implementer retries. This is a scheduler-owned recovery check, not a
 new `test_intent` input. Worker-reported observations cannot replace the sealed
 `evidence.test_correction` result.
 
+An implementer in `build` or `remediation-build` can request independent coverage
+with a capability receipt naming `required_role: "test_writer"`. Its successor
+uses the same runtime-observed `test-correction` check and receives a bounded,
+untrusted `test_authoring_handoff` report from the requesting receipt. An unchanged
+suite cannot complete authoring. After stable authored-test evidence, APE resumes
+the implementation stage with `targeted-tests` before advancing to review.
+Diagnostic role changes and retries retain this authoring obligation. A diagnostic
+receipt returns to a test writer; requesting implementation cannot skip authoring.
+Only runtime-observed stable pass/pass or fail/fail on independently changed tests
+permits continuation. A separate immutable completion reference preserves that
+result across implementation retries without trusting worker-reported observations.
+
 `debug` / `spike` can freeze exact `run_command_profiles` for their matching
 read-only role, with `effect: "execute"`, an audit reason, and operator approval.
 Set `operator_authorized: true` only after approval of the literal command.

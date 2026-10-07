@@ -44,6 +44,7 @@
   "__tests__/runtime-v2-codex-bootstrap.test.js": 2000,
   "__tests__/runtime-v2-codex-cache-retention.test.js": 692,
   "__tests__/runtime-v2-codex-default-launcher.test.js": 2000,
+  "__tests__/runtime-v2-codex-development-refresh.test.js": 5840,
   "__tests__/runtime-v2-codex-freeform-apply-patch.test.js": 2949,
   "__tests__/runtime-v2-codex-model-defaults.test.js": 769,
   "__tests__/runtime-v2-codex-refresh-contract.test.js": 10803,

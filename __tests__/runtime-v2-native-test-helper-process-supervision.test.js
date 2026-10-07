@@ -33,18 +33,18 @@ async function bounded(promise, ms = 10000) {
   } finally { clearTimeout(timer); }
 }
 
-async function alive(pid) {
-  try { process.kill(pid, 0); } catch (error) {
+async function alive(pid, { kill = process.kill, readStat = readFile, platform = process.platform } = {}) {
+  try { kill(pid, 0); } catch (error) {
     if (error.code === 'ESRCH') return false;
     throw error;
   }
   // An orphan zombie cannot execute or retain pipes; Linux init may reap it
   // later. This observation never sends a signal or treats EPERM as absence.
-  if (process.platform === 'linux') {
+  if (platform === 'linux') {
     try {
-      const stat = await readFile(`/proc/${pid}/stat`, 'utf8');
+      const stat = await readStat(`/proc/${pid}/stat`, 'utf8');
       if (stat.slice(stat.lastIndexOf(')') + 2).startsWith('Z ')) return false;
-    } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+    } catch (error) { if (error.code === 'ENOENT' || error.code === 'ESRCH') return false; throw error; }
   }
   return true;
 }
@@ -117,9 +117,73 @@ afterEach(async () => {
     for (const pid of ids) {
       if (await alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch (e) { if (e.code !== 'ESRCH') throw e; } }
     }
-    await waitUntil(async () => !(await Promise.all(ids.map(alive))).some(Boolean), 5000);
+    await waitUntil(async () => !(await Promise.all(ids.map((pid) => alive(pid)))).some(Boolean), 5000);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+describe('fixture process liveness observation', () => {
+  const pid = 43210;
+  const fault = (code) => Object.assign(new Error(`injected ${code}`), { code });
+
+  function observation({ stat = `${pid} (fixture child) S 1 2 3`, readError, signalError } = {}) {
+    const calls = [];
+    return {
+      calls,
+      platform: 'linux',
+      kill: (observedPid, signal) => {
+        calls.push(['signal', observedPid, signal]);
+        if (signalError) throw signalError;
+      },
+      readStat: async (filename, encoding) => {
+        calls.push(['read', filename, encoding]);
+        if (readError) throw readError;
+        return stat;
+      },
+    };
+  }
+
+  const successfulSignalThenRead = [
+    ['signal', pid, 0], ['read', `/proc/${pid}/stat`, 'utf8'],
+  ];
+
+  it.each(['ENOENT', 'ESRCH'])('observes disappearance on procfs %s after successful signal-0', async (code) => {
+    const dependencies = observation({ readError: fault(code) });
+    expect(await alive(pid, dependencies)).toBe(false);
+    expect(dependencies.calls).toEqual(successfulSignalThenRead);
+  });
+
+  it.each([['S', true], ['R', true], ['Z', false]])('observes process state %s as alive=%s', async (state, expected) => {
+    const dependencies = observation({ stat: `${pid} (fixture (child)) ${state} 1 2 3` });
+    expect(await alive(pid, dependencies)).toBe(expected);
+    expect(dependencies.calls).toEqual(successfulSignalThenRead);
+  });
+
+  it('observes signal ESRCH without attempting procfs', async () => {
+    const dependencies = observation({ signalError: fault('ESRCH') });
+    expect(await alive(pid, dependencies)).toBe(false);
+    expect(dependencies.calls).toEqual([['signal', pid, 0]]);
+  });
+
+  it.each(['EACCES', 'EPERM', 'EIO'])('propagates procfs %s rather than hiding a possible survivor', async (code) => {
+    const error = fault(code);
+    const dependencies = observation({ readError: error });
+    await expect(alive(pid, dependencies)).rejects.toBe(error);
+    expect(dependencies.calls).toEqual(successfulSignalThenRead);
+  });
+
+  it.each(['EACCES', 'EPERM', 'EIO', 'ENOENT'])('propagates signal %s without attempting procfs', async (code) => {
+    const error = fault(code);
+    const dependencies = observation({ signalError: error });
+    await expect(alive(pid, dependencies)).rejects.toBe(error);
+    expect(dependencies.calls).toEqual([['signal', pid, 0]]);
+  });
+
+  it('does not consult procfs on platforms without Linux procfs', async () => {
+    const dependencies = { ...observation({ readError: fault('EIO') }), platform: 'darwin' };
+    expect(await alive(pid, dependencies)).toBe(true);
+    expect(dependencies.calls).toEqual([['signal', pid, 0]]);
+  });
 });
 
 describe('retireChild ownership and lifecycle races', () => {
@@ -501,7 +565,7 @@ describe('runNativeJson bounded process supervision', () => {
     owner.kill('SIGKILL'); await bounded(exit);
     // There is no helper promise after owner death: give its lifeline a bounded
     // retirement budget, then observe independently before emergency teardown.
-    await waitUntil(async () => !(await Promise.all((await pids(root)).map(alive))).some(Boolean), 7000);
+    await waitUntil(async () => !(await Promise.all((await pids(root)).map((pid) => alive(pid)))).some(Boolean), 7000);
     await retired(root, 2);
   }, 30000);
 });

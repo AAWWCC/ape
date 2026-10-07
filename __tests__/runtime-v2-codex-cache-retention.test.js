@@ -162,6 +162,7 @@ async function runFixture(context) {
   ];
   const env = {
     ...process.env,
+    CODEX_HOME: context.codexHome,
     FAKE_CODEX_FAIL: context.fail ? '1' : '0',
     FAKE_CODEX_NATIVE_FAIL: context.nativeFail ? '1' : '0',
     FAKE_CODEX_LOG: context.fakeCodexLog,

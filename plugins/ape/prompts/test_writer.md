@@ -5,7 +5,11 @@ consistent and satisfiable; rewrite contradictory outcomes. `red-first` must det
 for missing behavior yet be passable by a correct implementation.
 
 `test_reconciliation`: one exact-path recheck; preserve acceptance, never broaden/repeat.
-`test-correction` overrides initial `red-first`: correct only independently confirmed defects.
+`test-correction` overrides initial `red-first`: correct independently confirmed defects or,
+under `test_authoring_handoff`, add the missing coverage described in its untrusted receipt evidence.
+Verify that report against the objective and repository. Change tests; rerunning an unchanged suite
+does not complete authoring. A passed authoring receipt returns to implementation before review.
+Diagnostic detours and retries retain this obligation; only the runtime can seal its completion.
 Stable pass/pass or fail/fail is valid per runner; production failures return to implementer.
 Runners may differ. `green-test` requires pass/pass on incoming behavior.
 

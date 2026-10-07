@@ -59,7 +59,8 @@ function record(state, ticket, overrides = {}) {
     type: 'RECEIPT_RECORDED',
     ticket,
     receipt,
-    stage: { id: ticket.stage_id, role: ticket.role, parallel_group: ticket.parallel_group },
+    stage: { id: ticket.stage_id, role: ticket.role, parallel_group: ticket.parallel_group,
+      ...(ticket.required_checks ? { required_checks: ticket.required_checks } : {}) },
     next_state: state,
   });
   for (const action of actions) {
@@ -91,6 +92,95 @@ function walkToReview(state) {
   expect(reviewTicket.parallel_group).toBe('code-review');
   return reviewTicket;
 }
+
+describe('test authoring continuation recovery', () => {
+  function pendingAuthor(stageId = 'build') {
+    const source = { ticket_id: 'build-source', ticket_hash: 'a'.repeat(64), stage_id: stageId,
+      role: 'implementer', writable: true, required_checks: ['targeted-tests'], parallel_group: null,
+      claimed_paths: ['src/value.js'], test_paths: ['tests/value.test.js'] };
+    const sourceReceipt = { ticket_id: source.ticket_id, receipt_hash: 'b'.repeat(64), status: 'failed',
+      evidence: { failure_kind: 'capability', required_claims: { required_role: 'test_writer' } } };
+    const handoff = { version: 1, source_ticket_id: source.ticket_id, source_ticket_hash: source.ticket_hash,
+      source_receipt_hash: sourceReceipt.receipt_hash, implementation_checks: ['targeted-tests'],
+      report: 'Additional behavior needs independent coverage.', trust: 'untrusted-evidence' };
+    const author = { ...source, ticket_id: 'author-ticket', role: 'test_writer',
+      required_checks: ['test-correction'], test_authoring_handoff: handoff };
+    return { source, author, handoff, state: baseRun({ tickets: [source, author], receipts: [sourceReceipt] }) };
+  }
+
+  it.each(['expiry', 'contract', 'product'])('preserves the implementation continuation across %s recovery', (kind) => {
+    const { author, handoff, state } = pendingAuthor();
+    const actions = kind === 'expiry'
+      ? reduceRun(state, { type: 'EXPIRE_DISPATCH', ticket_id: author.ticket_id, reason: 'Worker disconnected' })
+      : record(state, author, { status: 'failed', evidence: { failure_kind: kind, summary: 'Worker could not finish' } });
+    const retry = actions.find((entry) => entry.type === 'issue_ticket');
+    expect(retry).toMatchObject({ stage: { role: 'test_writer', required_checks: ['test-correction'] },
+      test_authoring_handoff: handoff });
+  });
+
+  it('blocks a lost implementation continuation instead of advancing to review', () => {
+    const { author, state } = pendingAuthor();
+    state.tickets = [author];
+    const actions = record(state, author);
+    expect(state.status).toBe('blocked');
+    expect(actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
+  });
+
+  it.each(['build', 'remediation-build'])('returns a successful %s diagnostic detour to authoring', (stageId) => {
+    const { author, handoff, state } = pendingAuthor(stageId);
+    const diagnostic = { ...author, ticket_id: 'diagnostic-ticket', role: 'debugger', writable: false,
+      required_checks: [] };
+    state.receipts.push({ ticket_id: author.ticket_id, status: 'failed',
+      evidence: { failure_kind: 'capability', required_claims: { required_role: 'debugger' } } });
+    state.tickets.push(diagnostic);
+    const actions = record(state, diagnostic, { changed_files: [], evidence: { summary: 'Diagnosis complete' } });
+    const issued = actions.filter((entry) => entry.type === 'issue_ticket');
+    expect(issued).toHaveLength(1);
+    expect(issued[0]).toMatchObject({ stage: { id: stageId, role: 'test_writer',
+      required_checks: ['test-correction'] }, test_authoring_handoff: handoff });
+    expect(actions.some((entry) => entry.type === 'run_gates')).toBe(false);
+  });
+
+  it.each(['build', 'remediation-build'].flatMap((stage) =>
+    ['expiry', 'contract', 'product'].map((kind) => [stage, kind])))
+  ('preserves pending authoring through a %s debugger %s retry', (stageId, kind) => {
+    const { author, handoff, state } = pendingAuthor(stageId);
+    const diagnostic = { ...author, ticket_id: 'diagnostic-ticket', role: 'debugger', writable: false,
+      required_checks: [] };
+    state.receipts.push({ ticket_id: author.ticket_id, status: 'failed',
+      evidence: { failure_kind: 'capability', required_claims: { required_role: 'debugger' } } });
+    state.tickets.push(diagnostic);
+    const actions = kind === 'expiry'
+      ? reduceRun(state, { type: 'EXPIRE_DISPATCH', ticket_id: diagnostic.ticket_id, reason: 'Diagnostic worker disconnected' })
+      : record(state, diagnostic, { status: 'failed', evidence: { failure_kind: kind, summary: 'Diagnostic worker interrupted' } });
+    const retry = actions.find((entry) => entry.type === 'issue_ticket');
+    expect(retry).toMatchObject({ stage: { id: stageId, role: 'debugger' }, test_authoring_handoff: handoff });
+    const retried = { ...diagnostic, ...retry.stage, ticket_id: 'retried-diagnostic',
+      test_authoring_handoff: retry.test_authoring_handoff };
+    state.tickets.push(retried);
+    const completed = record(state, retried, { changed_files: [], evidence: { summary: 'Diagnosis finished' } });
+    expect(completed.find((entry) => entry.type === 'issue_ticket')).toMatchObject({
+      stage: { id: stageId, role: 'test_writer', required_checks: ['test-correction'] },
+      test_authoring_handoff: handoff,
+    });
+  });
+
+  it.each(['missing source', 'source ticket hash', 'source receipt hash', 'source role', 'implementation checks'])
+  ('fails closed on %s after a diagnostic detour', (fault) => {
+    const { source, author, state } = pendingAuthor();
+    const diagnostic = { ...author, ticket_id: 'diagnostic-ticket', role: 'debugger', writable: false,
+      required_checks: [] };
+    state.tickets.push(diagnostic);
+    if (fault === 'missing source') state.tickets = state.tickets.filter((entry) => entry !== source);
+    if (fault === 'source ticket hash') source.ticket_hash = 'c'.repeat(64);
+    if (fault === 'source receipt hash') state.receipts[0].receipt_hash = 'c'.repeat(64);
+    if (fault === 'source role') source.role = 'debugger';
+    if (fault === 'implementation checks') author.test_authoring_handoff.implementation_checks = [];
+    const actions = record(state, diagnostic);
+    expect(state.status).toBe('blocked');
+    expect(actions.some((entry) => entry.type === 'issue_ticket' || entry.type === 'run_gates')).toBe(false);
+  });
+});
 
 describe('APE v2 remediation convergence (F1)', () => {
   it('charges the remediation budget on a verdict disagreement and reaches gates when the remediation review agrees', () => {
@@ -385,6 +475,7 @@ describe('APE v2 legacy receipt-contract byte stability', () => {
       expect(artifact).not.toHaveProperty('physical_workers');
     }
     expect(ticketValidation.value).not.toHaveProperty('receipt_contract_version');
+    expect(ticketValidation.value).not.toHaveProperty('test_authoring_handoff');
     expect(ticketValidation.value).not.toHaveProperty('capability_manifest');
   });
 });
