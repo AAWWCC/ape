@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -15,7 +16,7 @@ function render(payload, charset = 'unicode', envOverrides = {}) {
   // Pin the charset so assertions on unicode glyphs (e.g. the ⟳ loading /
   // ✓ done marks) are deterministic regardless of an ambient
   // APE_STATUSLINE_CHARSET.
-  const env = { ...process.env, APE_STATUSLINE_CHARSET: charset, APE_STATUSLINE_GIT_TIMEOUT_MS: '5000' };
+  const env = { ...gitFixtureEnv(), APE_STATUSLINE_CHARSET: charset, APE_STATUSLINE_GIT_TIMEOUT_MS: '5000' };
   // The renderer consults the host project pins; strip the ambient ones so a
   // suite run from a live Claude session (CLAUDE_PROJECT_DIR = this repo)
   // cannot leak into scratch-project resolution. Pinned cases inject their
@@ -32,7 +33,7 @@ function render(payload, charset = 'unicode', envOverrides = {}) {
 }
 
 function renderProgram(program, payload) {
-  const env = { ...process.env, APE_STATUSLINE_CHARSET: 'unicode', APE_STATUSLINE_GIT_TIMEOUT_MS: '5000' };
+  const env = { ...gitFixtureEnv(), APE_STATUSLINE_CHARSET: 'unicode', APE_STATUSLINE_GIT_TIMEOUT_MS: '5000' };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
   return execFileSync('node', [program], {
@@ -862,7 +863,7 @@ describe('ape v2 statusline renderer', () => {
     const repoSentinel = `PRIVATE_REPOSITORY_SENTINEL_${bidi}${'r'.repeat(180)}`;
     const project = join(dir, repoSentinel);
     mkdirSync(project, { recursive: true });
-    execFileSync('git', ['init', '-q'], { cwd: project });
+    execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: project });
     const branchSentinel = [
       `PRIVATE_BRANCH_SENTINEL_${bidi}${'a'.repeat(180)}`,
       'b'.repeat(180),
@@ -870,7 +871,7 @@ describe('ape v2 statusline renderer', () => {
       'd'.repeat(180),
       'e'.repeat(180),
     ].join('/');
-    execFileSync('git', ['checkout', '-qb', branchSentinel], { cwd: project });
+    execFileSync('git', ['checkout', '-qb', branchSentinel], { env: gitFixtureEnv(), cwd: project });
     writeActive(project, {
       schema_version: '2.0.0',
       run_id: 'run-private-repository-statusline',
@@ -1063,7 +1064,7 @@ describe('ape v2 statusline renderer', () => {
       // no upstream) are expected to fail, and execFileSync forwards child stderr
       // to the parent by default, which leaks git `fatal:` lines into test output.
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      env: gitFixtureEnv(),
     });
     git('init', '-q', '-b', 'work');
     git('config', 'user.email', 't@t');
@@ -1073,7 +1074,7 @@ describe('ape v2 statusline renderer', () => {
     git('commit', '-qm', 'init');
     // A bare "remote" the branch tracks, so an unpushed commit reads as ahead 1.
     const remote = mkdtempSync(join(tmpdir(), 'ape-remote-'));
-    execFileSync('git', ['init', '-q', '--bare', remote]);
+    execFileSync('git', ['init', '-q', '--bare', remote], { env: gitFixtureEnv() });
     git('remote', 'add', 'origin', remote);
     git('push', '-q', '-u', 'origin', 'work');
     writeFileSync(join(dir, 'b.txt'), 'two');
@@ -1095,7 +1096,7 @@ describe('ape v2 statusline renderer', () => {
       // no upstream) are expected to fail, and execFileSync forwards child stderr
       // to the parent by default, which leaks git `fatal:` lines into test output.
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      env: gitFixtureEnv(),
     });
     git('init', '-q', '-b', 'work');
     git('config', 'user.email', 't@t');
@@ -1104,7 +1105,7 @@ describe('ape v2 statusline renderer', () => {
     git('add', 'a.txt');
     git('commit', '-qm', 'init');
     const remote = mkdtempSync(join(tmpdir(), 'ape-remote-'));
-    execFileSync('git', ['init', '-q', '--bare', remote]);
+    execFileSync('git', ['init', '-q', '--bare', remote], { env: gitFixtureEnv() });
     git('remote', 'add', 'origin', remote);
     // Push WITHOUT -u: a remote-tracking ref now exists, but the branch has no
     // upstream — so git reports no "ahead" and the count must come from the
@@ -1129,7 +1130,7 @@ describe('ape v2 statusline renderer', () => {
       // no upstream) are expected to fail, and execFileSync forwards child stderr
       // to the parent by default, which leaks git `fatal:` lines into test output.
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      env: gitFixtureEnv(),
     });
     git('init', '-q', '-b', 'work');
     git('config', 'user.email', 't@t');
@@ -1154,7 +1155,7 @@ describe('ape v2 statusline renderer', () => {
       encoding: 'utf8',
       // Ignore stderr: consistent with the other git-repo fixtures in this file.
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      env: gitFixtureEnv(),
     });
     git('init', '-q', '-b', 'work');
     git('config', 'user.email', 't@t');
@@ -1202,7 +1203,7 @@ describe('ape v2 statusline renderer', () => {
       encoding: 'utf8',
       // Ignore stderr: consistent with the other git-repo fixtures in this file.
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      env: gitFixtureEnv(),
     });
     git('init', '-q', '-b', 'work');
     git('config', 'user.email', 't@t');
@@ -1257,7 +1258,7 @@ describe('ape v2 statusline renderer', () => {
       encoding: 'utf8',
       // Ignore stderr: consistent with the other git-repo fixtures in this file.
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      env: gitFixtureEnv(),
     });
     git('init', '-q', '-b', 'work');
     git('config', 'user.email', 't@t');
@@ -1267,7 +1268,7 @@ describe('ape v2 statusline renderer', () => {
     git('commit', '-qm', 'init');
     // A bare "remote" the branch tracks, so an unpushed commit reads as ahead 1.
     const remote = mkdtempSync(join(tmpdir(), 'ape-remote-'));
-    execFileSync('git', ['init', '-q', '--bare', remote]);
+    execFileSync('git', ['init', '-q', '--bare', remote], { env: gitFixtureEnv() });
     git('remote', 'add', 'origin', remote);
     git('push', '-q', '-u', 'origin', 'work');
     writeFileSync(join(dir, 'b.txt'), 'two');

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -20,11 +21,8 @@ function git(directory, args) {
     cwd: directory,
     encoding: 'utf8',
     env: {
-      ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))),
-      GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_GLOBAL: '/dev/null',
+      ...gitFixtureEnv(),
       GIT_PAGER: 'cat',
-      GIT_TERMINAL_PROMPT: '0',
     },
   });
 }

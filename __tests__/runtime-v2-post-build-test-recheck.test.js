@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -51,11 +52,7 @@ async function project({ multiRunner = false } = {}) {
   const git = (...args) => execFileSync('git', args, {
     cwd: dir,
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-      GIT_CONFIG_SYSTEM: process.platform === 'win32' ? 'NUL' : '/dev/null',
-    },
+    env: gitFixtureEnv(),
   });
   git('init', '-q');
   git('config', 'user.email', 'ape@example.test');

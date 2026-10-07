@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { build } from 'esbuild';
 import { link, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
@@ -20,7 +21,7 @@ async function fixture() {
   const directory = await mkdtemp(path.join(tmpdir(), 'ape-fourth-doctor-'));
   fixtures.push(directory);
   await mkdir(path.join(directory, 'dist'));
-  execFileSync('git', ['init', '-q'], { cwd: directory });
+  execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: directory });
   return directory;
 }
 
@@ -49,7 +50,7 @@ describe('fourth-pass doctor diagnostic file boundaries', () => {
     const directory = await fixture();
     const bundle = path.join(directory, 'dist', 'ape-mcp.bundle.mjs');
     await writeFile(bundle, 'export {};\n');
-    execFileSync('git', ['add', 'dist'], { cwd: directory });
+    execFileSync('git', ['add', 'dist'], { env: gitFixtureEnv(), cwd: directory });
     await rm(bundle);
     execFileSync('mkfifo', [bundle]);
     const report = checkedReport(childReport(directory, `
@@ -75,7 +76,7 @@ describe('fourth-pass doctor diagnostic file boundaries', () => {
     const directory = await fixture();
     const bundle = await buildDoctor(directory);
     await writeFile(path.join(directory, 'dist', 'ape-hooks.bundle.mjs'), 'export {};\n');
-    execFileSync('git', ['add', 'dist/ape-hooks.bundle.mjs'], { cwd: directory });
+    execFileSync('git', ['add', 'dist/ape-hooks.bundle.mjs'], { env: gitFixtureEnv(), cwd: directory });
     const report = checkedReport(childReport(directory, `
       import { unlinkSync } from 'node:fs';
       import { execFileSync } from 'node:child_process';
@@ -93,7 +94,7 @@ describe('fourth-pass doctor diagnostic file boundaries', () => {
     const ordinary = path.join(directory, 'ordinary.mjs');
     await writeFile(ordinary, '// an ordinary symlinked deployment with different bytes\n');
     await symlink(ordinary, path.join(directory, 'dist', 'ape-mcp.bundle.mjs'));
-    execFileSync('git', ['add', 'dist'], { cwd: directory });
+    execFileSync('git', ['add', 'dist'], { env: gitFixtureEnv(), cwd: directory });
     const report = await doctor(directory);
     expect(report.healthy).toBe(true);
     expect(report.checks.find((check) => check.name === 'bundle-drift'))

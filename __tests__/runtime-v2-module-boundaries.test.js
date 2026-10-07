@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -734,7 +735,7 @@ function analyzeBoundaries({
 
 function productionInput() {
   const missing = REQUIRED_OWNER_FILES.filter((file) => !existsSync(path.join(REPO_ROOT, file)));
-  const tracked = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', 'lib/runtime'], { cwd: REPO_ROOT, encoding: 'utf8' })
+  const tracked = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', 'lib/runtime'], { env: gitFixtureEnv(), cwd: REPO_ROOT, encoding: 'utf8' })
     .split('\n')
     .filter((file) => file.endsWith('.js'));
   const graphFiles = [...new Set([...tracked, ...REQUIRED_OWNER_FILES])].sort();

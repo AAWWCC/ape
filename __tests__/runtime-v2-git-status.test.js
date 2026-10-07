@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { describe, it, expect, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -20,7 +21,7 @@ describe('workingTreeStatus porcelain column fidelity', () => {
     dirs.push(dir);
     const git = (...a) => execFileSync('git', ['-C', dir, ...a], {
       encoding: 'utf8',
-      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      env: gitFixtureEnv(),
     });
     git('init', '-q');
     git('config', 'user.email', 't@t');

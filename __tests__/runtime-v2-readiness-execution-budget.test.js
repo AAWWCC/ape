@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -121,13 +122,13 @@ describe('run readiness and capability manifests', () => {
   it('refuses an oversized source configuration before preview or start can create side effects', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ape-readiness-manifest-bounds-'));
     dirs.push(dir);
-    execFileSync('git', ['init', '-b', 'main'], { cwd: dir, stdio: 'ignore' });
-    execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: dir });
-    execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: dir });
+    execFileSync('git', ['init', '-b', 'main'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: dir });
     writeFileSync(join(dir, 'README.md'), '# fixture\n');
-    execFileSync('git', ['add', 'README.md'], { cwd: dir });
-    execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
-    const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    execFileSync('git', ['add', 'README.md'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['commit', '-m', 'init'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
+    const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim();
     const runtime = join(dir, '.ape', 'runtime');
     mkdirSync(runtime, { recursive: true });
     const commandProfiles = Array.from({ length: 2_049 }, (_, index) => ({
@@ -178,9 +179,9 @@ describe('run readiness and capability manifests', () => {
 
     await expect(startRun(dir, input)).rejects.toMatchObject(boundedFileError);
     expect(readdirSync(runtime).sort()).toEqual(['config.json']);
-    expect(execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: dir, encoding: 'utf8' }).trim())
+    expect(execFileSync('git', ['branch', '--format=%(refname:short)'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim())
       .toBe('main');
-    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim())
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim())
       .toBe(headBefore);
   });
 
@@ -273,12 +274,12 @@ describe('run readiness and capability manifests', () => {
   it('admits a configured run with a capability manifest and ordinary ticket deadline', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ape-readiness-admit-'));
     dirs.push(dir);
-    execFileSync('git', ['init', '-b', 'main'], { cwd: dir, stdio: 'ignore' });
-    execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: dir });
-    execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: dir });
+    execFileSync('git', ['init', '-b', 'main'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: dir });
     writeFileSync(join(dir, 'README.md'), '# fixture\n');
-    execFileSync('git', ['add', 'README.md'], { cwd: dir });
-    execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['add', 'README.md'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['commit', '-m', 'init'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
     await configAction(dir, 'set', { key: 'test_commands.targeted_template', value: 'npm test -- {paths}' });
     await configAction(dir, 'set', { key: 'test_commands.full', value: 'npm test' });
     await configAction(dir, 'set', {

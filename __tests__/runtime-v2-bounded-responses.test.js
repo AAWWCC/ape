@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -824,7 +825,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project() {
@@ -852,7 +853,7 @@ function session(messages) {
     // Strip the ambient host project pins so root resolution is driven by
     // the call arguments alone, not the live session env of whoever runs
     // the suite.
-    const env = { ...process.env };
+    const env = gitFixtureEnv();
     delete env.CLAUDE_PROJECT_DIR;
     delete env.CODEX_CWD;
     const child = spawn(process.execPath, [path.join(root, 'bin', 'ape-mcp.mjs')], {

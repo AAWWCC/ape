@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { describe, it, expect, vi } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import {
@@ -199,7 +200,7 @@ describe('doctor loaded-module-drift reported by genuine source- and bundled-exe
   }
 
   function runGitQuiet(dir, args) {
-    execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', args, { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
   }
 
   function commitEverything(dir, message) {
@@ -245,7 +246,7 @@ describe('doctor loaded-module-drift reported by genuine source- and bundled-exe
   // only by WHICH file is actually executed -- the one thing that differs
   // between the two execution shapes residuals (2) and (3) each require.
   function launchApeServer(projectDir, entryParts, label) {
-    const env = { ...process.env };
+    const env = gitFixtureEnv();
     delete env.CLAUDE_PROJECT_DIR;
     delete env.CODEX_CWD;
     const child = spawn(process.execPath, [join(projectDir, ...entryParts)], {

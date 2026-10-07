@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,7 +14,7 @@ const roots = [];
 const run = 'run-synthetic-attribution';
 const call = sha256('synthetic-call');
 const git = (root, ...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8',
-  env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } }).trim();
+  env: gitFixtureEnv() }).trim();
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));

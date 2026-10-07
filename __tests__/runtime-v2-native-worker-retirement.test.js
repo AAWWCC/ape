@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
@@ -28,7 +29,7 @@ import { invokeCodexHook } from './codex-native-test-helper.js';
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const roots = [];
 const digest = (text) => createHash('sha256').update(text).digest('hex');
-const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+const git = (cwd, ...args) => execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 const key = (identity) => JSON.stringify(identity);
 
 // Defer loading so missing behavior produces collected assertion failures,

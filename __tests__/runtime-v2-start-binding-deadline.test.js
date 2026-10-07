@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -195,12 +196,13 @@ async function codexProject({ includeMalformedDeadline = false } = {}) {
   cleanups.push(dir);
   await mkdir(path.join(dir, 'src'), { recursive: true });
   await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 1;\n');
-  execFileSync('git', ['init', '-q'], { cwd: dir });
-  execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: dir });
-  execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: dir });
-  execFileSync('git', ['add', '.'], { cwd: dir });
-  execFileSync('git', ['commit', '-qm', 'baseline'], { cwd: dir });
+  execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['add', '.'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['commit', '-qm', 'baseline'], { env: gitFixtureEnv(), cwd: dir });
   const baseTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+    env: gitFixtureEnv(),
     cwd: dir,
     encoding: 'utf8',
   }).trim();
@@ -237,7 +239,7 @@ async function codexProject({ includeMalformedDeadline = false } = {}) {
 // markers so an ambient export from whoever runs the suite cannot smuggle a
 // second binding into the payload-bound cases.
 function codexEnv(overrides = {}) {
-  const env = { ...process.env };
+  const env = gitFixtureEnv();
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE;
   delete env.CLAUDE_PROJECT_DIR;

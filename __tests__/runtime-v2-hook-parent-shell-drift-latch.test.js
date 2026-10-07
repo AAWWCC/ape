@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -24,12 +25,9 @@ afterEach(async () => {
 
 function isolatedEnv() {
   return {
-    ...Object.fromEntries(Object.entries(process.env).filter(([name]) =>
-      !/^(?:APE_|GIT_|CLAUDE_|CODEX_)/.test(name) && name !== 'CLAUDECODE')),
+    ...gitFixtureEnv(Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+      !/^(?:APE_|CLAUDE_|CODEX_)/.test(name) && name !== 'CLAUDECODE'))),
     CLAUDECODE: '1',
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: '/dev/null',
-    GIT_TERMINAL_PROMPT: '0',
   };
 }
 

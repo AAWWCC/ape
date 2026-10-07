@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -73,7 +74,7 @@ async function fixture({ fullLane = false, productionPaths = ADMITTED_PRODUCTION
   }
   for (const args of [['init', '-q'], ['config', 'user.email', 'ape@example.test'],
     ['config', 'user.name', 'APE Test'], ['add', '.'], ['commit', '-qm', 'fixture']]) {
-    execFileSync('git', args, { cwd: dir });
+    execFileSync('git', args, { env: gitFixtureEnv(), cwd: dir });
   }
   const paths = runtimePaths(dir);
   await atomicWriteJson(paths.config, {

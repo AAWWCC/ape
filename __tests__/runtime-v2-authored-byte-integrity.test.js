@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -104,7 +105,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 // A running project with exactly one bound, writable implementer ticket
@@ -148,7 +149,7 @@ async function boundProject() {
 // bound ticket via the host-neutral `event.ticket_id` channel rather than a
 // Claude SubagentStart binding record.
 function codexEnv() {
-  const env = { ...process.env };
+  const env = gitFixtureEnv();
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE;
   delete env.CLAUDE_PROJECT_DIR;
@@ -710,7 +711,7 @@ const SCAN_FILE_EXEMPTIONS = new Set([
 ]);
 
 function trackedSourceFiles(rootDir) {
-  const listing = execFileSync('git', ['ls-files', ...SCAN_DIRS], { cwd: rootDir, encoding: 'utf8' });
+  const listing = execFileSync('git', ['ls-files', ...SCAN_DIRS], { env: gitFixtureEnv(), cwd: rootDir, encoding: 'utf8' });
   return listing
     .split('\n')
     .filter((entry) => /\.(js|mjs|cjs)$/.test(entry) && !SCAN_FILE_EXEMPTIONS.has(entry) && existsSync(path.join(rootDir, entry)));

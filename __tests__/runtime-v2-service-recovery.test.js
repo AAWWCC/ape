@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { access, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
@@ -39,7 +40,7 @@ function exists(file) {
 }
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 // Modeled on runtime-v2-lock-protocol.test.js's project(): a real temp git repo

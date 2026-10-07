@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -16,7 +17,7 @@ afterEach(async () => Promise.all(directories.splice(0).map((directory) =>
 async function bootstrap(passed = true) {
   const root = await mkdtemp(path.join(tmpdir(), 'ape-bootstrap-gates-'));
   directories.push(root);
-  const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+  const git = (...args) => execFileSync('git', args, { env: gitFixtureEnv(), cwd: root, stdio: 'pipe' });
   git('init', '-b', 'main');
   git('config', 'user.email', 'ape@example.test');
   git('config', 'user.name', 'APE Test');

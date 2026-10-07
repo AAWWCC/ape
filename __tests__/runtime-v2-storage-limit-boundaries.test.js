@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -70,7 +71,7 @@ function hashedRecord(repository) {
 describe('archive validation follows admitted repository capacity', () => {
   it('archives and explains an actual admitted 257-file diff without calling it incomplete', async () => {
     const root = await scratch();
-    const git = (args) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+    const git = (args) => execFileSync('git', args, { env: gitFixtureEnv(), cwd: root, stdio: 'pipe' });
     git(['init', '-b', 'main']);
     git(['-c', 'user.name=Audit Fixture', '-c', 'user.email=audit@example.invalid',
       'commit', '--allow-empty', '--no-gpg-sign', '-m', 'fixture baseline']);

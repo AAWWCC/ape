@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -119,7 +120,7 @@ function stageGeneratorProject() {
 // below), so whatever allowlisted env this call sets on the GENERATOR
 // process propagates to the renderer CHILD it spawns too.
 function runGenerator(stagedDir, envOverrides = {}) {
-  const env = { ...process.env };
+  const env = gitFixtureEnv();
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
   Object.assign(env, envOverrides);
@@ -180,7 +181,7 @@ function svgVisibleText(svgContent) {
 // CLAUDE_PROJECT_DIR/CODEX_CWD scrub as runGenerator, for the same reason.
 function renderDirect(dir, envOverrides = {}) {
   const env = {
-    ...process.env,
+    ...gitFixtureEnv(),
     APE_STATUSLINE_CHARSET: 'nerdfont',
     COLORTERM: 'truecolor',
     APE_STATUSLINE_GIT_TIMEOUT_MS: '5000',
@@ -365,14 +366,14 @@ describe('statusline gallery regeneration is safe and reproducible', () => {
         // is exactly the class of ambient variable a git hook, `git rebase
         // --exec`, or wrapper tooling exports on a real developer machine.
         mkdirSync(ambientDir, { recursive: true });
-        execFileSync('git', ['init', '-q', '-b', 'ambientwork'], { cwd: ambientDir });
-        execFileSync('git', ['config', 'user.email', 'ambient@example.test'], { cwd: ambientDir });
-        execFileSync('git', ['config', 'user.name', 'ambient'], { cwd: ambientDir });
+        execFileSync('git', ['init', '-q', '-b', 'ambientwork'], { env: gitFixtureEnv(), cwd: ambientDir });
+        execFileSync('git', ['config', 'user.email', 'ambient@example.test'], { env: gitFixtureEnv(), cwd: ambientDir });
+        execFileSync('git', ['config', 'user.name', 'ambient'], { env: gitFixtureEnv(), cwd: ambientDir });
         writeFileSync(join(ambientDir, 'ambient.txt'), 'ambient\n');
-        execFileSync('git', ['add', 'ambient.txt'], { cwd: ambientDir });
-        execFileSync('git', ['commit', '-q', '-m', 'ambient baseline'], { cwd: ambientDir });
-        const beforeHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ambientDir, encoding: 'utf8' }).trim();
-        const beforeStatus = execFileSync('git', ['status', '--porcelain'], { cwd: ambientDir, encoding: 'utf8' });
+        execFileSync('git', ['add', 'ambient.txt'], { env: gitFixtureEnv(), cwd: ambientDir });
+        execFileSync('git', ['commit', '-q', '-m', 'ambient baseline'], { env: gitFixtureEnv(), cwd: ambientDir });
+        const beforeHead = execFileSync('git', ['rev-parse', 'HEAD'], { env: gitFixtureEnv(), cwd: ambientDir, encoding: 'utf8' }).trim();
+        const beforeStatus = execFileSync('git', ['status', '--porcelain'], { env: gitFixtureEnv(), cwd: ambientDir, encoding: 'utf8' });
 
         runGenerator(staged, {
           GIT_DIR: join(ambientDir, '.git'),
@@ -384,8 +385,8 @@ describe('statusline gallery regeneration is safe and reproducible', () => {
         // though the generator's own fixture-creation git() calls and the
         // renderer's own gitBranch/gitStatus probes both ran while these two
         // variables were exported.
-        const afterHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ambientDir, encoding: 'utf8' }).trim();
-        const afterStatus = execFileSync('git', ['status', '--porcelain'], { cwd: ambientDir, encoding: 'utf8' });
+        const afterHead = execFileSync('git', ['rev-parse', 'HEAD'], { env: gitFixtureEnv(), cwd: ambientDir, encoding: 'utf8' }).trim();
+        const afterStatus = execFileSync('git', ['status', '--porcelain'], { env: gitFixtureEnv(), cwd: ambientDir, encoding: 'utf8' });
         expect(afterHead, 'the ambient repository must not gain a new commit').toBe(beforeHead);
         expect(afterStatus, 'the ambient repository working tree must stay clean').toBe(beforeStatus);
 
@@ -441,7 +442,7 @@ function writeStatuslineActiveRun(dir, overrides = {}) {
 }
 
 function renderStatusline(dir, envOverrides = {}) {
-  const env = { ...process.env, APE_STATUSLINE_CHARSET: 'unicode', APE_STATUSLINE_GIT_TIMEOUT_MS: '5000' };
+  const env = { ...gitFixtureEnv(), APE_STATUSLINE_CHARSET: 'unicode', APE_STATUSLINE_GIT_TIMEOUT_MS: '5000' };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
   return execFileSync('node', [STATUSLINE_RENDERER], {

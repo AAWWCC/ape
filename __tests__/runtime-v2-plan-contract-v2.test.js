@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -64,11 +65,11 @@ async function integrationProject() {
   await mkdir(path.join(dir, 'tests'));
   await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 1;\n');
   await writeFile(path.join(dir, 'tests', 'value.test.js'), 'throw new Error("red");\n');
-  execFileSync('git', ['init', '-q'], { cwd: dir });
-  execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: dir });
-  execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: dir });
-  execFileSync('git', ['add', '.'], { cwd: dir });
-  execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: dir });
+  execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['add', '.'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['commit', '-qm', 'test: baseline'], { env: gitFixtureEnv(), cwd: dir });
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
     test_commands: { full: 'npm test', targeted_template: 'node --test {paths}' },
@@ -158,7 +159,7 @@ describe('plan contract v2 bindings', () => {
       hooks_trusted: true, subagents_available: true, explicit_invocation: true,
       plan_contract_version: 2,
     })).rejects.toThrow(/plan_contract_version 2 requires.*behavioral/i);
-    expect(execFileSync('git', ['branch', '--list', 'ape/*'], { cwd: dir, encoding: 'utf8' }).trim()).toBe('');
+    expect(execFileSync('git', ['branch', '--list', 'ape/*'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim()).toBe('');
   });
 
   it('binds the exact preflight hash and assigns every required snapped profile', () => {

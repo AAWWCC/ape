@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -55,7 +56,7 @@ async function fixture() {
 }
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function activeFixture() {
@@ -154,7 +155,7 @@ function payload(event, projectDir, matcher = '*') {
 }
 
 function pluginHostEnv(overrides = {}) {
-  const hostEnv = { ...process.env };
+  const hostEnv = { ...gitFixtureEnv() };
   for (const key of Object.keys(hostEnv)) {
     if (/^(?:PLUGIN_ROOT|CLAUDE_PLUGIN_ROOT|CLAUDECODE|CLAUDE_CODE|CLAUDE_PROJECT_DIR|CODEX_CWD|APE_HOST)$/i.test(key)) {
       delete hostEnv[key];

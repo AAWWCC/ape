@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFile } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile, copyFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -64,12 +65,12 @@ describe('public source and exported CI regressions', () => {
 
   it('scans tracked docs and tests even when ignore rules try to hide them, without echoing private values', async () => {
     const root = await fixture();
-    await run('git', ['init', '-q'], { cwd: root });
+    await run('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: root });
     const privateEmail = ['fixture-person', 'private-domain.dev'].join('@');
     const privatePath = ['docs', 'private-fixture.md'].join('/');
     await put(root, privatePath, `Synthetic detector input: ${privateEmail}\n`);
     await put(root, '__tests__/fixture.test.js', `const detectorInput = ${JSON.stringify(privateEmail)};\n`);
-    await run('git', ['add', '.'], { cwd: root });
+    await run('git', ['add', '.'], { env: gitFixtureEnv(), cwd: root });
     await put(root, '.gitignore', 'docs/\n__tests__/\n.ape/\n');
     await put(root, '.ape/local-secret', privateEmail);
     const result = await sourceCheck(root);
@@ -81,7 +82,7 @@ describe('public source and exported CI regressions', () => {
 
   it('includes new nonignored source files but accepts explicitly assembled negative-test fixtures', async () => {
     const root = await fixture();
-    await run('git', ['init', '-q'], { cwd: root });
+    await run('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: root });
     await put(root, '__tests__/fixture.test.js', "const negativeFixture = ['fixture-person', 'private-domain.dev'].join('@');\n");
     expect((await sourceCheck(root)).code).toBe(0);
     const syntheticSecret = ['ghp_', 'x'.repeat(32)].join('');
@@ -94,10 +95,10 @@ describe('public source and exported CI regressions', () => {
 
   it('retains audio and runtime-path protections for tracked source', async () => {
     const root = await fixture();
-    await run('git', ['init', '-q'], { cwd: root });
+    await run('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: root });
     await put(root, 'docs/renamed-fixture.bin', Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WAVEdata')]));
     await put(root, '.ape/fixture.json', '{}');
-    await run('git', ['add', '-f', '.'], { cwd: root });
+    await run('git', ['add', '-f', '.'], { env: gitFixtureEnv(), cwd: root });
     const result = await sourceCheck(root);
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('audio file signature');
@@ -106,7 +107,7 @@ describe('public source and exported CI regressions', () => {
 
   it('does not echo parser excerpts from malformed tracked MCP declarations', async () => {
     const root = await fixture();
-    await run('git', ['init', '-q'], { cwd: root });
+    await run('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: root });
     const marker = 'synthetic-sensitive-parser-content';
     await put(root, '.mcp.json', `{"mcpServers": ${marker}`);
     const result = await sourceCheck(root);
@@ -118,10 +119,10 @@ describe('public source and exported CI regressions', () => {
   it.skipIf(process.platform === 'win32')('rejects a tracked symlink without reading its external target', async () => {
     const root = await fixture();
     const external = await fixture();
-    await run('git', ['init', '-q'], { cwd: root });
+    await run('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: root });
     await put(external, 'target.txt', ['fixture-person', 'private-domain.dev'].join('@'));
     await symlink(path.join(external, 'target.txt'), path.join(root, 'link.txt'));
-    await run('git', ['add', '.'], { cwd: root });
+    await run('git', ['add', '.'], { env: gitFixtureEnv(), cwd: root });
     const result = await sourceCheck(root);
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('symlink');

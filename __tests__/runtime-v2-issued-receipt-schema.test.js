@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,7 +21,7 @@ async function issuedTicket(overrides = {}) {
   await mkdir(path.join(dir, 'tests'));
   await writeFile(path.join(dir, 'src/value.js'), 'export const value = 1;\n');
   await writeFile(path.join(dir, 'tests/value.test.js'), 'export {};\n');
-  const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+  const git = (...args) => execFileSync('git', args, { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
   git('init', '-q', '-b', 'main');
   git('config', 'user.email', 'ape@example.test');
   git('config', 'user.name', 'APE Test');

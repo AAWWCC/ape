@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -65,12 +66,12 @@ describe('verification.profiles configuration', () => {
     const outside = project();
     writeFileSync(path.join(dir, 'package.json'), '{"name":"profile-root-test","private":true}\n');
     symlinkSync(outside, path.join(dir, 'linked'), 'dir');
-    execFileSync('git', ['init', '-q'], { cwd: dir });
-    execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: dir });
-    execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: dir });
-    execFileSync('git', ['add', '.'], { cwd: dir });
-    execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: dir });
-    const treeSha = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: dir, encoding: 'utf8' }).trim();
+    execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['add', '.'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['commit', '-qm', 'test: baseline'], { env: gitFixtureEnv(), cwd: dir });
+    const treeSha = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim();
     const profile = valid({ command: 'node --version', root: 'linked' });
     const state = {
       run_id: 'run-profile-root', lane: 'mechanical', high_risk: false,

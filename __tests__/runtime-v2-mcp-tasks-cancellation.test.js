@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -60,7 +61,7 @@ function git(cwd, ...args) {
   execFileSync('git', args, {
     cwd,
     stdio: 'ignore',
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+    env: gitFixtureEnv(),
   });
 }
 
@@ -80,7 +81,7 @@ function alive(pid) {
 
 function session(messages) {
   return new Promise((resolve, reject) => {
-    const env = { ...process.env };
+    const env = gitFixtureEnv();
     delete env.CLAUDE_PROJECT_DIR;
     delete env.CODEX_CWD;
     const child = spawn(process.execPath, [path.join(root, 'bin', 'ape-mcp.mjs')], {

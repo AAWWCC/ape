@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -60,8 +61,8 @@ describe('evidence containment uses the effective command directory', () => {
     for (const args of [
       ['init', '-q'], ['config', 'user.email', 'ape@example.test'],
       ['config', 'user.name', 'APE Test'], ['add', '.'], ['commit', '-qm', 'test: baseline'],
-    ]) execFileSync('git', args, { cwd: project });
-    const env = { ...process.env, CODEX_CWD: project };
+    ]) execFileSync('git', args, { env: gitFixtureEnv(), cwd: project });
+    const env = { ...gitFixtureEnv(), CODEX_CWD: project };
     for (const key of ['APE_HOST', 'APE_TICKET_ID', 'CLAUDECODE', 'CLAUDE_CODE', 'CLAUDE_PROJECT_DIR']) {
       delete env[key];
     }

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -38,7 +39,7 @@ afterEach(async () => {
 async function fixture() {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-receipt-parent-drift-'));
   cleanups.push(dir);
-  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+  const git = (...args) => execFileSync('git', args, { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim();
   await mkdir(path.join(dir, 'docs'));
   await writeFile(path.join(dir, 'docs/note.md'), '# note\n');
   await writeFile(path.join(dir, 'docs/other.md'), '# other\n');

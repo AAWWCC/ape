@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -321,7 +322,7 @@ describe('remediation-test routing shape (pure reducer)', () => {
 // ---------------------------------------------------------------------------
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 // CJS on purpose: the scratch project has no package.json, so .js files run as
@@ -861,7 +862,7 @@ function statuslineMilestoneWord(run) {
     mkdirSync(path.join(dir, '.ape', 'runtime'), { recursive: true });
     writeFileSync(path.join(dir, '.ape', 'runtime', 'active.json'), JSON.stringify(run));
     const env = {
-      ...process.env,
+      ...gitFixtureEnv(),
       APE_STATUSLINE_CHARSET: 'unicode',
       APE_STATUSLINE_GIT_TIMEOUT_MS: '5000',
     };

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,12 +44,12 @@ function spikeInput(overrides = {}) {
 
 function initRepository() {
   const dir = mkdtempSync(join(tmpdir(), 'ape-run-command-profile-'));
-  execFileSync('git', ['init', '-b', 'main'], { cwd: dir, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: dir });
-  execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: dir });
+  execFileSync('git', ['init', '-b', 'main'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: dir });
   writeFileSync(join(dir, 'README.md'), '# fixture\n');
-  execFileSync('git', ['add', 'README.md'], { cwd: dir });
-  execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
+  execFileSync('git', ['add', 'README.md'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['commit', '-m', 'init'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
   return dir;
 }
 

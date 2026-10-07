@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -234,7 +235,7 @@ describe('APE v2 pathResolvesOutsideProject', () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project(status = 'running') {
@@ -277,7 +278,7 @@ async function outsideDir() {
 // Environment for the spawned binary: force the Claude host and strip any
 // host-provided project hints so only the payload under test decides.
 function claudeEnv() {
-  const env = { ...process.env, CLAUDECODE: '1' };
+  const env = { ...gitFixtureEnv(), CLAUDECODE: '1' };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
   return env;

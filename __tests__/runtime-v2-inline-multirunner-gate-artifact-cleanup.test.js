@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -134,9 +135,7 @@ async function fixture({ grace = 8000, exit = 0, pause, pauseIndex = 0, unknown 
   await mkdir(path.join(project, 'notes'), { recursive: true });
   await mkdir(outside);
   await writeFile(path.join(project, 'notes/note.md'), '# fixture\n');
-  const git = (...args) => execFileSync('git', args, {cwd:project, encoding:'utf8', env:{...process.env,
-    GIT_CONFIG_GLOBAL:process.platform === 'win32' ? 'NUL' : '/dev/null',
-    GIT_CONFIG_SYSTEM:process.platform === 'win32' ? 'NUL' : '/dev/null'}});
+  const git = (...args) => execFileSync('git', args, {cwd:project, encoding:'utf8', env: gitFixtureEnv()});
   git('init', '-q'); git('symbolic-ref', 'HEAD', 'refs/heads/main');
   git('config', 'user.email', 'ape@example.test'); git('config', 'user.name', 'APE Fixture');
   git('config', 'commit.gpgsign', 'false'); git('add', '.'); git('commit', '-qm', 'fixture');
@@ -206,7 +205,7 @@ async function invoke(f, action = 'next', fault = {}) {
   const response = path.join(f.outside, `response-${f.sequence}.json`);
   await writeFile(request, JSON.stringify({project:f.project,outside:f.outside,active:f.paths.active,runs:f.paths.runs,
     pause:f.pause,pauseIndex:f.pauseIndex,unknown:f.unknown,action,response,...fault}));
-  const env = {...process.env};
+  const env = gitFixtureEnv();
   for (const key of Object.keys(env)) if (/^(APE_|NODE_OPTIONS$|CODEX_CWD$|CLAUDE_PROJECT_DIR$)/.test(key)) delete env[key];
   env.APE_CLEANUP_FIXTURE = request;
   env.NODE_OPTIONS = '--require=' + JSON.stringify(path.join(f.outside, 'preload.cjs'));

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { normalizeLifecycleEvent as neutralNormalize, evaluateLifecyclePolicy as neutralPolicy,
   parseDeletionCommand as neutralDeletion, pathResolvesWithinClaims as neutralWithin,
   pathResolvesOutsideProject as neutralOutside } from '../lib/runtime/hooks.js';
@@ -34,7 +35,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project() {
@@ -112,7 +113,7 @@ async function bindWedgedFlight(dir, dispatchAction) {
 // Environment for the spawned binary: force the Claude host and strip any
 // host-provided project hints so only the payload under test decides.
 function claudeEnv() {
-  const env = { ...process.env, CLAUDECODE: '1' };
+  const env = { ...gitFixtureEnv(), CLAUDECODE: '1' };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
   return env;

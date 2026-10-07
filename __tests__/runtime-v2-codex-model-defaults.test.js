@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,7 +20,7 @@ afterEach(async () => {
 async function project() {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-codex-model-defaults-'));
   cleanups.push(dir);
-  execFileSync('git', ['init', '-q'], { cwd: dir });
+  execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: dir });
   const paths = runtimePaths(dir);
   await mkdir(paths.runtime, { recursive: true });
   return paths;

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -547,6 +548,7 @@ const REQUIRED_OWNER_FILES = CLAIMED_SOURCE_FILES.slice(4);
 
 function trackedRuntimeJsFiles() {
   const listing = execFileSync('git', ['ls-files', 'lib/runtime'], {
+    env: gitFixtureEnv(),
     cwd: REPO_ROOT,
     encoding: 'utf8',
   });

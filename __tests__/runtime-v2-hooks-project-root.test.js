@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,7 +20,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project() {
@@ -48,7 +49,7 @@ async function project() {
 // injected override, for the pinned-environment cases production always runs
 // under — decides the resolution.
 function claudeEnv(overrides = {}) {
-  const env = { ...process.env, CLAUDECODE: '1' };
+  const env = { ...gitFixtureEnv(), CLAUDECODE: '1' };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
   return { ...env, ...overrides };
@@ -57,7 +58,7 @@ function claudeEnv(overrides = {}) {
 // Codex host: no CLAUDECODE marker and no Claude pin; CODEX_CWD (when a case
 // injects it) is the only stable root channel that host provides.
 function codexEnv(overrides = {}) {
-  const env = { ...process.env };
+  const env = gitFixtureEnv();
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE;
   delete env.CLAUDE_PROJECT_DIR;

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { mkdir, open, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
@@ -27,11 +28,7 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-const GIT_ENV = {
-  ...process.env,
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
-};
+const GIT_ENV = gitFixtureEnv();
 
 function git(cwd, ...args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV }).trim();

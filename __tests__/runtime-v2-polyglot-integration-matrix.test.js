@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -143,7 +144,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } });
+  execFileSync('git', args, { cwd, encoding: 'utf8', env: gitFixtureEnv() });
 }
 
 // Out-of-tree probe: records its execution count and its own process.cwd() so a

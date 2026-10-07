@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -18,7 +19,7 @@ describe('ape v2 config doctor diagnosis mode', () => {
   function gitProject() {
     const dir = mkdtempSync(join(tmpdir(), 'ape-doctor-'));
     dirs.push(dir);
-    execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['init'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
     return dir;
   }
 

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -63,7 +64,7 @@ function terminalState(runId, overrides = {}) {
 }
 
 function git(cwd, ...args) {
-  execFileSync('git', args, { cwd, encoding: 'utf8' });
+  execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' });
 }
 
 async function gitProject() {

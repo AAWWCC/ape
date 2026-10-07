@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile, readdir, stat } from 'node:fs/promises';
@@ -30,7 +31,7 @@ import { executionPolicySnapshot } from '../lib/runtime/pipeline-limits.js';
 // ------------------------------------------------------------------
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 // A minimal git repository for previewRun tests. Shared across the suite
