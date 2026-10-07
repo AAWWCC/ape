@@ -81,15 +81,15 @@ describe('bounded receipt rejection recovery guidance', () => {
     expect(projected.projection).toBeDefined();
   });
 
-  it('refuses an oversized admission manifest without a usable digest or truncated ready claim', () => {
+  it('refuses an oversized admission manifest with an inconsistent digest', () => {
     const response = { ok: true, advisory: true, blueprint: {},
       admission: { version: 1, ready: true, request: { objective: 'x'.repeat(RESPONSE_BUDGET_BYTES * 2) } },
       admission_digest: 'a'.repeat(64) };
     const projected = projectRunResponse(response);
-    expect(projected).toMatchObject({ ok: false, blocked: true, code: 'admission-response-too-large',
-      attempts_consumed: 0, admission: { version: 1, ready: false } });
+    expect(projected).toMatchObject({ ok: false, blocked: true, code: 'admission-delivery-invalid',
+      attempts_consumed: 0 });
     expect(projected).not.toHaveProperty('admission_digest');
-    expect(projected.reason).toMatch(/decompos/i);
+    expect(projected.reason).toMatch(/hash-consistent/i);
     expect(Buffer.byteLength(JSON.stringify(projected))).toBeLessThan(RESPONSE_BUDGET_BYTES);
     expect(response.admission.ready).toBe(true);
   });

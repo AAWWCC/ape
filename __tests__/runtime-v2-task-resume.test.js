@@ -78,6 +78,36 @@ describe('explicit resume recovers a task with fresh execution', () => {
     const restored = tool({ action: 'resume', ...confirm(plan) });
     expect(restored.next_action.kind).toBe('start_recovered_work');
     expect(restored.start_input.objective).toBe(input.objective);
+    expect((await checkpoints.readWorkCheckpoint(runtimePaths(dir), restored.start_input.checkpoint_id)).version).toBe(2);
+
+    // Recovery and pagination must coexist in each installed host package.
+    // A package built from either development branch alone cannot serve this flow.
+    const request = { ...restored.start_input, action: 'preview',
+      objective: `Review ${'\\\n🙂'.repeat(4000)}`,
+      hooks_trusted: true, subagents_available: true, explicit_invocation: true };
+    const before = { head: git(dir, ['rev-parse', 'HEAD']), status: git(dir, ['status', '--porcelain']) };
+    const chunks = [];
+    let page = tool(request);
+    expect(page.admission_delivery?.kind).toBe('paged');
+    const { digest, total_utf8_bytes } = page.admission_delivery;
+    let offset = 0;
+    for (;;) {
+      const delivery = page.admission_delivery;
+      expect(delivery).toMatchObject({ version: 1, kind: 'paged', digest, total_utf8_bytes, offset });
+      expect(delivery.sha256).toBe(sha256(delivery.text));
+      chunks.push(delivery.text);
+      offset += Buffer.byteLength(delivery.text);
+      expect(chunks.length).toBeLessThan(100);
+      if (delivery.next_offset === null) break;
+      expect(delivery.next_offset).toBe(offset);
+      page = tool({ ...request, admission_page: { digest, offset } });
+    }
+    const manifestText = chunks.join('');
+    expect(offset).toBe(total_utf8_bytes);
+    expect(sha256(manifestText)).toBe(digest);
+    expect(JSON.parse(manifestText)).toMatchObject({ ready: true,
+      request: { checkpoint_id: restored.start_input.checkpoint_id, objective: request.objective } });
+    expect({ head: git(dir, ['rev-parse', 'HEAD']), status: git(dir, ['status', '--porcelain']) }).toEqual(before);
   });
 
   it('discovers without mutation, preserves the task, uses one recovery branch and never reuses worker evidence', async () => {

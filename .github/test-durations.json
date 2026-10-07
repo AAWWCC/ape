@@ -9,6 +9,7 @@
   "__tests__/runtime-v2-admission-manifest.test.js": 9457,
   "__tests__/runtime-v2-admission-npm-path.test.js": 742,
   "__tests__/runtime-v2-admission-package-selection.test.js": 11066,
+  "__tests__/runtime-v2-admission-pagination.test.js": 7367,
   "__tests__/runtime-v2-adoption-incident-regression-loop.test.js": 7,
   "__tests__/runtime-v2-agent-tool-surface.test.js": 12,
   "__tests__/runtime-v2-artifact-resource-budget.test.js": 57,

@@ -70,7 +70,7 @@ const resolveMcpRoot = (explicitDir = null) => resolveGovernedRoot({ explicitDir
 const TOOLS = Object.freeze([
   {
     name: 'ape_run',
-    description: 'Start and advance the deterministic APE runtime. One explicit invocation authorizes the complete scheduler-owned run through stages, corrections, replans, gates, waits, and configured automatic shipping; callers must not ask for continue or separate auto-merge consent between those transitions. Preview and start require the same complete prospective run facts, including objective and host; start additionally requires expected_admission_digest copied from the ready preview. For a Codex probe, the first call must include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. Pass the returned dispatch.spawn_args to native spawn_agent unchanged; a repeated probe re-emits the same prepared envelope after a lost response. Codex start is fail-closed until probe, native canary launch, probe-status, and probe-ack prove live child binding; the completed proof is consumed exactly once before Git mutation.',
+    description: 'Start and advance the deterministic APE runtime. One explicit invocation authorizes the complete scheduler-owned run through stages, corrections, replans, gates, waits, and configured automatic shipping; callers must not ask for continue or separate auto-merge consent between those transitions. Preview and start require the same complete prospective run facts, including objective and host; start additionally requires expected_admission_digest from a complete ready inline preview or a fully reviewed paged manifest. For a Codex probe, the first call must include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. Pass the returned dispatch.spawn_args to native spawn_agent unchanged; a repeated probe re-emits the same prepared envelope after a lost response. Codex start is fail-closed until probe, native canary launch, probe-status, and probe-ack prove live child binding; the completed proof is consumed exactly once before Git mutation.',
     inputSchema: {
       type: 'object',
       required: ['action'],
@@ -85,6 +85,10 @@ const TOOLS = Object.freeze([
         {
           if: { properties: { action: { const: 'start' } }, required: ['action'] },
           then: { required: ['expected_admission_digest'] },
+        },
+        {
+          if: { properties: { action: { const: 'preview' } }, required: ['action'] },
+          else: { not: { required: ['admission_page'] } },
         },
         {
           if: { properties: { action: { const: 'record' } }, required: ['action'] },
@@ -126,7 +130,7 @@ const TOOLS = Object.freeze([
         action: {
           type: 'string',
           enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'recover-receipt', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'],
-          description: 'Preview and start require identical complete prospective facts, including objective and host; start additionally requires the ready preview admission_digest as expected_admission_digest. Structured successor starts are unavailable because current host hooks do not authenticate human provenance; after explicit operator direction recover a blocked run with audited override reset, then start an ordinary fresh run. recover-receipt is the reason-audited emergency path for the exact draft of a host-observed stopped worker when normal worker attestation is unavailable. For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
+          description: 'Preview and start require identical complete prospective facts, including objective and host; start additionally requires the ready inline admission_digest or fully reviewed admission_delivery.digest as expected_admission_digest. Structured successor starts are unavailable because current host hooks do not authenticate human provenance; after explicit operator direction recover a blocked run with audited override reset, then start an ordinary fresh run. recover-receipt is the reason-audited emergency path for the exact draft of a host-observed stopped worker when normal worker attestation is unavailable. For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
         },
         project_dir: {
           type: 'string',
@@ -138,7 +142,15 @@ const TOOLS = Object.freeze([
         },
         expected_admission_digest: {
           type: 'string', pattern: '^[a-f0-9]{64}$',
-          description: 'For start, copy admission_digest from a ready preview of these identical inputs. Start recomputes it before mutation. It confirms reviewed inputs, not human authorization.',
+          description: 'For start, use admission_digest from a complete ready inline preview, or admission_delivery.digest after reviewing every page of the ready manifest. Start recomputes it before mutation. It confirms reviewed inputs, not human authorization.',
+        },
+        admission_page: {
+          type: 'object', additionalProperties: false, required: ['digest', 'offset'],
+          properties: {
+            digest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            offset: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+          },
+          description: 'Preview only: repeat identical prospective inputs and use admission_delivery.digest and next_offset to read the next page. Review every contiguous page through next_offset:null before binding or starting; the delivery digest then becomes expected_admission_digest. Never combine pages in one tool response.',
         },
         mode: { type: 'string', enum: [...START_MODES] },
         lane: {
@@ -666,6 +678,9 @@ function assertApeRunActionFields(input) {
     if (input[field] !== undefined && action !== 'resume') throw new Error(`${field} is accepted only by resume`);
   }
   if ((input.legacy_run_id !== undefined || input.recovery_context !== undefined) && !input.legacy_candidate_id) throw new Error('legacy task association requires legacy_candidate_id');
+  if (Object.hasOwn(input, 'admission_page') && action !== 'preview') {
+    throw new Error('admission_page is accepted only by preview');
+  }
   if (input.checkpoint_id !== undefined && !['resume', 'preview', 'start'].includes(action)) {
     throw new Error('checkpoint_id is accepted only by resume, preview, and start');
   }
@@ -748,6 +763,7 @@ async function dispatchApeRun(projectDir, input) {
       binding_protocol: 'native-v1',
       capability_contract_required: true,
       admission_contract_version: 1,
+      ...(input.admission_page !== undefined ? { admission_page: input.admission_page } : {}),
       required_capabilities: input.required_capabilities ?? [],
       run_command_profiles: input.run_command_profiles ?? [],
     });
