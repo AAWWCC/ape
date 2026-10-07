@@ -28,7 +28,7 @@ SOFTWARE.
 
 ## smol-toml
 
-The self-contained MCP and policy-hook bundles include smol-toml 1.8.0, licensed under BSD-3-Clause:
+The self-contained MCP and policy-hook bundles include smol-toml 1.9.0, licensed under BSD-3-Clause:
 
 Copyright (c) Squirrel Chat et al., All rights reserved.
 
