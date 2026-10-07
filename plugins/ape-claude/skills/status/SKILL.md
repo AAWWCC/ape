@@ -8,8 +8,9 @@ disable-model-invocation: false
 
 Call the dedicated read-only `ape_status` tool. This is the only APE skill that may be selected
 implicitly. Do not dispatch agents, advance the run, mutate state, or reinterpret a blocked result.
-Pass the governed project root as `project_dir`. Report available `work_recovery` checkpoint counts
-and direct the user to resume when unfinished work is available. Report no active run or sealed history accurately;
+Pass the governed project root as `project_dir`. Report available `work_recovery` checkpoint counts,
+the `recovery_plan` route and legacy counts, and any separate `recovery_cleanup` status. Direct the
+user to explicit resume when unfinished work is available. Report no active run or sealed history accurately;
 neither result authorizes starting or resetting a run.
 
 Render the current run, pending tickets or dispatches, lane, stage, gates, typed

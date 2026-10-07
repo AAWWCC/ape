@@ -38,7 +38,7 @@ Project state lives under `.ape/runtime/`. Do not edit it by hand.
 | `receipt-transactions/` | Records that prevent receipt effects from running twice. |
 | `dispatch-intents/` | Single-use launch and receipt capabilities. |
 | `history/<id>.json` | Immutable terminal history. |
-| `checkpoints/` | Saved unfinished work, prepared recovery, and links to fresh runs; local Git refs keep file and index snapshots reachable. |
+| `checkpoints/` | Saved unfinished work, immutable recovery journals, prepared recovery, and links to fresh runs; local Git refs keep file and index snapshots reachable. |
 | `artifact-archives/` | Verified gzip archives of older redundant artifacts. |
 | `requirement-index.json` | Requirement-to-run completion index. |
 | `roadmap.json` | Optional roadmap; statuses are calculated from evidence. |

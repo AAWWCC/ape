@@ -208,14 +208,14 @@ describe('APE v2 audited dispatch expiry (frictions #27/#30)', () => {
     expect(blocked.run.expired_tickets).toEqual([first.ticket_id, retry.ticket_id]);
     expect(blocked.actions.some((action) => action.type === 'history_archived')).toBe(true);
     expect(blocked.successor_guidance).toMatchObject({
-      version: 2,
+      version: 3,
       eligible: true,
       predecessor_run_id: blocked.run.run_id,
       retained_tree_sha: blocked.run.tree_sha,
       eligibility_reason: 'dispatch_expired',
       structured_successor_supported: false,
-      recovery_action: 'override-reset',
-      required_authorization: 'explicit-operator-override',
+      recovery_action: 'resume',
+      required_authorization: 'explicit-resume-invocation',
       automatic_start: false,
       automatic_ship: false,
     });

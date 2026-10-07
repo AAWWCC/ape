@@ -90,9 +90,27 @@ timings from at most the newest 20 history files under `.ape/runtime/`.
    and shipping. Use `ape_status` to read state, or `resume` to find the next action
    after interruption. `ape_run status` is a deprecated alias.
 
-Preview distinguishes a failing baseline from an unavailable runner. If the whole
-manifest cannot fit in the response, it refuses without issuing a usable digest.
-Existing legacy runs keep their original contracts.
+Preview distinguishes a failing baseline from an unavailable runner. Large manifests
+use read-only pages rather than rejecting the run. Existing legacy runs keep their contracts.
+
+An oversized preview returns `admission_summary: { version, ready }` and
+`admission_delivery: { version: 1, kind: "paged", digest, total_utf8_bytes, offset,
+next_offset, text, sha256 }`; it does not claim an inline `admission` or issue a top-level
+`admission_digest`. Text is a contiguous UTF-8 slice of the manifest's canonical JSON.
+Continue with the identical preview inputs plus `admission_page: { digest, offset: next_offset }`.
+This optional field is accepted only on preview and never becomes part of the admission hash.
+
+Read each page separately. Check its hash, the shared digest and total length, contiguous
+offsets from zero, and final `next_offset: null`. Reconstruct and verify the canonical manifest
+without printing it in one tool response. Review the full ready manifest before binding or
+dispatch, then use the delivery digest as `expected_admission_digest` and omit `admission_page`.
+Missing pages stop the parent protocol; the digest establishes consistency, not proof of reading.
+Every page re-evaluates admission without writing preview state. Changed inputs produce
+`admission-drift`; restart preview from zero. Malformed, out-of-range, or mid-character offsets
+produce `invalid-admission-page`. Retrying an unchanged page is deterministic.
+Admission previews fit within 40,000 framed UTF-8 bytes, including metadata and escaped text.
+This fits the measured default 10,000-token code-mode wrapper allowance; the general MCP
+response ceiling remains 48,000 bytes. Neither value limits the complete admission manifest.
 
 Start also validates objective, host, mode, lane, paths, requirements, risk, and
 available host capabilities. The main input rules are:
@@ -381,25 +399,53 @@ including modified, deleted, and non-ignored untracked files. Ignored files are 
 These refs survive Git garbage collection; they are not pushed by ordinary APE shipping.
 Checkpoint metadata retains the original objective, scope, requirements, branch, and failure reason.
 
+`ape_status`, resume and session guidance use one runtime recovery planner. A blocked run returns
+`recovery_plan` and `confirm_recovery` when it can safely continue. Explicit resume confirms the
+exact `expected_recovery_digest` with `explicit_invocation: true`; it needs no separate reset
+approval. The digest binds the run, HEAD, files, index, configuration and worker/gate ownership.
+Unchanged reviewed code with valid admission uses the existing gate retry policy. Code changes,
+new admission needs or exhausted recovery preserve the task in a checkpoint and retire the old
+execution. A durable journal precedes retirement so a retry after a lost response reuses that
+checkpoint and continuation. Unresolved workers/gates prevent retirement. Healthy runs retain
+their workers. Existing shipping watches are reconciled first; intentional auto-merge holds stay
+held. A new terminal block ends the invocation rather than creating another replacement.
+
+The execution diagnostic retains its historical manual recovery levers for compatibility;
+the task recovery plan and returned `next_action` govern an explicit resume request.
+
 `ape_status` reports `work_recovery` counts separately from the active run. With no active run,
 `ape_run resume` returns `recover_checkpoint` for one available checkpoint or `choose_checkpoint`
-when selection or storage inspection is needed. Discovery does not restore files or start workers.
+when checkpoint selection or storage inspection is needed. If legacy sources also exist, it returns
+`choose_recovery`. Discovery does not restore files or start workers.
 To recover a selected checkpoint, call `resume` with `checkpoint_id` and `explicit_invocation: true`.
 It merges saved work with the locally resolved default tip and restores it onto a new branch.
-Existing branches are retained. Newer dirty files, merge conflicts, and damaged checkpoint data
+Existing branches are retained until successful task completion. Newer dirty files, merge conflicts, and damaged checkpoint data
 stop recovery without overwriting the original working files. Fetch current remote refs before
 recovery when needed; normal shipping admission still checks remote freshness.
 
 Successful recovery returns `start_recovered_work` and `start_input`. Inspect the original blocker,
 then preview/start with complete current host attestations and the returned `checkpoint_id` and
-`supersedes_run`. Preview checks the restored checkout, base, and complete changed-file scope.
-Start uses a new run ID, current policy, fresh native binding, new workers, and new validation.
+`supersedes_run` when present. Preview checks the restored checkout, base, and complete changed-file scope.
+Start adopts the recovery branch itself, with a new run ID, current policy, fresh native binding,
+new workers, and new validation; it does not create a second phase branch.
 The runtime records recovered file provenance, not inherited test results or worker receipts.
 A checkpoint stops appearing as unfinished after its fresh run starts durably; its Git backup remains.
 
-An explicit resume request authorizes this recovery flow. It does not authorize resetting an active
-blocked run, discarding newer edits, or selecting one task among several. Historical runs reset
-before checkpoint support retain their existing files/history but do not gain checkpoints retroactively.
+`choose_recovery` also inventories older saved tasks, APE branches, current changes and the live
+Git stash list. Select `legacy_candidate_id` and explicitly associate it with `legacy_run_id`, or
+supply missing objective/scope in `recovery_context`. Rediscovery returns the digest to confirm.
+Imports preserve tracked, staged, deleted and untracked bytes without dropping the source stash
+or branch. Legacy provenance is user-confirmed; absent run IDs are never invented. External backup
+bundles are not inspected, and sources are never automatically combined based on names/messages.
+
+An explicit resume request authorizes this recovery flow, including a replacement for a blocked
+execution. `explicit_invocation` is the existing orchestrator attestation, not authenticated human
+proof. It does not authorize discarding newer edits or selecting one task among several.
+After successful task completion, cleanup traverses recorded checkpoint lineage and conditionally
+deletes only proven APE branches whose exact tips remain preserved, are unchanged and are not
+checked out in any worktree. `recovery_cleanup` reports retained branches and reasons separately
+from task success; resume can retry it. Checkpoint Git refs remain available. Manual reset, regate
+and ship still work, as do existing checkpoint resume clients.
 
 Run completion may compact older redundant snapshots while retaining recent ones.
 `maintenance-status` reads the last result without changes.

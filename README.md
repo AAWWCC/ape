@@ -102,7 +102,7 @@ For a tiny edit or a quick question, an ordinary coding session may be simpler.
 | --- | --- |
 | `run` | Start a build, investigation, or shipping run. |
 | `status` | Show progress, pending work, and blocks. |
-| `resume` | Continue an interrupted run or recover saved unfinished work. |
+| `resume` | Continue a task from a live or blocked run, saved checkpoint, or selected legacy work. |
 | `history` | Inspect past runs and their results. |
 | `config` | Set up commands, models, and shipping. |
 | `override` | Request an audited abort, reset, or dispatch expiration. |

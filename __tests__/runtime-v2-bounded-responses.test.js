@@ -198,7 +198,7 @@ describe('Codex bootstrap parent wire compaction', () => {
     }
   });
 
-  it('refuses an oversized complete preview before issuing a usable admission digest', () => {
+  it('pages an oversized complete preview without claiming an inline manifest', () => {
     const admission = { version: 1, ready: true, contract: { detail: '\n'.repeat(18_000) } };
     const response = {
       ok: true, advisory: true, admission, admission_digest: sha256(admission),
@@ -207,11 +207,13 @@ describe('Codex bootstrap parent wire compaction', () => {
     expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThan(RESPONSE_BUDGET_BYTES);
     expect(Buffer.byteLength(framedMcpText(response))).toBeGreaterThan(RESPONSE_BUDGET_BYTES);
     const projected = projectRunResponse(response);
-    expect(projected).toMatchObject({ ok: false, blocked: true, code: 'admission-response-too-large', attempts_consumed: 0, admission: { ready: false } });
+    expect(projected).toMatchObject({ ok: true, admission_summary: { ready: true },
+      admission_delivery: { kind: 'paged', digest: sha256(admission), offset: 0 } });
+    expect(projected).not.toHaveProperty('admission');
     expect(projected).not.toHaveProperty('admission_digest');
     expect(projected).not.toHaveProperty('run');
     expect(projected).not.toHaveProperty('actions');
-    expect(Buffer.byteLength(framedMcpText(projected))).toBeLessThan(RESPONSE_BUDGET_BYTES);
+    expect(Buffer.byteLength(framedMcpText(projected))).toBeLessThanOrEqual(RESPONSE_BUDGET_BYTES);
     expect(response.admission).toBe(admission);
     expect(response.admission_digest).toBe(sha256(admission));
   });

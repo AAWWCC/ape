@@ -56,8 +56,9 @@ describe('recovery guidance agrees with the lifecycle receiving boundary', () =>
     expect(status.next_safe_action).toBe('ape_run abort or ape_run override reset');
     expect(status.diagnostic.failed_checks).toEqual(state.gates.passed ? [] : ['full_suite']);
     expect(renderStatusDoc(state)).toContain('Next: ape_run abort or ape_run override reset');
+    expect(status.recovery_plan.kind).toBe('inspect_recovery');
     expect(await loadSessionGuidance(dir, { host: 'claude', source: 'resume' }))
-      .toContain('Next safe action: ape_run abort or ape_run override reset');
+      .toContain('on explicit resume, inspect unfinished work checkpoints and the recovery plan (inspect_recovery)');
     for (const event of [{ type: 'ABORT' }, { type: 'OVERRIDE', operation: 'reset', reason: 'synthetic operator request' }]) {
       expect(reduceRun(state, event).some((action) => action.type === 'reject')).toBe(false);
     }

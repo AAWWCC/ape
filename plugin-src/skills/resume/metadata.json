@@ -1,5 +1,5 @@
 {
   "name": "resume",
-  "description": "Resume an interrupted APE run or recover checkpointed unfinished work into a fresh validated run.",
+  "description": "Resume an APE task from a live execution, blocked run, checkpoint, or explicitly selected legacy work.",
   "invocation": "explicit"
 }

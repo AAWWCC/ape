@@ -191,7 +191,7 @@ describe('runtime-owned session guidance', () => {
       expect(guidance).toContain('run-session-guidance');
       expect(guidance).toContain(`immutable run contract ${'a'.repeat(64)}`);
       expect(guidance).toContain('planning contract v2');
-      expect(guidance).toContain('Next safe action: ape_run abort or ape_run override reset');
+      expect(guidance).toContain('on explicit resume, inspect unfinished work checkpoints and the recovery plan');
       expect(guidance).toContain('Repository instruction files remain repository-owned');
       expect(Buffer.byteLength(guidance, 'utf8')).toBeLessThanOrEqual(SESSION_GUIDANCE_MAX_BYTES);
     }

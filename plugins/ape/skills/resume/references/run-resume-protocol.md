@@ -33,6 +33,14 @@ the same confirmed `hooks_trusted: true`, `subagents_available: true`, and
 trust/availability that has not been established. They carry
 identical complete prospective fields except `action`; start additionally requires
 `expected_admission_digest` copied unchanged from the ready preview's `admission_digest`.
+Large manifests use `admission_delivery` (version 1, kind `paged`) instead of an inline `admission`.
+Repeat the prospective preview inputs with `admission_page: { digest, offset: next_offset }`.
+Read and review each response separately; never emit all pages in one tool response. Require one
+digest and `total_utf8_bytes`, contiguous byte offsets starting at zero, each page's `sha256`, and
+final `next_offset: null` at the total length. Reconstruct the canonical JSON and verify its digest
+without printing the combined document. Only then use the delivery `digest` as
+`expected_admission_digest` and omit `admission_page` on start. A delivery summary is not a full
+manifest. Missing/corrupt pages stop review; `admission-drift` requires a fresh preview from zero.
 Review the full versioned admission manifest before any binding probe or stage dispatch. A
 missing/truncated manifest or `admission.ready !== true` is a stop, not dispatch permission.
 If prospective inputs change, obtain a fresh preview rather than reusing the digest. This
@@ -193,19 +201,19 @@ MCP call at the wrapper's yield boundary can expose a host transport retry. If a
 are scheduler-owned and serialized: production, test, and mixed/both findings select build; test
 then review; or test then build then review respectively.
 
-When a run is blocked, never start a structured successor: current host lifecycle hooks do not
-provide authenticated human provenance, and raw hook stdin or a copied prompt is not authority. If
-the user explicitly directs recovery, call `ape_run override` with `operation: "reset"`, the exact
-active `run_id` as confirmation when available, and a non-empty reason that records the user's
-direction. The reset is audited and saves a durable work checkpoint before clearing the run.
-Report the returned checkpoint ID and Git ref. Call `resume` to discover it, select its exact
-`checkpoint_id` with `explicit_invocation: true`, and follow `start_recovered_work` through a fresh
-preview/start with complete current facts. Recovery carries files and task context, never old
-worker authority or evidence. A checkpoint failure must leave the original run and files intact.
-Do not infer reset authority from the original run invocation, guidance, unrelated approval, or config.
-An existing explicit direction for this reset remains valid; do not request it again.
-Never reset automatically, recreate a retained diff from memory, or ship merely because recovery was
-authorized.
+When a run reaches a new terminal block, end that invocation. A later explicit resume request
+authorizes discovery through `ape_run resume`, followed by confirmation of its exact
+`recovery_plan.expected_recovery_digest` with `explicit_invocation: true`. Follow the resume skill's
+source-selection and recovery actions; no separate reset approval is needed for this same task.
+The runtime journals preservation before retirement and carries files and task context into fresh
+preview/start, never old worker authority or evidence. A replacement that blocks again ends the
+invocation; do not automatically create another replacement.
+Structured successor input remains unavailable: `explicit_invocation` is the established
+orchestrator attestation, not authenticated human provenance from raw hook input or a copied prompt.
+Manual `override reset`, `regate`, and `ship` remain compatible explicit levers. Never infer a new
+resume request from the original run invocation, unrelated approval, guidance, or configuration.
+Never recreate retained work from memory. Configured shipping belongs to the freshly admitted run;
+an intentional shipping hold or uncertain prior shipment must be resolved through its returned action.
 
 If the runtime reports an active bound dispatch, wait. If it reports
 `dispatch_retirement_pending`, wait for the original agent unless the flight is genuinely orphaned

@@ -3,8 +3,26 @@
 Use only when the user explicitly asks to resume APE. Call `ape_run` with `action: "resume"` and
 continue from the returned machine state; never reconstruct completed work or pending tickets from
 conversation memory.
-Pass the governed project root as `project_dir` on every APE MCP call. When no active run remains,
-follow checkpoint discovery instead of treating unfinished work as missing:
+Pass the governed project root as `project_dir` on every APE MCP call. Inspect `recovery_plan`
+and follow the returned action. Discovery preserves files and does not start workers:
+
+- `confirm_recovery`: review the exact source task, blocker, and runtime decision. Under this
+  explicit resume invocation, call `resume` with the returned `expected_recovery_digest` and
+  `explicit_invocation: true`. Keep any selected `legacy_candidate_id`, `legacy_run_id`, or
+  `recovery_context` unchanged. Do not ask separately for a reset. The runtime chooses an eligible
+  same-run gate retry, reconciles the existing shipment, or checkpoints and retires the blocked
+  execution for fresh validation. A changed digest requires rediscovery; never reuse a stale plan.
+- `choose_recovery`: show task objectives, source kinds, branches/stashes, dates, and blockers.
+  Ask the user to select the source and associate it with a listed saved task (`legacy_run_id`),
+  or supply its missing objective and scope in `recovery_context`. Select only the returned
+  `legacy_candidate_id`; rediscover with that selection before confirming its digest. Never apply
+  or combine stashes yourself, guess task ownership from names, or import external backups.
+- `provide_recovery_context`: obtain the missing objective, mode, lane, host, claimed paths and
+  test paths for the selected source, then rediscover. The runtime records user-confirmed legacy
+  provenance without inventing an earlier run or validation evidence.
+- `inspect_recovery`: follow the concrete reason. Preserve unresolved workers/gates and newer
+  edits. An intentional auto-merge hold remains held until an explicit ship request. Uncertain
+  shipping must reconcile the existing pull request before creating a replacement execution.
 
 - `recover_checkpoint`: the runtime found one available checkpoint. Call `resume` again with
   its exact `checkpoint_id` and `explicit_invocation: true`.
@@ -16,12 +34,14 @@ follow checkpoint discovery instead of treating unfinished work as missing:
   fresh preview, keeping `checkpoint_id` and `supersedes_run`. Re-establish the current host,
   hooks, capabilities and runner configuration, review complete scope and admission, and perform
   the normal binding probe and start. If the response carries `start_input_ref`, read the complete
-  saved input there and include the record's `checkpoint_id` and `source_run_id` as `supersedes_run`.
+  saved input there and include the record's `checkpoint_id` and, if present, `source_run_id` as
+  `supersedes_run`. Start uses the restored recovery branch itself.
   Never reuse old tickets, receipts, permissions or test results.
 
-An explicit resume invocation authorizes checkpoint restoration and this fresh validated run,
-including configured shipping, without another continuation approval. It does not authorize
-resetting an existing blocked run, overwriting newer work, or choosing between different tasks.
+An explicit resume invocation authorizes the returned blocked-run recovery, checkpoint restoration
+and fresh validated run, including configured shipping, without another continuation approval.
+`explicit_invocation` is the orchestrator's attestation, not authenticated human provenance.
+It does not authorize overwriting newer work or choosing between different tasks.
 On a recovery conflict or changed working files, preserve both versions and report the concrete
 decision needed. If no active run or checkpoint exists, say so; never reconstruct files from memory.
 
@@ -38,6 +58,11 @@ successor. Follow the issued growth contract and frozen validation/worker limits
 contract v2 checks canonical unique paths against the shared structural guard and actual rendered
 command and manifest budgets. Historical growth contract v1 retains its 64-item/4096-byte bounds;
 never apply those historical bounds to a current successor or enlarge an issued contract.
+After recovery, drive the fresh execution to its next terminal result. A new terminal block ends
+this invocation; do not call resume again to create another execution without a new explicit
+resume request. Completion can leave separately reported branch cleanup pending; report retained
+branches and reasons without treating successful work as a failed run. Checkpoint refs remain.
+
 The resume invocation authorizes continuous scheduler-owned progress. Drive every returned
 transition, wait, review, replan, remediation, gate, and configured shipping action to a terminal
 result without asking the user to say continue. Yield only for completion, a terminal block, or
