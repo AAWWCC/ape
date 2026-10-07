@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -100,6 +101,7 @@ async function failure(promise, pattern) {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   // Assertions above run BEFORE this independently awaited emergency safety
   // net. A leak cannot pass just because afterEach killed it.
@@ -118,6 +120,206 @@ afterEach(async () => {
     await waitUntil(async () => !(await Promise.all(ids.map(alive))).some(Boolean), 5000);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+describe('retireChild ownership and lifecycle races', () => {
+  const limits = { killGraceMs: 100, cleanupMs: 200 };
+
+  function controlled(pid = 12345) {
+    vi.useFakeTimers();
+    const child = new EventEmitter();
+    Object.assign(child, { pid, exitCode: null, signalCode: null, kill: vi.fn(() => true) });
+    const callerListeners = {};
+    for (const event of ['spawn', 'exit', 'error']) {
+      child.on(event, vi.fn());
+      callerListeners[event] = child.listeners(event);
+    }
+    const exited = () => {
+      child.signalCode = 'SIGTERM';
+      child.emit('exit', null, 'SIGTERM');
+    };
+    const released = () => {
+      expect(vi.getTimerCount()).toBe(0);
+      for (const event of Object.keys(callerListeners)) {
+        expect(child.listeners(event)).toEqual(callerListeners[event]);
+      }
+    };
+    const lateEvents = async () => {
+      const signals = child.kill.mock.calls.slice();
+      child.emit('spawn');
+      child.emit('exit', 0, null);
+      child.emit('error', new Error('late caller-owned error'));
+      child.emit('close', 0, null);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(child.kill.mock.calls).toEqual(signals);
+      released();
+    };
+    return { child, exited, released, lateEvents };
+  }
+
+  it.each(['exitCode', 'signalCode'])('does not signal or retain resources for an already exited %s', async (key) => {
+    const { retireChild } = await load();
+    const f = controlled();
+    f.child[key] = key === 'exitCode' ? 0 : 'SIGKILL';
+    await retireChild(f.child, 'SIGTERM', limits);
+    expect(f.child.kill).not.toHaveBeenCalled();
+    f.released();
+    await f.lateEvents();
+  });
+
+  it('bounds missing spawn events without ever signalling an absent handle', async () => {
+    const { retireChild } = await load();
+    const f = controlled(null);
+    const completion = vi.fn();
+    const pending = retireChild(f.child, 'SIGTERM', limits).then(
+      () => completion('resolved'), (error) => { completion('rejected'); return error; },
+    );
+    await vi.advanceTimersByTimeAsync(299);
+    expect(completion).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await pending).message).toMatch(/cleanup.*confirm exit/i);
+    expect(completion.mock.calls).toEqual([['rejected']]);
+    expect(f.child.kill).not.toHaveBeenCalled();
+    f.released();
+    await f.lateEvents();
+  });
+
+  it('signals deferred spawn exactly once despite repeated spawn events', async () => {
+    const { retireChild } = await load();
+    const f = controlled(null);
+    const pending = retireChild(f.child, 'SIGTERM', limits);
+    expect(f.child.kill).not.toHaveBeenCalled();
+    f.child.pid = 12345;
+    f.child.emit('spawn');
+    f.child.emit('spawn');
+    expect(f.child.kill.mock.calls).toEqual([['SIGTERM']]);
+    f.exited();
+    await pending;
+    f.released();
+  });
+
+  it.each([undefined, null, 0, 1, -1, NaN, 1.5])('never signals an invalid PID %s when spawn fails', async (pid) => {
+    const { retireChild } = await load();
+    const f = controlled(null);
+    f.child.pid = pid;
+    const fault = new Error('spawn fixture ENOENT');
+    const pending = retireChild(f.child, 'SIGTERM', limits).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.child.kill).not.toHaveBeenCalled();
+    f.child.emit('error', fault);
+    expect(await pending).toBe(fault);
+    f.released();
+    await f.lateEvents();
+  });
+
+  it('clears timers when kill synchronously emits exit and repeats without accumulation', async () => {
+    const { retireChild } = await load();
+    const f = controlled();
+    f.child.kill.mockImplementation(() => { f.exited(); return true; });
+    for (let index = 0; index < 4; index++) {
+      f.child.signalCode = null;
+      await retireChild(f.child, 'SIGTERM', limits);
+      expect(f.child.kill).toHaveBeenCalledTimes(index + 1);
+      f.released();
+    }
+    await f.lateEvents();
+  });
+
+  it('escalates TERM to KILL but waits for confirmed exit', async () => {
+    const { retireChild } = await load();
+    const f = controlled();
+    const completion = vi.fn();
+    const pending = retireChild(f.child, 'SIGTERM', limits).then(completion);
+    expect(f.child.kill.mock.calls).toEqual([['SIGTERM']]);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(f.child.kill).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    expect(completion).not.toHaveBeenCalled();
+    f.exited();
+    await pending;
+    expect(completion).toHaveBeenCalledTimes(1);
+    f.released();
+    await f.lateEvents();
+  });
+
+  it('initial SIGKILL has only the cleanup deadline and does not signal again', async () => {
+    const { retireChild } = await load();
+    const f = controlled();
+    const pending = retireChild(f.child, 'SIGKILL', limits).catch((error) => error);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect((await pending).message).toMatch(/cleanup.*confirm exit/i);
+    expect(f.child.kill.mock.calls).toEqual([['SIGKILL']]);
+    f.released();
+    await f.lateEvents();
+  });
+
+  it('accepts actual exit after a live-handle error while a sibling keeps its own retirement timers', async () => {
+    const { retireChild } = await load();
+    const first = controlled();
+    const sibling = controlled(12346);
+    const firstPending = retireChild(first.child, 'SIGTERM', limits);
+    const siblingCompletion = vi.fn();
+    const siblingPending = retireChild(sibling.child, 'SIGTERM', limits).then(siblingCompletion);
+    first.child.emit('error', new Error('fixture signal failed'));
+    first.exited();
+    await firstPending;
+    expect(vi.getTimerCount()).toBe(2);
+    for (const event of ['spawn', 'exit', 'error']) expect(first.child.listenerCount(event)).toBe(1);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(first.child.kill.mock.calls).toEqual([['SIGTERM']]);
+    expect(sibling.child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    expect(siblingCompletion).not.toHaveBeenCalled();
+    sibling.exited();
+    await siblingPending;
+    first.released();
+    sibling.released();
+    await first.lateEvents();
+    await sibling.lateEvents();
+  });
+
+  it.each(['false', 'throw', 'error', 'true'])('does not confuse kill %s with exit confirmation', async (mode) => {
+    const { retireChild } = await load();
+    const f = controlled();
+    f.child.kill.mockImplementation(() => {
+      if (mode === 'throw') throw new Error('fixture EPERM');
+      if (mode === 'error') f.child.emit('error', new Error('fixture EPERM'));
+      return mode !== 'false';
+    });
+    for (let index = 0; index < 3; index++) {
+      const completion = vi.fn();
+      const pending = retireChild(f.child, 'SIGTERM', limits).then(
+        () => { completion('resolved'); }, (error) => { completion('rejected'); return error; },
+      );
+      await vi.advanceTimersByTimeAsync(299);
+      expect(completion).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      const error = await pending;
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toMatch(/cleanup.*confirm exit/i);
+      if (mode === 'throw' || mode === 'error') expect(error.message).toContain('fixture EPERM');
+      expect(completion.mock.calls).toEqual([['rejected']]);
+      expect(f.child.kill).toHaveBeenCalledTimes((index + 1) * 2);
+      f.released();
+    }
+    await f.lateEvents();
+  });
+
+  it.each([299, 300])('cleans up once when exit arrives at %s ms around the deadline', async (exitAt) => {
+    const { retireChild } = await load();
+    const f = controlled();
+    const completion = vi.fn();
+    const pending = retireChild(f.child, 'SIGTERM', limits).then(
+      () => completion('resolved'), () => completion('rejected'),
+    );
+    await vi.advanceTimersByTimeAsync(exitAt);
+    f.exited();
+    await pending;
+    expect(completion.mock.calls).toEqual([[exitAt < 300 ? 'resolved' : 'rejected']]);
+    f.released();
+    await f.lateEvents();
+  });
 });
 
 describe('runNativeJson bounded process supervision', () => {
@@ -308,13 +510,14 @@ describe('invokeCodexHook compatibility', () => {
   it('preserves root, argument order, JSON newline input and exactly the four exclusions', async () => {
     const root = await fixture(`
       let input = ''; for await (const chunk of process.stdin) input += chunk;
-      process.stdout.write(JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2), input,
+      process.stdout.write(JSON.stringify({ executable: process.execPath, cwd: process.cwd(), args: process.argv.slice(2), input,
         excluded: ['CLAUDECODE', 'CLAUDE_CODE', 'CLAUDE_PROJECT_DIR', 'CODEX_CWD'].filter(k => k in process.env),
         preserved: process.env.APE_FIXTURE_PRESERVED }));
     `);
     for (const key of ['CLAUDECODE', 'CLAUDE_CODE', 'CLAUDE_PROJECT_DIR', 'CODEX_CWD']) vi.stubEnv(key, 'must-not-leak');
     vi.stubEnv('APE_FIXTURE_PRESERVED', 'keep');
     expect(await bounded(invokeCodexHook(root, { hello: '世界' }, ['--one', 'two words']))).toEqual({
+      executable: process.execPath,
       cwd: await import('node:fs/promises').then(({ realpath }) => realpath(root)),
       args: ['--one', 'two words'], input: '{"hello":"世界"}\n', excluded: [], preserved: 'keep',
     });
