@@ -2465,7 +2465,7 @@ describe('live receipt contract integration', () => {
     { action: 'resume', advance: resumeRun, exhaustion: 1 },
     { action: 'next', advance: nextRun, exhaustion: 2 },
     { action: 'resume', advance: resumeRun, exhaustion: 2 },
-  ])('preserves an aborted run when $action encounters stopped worker exhaustion $exhaustion', async ({ advance, exhaustion }) => {
+  ])('preserves an aborted run when $action encounters stopped worker exhaustion $exhaustion', async ({ action, advance, exhaustion }) => {
     const value = await fixture();
     const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
     if (exhaustion === 2) {
@@ -2491,7 +2491,9 @@ describe('live receipt contract integration', () => {
 
     const files = [value.paths.active, path.join(value.paths.runs, `${value.state.run_id}.json`), intentFile];
     const before = await Promise.all(files.map((file) => readFile(file, 'utf8')));
-    expect(await advance(value.directory)).toMatchObject({ ok: false, reason: 'run is aborted' });
+    expect(await advance(value.directory)).toMatchObject(action === 'resume'
+      ? { ok: true, active: false, next_action: { kind: 'recover_checkpoint' } }
+      : { ok: false, reason: 'run is aborted' });
     expect(await Promise.all(files.map((file) => readFile(file, 'utf8')))).toEqual(before);
   });
 

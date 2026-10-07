@@ -177,6 +177,10 @@ const TOOLS = Object.freeze([
           type: 'string',
           description: 'Optional on start: run_id of an abandoned/blocked run this run supersedes; recorded in the immutable history record so one converged task does not read as repeated failures.',
         },
+        checkpoint_id: {
+          type: 'string', pattern: '^checkpoint-[0-9a-f]{32}$',
+          description: 'On resume, select saved unfinished work returned by status/resume; explicit_invocation:true authorizes restoration onto a new branch. On preview/start, bind the fresh run to that restored checkpoint. Existing runs and evidence are never revived.',
+        },
         auto_merge_authorized: {
           type: 'boolean',
           description: 'Backward-compatible explicit override. Normally omit: explicit_invocation plus shipping.auto_merge:true automatically authorizes this run to push, open its pull request, and merge.',
@@ -635,6 +639,9 @@ function taskWireProjection(task) {
 
 function assertApeRunActionFields(input) {
   const action = input.action;
+  if (input.checkpoint_id !== undefined && !['resume', 'preview', 'start'].includes(action)) {
+    throw new Error('checkpoint_id is accepted only by resume, preview, and start');
+  }
   if (Object.hasOwn(input, 'successor')) {
     throw new Error(STRUCTURED_SUCCESSOR_UNAVAILABLE_ERROR);
   }
@@ -698,6 +705,7 @@ async function dispatchApeRun(projectDir, input) {
       requirements: input.requirements ?? [],
       ...(input.completes !== undefined ? { completes: input.completes } : {}),
       ...(input.supersedes_run !== undefined ? { supersedes_run: input.supersedes_run } : {}),
+      ...(input.checkpoint_id !== undefined ? { checkpoint_id: input.checkpoint_id } : {}),
       ...(input.auto_merge_authorized !== undefined ? { auto_merge_authorized: input.auto_merge_authorized } : {}),
       plan_contract_version: input.plan_contract_version ?? (
         (input.mode ?? 'phase') === 'phase' &&
@@ -731,6 +739,7 @@ async function dispatchApeRun(projectDir, input) {
       // and the cross-run supersession marker only when the caller sent them.
       ...(input.completes !== undefined ? { completes: input.completes } : {}),
       ...(input.supersedes_run !== undefined ? { supersedes_run: input.supersedes_run } : {}),
+      ...(input.checkpoint_id !== undefined ? { checkpoint_id: input.checkpoint_id } : {}),
       ...(input.auto_merge_authorized !== undefined ? { auto_merge_authorized: input.auto_merge_authorized } : {}),
       plan_contract_version: input.plan_contract_version ?? (
         (input.mode ?? 'phase') === 'phase' &&
@@ -771,7 +780,10 @@ async function dispatchApeRun(projectDir, input) {
     });
   }
   if (action === 'status') return statusRun(projectDir);
-  if (action === 'resume') return resumeRun(projectDir);
+  if (action === 'resume') return resumeRun(projectDir, {
+    ...(input.checkpoint_id !== undefined ? { checkpoint_id: input.checkpoint_id } : {}),
+    ...(input.explicit_invocation !== undefined ? { explicit_invocation: input.explicit_invocation } : {}),
+  });
   if (action === 'regate') return regateRun(projectDir);
   if (action === 'ship') return shipRun(projectDir, input.reason);
   if (action === 'expire-dispatch') return expireDispatch(projectDir, input.ticket_id, input.reason);

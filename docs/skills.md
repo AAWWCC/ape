@@ -6,7 +6,7 @@ APE provides the same seven skills in Claude Code and Codex.
 | --- | --- |
 | `run` | Confirm scope, then start and advance a run. |
 | `status` | Show the active run and optional roadmap. |
-| `resume` | Continue an interrupted run. |
+| `resume` | Continue an interrupted run, or recover saved unfinished work into a fresh validated run. |
 | `history` | Search or explain past runs; import history or compact artifacts. |
 | `config` | Read or change settings, check setup, detect test commands, or configure a statusline. |
 | `override` | Abort, reset, or expire a dispatch with an audit reason. |

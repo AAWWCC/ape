@@ -3,8 +3,27 @@
 Use only when the user explicitly asks to resume APE. Call `ape_run` with `action: "resume"` and
 continue from the returned machine state; never reconstruct completed work or pending tickets from
 conversation memory.
-Pass the governed project root as `project_dir` on every APE MCP call. If there is no active run,
-report that result; a resume request does not authorize a fresh start or reset.
+Pass the governed project root as `project_dir` on every APE MCP call. When no active run remains,
+follow checkpoint discovery instead of treating unfinished work as missing:
+
+- `recover_checkpoint`: the runtime found one available checkpoint. Call `resume` again with
+  its exact `checkpoint_id` and `explicit_invocation: true`.
+- `choose_checkpoint`: show the returned objectives, branches, and dates and ask which work to
+  recover. Do not guess when several checkpoints exist or storage is incomplete/unreadable.
+- `start_recovered_work`: files are restored on a new branch and reconciled with the locally
+  resolved default branch. Read the saved failure reason as evidence, inspect what remains to
+  be done, and address the original blocker. Use the returned `start_input` as the basis of a
+  fresh preview, keeping `checkpoint_id` and `supersedes_run`. Re-establish the current host,
+  hooks, capabilities and runner configuration, review complete scope and admission, and perform
+  the normal binding probe and start. If the response carries `start_input_ref`, read the complete
+  saved input there and include the record's `checkpoint_id` and `source_run_id` as `supersedes_run`.
+  Never reuse old tickets, receipts, permissions or test results.
+
+An explicit resume invocation authorizes checkpoint restoration and this fresh validated run,
+including configured shipping, without another continuation approval. It does not authorize
+resetting an existing blocked run, overwriting newer work, or choosing between different tasks.
+On a recovery conflict or changed working files, preserve both versions and report the concrete
+decision needed. If no active run or checkpoint exists, say so; never reconstruct files from memory.
 
 Follow [`references/run-resume-protocol.md`](references/run-resume-protocol.md) for dispatch,
 receipt recording, waiting, and advancement. Never spawn a replacement for an already-bound ticket

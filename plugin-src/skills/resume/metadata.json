@@ -1,5 +1,5 @@
 {
   "name": "resume",
-  "description": "Resume an interrupted APE run from persisted machine state.",
+  "description": "Resume an interrupted APE run or recover checkpointed unfinished work into a fresh validated run.",
   "invocation": "explicit"
 }

@@ -197,8 +197,11 @@ When a run is blocked, never start a structured successor: current host lifecycl
 provide authenticated human provenance, and raw hook stdin or a copied prompt is not authority. If
 the user explicitly directs recovery, call `ape_run override` with `operation: "reset"`, the exact
 active `run_id` as confirmation when available, and a non-empty reason that records the user's
-direction. The reset is audited. Then re-inspect the repository, preserve or reconcile retained work
-without destructive cleanup, and use preview/start for an ordinary fresh run with complete facts.
+direction. The reset is audited and saves a durable work checkpoint before clearing the run.
+Report the returned checkpoint ID and Git ref. Call `resume` to discover it, select its exact
+`checkpoint_id` with `explicit_invocation: true`, and follow `start_recovered_work` through a fresh
+preview/start with complete current facts. Recovery carries files and task context, never old
+worker authority or evidence. A checkpoint failure must leave the original run and files intact.
 Do not infer reset authority from the original run invocation, guidance, unrelated approval, or config.
 An existing explicit direction for this reset remains valid; do not request it again.
 Never reset automatically, recreate a retained diff from memory, or ship merely because recovery was
