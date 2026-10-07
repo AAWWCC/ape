@@ -449,7 +449,7 @@ async function main(argv) {
   process.stdout.write(
     args.preserveOpenTasks
       ? 'Previous pinned cache paths were restored and the new selected version was verified.\n'
-      : 'Previous versions are archived outside the active cache. Open tasks can lose their pinned paths and need a host refresh; do not reinstall while workers are active.\n',
+      : 'Previous versions are archived outside the active cache. Open tasks can lose their pinned paths; a host refresh does not restore those paths; do not reinstall while workers are active.\n',
   );
   process.stdout.write(
     `Desktop activation is not verified by this command. A running app may retain its previous plugin snapshot; verify that a fresh task loads ${nextVersion} before starting an APE run.\n`,

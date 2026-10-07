@@ -116,6 +116,12 @@ leave bytes untouched. See the immutable upstream
 [loader](https://raw.githubusercontent.com/openai/codex/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core-plugins/src/loader.rs), and
 [store](https://raw.githubusercontent.com/openai/codex/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core-plugins/src/store.rs).
 
+The marketplace smoke also checks a same-version refresh in disposable homes for
+both archive and preserve-open-tasks modes. It records the original hook/runner
+paths separately from recovery copies, verifies complete source/cache inventories,
+and rejects incomplete or failed host responses. This may be a version-matched
+no-op; it supplements the version-advancing acceptance test below.
+
 The real-host acceptance test uses disposable `HOME` and `CODEX_HOME`, installs the
 normal marketplace package, and runs the development reinstall helper in both archive
 and preserve-open-tasks modes. After baseline discovery completes, the same app-server
