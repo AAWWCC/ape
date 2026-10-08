@@ -424,6 +424,15 @@ held. A new terminal block ends the invocation rather than creating another repl
 The execution diagnostic retains its historical manual recovery levers for compatibility;
 the task recovery plan and returned `next_action` govern an explicit resume request.
 
+Receipt draft validation verifies the immutable contract; authored-test admission additionally
+requires runtime-observed provenance, routing and test verdicts. A deterministic refusal of an
+exact native-attested draft is durably blocked, with a bounded admission reason and checkpoint
+recovery guidance. Repeated record, next and resume calls preserve that refusal without accepting
+the receipt or launching a replacement worker. Inspect the cause and use resume to review recovery;
+preserve existing authored coverage and never manufacture cosmetic test edits. Transient runner
+failures retain exact-receipt retry, and prepared or committed successful receipts retain idempotent
+replay. Ordinary validation rejection remains advisory and does not change run state.
+
 `ape_status` reports `work_recovery` counts separately from the active run. With no active run,
 `ape_run resume` returns `recover_checkpoint` for one available checkpoint or `choose_checkpoint`
 when checkpoint selection or storage inspection is needed. If legacy sources also exist, it returns
