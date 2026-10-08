@@ -1,4 +1,5 @@
-import { devNull } from 'node:os';
+// Git for Windows rejects Node's namespaced null path (\\.\nul).
+const gitNullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
 
 /**
  * A fresh environment for Git in disposable test repositories, including Git
@@ -12,8 +13,8 @@ export function gitFixtureEnv(baseEnv = process.env) {
     Object.entries(baseEnv).filter(([key]) => !/^GIT_/i.test(key)),
   );
   Object.assign(env, {
-    GIT_CONFIG_GLOBAL: devNull,
-    GIT_CONFIG_SYSTEM: devNull,
+    GIT_CONFIG_GLOBAL: gitNullDevice,
+    GIT_CONFIG_SYSTEM: gitNullDevice,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_AUTHOR_NAME: 'APE Test',
     GIT_AUTHOR_EMAIL: 'ape-test@example.invalid',
@@ -30,7 +31,7 @@ export function gitFixtureEnv(baseEnv = process.env) {
     ['init.defaultBranch', 'main'],
     ['core.autocrlf', 'false'],
     ['core.eol', 'lf'],
-    ['core.hooksPath', devNull],
+    ['core.hooksPath', gitNullDevice],
     ['commit.gpgSign', 'false'],
     ['tag.gpgSign', 'false'],
   ];
