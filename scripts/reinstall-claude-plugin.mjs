@@ -85,7 +85,7 @@ async function stage(args, root, version) {
   await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
   await assertRegularTree(root);
   for (const file of ['dist/ape-mcp.bundle.mjs', 'dist/ape-hooks.bundle.mjs', 'dist/ape-larp.bundle.mjs',
-    'hooks/claude-hooks.json', 'lib/runtime/runner.js', 'lib/runtime/spawn.js', 'lib/runtime/file-stats.js', 'lib/runtime/host-identity.js',
+    'hooks/claude-hooks.json', 'lib/runtime/runner.js', 'lib/runtime/spawn.js', 'lib/runtime/file-stats.js',
     'skills/run/SKILL.md', 'package.json', 'THIRD_PARTY_NOTICES.md']) {
     if (!(await exists(join(root, file)))) throw new Error(`staged Claude plugin is missing required runtime file: ${file}`);
   }

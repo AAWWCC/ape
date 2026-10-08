@@ -24,7 +24,7 @@ async function cleanupFixture(root) {
   if (!childShutdownIncomplete) await rm(root, { recursive: true, force: true });
 }
 
-const PINNED_FILES = ['dist/ape-hooks.bundle.mjs', 'lib/runtime/runner.js', 'lib/runtime/spawn.js', 'lib/runtime/file-stats.js', 'lib/runtime/host-identity.js'];
+const PINNED_FILES = ['dist/ape-hooks.bundle.mjs', 'lib/runtime/runner.js'];
 const PHASES = ['beforeReinstall', 'afterReinstall', 'afterRefresh'];
 const REFRESH_PARAMS = { cwds: [], marketplaceKinds: ['local'], forceRefetch: true };
 function requireEvidence(condition, message) {
@@ -86,7 +86,7 @@ export function validateCodexRefreshEvidence(evidence, expected) {
   same(expected.source, join(marketplace, 'versions/ape', expected.newVersion), 'source path');
   same(expected.oldSource, join(marketplace, 'versions/ape', expected.oldVersion), 'old source path');
   same(expected.selectedRoot, join(expected.codexHome, 'plugins/cache/ape-dev/ape', expected.newVersion), 'selected path');
-  requireEvidence(expected.baseline?.length === PINNED_FILES.length, 'baseline');
+  requireEvidence(expected.baseline?.length === 2, 'baseline');
   expected.baseline.forEach((entry, index) => {
     same(entry.relative, PINNED_FILES[index], 'baseline relative path');
     same(entry.path, join(oldRoot, PINNED_FILES[index]), 'baseline absolute path');

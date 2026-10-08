@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acquireRunLock,
   computeFsLatencyMultiplier,
@@ -66,13 +66,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 });
 
 const cleanups = [];
-let currentHost;
-beforeEach(async () => {
-  const dir = await scratch();
-  const probe = path.join(dir, 'identity.lock');
-  currentHost = (await acquireRunLock(probe, 'identity-fixture')).host;
-  await releaseRunLock(probe, 'identity-fixture');
-});
 afterEach(async () => {
   releaseFault.rename = null;
   releaseHold.lockPath = null;
@@ -310,7 +303,7 @@ describe('APE v2 run-lock crash recovery (invariant 7)', () => {
   it('recovers a same-host dead-pid lock only under recoverStale, and audits the steal', async () => {
     const dir = await scratch();
     const lock = path.join(dir, 'active.lock');
-    writeFileSync(lock, `${JSON.stringify({ version: 1, run_id: 'run-dead', pid: deadPid(), host: currentHost })}\n`);
+    writeFileSync(lock, `${JSON.stringify({ version: 1, run_id: 'run-dead', pid: deadPid(), host: hostname() })}\n`);
     await expect(acquireRunLock(lock, 'run-new')).rejects.toThrow(/another APE writing run/);
     const recovered = [];
     const payload = await acquireRunLock(lock, 'run-new', {
@@ -336,7 +329,7 @@ describe('APE v2 run-lock crash recovery (invariant 7)', () => {
   it('admits exactly one of two concurrent recoveries of the same stale lock', async () => {
     const dir = await scratch();
     const lock = path.join(dir, 'active.lock');
-    writeFileSync(lock, `${JSON.stringify({ version: 1, run_id: 'run-dead', pid: deadPid(), host: currentHost })}\n`);
+    writeFileSync(lock, `${JSON.stringify({ version: 1, run_id: 'run-dead', pid: deadPid(), host: hostname() })}\n`);
     // Pre-fix (read-then-rm), the second contender's rm could delete the first
     // contender's freshly written lock and both would acquire.
     const results = await Promise.allSettled([
@@ -359,11 +352,11 @@ describe('APE v2 run-lock crash recovery (invariant 7)', () => {
   it('stealLockFileByRename refuses to steal when the lock content changed under it', async () => {
     const dir = await scratch();
     const lock = path.join(dir, 'active.lock');
-    const stale = `${JSON.stringify({ version: 1, run_id: 'run-dead', pid: deadPid(), host: currentHost })}\n`;
+    const stale = `${JSON.stringify({ version: 1, run_id: 'run-dead', pid: deadPid(), host: hostname() })}\n`;
     writeFileSync(lock, stale);
     // A faster contender already recovered and installed a fresh live lock where
     // the stale one was; we still hold the stale bytes we read moments earlier.
-    const fresh = `${JSON.stringify({ version: 1, run_id: 'run-winner', pid: process.pid, host: currentHost })}\n`;
+    const fresh = `${JSON.stringify({ version: 1, run_id: 'run-winner', pid: process.pid, host: hostname() })}\n`;
     writeFileSync(lock, fresh);
     const won = await stealLockFileByRename(lock, stale);
     expect(won).toBe(false);
@@ -374,38 +367,37 @@ describe('APE v2 run-lock crash recovery (invariant 7)', () => {
   it('stealLockFileByRename steals only when the observed bytes still hold', async () => {
     const dir = await scratch();
     const lock = path.join(dir, 'active.lock');
-    const stale = `${JSON.stringify({ version: 1, run_id: 'run-dead', pid: deadPid(), host: currentHost })}\n`;
+    const stale = `${JSON.stringify({ version: 1, run_id: 'run-dead', pid: deadPid(), host: hostname() })}\n`;
     writeFileSync(lock, stale);
     const won = await stealLockFileByRename(lock, stale);
     expect(won).toBe(true);
     expect(existsSync(lock)).toBe(false);
   });
 
-  it.each(['', '{"version":1,'])('preserves an unverifiable lock under recoverStale (bytes: %j)', async (bytes) => {
+  it('recovers a 0-byte lock under recoverStale instead of wedging permanently', async () => {
     const dir = await scratch();
     const lock = path.join(dir, 'active.lock');
-    writeFileSync(lock, bytes);
+    writeFileSync(lock, '');
     await expect(acquireRunLock(lock, 'run-new')).rejects.toThrow(/unreadable; use override reset/);
-    expect(readFileSync(lock, 'utf8')).toBe(bytes);
     const recovered = [];
-    await expect(acquireRunLock(lock, 'run-new', {
+    const payload = await acquireRunLock(lock, 'run-new', {
       recoverStale: true,
       onRecover: (detail) => recovered.push(detail),
-    })).rejects.toThrow(/unreadable; use override reset/);
-    expect(recovered).toEqual([]);
-    expect(readFileSync(lock, 'utf8')).toBe(bytes);
-    expect(await readdir(dir)).toEqual(['active.lock']);
+    });
+    expect(payload.run_id).toBe('run-new');
+    expect(recovered).toEqual([{ kind: 'unreadable-lock', run_id: null }]);
+    expect(JSON.parse(readFileSync(lock, 'utf8')).run_id).toBe('run-new');
+    await releaseRunLock(lock, 'run-new');
   });
 
-  it.each(['', '{"version":1,'])('releaseRunLock preserves an unverifiable lock (bytes: %j)', async (bytes) => {
+  it('releaseRunLock clears an unreadable lock instead of throwing', async () => {
     const dir = await scratch();
     const lock = path.join(dir, 'active.lock');
-    writeFileSync(lock, bytes);
-    // Empty or torn records supply no execution identity or ownership proof;
-    // routine release must retain them for explicit audited recovery.
-    await expect(releaseRunLock(lock, 'run-any')).rejects.toThrow(/unverifiable.*audited recovery/);
-    expect(readFileSync(lock, 'utf8')).toBe(bytes);
-    expect(await readdir(dir)).toEqual(['active.lock']);
+    writeFileSync(lock, '');
+    // Pre-fix this threw SyntaxError, wedging abort's release_lock action
+    // after the history archive had already recorded the run as aborted.
+    await releaseRunLock(lock, 'run-any');
+    expect(existsSync(lock)).toBe(false);
   });
 });
 

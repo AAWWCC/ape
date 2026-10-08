@@ -1,7 +1,6 @@
-import { localExecutionIdentity } from '../lib/runtime/host-identity.js';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -16,7 +15,7 @@ afterEach(async () => {
   );
 });
 
-async function fixture({ fail = false, nativeFail = false, sourceType = 'local', unrelatedMarketplace = false, omitRuntimeFile = false, omitGateRunner = false, omitFileStats = false, omitHostIdentity = false } = {}) {
+async function fixture({ fail = false, nativeFail = false, sourceType = 'local', unrelatedMarketplace = false, omitRuntimeFile = false, omitGateRunner = false, omitFileStats = false } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'ape-cache-retention-test-'));
   temporaryRoots.push(root);
   const pluginRoot = path.join(root, 'plugin');
@@ -74,12 +73,9 @@ async function fixture({ fail = false, nativeFail = false, sourceType = 'local',
   if (!omitGateRunner) {
     await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'runner.js'), "import './spawn.js';\n");
   }
-  await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'spawn.js'), "import './file-stats.js';\nimport './host-identity.js';\nexport const fixture = true;\n");
+  await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'spawn.js'), "import './file-stats.js';\nexport const fixture = true;\n");
   if (!omitFileStats) {
     await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'file-stats.js'), 'export const fixture = true;\n');
-  }
-  if (!omitHostIdentity) {
-    await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'host-identity.js'), 'export const fixture = true;\n');
   }
   await writeFile(path.join(pluginRoot, 'package.json'), '{"name":"ape-fixture","type":"module"}\n');
   await writeFile(path.join(pluginRoot, 'hooks', 'hooks.json'), '{}\n');
@@ -202,7 +198,7 @@ describe('Codex plugin cache retention reinstall', () => {
     const lock = path.join(context.codexHome, 'dev-plugins', '.ape-reinstall-ape-dev.lock');
     await mkdir(lock);
     await writeFile(path.join(lock, 'owner'), 'interrupted-owner');
-    await writeFile(path.join(lock, 'process'), JSON.stringify({ version: 1, token: 'interrupted-owner', pid, host: localExecutionIdentity(), state: 'active' }));
+    await writeFile(path.join(lock, 'process'), JSON.stringify({ version: 1, token: 'interrupted-owner', pid, host: hostname(), state: 'active' }));
     const result = await runFixture(context);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('Verified registered source and selected version');
@@ -256,7 +252,6 @@ describe('Codex plugin cache retention reinstall', () => {
       "import './spawn.js';\n",
     );
     expect(await readFile(path.join(installed, 'lib', 'runtime', 'file-stats.js'), 'utf8')).toBe('export const fixture = true;\n');
-    expect(await readFile(path.join(installed, 'lib', 'runtime', 'host-identity.js'), 'utf8')).toBe('export const fixture = true;\n');
     expect(JSON.parse(await readFile(path.join(installed, 'package.json'), 'utf8')).type).toBe('module');
     expect((await readdir(installed)).sort()).toEqual(
       ['.codex-plugin', '.mcp.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'dist', 'hooks', 'lib', 'package.json', 'prompts', 'skills'].sort(),
@@ -382,16 +377,6 @@ describe('Codex plugin cache retention reinstall', () => {
     expect(
       JSON.parse(await readFile(path.join(context.pluginRoot, '.codex-plugin', 'plugin.json'), 'utf8')).version,
     ).toBe(context.oldVersion);
-  });
-
-  it('fails preflight before invoking Codex when the execution-identity dependency is absent', async () => {
-    const context = await fixture({ omitHostIdentity: true });
-    const result = await runFixture(context);
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain('staged plugin is missing required runtime file: lib/runtime/host-identity.js');
-    await expect(readFile(context.fakeCodexLog, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await readFile(path.join(context.oldRoot, 'old-task-sentinel.txt'), 'utf8')).toBe('still available\n');
-    expect(await readdir(context.cacheRoot)).toEqual([context.oldVersion]);
   });
 
   it('fails preflight before invoking Codex when the shared file-stat dependency is absent', async () => {

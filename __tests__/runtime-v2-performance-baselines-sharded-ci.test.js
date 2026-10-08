@@ -181,7 +181,6 @@ describe('committed duration inventory and deterministic CI partition', () => {
     const durations = JSON.parse(readFileSync(join(ROOT, '.github', 'test-durations.json'), 'utf8'));
     expect(Object.keys(durations)).toEqual([...inventory].sort());
     expect(Object.values(durations).every((value) => Number.isFinite(value) && value > 0)).toBe(true);
-    expect(durations['__tests__/runtime-v2-host-identity.test.js']).toBe(839);
   });
 
   it('assigns a disjoint smoke set and every other test exactly once across three nonempty stable shards', async () => {
@@ -229,7 +228,6 @@ describe('committed duration inventory and deterministic CI partition', () => {
       '__tests__/runtime-v2-file-stat-compat.test.js',
       '__tests__/runtime-v2-gate-launch-ownership-windows.test.js',
       '__tests__/runtime-v2-hook-output-flush.test.js',
-      '__tests__/runtime-v2-host-identity.test.js',
       '__tests__/runtime-v2-lock-protocol.test.js',
       '__tests__/runtime-v2-native-platform.test.js',
       '__tests__/runtime-v2-native-recovery.test.js',

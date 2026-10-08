@@ -221,30 +221,10 @@ export async function load(url, context, next) {
   await writeFile(path.join(f.outside, 'offline-loader.mjs'), loader);
   const owner = `
 import fs from 'node:fs';
-import os from 'node:os';
-import cp from 'node:child_process';
 import path from 'node:path';
 import { syncBuiltinESMExports, register } from 'node:module';
 import { pathToFileURL } from 'node:url';
 const request = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-// Only this isolated controller observes the renamed host; the OS and the
-// detached suite environment remain untouched.
-if (request.observedHostname) {
-  os.hostname = () => request.observedHostname;
-  syncBuiltinESMExports();
-}
-if (request.identityUnavailable) {
-  const unavailable = () => { throw Object.assign(new Error('fixture identity provider unavailable'), {code:'EACCES'}); };
-  for (const method of ['readFileSync', 'readlinkSync', 'statSync']) {
-    const real = fs[method];
-    fs[method] = (...args) => ['boot_id', '/ns/pid', 'machine-id'].some((part) => String(args[0]).includes(part)) ? unavailable() : real(...args);
-  }
-  for (const method of ['execFileSync', 'spawnSync']) {
-    const real = cp[method];
-    cp[method] = (...args) => /sysctl|powershell|pwsh/i.test(String(args[0])) ? unavailable() : real(...args);
-  }
-  syncBuiltinESMExports();
-}
 register(pathToFileURL(path.join(request.outside, 'offline-loader.mjs')));
 const service = await import(${JSON.stringify(moduleUrl('service.js'))});
 const { runtimePaths } = await import(${JSON.stringify(moduleUrl('paths.js'))});
@@ -314,12 +294,6 @@ try {
     result = await service.abortRun(request.project, 'fixture explicit abort');
   } else if (request.action === 'resume') {
     result = await service.resumeRun(request.project);
-  } else if (request.action === 'diagnose') {
-    const { statusRun } = await import(${JSON.stringify(moduleUrl('status-service.js'))});
-    const { doctor } = await import(${JSON.stringify(moduleUrl('doctor.js'))});
-    const status = await statusRun(request.project);
-    const health = await doctor(request.project);
-    result = { status, healthy: health.healthy, checks: health.checks };
   } else if (request.action === 'regate') {
     result = await service.regateRun(request.project);
   } else if (request.action === 'ship') {
@@ -356,7 +330,7 @@ async function invoke(f, request, childEnv = {}) {
   const id = `${Date.now()}-${invocationSequence++}`;
   const response = path.join(f.outside, `${id}.response.json`);
   const input = path.join(f.outside, `${id}.request.json`);
-  await writeFile(input, JSON.stringify({ project: f.project, outside: f.outside, state: f.state, response, observedHostname: f.observedHostname, ...request }));
+  await writeFile(input, JSON.stringify({ project: f.project, outside: f.outside, state: f.state, response, ...request }));
   const env = gitFixtureEnv();
   for (const key of Object.keys(env)) if (/^(APE_|CODEX_CWD$|CLAUDE_PROJECT_DIR$|NODE_OPTIONS$)/.test(key)) delete env[key];
   Object.assign(env, childEnv);
@@ -471,41 +445,6 @@ async function finishService(f, entry) {
 }
 
 describe('durable gate ownership at the state-publication sink (native)', () => {
-  it.each(['live', 'completed'])('recovers %s authenticated work after the controller observes a hostname change', async (phase) => {
-    const f = await fixture();
-    await serviceHarness(f);
-    const owner = await invoke(f, { action: 'launch', entry: 'receipt', sink: 'active', fault: 'crash', consume: phase === 'completed' });
-    if (phase === 'completed') await consumptionBarrier(f, owner);
-    else await until(() => exists(path.join(f.outside, 'publication-barrier.json')), 'live publication barrier');
-    const ownershipDir = path.join(f.paths.runtime, 'gate-suite');
-    const ownershipNames = (await readdir(ownershipDir)).filter((name) => name.endsWith('.ownership.json'));
-    expect(ownershipNames).toHaveLength(1);
-    const ownershipFile = path.join(ownershipDir, ownershipNames[0]);
-    const original = await json(ownershipFile);
-    const first = (await records(f))[0];
-    if (phase === 'live') expect(alive(first.descendant)).toBe(true);
-    else {
-      const proof = await readGateProof(original);
-      expect(proof).toMatchObject({ cleanup: { status: 'confirmed' }, producers: { result_published: true, heartbeat_drained: true } });
-      expect(alive(first.descendant)).toBe(false);
-    }
-    owner.child.kill('SIGKILL');
-    await owner.exited;
-    f.observedHostname = 'renamed-controller.invalid';
-    for (const action of ['resume', 'recover', 'next']) {
-      const recovery = await invoke(f, { action, entry: 'receipt' });
-      expect((await recovery.result()).error).toBeUndefined();
-      await recovery.exited;
-      const retained = await json(ownershipFile);
-      expect(retained.generation).toBe(original.generation);
-      expect(retained.watch.pid).toBe(original.watch.pid);
-      expect(await records(f)).toHaveLength(1);
-    }
-    await finishService(f, 'receipt');
-    expect(await records(f), 'a hostname change must never repeat authenticated work').toHaveLength(1);
-    expect(alive(first.descendant)).toBe(false);
-  }, 90_000);
-
   it.each(['receipt', 'regate', 'ship'])('abort retires unpublished %s work and stays sealed through every recovery entry', async (entry) => {
     const f = await fixture();
     if (entry === 'ship') {
@@ -721,107 +660,6 @@ async function pollToEnd(f, watch, state = f.state, config = f.config) {
   }
 }
 describe('generation identity and conservative legacy recovery', () => {
-  it.each(['legacy', 'malformed', 'foreign'])('blocks a %s job identity with an unchanged valid reservation through public recovery', async (kind) => {
-    const f = await fixture();
-    await serviceHarness(f);
-    const watch = await start(f);
-    const first = (await records(f))[0];
-    const reservationBytes = await readFile(watch.ownership_file);
-    const reservation = JSON.parse(reservationBytes);
-    const originalJobBytes = await readFile(watch.job_file);
-    const originalJob = JSON.parse(originalJobBytes);
-    expect(originalJob.host).toBe(reservation.host);
-    expect(reservation.watch.host).toBe(reservation.host);
-    const host = kind === 'legacy' ? hostname() : kind === 'malformed' ? '' :
-      originalJob.host.replace(/[a-f0-9](?=[^a-f0-9]*$)/, (digit) => digit === '0' ? '1' : '0');
-    expect(host).not.toBe(originalJob.host);
-    // Change only the persisted job, after real broker registration. Keep the
-    // reservation, embedded watch and broker authentication byte-for-byte intact.
-    await atomicWriteJson(watch.job_file, { ...originalJob, host });
-    const jobBytes = await readFile(watch.job_file);
-    await atomicWriteJson(f.paths.active, { ...f.state, status: 'gating', gates_watch: watch });
-    const retained = async () => {
-      expect((await readFile(watch.ownership_file)).equals(reservationBytes), 'refusal must retain the original reservation bytes').toBe(true);
-      expect((await readFile(watch.job_file)).equals(jobBytes), 'unusable job identity must not be relabeled or replaced').toBe(true);
-      expect(await records(f), 'recovery must not launch another suite').toHaveLength(1);
-      for (const pid of [watch.pid, reservation.broker_pid, first.pid, first.descendant]) {
-        expect(alive(pid), 'identity refusal must not retire the real owned processes').toBe(true);
-      }
-    };
-    // Diagnose before any mutating recovery so status cannot merely echo an
-    // already-blocked state and an unrelated doctor failure cannot satisfy it.
-    const diagnostic = await invoke(f, { action: 'diagnose' });
-    const diagnosed = await diagnostic.result();
-    await diagnostic.exited;
-    expect(diagnosed.error).toBeUndefined();
-    expect(diagnosed.result.status.run.status).toBe('blocked');
-    expect(diagnosed.result.status.run.block_reason).toMatch(/identity|execution/i);
-    expect(diagnosed.result.healthy).toBe(false);
-    expect(diagnosed.result.checks.find((check) => check.name === 'gate-execution-identity')).toMatchObject({ passed: false });
-    await retained();
-    for (const action of ['next', 'resume', 'next']) {
-      const controller = await invoke(f, { action });
-      const response = await controller.result();
-      await controller.exited;
-      expect(response.error).toBeUndefined();
-      expect(response.result.actions?.some((item) => item.type === 'gating_pending'), 'unusable job identity must terminate recovery instead of requesting another poll').not.toBe(true);
-      const active = await json(f.paths.active);
-      const saved = await json(path.join(f.paths.runs, active.run_id + '.json'));
-      for (const state of [active, saved]) {
-        expect(state.status).toBe('blocked');
-        expect(state.stage).toBe('gates');
-        expect(state.block_reason).toMatch(/identity|execution/i);
-        expect(state.block_reason).toMatch(/retain|recover|retire/i);
-        expect(state.gates?.checks?.full_suite?.passed).not.toBe(true);
-        expect(state.gates_watch?.nonce).toBe(watch.nonce);
-        expect(state.gates_watch?.pid).toBe(watch.pid);
-      }
-      await retained();
-    }
-    // Restore the synthetic fault only after every refusal assertion, then
-    // require normal authenticated completion and real descendant retirement.
-    await writeFile(watch.job_file, originalJobBytes);
-    await writeFile(path.join(f.outside, 'one.release'), 'go');
-    await pollToEnd(f, watch);
-    expect(alive(first.descendant)).toBe(false);
-    await expectNoOverlap(f);
-  }, 80_000);
-
-  it.each(['legacy', 'foreign', 'malformed', 'unavailable'])('reports %s identity as actionable through next, resume, status and doctor', async (kind) => {
-    const f = await fixture();
-    await serviceHarness(f);
-    const watch = await start(f);
-    const first = (await records(f))[0];
-    const original = await json(watch.ownership_file);
-    const host = kind === 'unavailable' ? original.host : kind === 'legacy' ? hostname() : kind === 'malformed' ? '' :
-      original.host.replace(/[a-f0-9](?=[^a-f0-9]*$)/, (digit) => digit === '0' ? '1' : '0');
-    if (kind === 'foreign') expect(host).not.toBe(original.host);
-    // Synthetic persisted fault, after real registration and before the
-    // public recovery sink. The broker's authenticated state is unchanged.
-    await atomicWriteJson(watch.ownership_file, {...original, host, watch:{...original.watch,host}});
-    await atomicWriteJson(f.paths.active, {...f.state, status:'gating', gates_watch:watch});
-    const bytes = await readFile(watch.ownership_file);
-    for (const action of ['next', 'resume']) {
-      const controller = await invoke(f, {action, identityUnavailable:kind === 'unavailable'});
-      const response = await controller.result();
-      await controller.exited;
-      if (response.error) expect(response.error).toMatch(/identity|execution|boot|unavailable/i);
-      const state = await json(f.paths.active);
-      if (!response.error) expect(state.status, 'permanently unusable identity is not ordinary progressing tests').not.toBe('gating');
-      expect(state.gates?.checks?.full_suite?.passed).not.toBe(true);
-      expect(await records(f)).toHaveLength(1);
-      expect((await readFile(watch.ownership_file)).equals(bytes)).toBe(true);
-      expect(alive(first.descendant)).toBe(true);
-    }
-    const diagnostic = await invoke(f, {action:'diagnose', identityUnavailable:kind === 'unavailable'});
-    const response = await diagnostic.result();
-    await diagnostic.exited;
-    expect(response.error).toBeUndefined();
-    expect(response.result.healthy).toBe(false);
-    expect(JSON.stringify(response.result.status)).toMatch(/identity|legacy|execution/i);
-    expect(response.result.checks.some((check) => check.passed === false && /identity|legacy|execution/i.test(JSON.stringify(check)))).toBe(true);
-  }, 60_000);
-
   it('gives repeated cache-equivalent generations distinct scratch paths and nonces', async () => {
     const f = await fixture();
     const first = await start(f);

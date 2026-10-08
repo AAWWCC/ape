@@ -149,7 +149,6 @@
   "__tests__/runtime-v2-hooks-project-root.test.js": 4607,
   "__tests__/runtime-v2-hooks-response-shape.test.js": 2,
   "__tests__/runtime-v2-host-compatibility-contract.test.js": 1005,
-  "__tests__/runtime-v2-host-identity.test.js": 839,
   "__tests__/runtime-v2-host-ticket-binding.test.js": 4271,
   "__tests__/runtime-v2-impacted-gate.test.js": 15341,
   "__tests__/runtime-v2-importer-determinism-toctou.test.js": 124,

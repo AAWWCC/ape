@@ -1,8 +1,7 @@
-import { localExecutionIdentity } from '../lib/runtime/host-identity.js';
 import { createHmac, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { pollGateSuite } from '../lib/runtime/gate-watch.js';
@@ -26,7 +25,7 @@ async function pollFixture(strategy, oversized) {
   const files = gateGenerationFiles(paths, generation);
   const watch = {
     nonce: generation, generation, cache_key: 'fixture-key', tree_sha: 'a'.repeat(40),
-    ownership_file: gateOwnershipPath(paths, state.run_id), host: localExecutionIdentity(),
+    ownership_file: gateOwnershipPath(paths, state.run_id), host: hostname(),
     job_file: files.job, artifact_file: files.artifact, heartbeat_file: files.heartbeat,
     command: 'fixture', plan: { command: 'fixture', args: [] },
     runner_order: ['fixture'], runner_index: 0,
@@ -36,7 +35,7 @@ async function pollFixture(strategy, oversized) {
   const record = await reserveGateOwnership(root, paths, state, watch);
   await atomicWriteJson(files.job, {
     nonce: generation, run_id: state.run_id, ownership_file: watch.ownership_file,
-    host: watch.host, project_dir: realpathSync(root), plan: watch.plan, cache_key: watch.cache_key,
+    project_dir: realpathSync(root), plan: watch.plan, cache_key: watch.cache_key,
   });
   const payload = {
     cleanup: { status: 'confirmed' },

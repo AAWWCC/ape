@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { acquireRunLock, releaseRunLock } from '../lib/runtime/lock.js';
@@ -94,17 +94,12 @@ function deadPid() {
 // A dead holder's lock file, mirroring the acquireRunLock payload shape:
 // same-host with a genuinely dead pid, so recovering it under recoverStale is
 // legitimate staleness by the file-lock's own criteria (F9).
-async function staleLockBytes(runId) {
-  const dir = await scratch();
-  const probe = path.join(dir, 'identity.lock');
-  const current = await acquireRunLock(probe, 'identity-fixture');
-  await releaseRunLock(probe, 'identity-fixture');
+function staleLockBytes(runId) {
   return `${JSON.stringify({
-    ...current,
     version: 1,
     run_id: runId,
     pid: deadPid(),
-    host: current.host,
+    host: hostname(),
     acquired_at: new Date(Date.now() - 10 * 60_000).toISOString(),
   })}\n`;
 }
@@ -153,7 +148,7 @@ function expectLawfulSettlement(name, outcome) {
 // live: the window. Every gate carries a FALLBACK_MS timeout so a fixed tree
 // that restructures the steal degrades transparently.
 async function stageAbsenceWindow(lockPath) {
-  await writeFile(lockPath, await staleLockBytes('run-dead'), { encoding: 'utf8', mode: 0o600 });
+  await writeFile(lockPath, staleLockBytes('run-dead'), { encoding: 'utf8', mode: 0o600 });
 
   const gates = {
     bParked: deferred(),
@@ -376,7 +371,7 @@ describe('APE v2 file lock: the steal absence window must never admit a second r
   it('still recovers a genuinely dead-pid stale lock under recoverStale and still refuses a live lock', async () => {
     const dir = await scratch();
     const lockPath = path.join(dir, 'active.lock');
-    await writeFile(lockPath, await staleLockBytes('run-dead'), { encoding: 'utf8', mode: 0o600 });
+    await writeFile(lockPath, staleLockBytes('run-dead'), { encoding: 'utf8', mode: 0o600 });
     // Without a recovery credit even a dead-pid lock is refused.
     await expect(acquireRunLock(lockPath, 'run-fresh')).rejects.toThrow(/another APE writing run is active/);
     const payload = await acquireRunLock(lockPath, 'run-fresh', { recoverStale: true });

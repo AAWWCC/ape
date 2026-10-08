@@ -41,7 +41,6 @@ async function fixture() {
     'lib/runtime/runner.js': '',
     'lib/runtime/spawn.js': '',
     'lib/runtime/file-stats.js': '',
-    'lib/runtime/host-identity.js': '',
     'prompts/common.md': 'fixture',
     'skills/run/SKILL.md': 'fixture',
     'THIRD_PARTY_NOTICES.md': 'fixture',

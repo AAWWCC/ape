@@ -1,6 +1,6 @@
 import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
@@ -8,7 +8,6 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CURRENT_EXECUTION_POLICY_DEFAULTS } from '../lib/runtime/pipeline-limits.js';
 import { finalizeTicket } from '../lib/runtime/schemas.js';
-import { localExecutionIdentity } from '../lib/runtime/host-identity.js';
 
 const RENDERER = fileURLToPath(new URL('../bin/ape-statusline.mjs', import.meta.url));
 const PACKAGE_BUILDER = fileURLToPath(new URL('../scripts/build-plugin-packages.mjs', import.meta.url));
@@ -696,7 +695,7 @@ describe('ape v2 statusline renderer', () => {
     writeFileSync(join(runtime, 'active.lock'), JSON.stringify({
       version: 1,
       run_id: state.run_id,
-      host: localExecutionIdentity(),
+      host: hostname(),
       pid: process.pid,
       acquired_at: new Date().toISOString(),
       nonce: '12345678-1234-4234-8234-123456789abc',
@@ -750,7 +749,7 @@ describe('ape v2 statusline renderer', () => {
     writeFileSync(join(runtime, 'active.lock'), JSON.stringify({
       version: 1,
       run_id: 'run-codex-bound-statusline',
-      host: localExecutionIdentity(),
+      host: hostname(),
       pid: process.pid,
       acquired_at: new Date().toISOString(),
       nonce: '12345678-1234-4234-8234-123456789abc',
@@ -799,7 +798,7 @@ describe('ape v2 statusline renderer', () => {
     writeActive(dir, state);
     mkdirSync(intents, { recursive: true });
     writeFileSync(join(runtime, 'active.lock'), JSON.stringify({
-      version: 1, run_id: ticket.run_id, host: localExecutionIdentity(), pid: process.pid,
+      version: 1, run_id: ticket.run_id, host: hostname(), pid: process.pid,
       acquired_at: new Date().toISOString(), nonce: '12345678-1234-4234-8234-123456789abc',
     }));
     const intentFile = join(intents, createHash('sha256').update(ticket.ticket_id).digest('hex') + '.json');
@@ -1350,7 +1349,7 @@ describe('ape v2 statusline renderer', () => {
     const validLock = {
       version: 1,
       run_id: 'run-hostile-dispatch-artifacts',
-      host: localExecutionIdentity(),
+      host: hostname(),
       pid: process.pid,
       acquired_at: new Date().toISOString(),
       nonce: '12345678-1234-4234-8234-123456789abc',
@@ -1415,20 +1414,7 @@ describe('ape v2 statusline renderer', () => {
     symlinkSync(intentTarget, intentFile);
     expect(renderDiagnostic()).toContain('dispatch_pending');
 
-    // Reap a real child so the dead-current control cannot pass merely because
-    // a synthetic numeric PID is malformed or belongs to a live process.
-    const exited = spawnSync(process.execPath, ['-e', ''], { timeout: 3000 });
-    expect(exited.error).toBeUndefined();
-    expect(exited.status).toBe(0);
-    expect(exited.pid).toBeGreaterThan(1);
-    expect(() => process.kill(exited.pid, 0)).toThrowError(expect.objectContaining({ code: 'ESRCH' }));
-    const foreignHost = validLock.host.slice(0, -1) + (validLock.host.endsWith('0') ? '1' : '0');
     const lockCases = [
-      ['current identity with exited owner', JSON.stringify({ ...validLock, pid: exited.pid })],
-      ['legacy hostname with live owner', JSON.stringify({ ...validLock, host: hostname() })],
-      ['legacy hostname with exited owner', JSON.stringify({ ...validLock, host: hostname(), pid: exited.pid })],
-      ['foreign identity with live owner', JSON.stringify({ ...validLock, host: foreignHost })],
-      ['foreign identity with exited owner', JSON.stringify({ ...validLock, host: foreignHost, pid: exited.pid })],
       ['array shape', JSON.stringify([validLock])],
       ['version discriminator', JSON.stringify({ ...validLock, version: 2 })],
       ['negative pid', JSON.stringify({ ...validLock, pid: -1 })],

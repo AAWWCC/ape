@@ -38,7 +38,6 @@ export const NATIVE_RUNTIME_TEST_FILES = Object.freeze([
   '__tests__/runtime-v2-file-stat-compat.test.js',
   '__tests__/runtime-v2-gate-launch-ownership-windows.test.js',
   '__tests__/runtime-v2-hook-output-flush.test.js',
-  '__tests__/runtime-v2-host-identity.test.js',
   '__tests__/runtime-v2-lock-protocol.test.js',
   '__tests__/runtime-v2-native-platform.test.js',
   '__tests__/runtime-v2-native-recovery.test.js',

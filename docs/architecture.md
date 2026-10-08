@@ -67,35 +67,6 @@ History, audits, prepared transactions, changed files, and active/sealed state r
 Use `ape_history maintenance-status` to inspect retention or `compact-artifacts` for an audited,
 bounded cleanup.
 
-## Local execution identity
-
-Gate ownership, broker/proof checks, run locks and governed directory locks use
-`ape-execution-v1` tokens derived inside `host-identity.js`. Linux combines the
-kernel boot UUID with the PID namespace; macOS uses `kern.bootsessionuuid`;
-Windows queries the kernel BootIdentifier through the fixed system PowerShell
-path without profiles or caller-supplied module paths. Provider output is
-validated, hashed and cached for the process lifetime. Raw platform identifiers
-are not diagnostics. Hostnames, project files, caller arguments and environment
-identity overrides grant no ownership authority.
-
-The token identifies an OS execution context, not a process lifetime or an
-authentication secret. Gate generations still require their authenticated broker
-challenge, proof, retirement and producer-drain evidence. Locks retain their
-atomic creation/capture, byte and inode checks, owner tokens and handback barriers;
-only proven same-execution process absence permits stale recovery. Foreign,
-legacy, malformed or unavailable identity cannot authorize adoption, signaling,
-replacement or success. This trusts installed runtime code, system identity
-providers and cooperative writers; same-privilege modification of those trusted
-components is outside that boundary.
-
-Hostname changes preserve current ownership. Reboots and Linux PID-namespace
-changes do not. Legacy hostname-only records are retained without relabeling.
-New task staging uses `.task-create.v2` with an execution-identity digest; legacy
-staging remains available for explicit inspection instead of automatic deletion.
-Status and doctor report unusable identity as a recovery problem, not progressing
-tests. Retire active work with its creating runtime before a normal reviewed
-rollback; older runtimes must not operate on newer active ownership.
-
 ## Loaded bundles
 
 Hosts run the bundles they loaded from `dist/`, not the current source. A rebuild alone does not
