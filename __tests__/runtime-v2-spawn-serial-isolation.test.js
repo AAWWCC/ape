@@ -2,6 +2,7 @@ import { readdir } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { resolveConfig as resolveVitestConfig } from 'vitest/node';
 
 // Roadmap: spawn-test-parallelism-isolation. The 2026-07-20 spike
 // (run-fixture-7e7287db5e67) showed that under the file-parallel forks
@@ -138,6 +139,34 @@ async function getProject(name) {
   return projects.find((project) => project.name === name);
 }
 
+/** Resolve fixtures with the installed runner, without loading the repo config
+ * or starting a test run. In Vitest 4, fileParallelism:false forces maxWorkers
+ * to 1; removed poolOptions controls have no effect. */
+async function resolveTestConfig(test) {
+  const { vitestConfig } = await resolveVitestConfig({
+    ...test,
+    root: ROOT,
+    config: false,
+    watch: false,
+  });
+  return vitestConfig;
+}
+
+/** Use the same effective-contract guard for live config and adversarial inputs.
+ * Isolated projects with one worker and default groupOrder are scheduled as
+ * serial files by Vitest 4, including the supported maxWorkers:1 equivalent. */
+async function assertSerialFiles(test) {
+  const effective = await resolveTestConfig(test);
+  expect(
+    effective.maxWorkers,
+    'spawn-serial must serialize file execution with fileParallelism: false or maxWorkers: 1',
+  ).toBe(1);
+  expect(effective.isolate, 'spawn-serial must retain per-file isolation').toBe(true);
+  expect(effective.pool, 'spawn-serial must retain forks process isolation').toBe('forks');
+  expect(effective.sequence.groupOrder, 'spawn-serial must retain the default scheduling group').toBe(0);
+  return effective;
+}
+
 describe('spawn-serial vitest project isolates spawn-heavy gate-integration tests', () => {
   it("(a) defines a 'spawn-serial' project alongside 'default'", async () => {
     const names = (await loadProjects()).map((project) => project.name);
@@ -188,20 +217,57 @@ describe('spawn-serial vitest project isolates spawn-heavy gate-integration test
     }
   });
 
-  it('(d) spawn-serial sets a serialization knob so its files run one at a time', async () => {
+  it('(d) spawn-serial effectively runs one isolated file at a time in installed Vitest', async () => {
     const spawnSerial = await getProject('spawn-serial');
     expect(spawnSerial, "the 'spawn-serial' project must exist").toBeTruthy();
-    const t = spawnSerial.test;
-    const serialized =
-      t.fileParallelism === false ||
-      t.maxWorkers === 1 ||
-      t.poolOptions?.forks?.singleFork === true ||
-      t.poolOptions?.threads?.singleThread === true;
-    expect(
-      serialized,
-      'spawn-serial must serialize file execution (fileParallelism: false, maxWorkers: 1, ' +
-        'poolOptions.forks.singleFork, or poolOptions.threads.singleThread)',
-    ).toBe(true);
+    await assertSerialFiles(spawnSerial.test);
+  });
+
+  it.each([
+    ['fileParallelism:false', { fileParallelism: false }],
+    ['fileParallelism:false overrides multiple workers', { fileParallelism: false, maxWorkers: 3 }],
+    ['maxWorkers:1 with default file parallelism', { maxWorkers: 1 }],
+    ['maxWorkers:1 with enabled file parallelism', { maxWorkers: 1, fileParallelism: true }],
+  ])('accepts the installed effective serialization contract: %s', async (_name, test) => {
+    await assertSerialFiles(test);
+  });
+
+  const legacyControls = [
+    ['singleFork', { pool: 'forks', poolOptions: { forks: { singleFork: true } } }],
+    ['singleThread', { pool: 'threads', poolOptions: { threads: { singleThread: true } } }],
+  ];
+  const legacyFixtures = legacyControls.flatMap(([name, test]) => [
+    [`${name}, fileParallelism absent`, { ...test, maxWorkers: 3 }],
+    [`${name}, fileParallelism enabled`, { ...test, maxWorkers: 3, fileParallelism: true }],
+  ]);
+
+  it.each([
+    ...legacyFixtures,
+    ['no serialization control', {}],
+    ['multiple workers with default file parallelism', { maxWorkers: 3 }],
+    ['multiple workers with enabled file parallelism', { maxWorkers: 3, fileParallelism: true }],
+  ])('rejects ineffective serialization with an actionable diagnostic: %s', async (_name, test) => {
+    await expect(assertSerialFiles(test)).rejects.toThrow(
+      'spawn-serial must serialize file execution with fileParallelism: false or maxWorkers: 1',
+    );
+  });
+
+  it('rejects serialization that disables per-file isolation', async () => {
+    await expect(assertSerialFiles({ fileParallelism: false, isolate: false }))
+      .rejects.toThrow('spawn-serial must retain per-file isolation');
+  });
+
+  it('rejects a serial threads pool that loses forks process isolation', async () => {
+    await expect(assertSerialFiles({ fileParallelism: false, pool: 'threads' }))
+      .rejects.toThrow('spawn-serial must retain forks process isolation');
+  });
+
+  it('retains process isolation in the parallel default project', async () => {
+    const defaultProject = await getProject('default');
+    expect(defaultProject, "the 'default' project must exist").toBeTruthy();
+    const effective = await resolveTestConfig(defaultProject.test);
+    expect(effective.isolate).toBe(true);
+    expect(effective.pool).toBe('forks');
   });
 
   it('runs benchmark CLI lock tests only in the serial project', async () => {
