@@ -129,6 +129,14 @@ before the implementer retries. This is a scheduler-owned recovery check, not a
 new `test_intent` input. Worker-reported observations cannot replace the sealed
 `evidence.test_correction` result.
 
+During the initial test stage, capability and worker-transport recovery can carry
+unchanged authored tests into a successor's runtime observation. APE verifies the
+original test writer's committed receipt, immutable tickets, recovery transaction,
+and exact file diff before executing those paths twice against the current tree.
+The successor's receipt still attributes only its own writes. Baseline tests,
+unrecorded expired-worker output, changed inherited files, and prior-stage results
+do not become authored evidence through this handoff.
+
 An implementer in `build` or `remediation-build` can request independent coverage
 with a capability receipt naming `required_role: "test_writer"`. Its successor
 uses the same runtime-observed `test-correction` check and receives a bounded,

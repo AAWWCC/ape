@@ -68,7 +68,7 @@ async function liveTree(root) {
 // holds PowerShell after its proof flush, exposing the interval in which work
 // is retired but the broker still owns cwd/output handles. The no-proof arm
 // stops immediately before publication, after the real Job has been retired.
-async function barrierOwner(root, scenario, publish = true) {
+async function barrierOwner(root, scenario, publish = true, release = true) {
   const runnerUrl = pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../lib/runtime/runner.js')).href;
   const ownerFile = path.join(root, 'barrier-owner.mjs');
   const source = `
@@ -79,7 +79,8 @@ async function barrierOwner(root, scenario, publish = true) {
     import {syncBuiltinESMExports} from 'node:module';
     const root = ${JSON.stringify(root)};
     const original = cp.spawn;
-    let broker, closed = false, settled = false;
+    let broker, closed = false, settled = false, proofAt;
+    const order = [];
     const createServer = net.createServer;
     net.createServer = function(listener) {
       return createServer.call(this, (socket) => {
@@ -91,6 +92,27 @@ async function barrierOwner(root, scenario, publish = true) {
             // Registered after the production listener, so this event means
             // the real authentication/completion handler has already run.
             process.send({event:'proof-delivered'});
+            proofAt = performance.now();
+            order.push('proof');
+            // A new turn drains the complete promise chain, detecting an
+            // incorrect proof-only resolution before releasing the broker.
+            setImmediate(() => {
+              const retired = ${JSON.stringify(scenario)} === 'missing' ? [] :
+                ['suite.pid', 'descendant.pid'].map((name) => {
+                  const pid = Number(fs.readFileSync(path.join(root, name), 'utf8'));
+                  let alive;
+                  try { process.kill(pid, 0); alive = true; }
+                  catch (error) { alive = error.code === 'EPERM'; }
+                  return {name, alive};
+                });
+              order.push('checkpoint');
+              process.send({event:'snapshot', settled, closed, retired,
+                released:fs.existsSync(path.join(root,'broker-release'))});
+              if (${release}) {
+                order.push('release');
+                fs.writeFileSync(path.join(root,'broker-release'), 'go');
+              }
+            });
             received = '';
           }
         });
@@ -115,14 +137,13 @@ async function barrierOwner(root, scenario, publish = true) {
         args = [...args];
         args[at + 1] = Buffer.from(script, 'utf16le').toString('base64');
         broker = original.call(this, command, args, options);
-        broker.once('close', () => { closed = true; process.send({event:'broker-close'}); });
+        broker.once('close', () => { closed = true; order.push('close'); process.send({event:'broker-close'}); });
         return broker;
       }
       return original.call(this, command, args, options);
     };
     syncBuiltinESMExports();
     process.on('message', (m) => {
-      if (m === 'inspect') process.send({event:'snapshot', settled, closed});
       if (m === 'finish') process.disconnect();
     });
     const {runTestSuite} = await import(${JSON.stringify(runnerUrl)});
@@ -134,7 +155,9 @@ async function barrierOwner(root, scenario, publish = true) {
       kill_grace_ms: 300, drain_ms: 1000,
     });
     settled = true;
-    process.send({event:'result', result, closed});
+    order.push('result');
+    process.send({event:'result', result, closed, order,
+      proofElapsed:proofAt === undefined ? null : performance.now() - proofAt});
   `;
   await writeFile(ownerFile, source);
   await writeFile(path.join(root, 'boundary-suite.cjs'), `
@@ -262,19 +285,16 @@ describe.skipIf(!windows)('Windows native ownership and completion proof', () =>
       try {
         await waitFor(() => readFile(path.join(root, 'broker-held')).then(() => true, () => false), 'proof-flushed broker barrier');
         await owner.event('proof-delivered');
-        owner.child.send('inspect');
         const snapshot = await owner.event('snapshot');
         expect(snapshot.closed, 'the suffix barrier must still own the broker handles').toBe(false);
         expect(snapshot.settled, 'proof delivery alone must not resolve before broker close/drain').toBe(false);
-        if (scenario !== 'missing') {
-          for (const name of ['suite.pid', 'descendant.pid']) {
-            const pid = Number(await readFile(path.join(root, name), 'utf8'));
-            expect(alive(pid), `${name} must be retired before the proof barrier`).toBe(false);
-          }
-        }
-        await writeFile(path.join(root, 'broker-release'), 'go');
+        expect(snapshot.released).toBe(false);
+        expect(snapshot.retired).toEqual(scenario === 'missing' ? [] : [
+          {name:'suite.pid', alive:false}, {name:'descendant.pid', alive:false},
+        ]);
         const observed = await owner.event('result');
         expect(observed.closed).toBe(true);
+        expect(observed.order).toEqual(['proof', 'checkpoint', 'release', 'close', 'result']);
         const result = observed.result;
         if (scenario === 'missing') {
           expect(result).toMatchObject({passed:false, tooling_failure:true, exit_code:null});
@@ -296,6 +316,33 @@ describe.skipIf(!windows)('Windows native ownership and completion proof', () =>
       }
     }, 50_000,
   );
+
+  it('fails closed when parent-side release remains withheld past the drain deadline', async () => {
+    const root = await fixture();
+    const owner = await barrierOwner(root, 'success', true, false);
+    try {
+      await owner.event('proof-delivered');
+      const snapshot = await owner.event('snapshot');
+      expect(snapshot).toMatchObject({settled:false, closed:false, released:false,
+        retired:[{name:'suite.pid', alive:false}, {name:'descendant.pid', alive:false}]});
+      // Intentionally never release here: reproduce the old parent-delay
+      // ordering independently of CI load or the parent's polling speed.
+      const observed = await owner.event('result');
+      expect(observed.proofElapsed).toBeGreaterThanOrEqual(900);
+      expect(observed.proofElapsed).toBeLessThan(10000);
+      expect(observed.order).not.toContain('release');
+      expect(observed.result).toMatchObject({passed:false, tooling_failure:true,
+        exit_code:null});
+      // runTestSuite exposes spawn failures as tooling failures and omits
+      // cleanup; it must never manufacture confirmed cleanup on this arm.
+      expect(observed.result.cleanup).toBeUndefined();
+      expect(observed.result.output).toContain('did not close after completion proof');
+    } finally {
+      await writeFile(path.join(root, 'broker-release'), 'go');
+      await owner.event('broker-close');
+      if (owner.child.connected) owner.child.send('finish');
+    }
+  }, 50_000);
 
   it('does not promote broker close without an authenticated retirement message to success', async () => {
     const root = await fixture();

@@ -240,6 +240,71 @@ describe('shared Git fixture child environment', () => {
     expect(build()).not.toBe(process.env);
   });
 
+  it('removes mixed-case Git overrides before handing the environment to a child', async () => {
+    const build = await builder();
+    const f = fixture();
+    const parent = { ...process.env };
+    const residue = {
+      git_dir: path.join(f.root, 'missing-repository'),
+      Git_WORK_TREE: path.join(f.root, 'missing-worktree'),
+      gIt_CONFIG_COUNT: 'malformed',
+      git_CONFIG_PARAMETERS: "'commit.gpgSign=true'",
+      Git_AUTHOR_NAME: 'Injected Author',
+    };
+    const input = Object.freeze({ ...f.env, ...residue });
+    const before = { ...input };
+    const env = build(input);
+    // Windows environment keys are case-insensitive; inspect the returned
+    // object as well so this boundary is exercised on POSIX test hosts.
+    for (const key of Object.keys(residue)) expect(env).not.toHaveProperty(key);
+    const dir = f.dir('mixed-case');
+    expect(commit(dir, env)).toEqual({
+      branch: 'main',
+      identity: 'APE Test <ape-test@example.invalid>|APE Test <ape-test@example.invalid>',
+      contents: 'fixture bytes\n',
+    });
+    expect(() => git(dir, env, 'rev-parse', '--verify', 'missing-ref')).toThrow();
+    expect(input).toEqual(before);
+    expect(process.env).toEqual(parent);
+  });
+
+  it('keeps commits and annotated tags isolated when local settings change after environment construction', async () => {
+    const build = await builder();
+    const f = fixture();
+    const h = hostileFiles(f);
+    const parent = { ...process.env };
+    const input = Object.freeze({ ...f.env });
+    const before = { ...input };
+    const env = build(input);
+    const envBefore = { ...env };
+    const dir = f.dir('late-local-config');
+    git(dir, env, 'init', '-q');
+    const config = path.join(dir, '.git', 'config');
+    // Install the hostile include after sanitization, immediately before the
+    // write sinks. Command-scope protection must still dominate local config.
+    const configBytes = `${readFileSync(config, 'utf8')}\n[include]\n path = ${quote(path.join(f.root, 'included-config'))}\n`;
+    writeFileSync(config, configBytes);
+    writeFileSync(path.join(dir, 'payload.txt'), 'fixture bytes\n');
+    git(dir, env, 'add', 'payload.txt');
+    git(dir, env, 'commit', '-qm', 'late local settings');
+    git(dir, env, 'branch', 'fixture-branch');
+    expect(git(dir, env, 'branch', '--show-current').trim()).toBe('main');
+    expect(git(dir, env, 'log', '-1', '--format=%an <%ae>|%cn <%ce>').trim()).toBe(
+      'APE Test <ape-test@example.invalid>|APE Test <ape-test@example.invalid>');
+    expect(git(dir, env, 'show', 'fixture-branch:payload.txt')).toBe('fixture bytes\n');
+    git(dir, env, 'tag', '-a', 'fixture-tag', '-m', 'unsigned fixture tag');
+    expect(git(dir, env, 'cat-file', '-t', 'fixture-tag').trim()).toBe('tag');
+    expect(git(dir, env, 'rev-parse', 'fixture-tag^{}').trim()).toBe(git(dir, env, 'rev-parse', 'HEAD').trim());
+    expect(git(dir, env, 'cat-file', '-p', 'fixture-tag')).not.toContain('BEGIN PGP SIGNATURE');
+    expect(existsSync(h.hookMarker)).toBe(false);
+    expect(existsSync(h.signerMarker)).toBe(false);
+    expect(readFileSync(config, 'utf8')).toBe(configBytes);
+    for (const [file, bytes] of Object.entries(h.configBytes)) expect(readFileSync(file, 'utf8')).toBe(bytes);
+    expect(env).toEqual(envBefore);
+    expect(input).toEqual(before);
+    expect(process.env).toEqual(parent);
+  });
+
   it.each(['global', 'system', 'home-xdg', 'count', 'parameters', 'malformed-count', 'template', 'combined'])(
     'isolates commits and branches from %s poisoning', async (kind) => {
       const build = await builder();
