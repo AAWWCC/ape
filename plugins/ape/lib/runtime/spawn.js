@@ -1,10 +1,10 @@
+import { localExecutionIdentity, isLocalExecution } from './host-identity.js';
 import { spawn } from 'node:child_process';
 import { createHmac, randomUUID } from 'node:crypto';
 import { createServer, createConnection } from 'node:net';
 import path from 'node:path';
 import { constants, realpathSync } from 'node:fs';
 import { open, rename } from 'node:fs/promises';
-import { hostname } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { lstatFile, statFileHandle } from './file-stats.js';
 
@@ -69,6 +69,7 @@ export async function readGateOwnership(file) {
 // The caller has validated the project/run and derived paths before invoking
 // this transport. A recycled TCP port cannot answer the generation challenge.
 export function queryGateBroker(record, action = 'inspect') {
+  if (!isLocalExecution(record?.host) || record.watch?.host !== record.host) return Promise.resolve(null);
   return new Promise((resolve) => {
     const challenge = randomUUID();
     const request = { challenge, generation: record.generation, action };
@@ -94,6 +95,7 @@ export function queryGateBroker(record, action = 'inspect') {
 
 export async function readGateProof(record) {
   try {
+    if (!isLocalExecution(record?.host) || record.watch?.host !== record.host) return null;
     const proof = await readGateOwnership(record.proof_file);
     if (proof.generation !== record.generation || proof.mac !== ownershipMac(record.secret, proof.payload)) return null;
     // The broker's proof is immutable after exit. Its runner acknowledges
@@ -129,7 +131,7 @@ async function runGateProofBroker() {
       const job = await readGateOwnership(message.job_file);
       const record = await readGateOwnership(job.ownership_file);
       if (record.phase !== 'reserved' || record.generation !== job.nonce || record.secret !== message.secret ||
-          record.host !== hostname() || record.project_dir !== job.project_dir ||
+          record.host !== localExecutionIdentity() || job.host !== record.host || record.watch.host !== record.host || record.project_dir !== job.project_dir ||
           record.watch.job_file !== message.job_file || record.run_id !== job.run_id ||
           job.artifact_file !== record.watch.artifact_file || job.heartbeat_file !== record.watch.heartbeat_file ||
           JSON.stringify(job.plan) !== JSON.stringify(record.watch.plan)) throw new Error('ownership reservation mismatch');
@@ -210,6 +212,7 @@ async function runGateProofBroker() {
 
 export async function runOwnedGateJob(jobFile, job) {
   const record = await readGateOwnership(job.ownership_file);
+  if (!isLocalExecution(record.host) || job.host !== record.host || record.watch?.host !== record.host) return;
   if (record.phase !== 'reserved' || record.generation !== job.nonce || record.watch.job_file !== jobFile) return;
   const broker = spawn(process.execPath, [resolveSuiteSupervisorEntry(), GATE_BROKER_SENTINEL], {
     cwd: job.project_dir, detached: true, windowsHide: true,
@@ -1286,7 +1289,7 @@ export async function killProcessTree(watch, options = {}) {
     if (!watch || typeof watch !== 'object') return;
     if (watch.ownership_file || watch.generation) {
       const unknown = { status: 'unknown', cause: 'gate broker retirement could not be confirmed' };
-      if (watch.host !== hostname() || !watch.ownership_file || !watch.generation) return unknown;
+      if (watch.host !== localExecutionIdentity() || !watch.ownership_file || !watch.generation) return unknown;
       const record = await readGateOwnership(watch.ownership_file);
       if (record.host !== watch.host || record.generation !== watch.generation || record.watch.nonce !== watch.nonce ||
           record.watch.ownership_file !== watch.ownership_file || record.watch.job_file !== watch.job_file) return unknown;
@@ -1305,10 +1308,10 @@ export async function killProcessTree(watch, options = {}) {
       return unknown;
     }
     // Exact host match, mirroring the A2 respawn fence's `watch.host ===
-    // hostname()`. The old `typeof host === 'string' && host && host !==
-    // hostname()` form skipped only a non-empty MISMATCH, so a watch carrying
+    // localExecutionIdentity()`. The old `typeof host === 'string' && host && host !==
+    // localExecutionIdentity()` form skipped only a non-empty MISMATCH, so a watch carrying
     // no host at all was signalled on whatever machine happened to read it.
-    if (watch.host !== hostname()) return;
+    if (watch.host !== localExecutionIdentity()) return;
     const pid = watch.pid;
     // `pid <= 1`, NOT `pid <= 0`. POSIX kill(-1, sig) is a BROADCAST to every
     // process the caller may signal, so a watch that somehow persisted pid 1

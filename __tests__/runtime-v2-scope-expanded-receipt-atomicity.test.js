@@ -15,6 +15,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
+import { localExecutionIdentity } from '../lib/runtime/host-identity.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -328,7 +329,7 @@ vi.mock('../lib/runtime/lock.js', async (importOriginal) => {
   const control = { arm: null, fired: 0, mutationCalls: 0 };
   const replaceHeldDirectory = async (lockPath) => {
     const fs = await import('node:fs/promises');
-    const os = await import('node:os');
+    const { localExecutionIdentity } = await import('../lib/runtime/host-identity.js');
     const nodePath = await import('node:path');
     const displaced = `${lockPath}.displaced.${control.fired}`;
     await fs.rename(lockPath, displaced);
@@ -338,7 +339,7 @@ vi.mock('../lib/runtime/lock.js', async (importOriginal) => {
       version: 1,
       token: 'rival-owner-token',
       pid: process.pid,
-      host: os.hostname(),
+      host: localExecutionIdentity(),
       state: 'active',
     })}\n`);
     control.arm = null;
@@ -2729,12 +2730,17 @@ describe('APE v2 frozen recovery authority and receipt-lock ownership', () => {
     ['a missing process record', null],
     ['a malformed process record', 'not-json\n'],
     [
+      'a hostname-only legacy record even when its numeric PID is absent',
+      `${JSON.stringify({ version: 1, token: 'legacy-owner-token', pid: 2_147_483_647,
+        host: hostname(), state: 'active' })}\n`,
+    ],
+    [
       'a process record bound to a different owner token',
       `${JSON.stringify({
         version: 1,
         token: 'different-owner-token',
         pid: 2_147_483_647,
-        host: hostname(),
+        host: localExecutionIdentity(),
         state: 'active',
       })}\n`,
     ],
@@ -2744,7 +2750,7 @@ describe('APE v2 frozen recovery authority and receipt-lock ownership', () => {
         version: 1,
         token: 'legacy-owner-token',
         pid: process.pid,
-        host: hostname(),
+        host: localExecutionIdentity(),
         state: 'retiring',
       })}\n`,
     ],
@@ -2794,7 +2800,7 @@ describe('APE v2 frozen recovery authority and receipt-lock ownership', () => {
       version: 1,
       token: ownerToken,
       pid: deadPid,
-      host: hostname(),
+      host: localExecutionIdentity(),
       state: 'active',
     })}\n`);
     const stale = new Date(Date.now() - 60_000);
@@ -3054,7 +3060,7 @@ describe('APE v2 second-review recovery closure', () => {
             version: 1,
             token: 'direct-rival',
             pid: process.pid,
-            host: hostname(),
+            host: localExecutionIdentity(),
             state: 'active',
           })}\n`);
         });

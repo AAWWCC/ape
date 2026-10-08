@@ -21,6 +21,15 @@ and artifact-specific bounds still apply. Responses summarize larger records; fu
 
 ## History observability and metrics
 
+`ape_status` and `ape_config doctor` classify unusable local gate execution
+identity as `unavailable`, `legacy-or-malformed`, or `foreign-execution`.
+`ape_run next` and `resume` block such ownership rather than reporting indefinitely
+progressing tests. These diagnostics never certify descendant retirement or
+authorize deleting records. Preserve the original reservation and use explicit
+audited recovery only after verifying all owned work is retired. Normal hostname
+changes do not invalidate current execution-identity records; legacy hostname
+records cannot be migrated by inserting the current identity.
+
 `ape_history explain` shows the saved run record and its lifecycle: dispatches,
 retries, remediation, and recovery. The summary keeps preflight question IDs and
 counts, not the operator's answer text.

@@ -65,7 +65,7 @@ const REQUIRED_RUNTIME_FILES = Object.freeze([
   'hooks/hooks.json',
   'lib/runtime/runner.js',
   'lib/runtime/spawn.js',
-  'lib/runtime/file-stats.js',
+  'lib/runtime/file-stats.js', 'lib/runtime/host-identity.js',
   'package.json',
   'prompts/common.md',
   'skills/run/SKILL.md',

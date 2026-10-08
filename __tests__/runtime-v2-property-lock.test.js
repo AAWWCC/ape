@@ -1,8 +1,9 @@
+import { localExecutionIdentity } from '../lib/runtime/host-identity.js';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
-import { hostname, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as fc from 'fast-check';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -96,7 +97,7 @@ async function scratch() {
   return mkdtemp(path.join(tmpdir(), 'ape-property-lock-'));
 }
 
-const PRE_STATES = ['absent', 'dead-pid', 'live', 'zero-byte', 'garbage'];
+const PRE_STATES = ['absent', 'dead-pid', 'live', 'legacy-dead', 'zero-byte', 'garbage'];
 
 const burstArb = fc.record({
   preState: fc.constantFrom(...PRE_STATES),
@@ -112,10 +113,13 @@ describe('APE v2 run-lock properties: generated acquire/release/steal/crash inte
           const lock = path.join(dir, 'active.lock');
           let preContent = null;
           if (preState === 'dead-pid') {
-            preContent = `${JSON.stringify({ version: 1, run_id: 'run-dead', pid: deadPid(), host: hostname() })}\n`;
+            preContent = `${JSON.stringify({ version: 1, run_id: 'run-dead', pid: deadPid(), host: localExecutionIdentity() })}\n`;
             await writeFile(lock, preContent);
           } else if (preState === 'live') {
-            preContent = `${JSON.stringify({ version: 1, run_id: 'run-live', pid: process.pid, host: hostname() })}\n`;
+            preContent = `${JSON.stringify({ version: 1, run_id: 'run-live', pid: process.pid, host: localExecutionIdentity() })}\n`;
+            await writeFile(lock, preContent);
+          } else if (preState === 'legacy-dead') {
+            preContent = `${JSON.stringify({ version: 1, run_id: 'run-legacy', pid: deadPid(), host: 'legacy-hostname' })}\n`;
             await writeFile(lock, preContent);
           } else if (preState === 'zero-byte') {
             preContent = '';
@@ -142,16 +146,16 @@ describe('APE v2 run-lock properties: generated acquire/release/steal/crash inte
             );
           }
           const anyRecover = contenders.some((contender) => contender.recoverStale);
-          if (preState === 'live') {
-            // A live holder is never stolen, whatever the recoverStale flags.
+          if (['live', 'legacy-dead', 'zero-byte', 'garbage'].includes(preState)) {
+            // Live or unverifiable ownership is retained regardless of recovery flags.
             expect(winners.length).toBe(0);
             expect(await readFile(lock, 'utf8')).toBe(preContent);
-          } else if (preState === 'absent' || anyRecover) {
-            // A free lock, or a dead/corrupt generation with a recovery
+          } else if (preState === 'absent' || (preState === 'dead-pid' && anyRecover)) {
+            // A free lock, or a verified dead generation with a recovery
             // credit in the burst, always yields exactly one winner.
             expect(winners.length).toBe(1);
           } else {
-            // Dead or corrupt bytes with no recovery credit: everyone refuses
+            // Verified dead bytes with no recovery credit: everyone refuses
             // and the observed bytes survive untouched.
             expect(winners.length).toBe(0);
             expect(await readFile(lock, 'utf8')).toBe(preContent);

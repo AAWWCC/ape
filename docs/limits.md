@@ -121,6 +121,16 @@ of child exit; [Node documents this for synchronous child processes](https://nod
 
 ## Storage and observations
 
+Local ownership identity is limited to one OS boot execution (and, on Linux, one
+PID namespace). macOS and Windows system-provider invocations have a 5-second
+timeout and 16 KiB output limit. Unsupported platforms, unavailable providers,
+malformed output and nonstandard Windows system locations fail closed. Windows
+currently requires the trusted system executable under `C:\Windows`; environment
+overrides cannot select another provider. Hostname changes are tolerated, but a
+boot identity is not proof that a numeric PID still belongs to the same process.
+Legacy or unverifiable records remain retained until explicit audited recovery
+after retirement is independently verified. See [architecture](architecture.md#local-execution-identity).
+
 | Family | Current behavior and reason |
 | --- | --- |
 | State and diagnostic archive | **Aligned:** 8 MiB serialized JSON envelope and depth 34, derived from the ingress depth of 32 plus the two enclosing state levels. Wrapping a valid receipt or preflight artifact no longer makes it unreadable. The former nested 256-entry/4,096-object archive decoder no longer rejects supported larger records. Admission's complete 2,048-path evidence participates in the archived hash. Public diagnostic samples remain smaller. |

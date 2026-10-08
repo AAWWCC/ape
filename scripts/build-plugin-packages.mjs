@@ -30,7 +30,7 @@ const DIST_FILES = Object.freeze([
   'ape-larp.bundle.mjs',
   'ape-mcp.bundle.mjs',
 ]);
-const RUNTIME_FILES = Object.freeze(['runner.js', 'spawn.js', 'file-stats.js']);
+const RUNTIME_FILES = Object.freeze(['runner.js', 'spawn.js', 'file-stats.js', 'host-identity.js']);
 const CLAUDE_STATUSLINE_FILES = Object.freeze([
   ['lib/runtime', 'input-guard.js'],
   ['lib/runtime', 'pipeline-limits.js'],

@@ -449,6 +449,15 @@ child. This manual desktop procedure does not enable the automatic adapter.
 
 ## Recovery development rule
 
+For gate or lock execution-identity failures, preserve reservations, proof files,
+producer acknowledgements and task staging. Check the reported unavailable,
+foreign-execution or legacy/malformed classification. A hostname change alone
+does not invalidate current records. A reboot, namespace change or legacy record
+cannot establish retirement, even when its numeric PID is absent. Verify work
+and descendants are retired before an explicit audited recovery; never edit
+runtime identity fields to make an old record look current. Roll back through a
+reviewed public revert only after retiring work with the creating runtime.
+
 Fix dispatch, binding, and ticket orchestration through ordinary development.
 Resume APE self-hosting only after offline replay and the first live mechanical
 and fast checks pass without intervention.
