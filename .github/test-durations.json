@@ -14,6 +14,7 @@
   "__tests__/runtime-v2-agent-tool-surface.test.js": 12,
   "__tests__/runtime-v2-artifact-resource-budget.test.js": 57,
   "__tests__/runtime-v2-artifact-retention.test.js": 1016,
+  "__tests__/runtime-v2-attested-test-admission-recovery.test.js": 57550,
   "__tests__/runtime-v2-authored-byte-integrity.test.js": 4883,
   "__tests__/runtime-v2-authored-path-admission.test.js": 14670,
   "__tests__/runtime-v2-benchmark.test.js": 16139,
