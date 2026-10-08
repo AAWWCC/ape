@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,7 +8,7 @@ import { previewRun, startRun } from '../lib/runtime/lifecycle-service.js';
 import { inspectAdmissionCommandPrerequisites, resolveAdmissionExecutable } from '../lib/runtime/admission-command-prerequisites.js';
 
 const roots = [];
-const git = (root, ...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } }).trim();
+const git = (root, ...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', env: gitFixtureEnv() }).trim();
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
 async function put(root, file, bytes) {
   await mkdir(path.dirname(path.join(root, file)), { recursive: true });

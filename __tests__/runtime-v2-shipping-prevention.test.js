@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -29,21 +30,21 @@ function commitShippingFixture(state, repository = {}) {
 async function project({ trackedConfig = false } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'ape-shipping-prevention-'));
   directories.push(directory);
-  await runGit(directory, ['init', '-b', 'main']);
-  await runGit(directory, ['config', 'user.name', 'APE Test']);
-  await runGit(directory, ['config', 'user.email', 'ape@example.test']);
-  await runGit(directory, ['config', 'commit.gpgsign', 'false']);
+  await runGit(directory, ['init', '-b', 'main'], { env: gitFixtureEnv() });
+  await runGit(directory, ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv() });
+  await runGit(directory, ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv() });
+  await runGit(directory, ['config', 'commit.gpgsign', 'false'], { env: gitFixtureEnv() });
   await writeFile(path.join(directory, 'value.txt'), 'baseline\n');
-  await runGit(directory, ['add', 'value.txt']);
+  await runGit(directory, ['add', 'value.txt'], { env: gitFixtureEnv() });
   if (trackedConfig) {
     await mkdir(path.join(directory, '.ape'));
     await writeFile(path.join(directory, '.ape/config.json'), '{"baseline":true}\n');
-    await runGit(directory, ['add', '.ape/config.json']);
+    await runGit(directory, ['add', '.ape/config.json'], { env: gitFixtureEnv() });
   }
-  await runGit(directory, ['commit', '-m', 'baseline']);
-  await runGit(directory, ['remote', 'add', 'origin', target.origin]);
-  await runGit(directory, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
-  await runGit(directory, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+  await runGit(directory, ['commit', '-m', 'baseline'], { env: gitFixtureEnv() });
+  await runGit(directory, ['remote', 'add', 'origin', target.origin], { env: gitFixtureEnv() });
+  await runGit(directory, ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { env: gitFixtureEnv() });
+  await runGit(directory, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'], { env: gitFixtureEnv() });
   return directory;
 }
 
@@ -63,8 +64,8 @@ function stubAdmissionGithub({ repository = {}, rules = null, failed = false } =
 
 async function preparedShipping(directory, { file = 'value.txt' } = {}) {
   const admission = await shipping.inspectShippingAdmission(directory, {}, config);
-  await runGit(directory, ['switch', '-c', 'ape/test']);
-  const head = await runGit(directory, ['rev-parse', 'HEAD']);
+  await runGit(directory, ['switch', '-c', 'ape/test'], { env: gitFixtureEnv() });
+  const head = await runGit(directory, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() });
   await writeFile(path.join(directory, file), 'approved change\n');
   const state = commitShippingFixture({
     run_id: 'run-offline-shipping', objective: 'Offline shipping fixture', mode: 'phase', lane: 'fast',
@@ -98,15 +99,15 @@ describe('immutable observed merge evidence', () => {
   it.each(['phase', 'admitted-land', 'advanced-land', 'racing-land', 'dirty-land'])('protects a same-tree divergent local base during %s cleanup', async (scenario) => {
     const directory = await project();
     const { state, originalGit } = await preparedShipping(directory);
-    await originalGit(directory, ['add', 'value.txt']);
-    await originalGit(directory, ['commit', '-m', 'attested feature']);
-    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD']);
-    const mergeCommit = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', state.base_commit_sha, '-m', 'remote squash']);
-    const admittedHead = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', state.base_commit_sha, '-m', 'admitted local land work']);
-    const uniqueHead = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', admittedHead, '-m', 'later unique local work']);
-    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', mergeCommit]);
+    await originalGit(directory, ['add', 'value.txt'], { env: gitFixtureEnv() });
+    await originalGit(directory, ['commit', '-m', 'attested feature'], { env: gitFixtureEnv() });
+    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() });
+    const mergeCommit = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', state.base_commit_sha, '-m', 'remote squash'], { env: gitFixtureEnv() });
+    const admittedHead = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', state.base_commit_sha, '-m', 'admitted local land work'], { env: gitFixtureEnv() });
+    const uniqueHead = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', admittedHead, '-m', 'later unique local work'], { env: gitFixtureEnv() });
+    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', mergeCommit], { env: gitFixtureEnv() });
     const initialHead = scenario === 'advanced-land' ? uniqueHead : admittedHead;
-    await originalGit(directory, ['update-ref', 'refs/heads/main', initialHead, state.base_commit_sha]);
+    await originalGit(directory, ['update-ref', 'refs/heads/main', initialHead, state.base_commit_sha], { env: gitFixtureEnv() });
     state.mode = scenario === 'phase' ? 'phase' : 'land';
     commitShippingFixture(state, { branch: 'main', head: admittedHead });
     const prUrl = 'https://github.com/acme/project/pull/1';
@@ -125,7 +126,7 @@ describe('immutable observed merge evidence', () => {
       if (args[0] === 'pull') return originalGit(root, ['merge', '--ff-only', 'refs/remotes/origin/main']);
       if (args[0] === 'push' || (args[0] === 'ls-remote' && !args.includes('--get-url'))) throw Error('offline network intercepted');
       if (scenario === 'racing-land' && args[0] === 'update-ref' && args[2] === 'refs/heads/main') {
-        await originalGit(root, ['update-ref', 'refs/heads/main', uniqueHead, admittedHead]);
+        await originalGit(root, ['update-ref', 'refs/heads/main', uniqueHead, admittedHead], { env: gitFixtureEnv() });
       }
       return originalGit(root, args, options);
     });
@@ -133,9 +134,9 @@ describe('immutable observed merge evidence', () => {
     expect(result.merged).toMatchObject({ head_oid: pushedHead, cleanup: { cleaned: scenario === 'admitted-land' } });
     expect(effects.some(args => args[0] === 'reset')).toBe(false);
     const expectedHead = scenario === 'admitted-land' ? mergeCommit : scenario === 'racing-land' ? uniqueHead : initialHead;
-    expect(await originalGit(directory, ['rev-parse', 'main'])).toBe(expectedHead);
+    expect(await originalGit(directory, ['rev-parse', 'main'], { env: gitFixtureEnv() })).toBe(expectedHead);
     if (scenario !== 'admitted-land') {
-      expect(await originalGit(directory, ['for-each-ref', '--contains', expectedHead, '--format=%(refname)'])).toBe('refs/heads/main');
+      expect(await originalGit(directory, ['for-each-ref', '--contains', expectedHead, '--format=%(refname)'], { env: gitFixtureEnv() })).toBe('refs/heads/main');
       expect(result.merged.cleanup.reason).toBeTruthy();
     }
     if (scenario === 'dirty-land') expect(await readFile(path.join(directory, 'local-only.txt'), 'utf8')).toBe('untracked local work\n');
@@ -144,12 +145,12 @@ describe('immutable observed merge evidence', () => {
   it.each(['poll', 'phase-one-reentry'])('retains later unique local work after observing the attested remote merge (%s)', async (route) => {
     const directory = await project();
     const { state, originalGit } = await preparedShipping(directory);
-    await originalGit(directory, ['add', 'value.txt']);
-    await originalGit(directory, ['commit', '-m', 'attested feature']);
-    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD']);
-    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', pushedHead]);
-    await originalGit(directory, ['commit', '--allow-empty', '-m', 'unique later local work']);
-    const uniqueHead = await originalGit(directory, ['rev-parse', 'HEAD']);
+    await originalGit(directory, ['add', 'value.txt'], { env: gitFixtureEnv() });
+    await originalGit(directory, ['commit', '-m', 'attested feature'], { env: gitFixtureEnv() });
+    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() });
+    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', pushedHead], { env: gitFixtureEnv() });
+    await originalGit(directory, ['commit', '--allow-empty', '-m', 'unique later local work'], { env: gitFixtureEnv() });
+    const uniqueHead = await originalGit(directory, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() });
     const prUrl = 'https://github.com/acme/project/pull/1';
     state.shipping_watch = { provider: 'github', pr_url: prUrl, branch: state.branch, base: 'main', head_oid: pushedHead, created_at: new Date().toISOString(), shipping_target: state.shipping_target };
     const originalSpawn = spawning.spawnWithTimeout.getMockImplementation();
@@ -170,24 +171,24 @@ describe('immutable observed merge evidence', () => {
     expect(result).toMatchObject({ head_oid: pushedHead, cleanup: { cleaned: false, remote_branch_retained: true } });
     expect(result.cleanup.reason).toMatch(/tip changed/);
     expect(calls.some(args => args[1] === 'merge' || args.includes('--delete-branch'))).toBe(false);
-    expect(await originalGit(directory, ['branch', '--show-current'])).toBe(state.branch);
-    expect(await originalGit(directory, ['rev-parse', state.branch])).toBe(uniqueHead);
-    expect(await originalGit(directory, ['for-each-ref', '--contains', uniqueHead, '--format=%(refname)'])).toBe(`refs/heads/${state.branch}`);
+    expect(await originalGit(directory, ['branch', '--show-current'], { env: gitFixtureEnv() })).toBe(state.branch);
+    expect(await originalGit(directory, ['rev-parse', state.branch], { env: gitFixtureEnv() })).toBe(uniqueHead);
+    expect(await originalGit(directory, ['for-each-ref', '--contains', uniqueHead, '--format=%(refname)'], { env: gitFixtureEnv() })).toBe(`refs/heads/${state.branch}`);
   });
 
   it.each(['already-merged', 'submitted', 'command-race'])('accepts the exact attested squash merge after an unrelated later base commit (%s)', async (observation) => {
     const directory = await project();
     const { state, originalGit } = await preparedShipping(directory);
-    await originalGit(directory, ['add', 'value.txt']);
-    await originalGit(directory, ['commit', '-m', 'attested feature']);
-    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD']);
-    const mergeCommit = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', state.base_commit_sha, '-m', 'observed squash merge']);
+    await originalGit(directory, ['add', 'value.txt'], { env: gitFixtureEnv() });
+    await originalGit(directory, ['commit', '-m', 'attested feature'], { env: gitFixtureEnv() });
+    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() });
+    const mergeCommit = await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-p', state.base_commit_sha, '-m', 'observed squash merge'], { env: gitFixtureEnv() });
     expect(mergeCommit).not.toBe(pushedHead);
     await writeFile(path.join(directory, 'unrelated.txt'), 'later independent change\n');
-    await originalGit(directory, ['add', 'unrelated.txt']);
-    const laterTree = await originalGit(directory, ['write-tree']);
-    const laterCommit = await originalGit(directory, ['commit-tree', laterTree, '-p', mergeCommit, '-m', 'later base change']);
-    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', laterCommit]);
+    await originalGit(directory, ['add', 'unrelated.txt'], { env: gitFixtureEnv() });
+    const laterTree = await originalGit(directory, ['write-tree'], { env: gitFixtureEnv() });
+    const laterCommit = await originalGit(directory, ['commit-tree', laterTree, '-p', mergeCommit, '-m', 'later base change'], { env: gitFixtureEnv() });
+    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', laterCommit], { env: gitFixtureEnv() });
     const prUrl = 'https://github.com/acme/project/pull/1';
     state.shipping_watch = { provider: 'github', pr_url: prUrl, branch: state.branch, base: 'main', head_oid: pushedHead, created_at: new Date().toISOString(), shipping_target: state.shipping_target, ...(observation === 'submitted' ? { merge_request_submitted: true } : {}) };
     const originalSpawn = spawning.spawnWithTimeout.getMockImplementation();
@@ -210,24 +211,24 @@ describe('immutable observed merge evidence', () => {
     expect(result).toMatchObject({ merged: { url: prUrl } });
     expect(result.failed).toBeUndefined();
     expect(git.runGit).toHaveBeenCalledWith(directory, ['rev-parse', `${mergeCommit}^{tree}`]);
-    expect(await originalGit(directory, ['rev-parse', `${mergeCommit}^{tree}`])).toBe(state.gates.tree_sha);
-    expect(await originalGit(directory, ['rev-parse', `${laterCommit}^{tree}`])).not.toBe(state.gates.tree_sha);
+    expect(await originalGit(directory, ['rev-parse', `${mergeCommit}^{tree}`], { env: gitFixtureEnv() })).toBe(state.gates.tree_sha);
+    expect(await originalGit(directory, ['rev-parse', `${laterCommit}^{tree}`], { env: gitFixtureEnv() })).not.toBe(state.gates.tree_sha);
   });
 
   it.each(['missing-commit', 'unattested-tree', 'outside-base', 'head-drift', 'other-repository', 'other-pr'])('refuses invalid observed merge authority: %s', async (invalid) => {
     const directory = await project();
     const { state, originalGit } = await preparedShipping(directory);
-    await originalGit(directory, ['add', 'value.txt']);
-    await originalGit(directory, ['commit', '-m', 'attested feature']);
-    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD']);
-    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', pushedHead]);
+    await originalGit(directory, ['add', 'value.txt'], { env: gitFixtureEnv() });
+    await originalGit(directory, ['commit', '-m', 'attested feature'], { env: gitFixtureEnv() });
+    const pushedHead = await originalGit(directory, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() });
+    await originalGit(directory, ['update-ref', 'refs/remotes/origin/main', pushedHead], { env: gitFixtureEnv() });
     const prUrl = 'https://github.com/acme/project/pull/1';
     state.shipping_watch = { provider: 'github', pr_url: prUrl, branch: state.branch, base: 'main', head_oid: pushedHead, created_at: new Date().toISOString(), shipping_target: state.shipping_target };
     const observedHead = invalid === 'head-drift' ? state.base_commit_sha : pushedHead;
     const observedUrl = invalid === 'other-repository' ? 'https://github.com/other/project/pull/1' : invalid === 'other-pr' ? 'https://github.com/acme/project/pull/2' : prUrl;
     const mergeCommit = invalid === 'missing-commit' ? '-'
       : invalid === 'unattested-tree' ? state.base_commit_sha
-        : invalid === 'outside-base' ? await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-m', 'unrelated root']) : pushedHead;
+        : invalid === 'outside-base' ? await originalGit(directory, ['commit-tree', state.gates.tree_sha, '-m', 'unrelated root'], { env: gitFixtureEnv() }) : pushedHead;
     const originalSpawn = spawning.spawnWithTimeout.getMockImplementation();
     vi.spyOn(spawning, 'spawnWithTimeout').mockImplementation((command, args, options) => {
       if (command !== 'gh') return originalSpawn(command, args, options);
@@ -253,13 +254,13 @@ describe('prevention-first shipping admission', () => {
     const directory = await project();
     const calls = stubAdmissionGithub();
     const before = await readFile(path.join(directory, '.git', 'index'));
-    const head = await runGit(directory, ['rev-parse', 'HEAD']);
+    const head = await runGit(directory, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() });
     const result = await shipping.inspectShippingAdmission(directory, { auto_merge_authorized: true }, config);
     expect(result).toMatchObject({ ready: true, blocking: [], shipping_target: { version: 1, ...target, required_remote_checks: true } });
     expect(result.prerequisites.status).toBe('ready');
     expect(calls.some((args) => args[1] === 'repos/acme/project')).toBe(true);
     expect(await readFile(path.join(directory, '.git', 'index'))).toEqual(before);
-    expect(await runGit(directory, ['rev-parse', 'HEAD'])).toBe(head);
+    expect(await runGit(directory, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() })).toBe(head);
   });
 
   it('separates local produce-and-hold target admission from deferred shipping proof', async () => {
@@ -289,7 +290,7 @@ describe('prevention-first shipping admission', () => {
 
   it('fails before remote queries when configured signing is not non-interactively proven', async () => {
     const directory = await project();
-    await runGit(directory, ['config', 'commit.gpgsign', 'true']);
+    await runGit(directory, ['config', 'commit.gpgsign', 'true'], { env: gitFixtureEnv() });
     const calls = stubAdmissionGithub();
     const result = await shipping.inspectShippingAdmission(directory, { auto_merge_authorized: true }, config);
     expect(result.blocking.map((entry) => entry.code)).toContain('shipping_signing_unverified');
@@ -298,7 +299,7 @@ describe('prevention-first shipping admission', () => {
 
   it('blocks missing Git identity before any GitHub prerequisite query', async () => {
     const directory = await project();
-    await runGit(directory, ['config', 'user.name', '']);
+    await runGit(directory, ['config', 'user.name', ''], { env: gitFixtureEnv() });
     const calls = stubAdmissionGithub();
     const result = await shipping.inspectShippingAdmission(directory, { auto_merge_authorized: true }, config);
     expect(result.blocking.map((entry) => entry.code)).toContain('shipping_git_identity_unavailable');
@@ -308,10 +309,10 @@ describe('prevention-first shipping admission', () => {
   it('keeps staged bytes, worktree, and HEAD unchanged when signing fails without an unsigned retry', async () => {
     const directory = await project();
     const { state, events, originalGit } = await preparedShipping(directory);
-    await originalGit(directory, ['add', 'value.txt']);
+    await originalGit(directory, ['add', 'value.txt'], { env: gitFixtureEnv() });
     const beforeIndex = await originalGit(directory, ['ls-files', '--stage', '-z'], { raw: true });
     const beforeWorktree = await readFile(path.join(directory, 'value.txt'));
-    const beforeHead = await originalGit(directory, ['rev-parse', 'HEAD']);
+    const beforeHead = await originalGit(directory, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() });
     const commits = [];
     const guardedGit = git.runGit.getMockImplementation();
     vi.mocked(git.runGit).mockImplementation((root, args, options) => {
@@ -330,7 +331,7 @@ describe('prevention-first shipping admission', () => {
     // change and no rollback may clobber a concurrent operator's index.
     expect(await originalGit(directory, ['ls-files', '--stage', '-z'], { raw: true })).toEqual(beforeIndex);
     expect(await readFile(path.join(directory, 'value.txt'))).toEqual(beforeWorktree);
-    expect(await originalGit(directory, ['rev-parse', 'HEAD'])).toBe(beforeHead);
+    expect(await originalGit(directory, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() })).toBe(beforeHead);
     expect(events.some((event) => event[0] === 'git' && ['push', 'reset', 'stash'].includes(event[1]))).toBe(false);
   });
 
@@ -343,7 +344,7 @@ describe('prevention-first shipping admission', () => {
 
   it('refuses mismatched fetch and push origins', async () => {
     const directory = await project();
-    await runGit(directory, ['remote', 'set-url', '--push', 'origin', 'https://github.com/other/project.git']);
+    await runGit(directory, ['remote', 'set-url', '--push', 'origin', 'https://github.com/other/project.git'], { env: gitFixtureEnv() });
     const result = await shipping.inspectShippingAdmission(directory, {}, config);
     expect(result.ready).toBe(false);
     expect(result.blocking.map((entry) => entry.code)).toContain('shipping_origin_mismatch');
@@ -352,9 +353,9 @@ describe('prevention-first shipping admission', () => {
   it.each(['insteadOf', 'pushInsteadOf'])('refuses a frozen transport redirected by %s while named origin remains correct', async (rewrite) => {
     const directory = await project();
     const sshOrigin = 'git@github.com:acme/project.git';
-    await runGit(directory, ['config', `url.https://github.com/other/project.git.${rewrite}`, sshOrigin]);
+    await runGit(directory, ['config', `url.https://github.com/other/project.git.${rewrite}`, sshOrigin], { env: gitFixtureEnv() });
     const before = await readFile(path.join(directory, '.git', 'config'));
-    expect(await runGit(directory, ['remote', 'get-url', 'origin'])).toBe(target.origin);
+    expect(await runGit(directory, ['remote', 'get-url', 'origin'], { env: gitFixtureEnv() })).toBe(target.origin);
     const result = await shipping.inspectShippingAdmission(directory, {}, { shipping: { ...config.shipping, target: { ...target, origin: sshOrigin } } });
     expect(result.ready).toBe(false);
     expect(result.blocking.map((entry) => entry.code)).toContain('shipping_origin_mismatch');
@@ -364,8 +365,8 @@ describe('prevention-first shipping admission', () => {
   it('refuses newly redirected frozen transport before GitHub or staging effects', async () => {
     const directory = await project();
     const { state, events, originalGit } = await preparedShipping(directory);
-    await originalGit(directory, ['remote', 'set-url', 'origin', 'git@github.com:acme/project.git']);
-    await originalGit(directory, ['config', 'url.https://github.com/other/project.git.pushInsteadOf', target.origin]);
+    await originalGit(directory, ['remote', 'set-url', 'origin', 'git@github.com:acme/project.git'], { env: gitFixtureEnv() });
+    await originalGit(directory, ['config', 'url.https://github.com/other/project.git.pushInsteadOf', target.origin], { env: gitFixtureEnv() });
     const before = await readFile(path.join(directory, '.git', 'index'));
     await expect(shipping.autoMergeGithub(directory, state, config)).rejects.toThrow(/origin.*frozen target/);
     expect(events.some((event) => event[0] === 'gh' || (event[0] === 'git' && ['add', 'commit', 'push'].includes(event[1])))).toBe(false);
@@ -382,7 +383,7 @@ describe('prevention-first shipping admission', () => {
 
   it('rejects legacy unbound shipping before any staging or remote access', async () => {
     const directory = await project();
-    await runGit(directory, ['switch', '-c', 'ape/test']);
+    await runGit(directory, ['switch', '-c', 'ape/test'], { env: gitFixtureEnv() });
     await writeFile(path.join(directory, 'value.txt'), 'modified\n');
     const before = await readFile(path.join(directory, '.git', 'index'));
     const originalGit = git.runGit;
@@ -418,7 +419,7 @@ describe('prevention-first shipping admission', () => {
       state.admission.manifest.shipping_target = structuredClone(state.shipping_target);
       state.admission.digest = sha256(state.admission.manifest);
       shippingConfig = { shipping: { ...config.shipping, target: changed } };
-      await originalGit(directory, ['remote', 'set-url', 'origin', changed.origin]);
+      await originalGit(directory, ['remote', 'set-url', 'origin', changed.origin], { env: gitFixtureEnv() });
     }
     expect(state.admitted_start_identity_hash).toBe(originalHash);
     await expect(shipping.autoMergeGithub(directory, state, shippingConfig)).rejects.toThrow(/admission.*commitment|admitted.start identity/i);
@@ -429,8 +430,8 @@ describe('prevention-first shipping admission', () => {
     const directory = await project();
     const { state, events, originalGit } = await preparedShipping(directory);
     if (variant === 'empty unborn baseline') {
-      const tree = await originalGit(directory, ['mktree']);
-      state.base_commit_sha = await originalGit(directory, ['commit-tree', tree, '-m', 'test empty baseline']);
+      const tree = await originalGit(directory, ['mktree'], { env: gitFixtureEnv() });
+      state.base_commit_sha = await originalGit(directory, ['commit-tree', tree, '-m', 'test empty baseline'], { env: gitFixtureEnv() });
     }
     state.admission.manifest.repository.base_commit = null;
     state.admission.manifest.repository.unborn = variant !== 'null base without unborn admission';
@@ -457,7 +458,7 @@ describe('prevention-first shipping admission', () => {
   it('refuses untested pre-staged content without changing the real index or committing', async () => {
     const directory = await project();
     await writeFile(path.join(directory, 'shadow.txt'), 'hidden staged version\n');
-    await runGit(directory, ['add', 'shadow.txt']);
+    await runGit(directory, ['add', 'shadow.txt'], { env: gitFixtureEnv() });
     await rm(path.join(directory, 'shadow.txt'));
     const { state, events } = await preparedShipping(directory);
     const before = await readFile(path.join(directory, '.git', 'index'));
@@ -474,11 +475,11 @@ describe('prevention-first shipping admission', () => {
     await writeFile(path.join(directory, '.ape/config.json'), '{"local_only":true}\n');
     const { state, events, originalGit } = await preparedShipping(directory, { file: 'docs/change.md' });
     await expect(shipping.autoMergeGithub(directory, state, config)).rejects.toThrow(/offline network sink intercepted/);
-    expect(await originalGit(directory, ['rev-parse', 'HEAD^{tree}'])).toBe(state.gates.tree_sha);
-    expect(await originalGit(directory, ['show', 'HEAD:.ape/config.json'])).toBe('{"baseline":true}');
-    expect(await originalGit(directory, ['ls-tree', '-r', '--name-only', 'HEAD', '--', '.ape']))
+    expect(await originalGit(directory, ['rev-parse', 'HEAD^{tree}'], { env: gitFixtureEnv() })).toBe(state.gates.tree_sha);
+    expect(await originalGit(directory, ['show', 'HEAD:.ape/config.json'], { env: gitFixtureEnv() })).toBe('{"baseline":true}');
+    expect(await originalGit(directory, ['ls-tree', '-r', '--name-only', 'HEAD', '--', '.ape'], { env: gitFixtureEnv() }))
       .toBe('.ape/config.json');
-    expect(await originalGit(directory, ['show', 'HEAD:docs/change.md'])).toBe('approved change');
+    expect(await originalGit(directory, ['show', 'HEAD:docs/change.md'], { env: gitFixtureEnv() })).toBe('approved change');
     expect(events.some((event) => event[0] === 'git' && event[1] === 'commit')).toBe(true);
     expect(events.some((event) => event[0] === 'git' && event[1] === 'push')).toBe(true);
   });
@@ -487,11 +488,11 @@ describe('prevention-first shipping admission', () => {
     const directory = await project({ trackedConfig: true });
     if (variant === 'edit') {
       await writeFile(path.join(directory, '.ape/config.json'), '{"untested":true}\n');
-      await runGit(directory, ['add', '.ape/config.json']);
+      await runGit(directory, ['add', '.ape/config.json'], { env: gitFixtureEnv() });
     } else if (variant === 'addition') {
       await writeFile(path.join(directory, '.ape/unreviewed.json'), '{"untested":true}\n');
-      await runGit(directory, ['add', '.ape/unreviewed.json']);
-    } else await runGit(directory, ['rm', '.ape/config.json']);
+      await runGit(directory, ['add', '.ape/unreviewed.json'], { env: gitFixtureEnv() });
+    } else await runGit(directory, ['rm', '.ape/config.json'], { env: gitFixtureEnv() });
     const { state, events } = await preparedShipping(directory);
     const before = await readFile(path.join(directory, '.git', 'index'));
     await expect(shipping.autoMergeGithub(directory, state, config)).rejects.toThrow(/prospective shipping index/);
@@ -502,10 +503,10 @@ describe('prevention-first shipping admission', () => {
   it('stages the tested working version of an approved partially staged file', async () => {
     const directory = await project();
     await writeFile(path.join(directory, 'value.txt'), 'older staged version\n');
-    await runGit(directory, ['add', 'value.txt']);
+    await runGit(directory, ['add', 'value.txt'], { env: gitFixtureEnv() });
     const { state, events, originalGit } = await preparedShipping(directory);
     await expect(shipping.autoMergeGithub(directory, state, config)).rejects.toThrow(/offline network sink intercepted/);
-    expect(await originalGit(directory, ['rev-parse', 'HEAD^{tree}'])).toBe(state.gates.tree_sha);
+    expect(await originalGit(directory, ['rev-parse', 'HEAD^{tree}'], { env: gitFixtureEnv() })).toBe(state.gates.tree_sha);
     expect(events.some((event) => event[0] === 'git' && event[1] === 'commit')).toBe(true);
     expect(events.some((event) => event[0] === 'git' && event[1] === 'push')).toBe(true);
   });
@@ -513,9 +514,11 @@ describe('prevention-first shipping admission', () => {
   it('refuses to push when a commit hook changes the committed tree', async () => {
     const directory = await project();
     const { state, events, originalGit } = await preparedShipping(directory);
+    // Sanitized init omits template hooks; this test owns its deliberate hook.
+    await mkdir(path.join(directory, '.git', 'hooks'), { recursive: true });
     await writeFile(path.join(directory, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nprintf "hook mutation\\n" > value.txt\ngit add -- value.txt\n', { mode: 0o755 });
     await expect(shipping.autoMergeGithub(directory, state, config)).rejects.toThrow(/committed shipping tree.*push refused/);
-    expect(await originalGit(directory, ['rev-parse', 'HEAD^{tree}'])).not.toBe(state.gates.tree_sha);
+    expect(await originalGit(directory, ['rev-parse', 'HEAD^{tree}'], { env: gitFixtureEnv() })).not.toBe(state.gates.tree_sha);
     expect(events.some((event) => event[0] === 'git' && event[1] === 'push')).toBe(false);
   });
 
@@ -545,15 +548,15 @@ describe('prevention-first shipping admission', () => {
     vi.mocked(git.runGit).mockImplementation(async (root, args, options) => {
       if (args[0] === 'push') {
         pinned = args[2].split(':')[0];
-        await originalGit(root, ['update-ref', 'refs/heads/ape/test', state.base_commit_sha]);
+        await originalGit(root, ['update-ref', 'refs/heads/ape/test', state.base_commit_sha], { env: gitFixtureEnv() });
         throw new Error('offline push race intercepted');
       }
       return previous(root, args, options);
     });
     await expect(shipping.autoMergeGithub(directory, state, config)).rejects.toThrow(/offline push race intercepted/);
     expect(pinned).toMatch(/^[0-9a-f]{40}$/);
-    expect(pinned).not.toBe(await originalGit(directory, ['rev-parse', 'HEAD']));
-    expect(await originalGit(directory, ['rev-parse', `${pinned}^{tree}`])).toBe(state.gates.tree_sha);
+    expect(pinned).not.toBe(await originalGit(directory, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() }));
+    expect(await originalGit(directory, ['rev-parse', `${pinned}^{tree}`], { env: gitFixtureEnv() })).toBe(state.gates.tree_sha);
   });
 
   it('allows the audited one-shot SHIP consent without claiming admission-time auto consent', async () => {

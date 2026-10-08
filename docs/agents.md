@@ -65,3 +65,13 @@ checks actual tool reachability for every packaged role without changing its all
 Shared role instructions live in `prompts/`, Claude wrappers in `agents/`, and
 Codex definitions in `.codex/agents/`. Tickets include the full common and role
 instructions even when Codex uses its built-in `worker` or `explorer` types.
+
+Skill sources live in `plugin-src/skills/`; run and resume share one protocol
+reference there. `npm run package:plugins` generates the host copies under
+`plugins/`. Edit the sources and regenerate those copies. The host wrappers and
+packaged references are required entrypoints, not additional policy sources.
+
+`AGENTS.md`, `AGENTS.override.md`, and `CLAUDE.md` are optional repository guidance.
+APE neither requires nor installs them. Keep project-specific conventions there;
+worker roles, receipt rules, and scheduler transitions belong to APE's runtime
+and its shared prompts.

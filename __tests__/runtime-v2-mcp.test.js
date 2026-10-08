@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -36,7 +37,7 @@ function session(messages) {
     // Strip the ambient host project pins so root resolution is driven by
     // the call arguments alone, not the live session env of whoever runs
     // the suite.
-    const env = { ...process.env };
+    const env = gitFixtureEnv();
     delete env.CLAUDE_PROJECT_DIR;
     delete env.CODEX_CWD;
     const child = spawn(process.execPath, [path.join(root, 'bin', 'ape-mcp.mjs')], {
@@ -83,7 +84,7 @@ function invokeClaudeHook(input) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(root, 'bin', 'ape-hook.mjs')], {
       cwd: root,
-      env: { ...process.env, CLAUDECODE: '1' },
+      env: { ...gitFixtureEnv(), CLAUDECODE: '1' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -253,11 +254,11 @@ describe('APE v2 MCP public surface', () => {
     };
     try {
       await writeFile(path.join(scratch, 'README.md'), '# fixture\n');
-      execFileSync('git', ['init', '-q'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
-      execFileSync('git', ['add', 'README.md'], { cwd: scratch });
-      execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
+      execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['add', 'README.md'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['commit', '-qm', 'test: baseline'], { env: gitFixtureEnv(), cwd: scratch });
       const [catalog] = await session([{ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }]);
       const prepared = await call('ape_run', {
         action: 'probe', host: 'codex', explicit_invocation: true,
@@ -778,11 +779,11 @@ describe('APE v2 MCP public surface', () => {
     const scratch = await mkdtemp(path.join(os.tmpdir(), `ape-mcp-${host}-start-`));
     try {
       await writeFile(path.join(scratch, 'README.md'), '# fixture\n');
-      execFileSync('git', ['init', '-q'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
-      execFileSync('git', ['add', '.'], { cwd: scratch });
-      execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
+      execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['add', '.'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['commit', '-qm', 'test: baseline'], { env: gitFixtureEnv(), cwd: scratch });
       const responses = await reviewedSession([
         {
           jsonrpc: '2.0',
@@ -837,11 +838,11 @@ describe('APE v2 MCP public surface', () => {
       }));
       await writeFile(path.join(scratch, 'value.js'), 'export const value = 1;\n');
       await writeFile(path.join(scratch, 'value.test.js'), 'import "./value.js";\n');
-      execFileSync('git', ['init', '-q'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
-      execFileSync('git', ['add', '.'], { cwd: scratch });
-      execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
+      execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['add', '.'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['commit', '-qm', 'test: baseline'], { env: gitFixtureEnv(), cwd: scratch });
 
       const responses = await reviewedSession([{
         jsonrpc: '2.0',
@@ -893,11 +894,11 @@ describe('APE v2 MCP public surface', () => {
       }));
       await writeFile(path.join(scratch, 'value.js'), 'export const value = 1;\n');
       await writeFile(path.join(scratch, 'value.test.js'), 'import "./value.js";\n');
-      execFileSync('git', ['init', '-q'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
-      execFileSync('git', ['add', '.'], { cwd: scratch });
-      execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
+      execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['add', '.'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['commit', '-qm', 'test: baseline'], { env: gitFixtureEnv(), cwd: scratch });
 
       const responses = await reviewedSession([{
         jsonrpc: '2.0',
@@ -955,11 +956,11 @@ describe('APE v2 MCP public surface', () => {
       }));
       await writeFile(path.join(scratch, 'value.js'), 'export const value = 1;\n');
       await writeFile(path.join(scratch, 'value.test.js'), 'import "./value.js";\n');
-      execFileSync('git', ['init', '-q'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
-      execFileSync('git', ['add', '.'], { cwd: scratch });
-      execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
+      execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['add', '.'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['commit', '-qm', 'test: baseline'], { env: gitFixtureEnv(), cwd: scratch });
 
       const responses = await reviewedSession([{
         jsonrpc: '2.0',
@@ -1010,14 +1011,14 @@ describe('APE v2 MCP public surface', () => {
       }));
       await writeFile(path.join(scratch, 'value.js'), 'export const value = 1;\n');
       await writeFile(path.join(scratch, 'value.test.js'), 'import "./value.js";\n');
-      execFileSync('git', ['init', '-q'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: scratch });
-      execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: scratch });
-      execFileSync('git', ['add', '.'], { cwd: scratch });
-      execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: scratch });
-      const branch = execFileSync('git', ['branch', '--show-current'], { cwd: scratch, encoding: 'utf8' }).trim();
-      const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: scratch, encoding: 'utf8' }).trim();
-      const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: scratch, encoding: 'utf8' }).trim();
+      execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['add', '.'], { env: gitFixtureEnv(), cwd: scratch });
+      execFileSync('git', ['commit', '-qm', 'test: baseline'], { env: gitFixtureEnv(), cwd: scratch });
+      const branch = execFileSync('git', ['branch', '--show-current'], { env: gitFixtureEnv(), cwd: scratch, encoding: 'utf8' }).trim();
+      const commit = execFileSync('git', ['rev-parse', 'HEAD'], { env: gitFixtureEnv(), cwd: scratch, encoding: 'utf8' }).trim();
+      const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { env: gitFixtureEnv(), cwd: scratch, encoding: 'utf8' }).trim();
 
       const preflightHash = 'a'.repeat(64);
       await writeFile(path.join(scratch, '.ape', 'runtime', 'active.json'), JSON.stringify({

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import path from 'node:path';
 import {
   acknowledgeBindingProbe,
@@ -7,7 +8,7 @@ import { runtimePaths } from '../lib/runtime/paths.js';
 import { codexBootstrapOrientation, codexProbeReservationOrientation } from '../lib/runtime/codex-bootstrap.js';
 export async function invokeCodexHook(root, input, args = []) {
   const { runNativeJson } = await import('../test-support/native-process.js');
-  const env = { ...process.env };
+  const env = gitFixtureEnv();
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE;
   delete env.CLAUDE_PROJECT_DIR;

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -24,7 +25,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 function ticket(id, claims) {
@@ -68,7 +69,7 @@ async function project(tickets) {
 // Force the Claude host and strip ambient pins so only the payload decides
 // resolution (same shape as runtime-v2-hooks-project-root.test.js).
 function claudeEnv() {
-  const env = { ...process.env, CLAUDECODE: '1' };
+  const env = { ...gitFixtureEnv(), CLAUDECODE: '1' };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
   delete env.APE_TICKET_ID;

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { access, link, mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
@@ -163,10 +164,7 @@ async function fixture(options = {}) {
   await mkdir(path.join(project, 'notes'), { recursive: true });
   await mkdir(outside);
   await writeFile(path.join(project, 'notes/note.md'), '# note\n');
-  const git = (...args) => execFileSync('git', args, { cwd: project, encoding: 'utf8', env: {
-    ...process.env, GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-    GIT_CONFIG_SYSTEM: process.platform === 'win32' ? 'NUL' : '/dev/null',
-  } });
+  const git = (...args) => execFileSync('git', args, { cwd: project, encoding: 'utf8', env: gitFixtureEnv() });
   git('init', '-q');
   git('symbolic-ref', 'HEAD', 'refs/heads/main');
   git('config', 'user.email', 'ape@example.test');
@@ -333,7 +331,7 @@ async function invoke(f, request, childEnv = {}) {
   const response = path.join(f.outside, `${id}.response.json`);
   const input = path.join(f.outside, `${id}.request.json`);
   await writeFile(input, JSON.stringify({ project: f.project, outside: f.outside, state: f.state, response, ...request }));
-  const env = { ...process.env };
+  const env = gitFixtureEnv();
   for (const key of Object.keys(env)) if (/^(APE_|CODEX_CWD$|CLAUDE_PROJECT_DIR$|NODE_OPTIONS$)/.test(key)) delete env[key];
   Object.assign(env, childEnv);
   const child = spawn(process.execPath, [path.join(f.outside, 'owner.mjs'), input], { cwd: f.project, env,
@@ -1048,7 +1046,7 @@ describe('confirmed cleanup is separate from command settlement', () => {
       writeFileSync(${JSON.stringify(output)}, JSON.stringify(result));
     `);
     const child = spawn(process.execPath, [harness], { cwd: f.project, stdio: 'ignore',
-      env: { ...process.env, NODE_OPTIONS: `--require=${JSON.stringify(preload)}` } });
+      env: { ...gitFixtureEnv(), NODE_OPTIONS: `--require=${JSON.stringify(preload)}` } });
     children.push(child);
     await until(async () => (await records(f)).length === 1, 'real descendants before denied proof');
     await writeFile(path.join(f.outside, 'one.release'), 'go');

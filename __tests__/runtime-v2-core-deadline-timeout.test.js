@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -148,7 +149,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project() {
@@ -282,7 +283,7 @@ function expireBoundRecord(record) {
 
 function observeSubagentStop(dir, host, intent) {
   const sessionId = host === 'codex' ? intent.bound_session_id : intent.parent_session_id;
-  const env = { ...process.env };
+  const env = gitFixtureEnv();
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE;
   delete env.CLAUDE_PROJECT_DIR;

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,7 +23,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project(config = {}) {
@@ -213,15 +214,15 @@ describe('land review outcomes', () => {
       terminal_reason_code: 'land_review_disagreement',
     });
     expect(result.successor_guidance).toMatchObject({
-      version: 2,
+      version: 3,
       eligible: true,
       predecessor_run_id: result.run.run_id,
       retained_tree_sha: result.run.tree_sha,
       eligibility_reason: 'land_review_disagreement',
       structured_successor_supported: false,
       unavailable_reason: 'authenticated-host-approval-unavailable',
-      recovery_action: 'override-reset',
-      required_authorization: 'explicit-operator-override',
+      recovery_action: 'resume',
+      required_authorization: 'explicit-resume-invocation',
       automatic_start: false,
       automatic_ship: false,
     });
@@ -249,8 +250,8 @@ describe('land review outcomes', () => {
     });
     expect(result.successor_guidance).toMatchObject({
       eligibility_reason: 'land_review_disagreement',
-      recovery_action: 'override-reset',
-      required_authorization: 'explicit-operator-override',
+      recovery_action: 'resume',
+      required_authorization: 'explicit-resume-invocation',
       automatic_start: false,
       automatic_ship: false,
     });

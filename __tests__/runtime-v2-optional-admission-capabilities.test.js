@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -14,7 +15,7 @@ import { invokesDeclaredWriteProfile } from '../lib/runtime/capability-selection
 
 const roots = [];
 const git = (root, ...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8',
-  env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } }).trim();
+  env: gitFixtureEnv() }).trim();
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));

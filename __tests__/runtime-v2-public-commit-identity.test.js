@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,7 +30,7 @@ function git(repository, ...args) {
     cwd: repository,
     encoding: 'utf8',
     env: {
-      ...process.env,
+      ...gitFixtureEnv(),
       GIT_AUTHOR_NAME: SAFE_NAME,
       GIT_AUTHOR_EMAIL: SAFE_EMAIL,
       GIT_COMMITTER_NAME: SAFE_NAME,
@@ -53,7 +54,7 @@ function commit(repositoryRoot, message, identity = {}) {
     cwd: repositoryRoot,
     encoding: 'utf8',
     env: {
-      ...process.env,
+      ...gitFixtureEnv(),
       GIT_AUTHOR_NAME: identity.authorName ?? SAFE_NAME,
       GIT_AUTHOR_EMAIL: identity.authorEmail ?? SAFE_EMAIL,
       GIT_COMMITTER_NAME: identity.committerName ?? SAFE_NAME,
@@ -68,7 +69,7 @@ function check(repositoryRoot, args = [], input = undefined, env = {}) {
     cwd: repositoryRoot,
     encoding: 'utf8',
     input,
-    env: { ...process.env, ...env },
+    env: { ...gitFixtureEnv(), ...env },
   });
 }
 
@@ -241,6 +242,7 @@ describe('public commit identity gate', () => {
       'git',
       ['hash-object', '--literally', '-t', 'commit', '-w', '--stdin'],
       {
+        env: gitFixtureEnv(),
       cwd: directory,
       encoding: 'utf8',
       input: rawCommit,
@@ -302,7 +304,7 @@ describe('public commit identity gate', () => {
       cwd: directory,
       encoding: 'utf8',
       env: {
-        ...process.env,
+        ...gitFixtureEnv(),
         GIT_COMMITTER_NAME: PERSONAL_NAME,
         GIT_COMMITTER_EMAIL: PERSONAL_EMAIL,
       },
@@ -331,6 +333,7 @@ describe('public commit identity gate', () => {
       '',
     ].join('\n');
     const written = spawnSync('git', ['hash-object', '-t', 'tag', '-w', '--stdin'], {
+      env: gitFixtureEnv(),
       cwd: directory,
       encoding: 'utf8',
       input: rawTag,
@@ -350,6 +353,7 @@ describe('public commit identity gate', () => {
     const shallow = mkdtempSync(path.join(tmpdir(), 'ape-public-identity-shallow-'));
     temporaryRepositories.push(shallow);
     execFileSync('git', ['clone', '--depth', '1', `file://${source}`, shallow], {
+      env: gitFixtureEnv(),
       encoding: 'utf8',
     });
 

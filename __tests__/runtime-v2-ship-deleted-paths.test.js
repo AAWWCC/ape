@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -40,9 +41,6 @@ import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identit
 //
 // All gh and network Git commands are intercepted below. Repository existence
 // is never used as a substitute for an offline test boundary.
-process.env.GIT_TERMINAL_PROMPT = '0';
-process.env.GIT_CONFIG_GLOBAL = '/dev/null';
-process.env.GIT_CONFIG_SYSTEM = '/dev/null';
 
 // Real git plumbing, a real (fail-closed) gh probe, and a real currentTreeSha
 // make each test do a little genuine work; keep the default 5s cap from tripping.
@@ -66,7 +64,7 @@ function git(cwd, ...args) {
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+    env: gitFixtureEnv(),
   }).trim();
 }
 

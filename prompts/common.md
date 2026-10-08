@@ -61,10 +61,16 @@ Return one JSON object with required `ticket_id`, `status`, `tests`, `findings`,
 - Code/security review: performed is `status: "passed"` with `evidence.verdict: "pass"` or `"fail"`;
   unable is `status: "failed"`.
 
-Build a stable final `draft`; omit timing and never generate timestamps during validation. Call
+Before drafting, await and inspect the final result of every test process, including any cancellation
+or session poll. Never batch receipt validation with a pending test result or cancellation request.
+Use the observed exit status and counts; an interrupted wait is not proof that the test was interrupted.
+Build a stable final `draft`; omit timing and never generate timestamps during validation.
+For `receipt_contract_version: 1`, call
 `ape_validate_receipt` with explicit `project_dir`, immutable `ticket_id`, and exact draft.
 On Codex, reuse the exact `project_dir` from the successful `ape_bind` call; on Claude, use the
 host-provided project root. Do not rely on the MCP server working directory. `valid: true` is terminal
-with no continuation action: return unchanged and never validate again. Otherwise correct fields
-within `validation.corrections_remaining`. On `exhausted`, stop for runtime recovery; never convert
+with no continuation action: return unchanged and never validate again. Otherwise follow the
+validator's correction or recovery decision; a null `validation.corrections_remaining` is not
+exhaustion. Historical tickets retain their issued validator requirement and finite allowances.
+On `exhausted` or a stalled recovery decision, stop for runtime recovery; never convert
 receipt failure into remediation, replan, abort, or successor.

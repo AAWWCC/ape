@@ -296,12 +296,6 @@ describe('canonical skill sources', () => {
     expect(run).toMatch(/input_required[\s\S]*answer-preflight/iu);
     expect(run).toMatch(/complete exact answers[\s\S]*additive/iu);
     expect(run).toMatch(/Omit it for[\s\S]*mechanical[\s\S]*non-phase modes[\s\S]*every resume/iu);
-    expect(run).toMatch(/Repository discovery[\s\S]*no match is valid[\s\S]*`\|\| true`/iu);
-    expect(run).toMatch(/never place[\s\S]*optional discovery[\s\S]*`&&` chain/iu);
-    expect(run).toContain(
-      "`rg --files -g 'AGENTS.md' -g '!**/.git/**' || true`",
-    );
-    expect(run).toMatch(/Correct a harmless read's syntax[\s\S]*once[\s\S]*stop on repeated denial or missing authority/iu);
     expect(run).toMatch(/ape_config[\s\S]*doctor[\s\S]*gate-command and visual-evidence readiness/iu);
   });
 
@@ -320,7 +314,7 @@ describe('canonical skill sources', () => {
     expect(canonical).toMatch(/control-call top level[\s\S]*only `action`, `project_dir`, and[\s\S]*`receipt`/u);
     expect(canonical).toMatch(/never send `run_id` on a record call/u);
     expect(canonical).toContain('`ape_run next`');
-    expect(canonical).toContain('`wait_ms: 300000`');
+    expect(canonical).toContain('`wait_ms`');
     expect(canonical).toMatch(/server-side poll/iu);
     expect(canonical).toMatch(/do not sleep inside[\s\S]*`functions\.exec`/iu);
     expect(canonical).toMatch(/record.*rejects[\s\S]*same physical agent[\s\S]*runtime authorizes correction/iu);

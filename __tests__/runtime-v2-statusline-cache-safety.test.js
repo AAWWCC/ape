@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -28,7 +29,7 @@ function fixture(history = false) {
       updated_at: new Date().toISOString(),
     }));
   } else {
-    const git = (...args) => execFileSync('git', ['-C', project, ...args], { stdio: 'pipe' });
+    const git = (...args) => execFileSync('git', ['-C', project, ...args], { env: gitFixtureEnv(), stdio: 'pipe' });
     git('init', '-q', '-b', 'cache-work');
     git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test',
       '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'fixture');
@@ -42,7 +43,7 @@ function fixture(history = false) {
   return { root, project, cache, files };
 }
 function childFor(f, envOverrides = {}) {
-  const env = { ...process.env, TMPDIR: f.cache, TMP: f.cache, TEMP: f.cache,
+  const env = { ...gitFixtureEnv(), TMPDIR: f.cache, TMP: f.cache, TEMP: f.cache,
     APE_STATUSLINE_CHARSET: 'ascii', APE_STATUSLINE_GIT_TIMEOUT_MS: '5000', ...envOverrides };
   delete env.CLAUDE_PROJECT_DIR; delete env.CODEX_CWD;
   const child = spawn(process.execPath, [renderer], { env, stdio: ['pipe', 'pipe', 'pipe'] });

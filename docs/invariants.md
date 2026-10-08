@@ -25,15 +25,16 @@ only needs recording, the parent retries that record without restarting the work
 ## The nine
 
 1. **Runtime-owned transitions.** The scheduler owns stages, retries, models, gates, and completion.
-2. **No main-session production writes.** Stage workers edit production files under tickets. The
-   parent handles orchestration and prose.
+2. **No main-session production writes during a run.** Stage workers edit production files under
+   tickets. The parent handles orchestration and prose for that invocation.
 3. **Independent behavioral tests.** Tests check behavior independently of implementation.
    Red-first admission observes fail/fail; green maintenance observes pass/pass. Non-behavioral
    work claims neither.
 4. **Tree-bound evidence.** The runtime recomputes the tree SHA and changed files before accepting
    a receipt. A worker's claim alone is insufficient.
-5. **Bounded retries and remediation.** Each failed stage follows the run's frozen retry policy (one retry by default). Further
-   remediation requires a strictly smaller blocker set and available budget.
+5. **Evidence-based recovery.** Each failed stage follows the run's frozen policy. New v4 runs
+   require material progress resolving prior blockers; repeated, cyclic, missing, or cosmetic
+   evidence stops recovery. Historical runs retain their original quotas and convergence rules.
 6. **Shared project and host policy.** Claude and Codex use the same core rules. Adapters do not
    decide policy, and project tooling comes from configuration.
 7. **Serialized writes.** State changes use locks and atomic writes. Receipt effects and MCP task
@@ -43,7 +44,8 @@ only needs recording, the parent retries that record without restarting the work
    report failure when it cannot prove success. A proven remote merge stays proven even if local
    cleanup fails.
 9. **Authorized, gated shipping.** Merge requires passing gates and either frozen
-   `auto_merge_authorized` consent from start or an audited one-shot `SHIP` marker. Every
+   `auto_merge_authorized` consent from start or an audited one-shot `SHIP` marker. An explicit
+   invocation supplies that start consent when automatic shipping is configured. Every
    external operation rechecks the frozen origin, repository, and base. The canonical APE checkout
    is restricted to `AAWWCC/ape`; other projects need their own explicit target. Protected
    auto-merge remains pending until the exact pushed head is observed merged.
@@ -56,7 +58,7 @@ only needs recording, the parent retries that record without restarting the work
 | No main-session production writes | Ticket/path rules in `lib/runtime/hooks.js`; `prompts/common.md`. |
 | Independent behavioral tests | `test_writer` boundary; runtime-owned `red-test` / `green-test` initial checks and independently authorized `test-correction`; receipt observations. |
 | Tree-bound evidence | `lib/runtime/receipt-validator.js`. |
-| Bounded retry and remediation | `lib/runtime/constants.js`; reducer finding fingerprints. |
+| Evidence-based recovery | `lib/runtime/recovery-progress.js`; the reducer and frozen execution policy. |
 | Shared project and host policy | `lib/runtime/adapters.js`; shared core configuration. |
 | Serialized writes | `lib/runtime/lock.js`, `storage.js`, and the separate tasks lock in `task-store.js`. |
 | Truthful completion | Receipt hash chain and independent validation. |

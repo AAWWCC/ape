@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -9,7 +10,7 @@ import { atomicWriteJson, readJson } from '../lib/runtime/storage.js';
 
 const dirs = [];
 afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
-const git = (dir, ...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+const git = (dir, ...args) => execFileSync('git', args, { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim();
 async function project() {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-resume-contract-'));
   dirs.push(dir);

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -73,7 +74,7 @@ async function fixture({ fullLane = false, productionPaths = ADMITTED_PRODUCTION
   }
   for (const args of [['init', '-q'], ['config', 'user.email', 'ape@example.test'],
     ['config', 'user.name', 'APE Test'], ['add', '.'], ['commit', '-qm', 'fixture']]) {
-    execFileSync('git', args, { cwd: dir });
+    execFileSync('git', args, { env: gitFixtureEnv(), cwd: dir });
   }
   const paths = runtimePaths(dir);
   await atomicWriteJson(paths.config, {
@@ -634,6 +635,44 @@ describe('test authoring recovery returns to implementation', () => {
     expect(builds[0].ticket).toMatchObject({ role: 'implementer', stage_id: 'build',
       claimed_paths: ['src/value.js'], required_checks: ['targeted-tests'] });
   }, 30_000);
+
+  it('starts a fresh correction for a second implementation failure and replays it unchanged', async () => {
+    const author = await handoff();
+    await writeThroughHooks(author, 'tests/value.test.js', TEST);
+    const authored = await seal(author, draft(author));
+    const buildAction = authored.actions.find((entry) => entry.type === 'dispatch_agent');
+    const build = { ...author, action: buildAction, ticket: buildAction.ticket,
+      binding: await bindCodexDispatchContext(root, author.dir, buildAction, 3) };
+    expect(build.ticket.test_authoring_completed).toBeTruthy();
+    const payload = draft(build, { required_role: 'test_writer' });
+    payload.evidence.needed_independent_coverage = 'A new failure requires a missing hooks directory fixture.';
+    expect(await validateReceiptForDispatch(build.dir, payload, build.ticket.ticket_id)).toMatchObject({ valid: true });
+    expect(await hook(build, { hook_event_name: 'SubagentStop', last_assistant_message: JSON.stringify(payload) })).toEqual({});
+    authoringFault.crashTicket = build.ticket.ticket_id;
+    const interrupted = await recordReceipt(build.dir, payload).catch(error => ({ ok: false, errors: [error.message] }));
+    expect(interrupted.ok).not.toBe(true);
+    expect(authoringFault.fired).toBe(1);
+    const second = await recordReceipt(build.dir, payload);
+    expect(second.ok, JSON.stringify(second)).toBe(true);
+    const action = second.actions.find((entry) => entry.type === 'dispatch_agent');
+    expect(action.ticket).toMatchObject({ role: 'test_writer', required_checks: ['test-correction'],
+      test_authoring_handoff: { source_ticket_id: build.ticket.ticket_id,
+        source_ticket_hash: build.ticket.ticket_hash } });
+    expect(action.ticket.test_authoring_handoff.report).toContain(payload.evidence.needed_independent_coverage);
+    expect(action.ticket.test_authoring_handoff).not.toEqual(author.ticket.test_authoring_handoff);
+    expect(action.ticket).not.toHaveProperty('test_authoring_completed');
+    const before = await readJson(author.paths.active);
+    expect((await recordReceipt(author.dir, payload)).ok).toBe(true);
+    expect(await readJson(author.paths.active)).toEqual(before);
+    const nextAuthor = { ...build, action, ticket: action.ticket,
+      binding: await bindCodexDispatchContext(root, author.dir, action, 4) };
+    await writeThroughHooks(nextAuthor, 'tests/value.test.js', `${TEST}// second correction\n`);
+    const corrected = await seal(nextAuthor, draft(nextAuthor));
+    const resumed = corrected.actions.find((entry) => entry.type === 'dispatch_agent').ticket;
+    expect(resumed).toMatchObject({ role: 'implementer', required_checks: ['targeted-tests'],
+      test_authoring_completed: { ticket_id: nextAuthor.ticket.ticket_id },
+      test_authoring_handoff: action.ticket.test_authoring_handoff });
+  }, 60_000);
 
   it('rejects a passed authoring receipt without any test changes', async () => {
     const author = await handoff();

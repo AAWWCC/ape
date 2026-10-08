@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { build } from 'esbuild';
 import { mkdtemp, mkdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -25,9 +26,9 @@ describe('loaded bundle identity under reproducible package timestamps', () => {
     const original = built.outputFiles[0].text;
     await writeFile(bundle, original);
     await utimes(bundle, 0, 0);
-    await runGit(root, ['init', '-q']);
-    await runGit(root, ['add', 'dist']);
-    await runGit(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']);
+    await runGit(root, ['init', '-q'], { env: gitFixtureEnv() });
+    await runGit(root, ['add', 'dist'], { env: gitFixtureEnv() });
+    await runGit(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], { env: gitFixtureEnv() });
     const { doctor } = await import(/* @vite-ignore */ pathToFileURL(bundle).href);
     const loaded = await stat(bundle);
     // Idempotent publication must not report stale code solely from metadata.

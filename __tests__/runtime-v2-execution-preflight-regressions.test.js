@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -81,9 +82,9 @@ async function gitFixture() {
   const root = await fixture();
   await mkdir(path.join(root, '.ape'));
   await writeFile(path.join(root, 'slow.cjs'), "require('node:fs').appendFileSync('.ape/executions', 'run\\n'); setTimeout(() => {}, 200);");
-  await runGit(root, ['init', '-q']);
-  await runGit(root, ['add', 'slow.cjs']);
-  await runGit(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']);
+  await runGit(root, ['init', '-q'], { env: gitFixtureEnv() });
+  await runGit(root, ['add', 'slow.cjs'], { env: gitFixtureEnv() });
+  await runGit(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], { env: gitFixtureEnv() });
   return root;
 }
 async function profilePreflight(root, deadlines, { staleSecondRoot = false } = {}) {

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
@@ -26,7 +27,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 // Config is written AFTER the baseline commit, so .ape/config.json is
@@ -368,7 +369,7 @@ describe('APE v2 start-time working-tree hygiene', () => {
     expect(first.run.run_id).toBe(blocked.run_id);
   });
 
-  it('offers only explicit override-reset guidance for a persisted land review disagreement', async () => {
+  it('offers explicit resume guidance for a persisted land review disagreement', async () => {
     const dir = await project();
     await startRun(dir, startInput());
     const paths = runtimePaths(dir);
@@ -391,15 +392,15 @@ describe('APE v2 start-time working-tree hygiene', () => {
 
     const status = await statusRun(dir);
     expect(status.successor_guidance).toMatchObject({
-      version: 2,
+      version: 3,
       eligible: true,
       predecessor_run_id: blocked.run_id,
       retained_tree_sha: blocked.tree_sha,
       eligibility_reason: 'land_review_disagreement',
       structured_successor_supported: false,
       unavailable_reason: 'authenticated-host-approval-unavailable',
-      recovery_action: 'override-reset',
-      required_authorization: 'explicit-operator-override',
+      recovery_action: 'resume',
+      required_authorization: 'explicit-resume-invocation',
       automatic_start: false,
       automatic_ship: false,
     });

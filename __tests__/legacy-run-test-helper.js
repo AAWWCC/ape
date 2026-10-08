@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import { loadRuntimeConfig } from '../lib/runtime/config.js';
@@ -13,7 +14,7 @@ import { initializeRunContractManifest } from '../lib/runtime/run-contract.js';
 // forge an admission certificate, or claim native host/probe evidence. Ticket
 // issuance and all later recovery/binding/receipt checks use production code.
 export async function seedLegacyRun(dir, input, { nativeReceiptContract = false } = {}) {
-  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+  const git = (...args) => execFileSync('git', args, { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim();
   const paths = runtimePaths(dir);
   const config = await loadRuntimeConfig(paths.config);
   const at = new Date().toISOString();

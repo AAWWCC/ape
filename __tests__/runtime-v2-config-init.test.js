@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { describe, it, expect, afterEach } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
@@ -26,7 +27,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 // stripped so tools/list is answered from the server's own tool table alone.
 function mcpSession(messages) {
   return new Promise((resolve, reject) => {
-    const env = { ...process.env };
+    const env = gitFixtureEnv();
     delete env.CLAUDE_PROJECT_DIR;
     delete env.CODEX_CWD;
     const child = spawn(process.execPath, [join(root, 'bin', 'ape-mcp.mjs')], {
@@ -103,7 +104,7 @@ describe('ape v2 config init onboarding', () => {
   // git-repository check passes (gitProject pattern from the doctor suite).
   function gitProject(prefix = 'ape-init-doctor-') {
     const dir = tempProject(prefix);
-    execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['init'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
     return dir;
   }
 

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 // Regression boundary of the retired observer-only collection cap.
 const LEGACY_COLLECTION_BOUNDARY = 256;
 import { execFileSync } from 'node:child_process';
@@ -93,7 +94,7 @@ async function statusFor(state) {
 
 function plainStatusline(dir, program = statuslineProgram) {
   const env = {
-    ...process.env,
+    ...gitFixtureEnv(),
     APE_STATUSLINE_CHARSET: 'unicode',
     APE_STATUSLINE_GIT_TIMEOUT_MS: '5000',
     APE_STATUSLINE_NOW_MS: String(Date.parse('2026-08-22T05:00:05.000Z')),
@@ -1018,11 +1019,11 @@ describe('unified public run diagnostics', () => {
     await mkdir(path.join(dir, 'tests'));
     await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 1;\n');
     await writeFile(path.join(dir, 'tests', 'value.test.js'), 'throw new Error("red");\n');
-    execFileSync('git', ['init', '-q'], { cwd: dir });
-    execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: dir });
-    execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: dir });
-    execFileSync('git', ['add', '.'], { cwd: dir });
-    execFileSync('git', ['commit', '-qm', 'baseline'], { cwd: dir });
+    execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['add', '.'], { env: gitFixtureEnv(), cwd: dir });
+    execFileSync('git', ['commit', '-qm', 'baseline'], { env: gitFixtureEnv(), cwd: dir });
     await atomicWriteJson(runtimePaths(dir).config, {
       shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
       test_commands: { targeted_template: 'node --test {paths}', full: 'node --test' },

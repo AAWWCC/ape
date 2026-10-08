@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -616,7 +617,7 @@ function git(cwd, ...args) {
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+    env: gitFixtureEnv(),
   }).trim();
 }
 

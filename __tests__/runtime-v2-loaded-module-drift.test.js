@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import {
@@ -79,11 +80,11 @@ describe('ape v2 doctor sees the LOADED runtime module, not just disk bytes', ()
   }
 
   function gitInit(dir) {
-    execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['init'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
   }
 
   function gitCommitAll(dir, message) {
-    execFileSync('git', ['add', '--all'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['add', '--all'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
     execFileSync(
       'git',
       [
@@ -97,7 +98,7 @@ describe('ape v2 doctor sees the LOADED runtime module, not just disk bytes', ()
         '-m',
         message,
       ],
-      { cwd: dir, stdio: 'ignore' },
+      { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' },
     );
   }
 
@@ -130,7 +131,7 @@ describe('ape v2 doctor sees the LOADED runtime module, not just disk bytes', ()
   }
 
   function startServer(projectDir) {
-    const env = { ...process.env };
+    const env = gitFixtureEnv();
     // Root resolution must come from the call arguments alone, never from the
     // ambient session pins of whoever runs the suite.
     delete env.CLAUDE_PROJECT_DIR;

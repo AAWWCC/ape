@@ -245,7 +245,9 @@ describe('durable observation recovery', () => {
     expect(saved.status).toBe('blocked');
     expect(saved.shipping_watch).toBeNull();
     expect(saved.block_reason).toMatch(/shipping failed/i);
+    expect(saved.shipping_recovery).toMatchObject({ status: 'needs-reconciliation', watch: { pr_url: expect.any(String) } });
     expect((await compactStatus(dir)).diagnostic.next_safe_action).toMatch(/regate/);
+    expect((await compactStatus(dir)).recovery_plan).toBeDefined();
     expect(saved.checkout_cleanup).toMatchObject({
       status: 'returned', base_branch: 'main', run_branch: 'feature/tested',
       retained: true, deleted: false,

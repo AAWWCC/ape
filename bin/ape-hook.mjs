@@ -31,7 +31,7 @@ import { widenedTestClaims } from '../lib/runtime/path-scope.js';
 import { resolveGovernedRoot, runtimePaths } from '../lib/runtime/paths.js';
 import { activeState } from '../lib/runtime/status-service.js';
 import { currentTreeSha, diffFiles } from '../lib/runtime/git.js';
-import { WRITE_TOOLS } from '../lib/runtime/write-policy.js';
+import { WRITE_TOOLS, matchingVerificationProfile } from '../lib/runtime/write-policy.js';
 import {
   INSPECTION_BUILTIN,
   inspectionEvidenceArgsSafe,
@@ -1181,6 +1181,7 @@ try {
       // really exists outside the root.
       const cwdSafe = !(await pathResolvesOutsideProject(paths.root, sessionCwd));
       const parsedEvidence = parseEvidenceCommand(event.command);
+      const verificationProfile = matchingVerificationProfile(event.command, { state, ticket });
       const executionCwd = parsedEvidence?.cdTarget === null || !parsedEvidence
         ? sessionCwd
         : path.resolve(sessionCwd, parsedEvidence.cdTarget);
@@ -1233,7 +1234,7 @@ try {
           ) {
             continue;
           }
-          if (!evidenceOperandNeedsRoot(candidate)) continue;
+          if (!verificationProfile && !evidenceOperandNeedsRoot(candidate)) continue;
           // The admitted leading cd relocates every remaining operand.
           const absolute = path.resolve(executionCwd, candidate);
           if (await pathResolvesOutsideProject(paths.root, absolute)) {

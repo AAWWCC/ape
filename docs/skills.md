@@ -4,12 +4,12 @@ APE provides the same seven skills in Claude Code and Codex.
 
 | Skill | What it does |
 | --- | --- |
-| `run` | Confirm scope, then start and advance a run. |
+| `run` | Establish scope, then start and advance a run. |
 | `status` | Show the active run and optional roadmap. |
-| `resume` | Continue an interrupted run, or recover saved unfinished work into a fresh validated run. |
+| `resume` | Resume a task from a live or blocked run, checkpoint, or explicitly selected legacy work, with fresh validation when needed. |
 | `history` | Search or explain past runs; import history or compact artifacts. |
 | `config` | Read or change settings, check setup, detect test commands, or configure a statusline. |
-| `override` | Abort, reset, or expire a dispatch with an audit reason. |
+| `override` | Abort or reset a run with an audit reason. |
 | `roadmap` | View, register, or supersede roadmap entries. |
 
 ## Invocation
@@ -20,8 +20,15 @@ bypass validation.
 
 Only `status` may be selected automatically. The other six skills require explicit
 invocation, including `history` and `roadmap`, which also offer state-changing
-actions. Their host metadata disables implicit invocation. Invoking a skill does
-not waive its approval or validation requirements.
+actions. Their host metadata disables implicit invocation. An explicit run or
+resume authorizes its scheduler-owned stages and configured shipping. Ask only
+for unresolved choices or actions outside that scope; keep validation and any
+intentional shipping hold in place.
+
+These skills govern the requested APE invocation. They do not make APE mandatory
+for ordinary repository work or extend worker restrictions to separately requested
+maintenance after an invocation ends. Repository instruction files are optional;
+APE supplies its own runtime guidance.
 
 ## Run intake
 
@@ -33,7 +40,8 @@ not register them without approval.
 Choose the contract that matches the work:
 
 - Behavioral fast/full phase work needs `test_paths`, defaults to `red-first`,
-  and may use plan contract v2.
+  and the run skill selects plan contract v2 for new starts. Historical runs retain
+  their admitted contract.
 - Use `green-maintenance` for green-on-arrival regression coverage or deflaking.
 - Pure data or baseline work is non-behavioral: contract v1, no test writer.
   Larger non-behavioral work can still use fast/full lanes.
@@ -46,6 +54,8 @@ The roadmap tracks work and dependencies; it does not start or sequence runs.
 Roadmap-backed runs can start or complete only when their prerequisites are
 satisfied. Status comes from active state, requirements, and saved history.
 
-Workers can propose `evidence.roadmap_followups` in a receipt. Registering them
-later still needs separate approval and an exact match to the accepted receipt.
+Workers can propose `evidence.roadmap_followups` in a receipt. Registration needs
+authorization for those entries and an exact match to the accepted receipt;
+receipt acceptance alone does not register them. Reuse an existing request that
+already covers those entries.
 See [roadmap actions](mcp-tools.md#roadmap-verbs).

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -24,7 +25,7 @@ async function project(active = false, bindingProtocol) {
   await mkdir(path.join(dir, 'tests'));
   await writeFile(path.join(dir, 'src/value.js'), 'export const value = 1;\n');
   await writeFile(path.join(dir, 'tests/value.test.js'), 'throw new Error("red");\n');
-  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+  const git = (...args) => execFileSync('git', args, { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' });
   git('init', '-q');
   git('config', 'user.email', 'ape@example.test');
   git('config', 'user.name', 'APE Test');
@@ -49,7 +50,7 @@ async function project(active = false, bindingProtocol) {
 }
 
 function invoke(binary, dir, input) {
-  const env = { ...process.env };
+  const env = gitFixtureEnv();
   for (const key of Object.keys(env)) {
     if (/^(?:APE_|CLAUDE|CODEX_|PLUGIN_ROOT)/i.test(key)) delete env[key];
   }

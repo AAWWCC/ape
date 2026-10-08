@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 // Roadmap entry ape-run-response-size-cap: the ape_run wire response must stay
 // under a stated size cap even when the operator's run objective is long.
 //
@@ -860,7 +861,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project() {
@@ -890,7 +891,7 @@ function session(messages) {
   return new Promise((resolve, reject) => {
     // Strip the ambient host project pins so root resolution is driven by the
     // call arguments alone, not the live session env of whoever runs the suite.
-    const env = { ...process.env };
+    const env = gitFixtureEnv();
     delete env.CLAUDE_PROJECT_DIR;
     delete env.CODEX_CWD;
     const child = spawn(process.execPath, [path.join(root, 'bin', 'ape-mcp.mjs')], {

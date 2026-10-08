@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { chmod, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -33,7 +34,7 @@ async function inspect(root, command, options = {}, commandRoot = '.') {
   expect(fact, 'the configured outer command must resolve').not.toBeNull();
   return inspectAdmissionCommandPrerequisites(root, [{ id: 'test:full', command, root: commandRoot }], [{ id: 'test:full', resolved: fact.resolved }], options);
 }
-const git = (root, ...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } }).trim();
+const git = (root, ...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', env: gitFixtureEnv() }).trim();
 function commit(root) { git(root, 'add', '.'); git(root, 'commit', '-qm', 'fixture'); return git(root, 'rev-parse', 'HEAD'); }
 function baseline(root) {
   git(root, 'init', '-q', '-b', 'main');

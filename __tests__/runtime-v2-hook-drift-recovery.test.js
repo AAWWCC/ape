@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { normalizeLifecycleEvent as neutralNormalize, evaluateLifecyclePolicy as neutralPolicy,
   parseDeletionCommand as neutralDeletion, pathResolvesWithinClaims as neutralWithin,
   pathResolvesOutsideProject as neutralOutside } from '../lib/runtime/hooks.js';
@@ -22,7 +23,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project(status = 'running') {
@@ -64,7 +65,7 @@ async function drift(dir) {
 // Environment for the spawned binary: pick the host explicitly and strip any
 // host-provided project hints so only the payload (or the child cwd) decides.
 function hostEnv(host) {
-  const env = { ...process.env };
+  const env = gitFixtureEnv();
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE;
   delete env.CLAUDE_PROJECT_DIR;

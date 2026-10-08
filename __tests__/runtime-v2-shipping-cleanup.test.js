@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -27,7 +28,7 @@ async function refreshFixture(host, repository = 'AAWWCC/ape') {
   const origin = `https://github.com/${repository}.git`;
   const packagePath = host === 'claude' ? 'plugins/ape-claude/.claude-plugin' : 'plugins/ape/.codex-plugin';
   const stateKey = `${host}_plugin_refresh`;
-  await git.runGit(root, ['remote', 'add', 'origin', origin]);
+  await git.runGit(root, ['remote', 'add', 'origin', origin], { env: gitFixtureEnv() });
   await mkdir(path.join(root, 'scripts'));
   await mkdir(path.join(root, packagePath), { recursive: true });
   await writeFile(path.join(root, packagePath, 'plugin.json'), JSON.stringify({ name: 'ape', version: '2.29.0' }));
@@ -40,12 +41,12 @@ if (saved.status !== 'installing') process.exit(19);
 appendFileSync('.git/refresh-calls.ndjson', JSON.stringify(process.argv.slice(2)) + '\\n');
 if (existsSync('.git/refresh-fail')) { console.error('synthetic refresh failure'); process.exit(17); }
 `);
-  await git.runGit(root, ['add', '.']);
-  await git.runGit(root, ['commit', '-m', 'shipped installer fixture']);
-  const head = await git.runGit(root, ['rev-parse', 'HEAD']);
-  const tree = await git.runGit(root, ['rev-parse', 'HEAD^{tree}']);
-  await git.runGit(root, ['update-ref', 'refs/remotes/origin/main', head]);
-  await git.runGit(root, ['update-ref', `refs/heads/${context.branch}`, head]);
+  await git.runGit(root, ['add', '.'], { env: gitFixtureEnv() });
+  await git.runGit(root, ['commit', '-m', 'shipped installer fixture'], { env: gitFixtureEnv() });
+  const head = await git.runGit(root, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() });
+  const tree = await git.runGit(root, ['rev-parse', 'HEAD^{tree}'], { env: gitFixtureEnv() });
+  await git.runGit(root, ['update-ref', 'refs/remotes/origin/main', head], { env: gitFixtureEnv() });
+  await git.runGit(root, ['update-ref', `refs/heads/${context.branch}`, head], { env: gitFixtureEnv() });
   const target = { origin, repository, base: 'main' };
   const config = { shipping: { [`${host}_dev_refresh`]: true, provider: 'github', required_remote_checks: true, target } };
   const state = {
@@ -83,13 +84,13 @@ describe.each(['codex', 'claude'])('automatic %s development refresh after shipp
     const actions = await applyActions(paths, c.state, [{ type: 'release_lock' }, { type: 'persist_state' }], c.config);
     expect(actions.map(action => action.type)).toEqual(['checkout_cleanup', stateKey, 'release_lock']);
     expect(await readJson(paths.active)).toMatchObject({ status: 'completed', checkout_cleanup: { status: 'returned' }, [stateKey]: { status: 'failed' } });
-    const head = await git.runGit(c.root, ['rev-parse', 'HEAD']);
+    const head = await git.runGit(c.root, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() });
     await rm(path.join(c.root, '.git/refresh-fail'));
     const resumed = await resumeRun(c.root);
     expect(resumed).toMatchObject({ ok: true, dispatch_state: 'none', run: { status: 'completed', [stateKey]: { status: 'installed' } } });
     expect(resumed.actions.map(action => action.type)).toEqual(['checkout_cleanup', stateKey]);
     expect((await c.calls()).map(args => args[3])).toEqual([c.state[stateKey].cachebuster, c.state[stateKey].cachebuster]);
-    expect(await git.runGit(c.root, ['rev-parse', 'HEAD'])).toBe(head);
+    expect(await git.runGit(c.root, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() })).toBe(head);
     expect((await readJson(paths.active)).merge).toEqual(c.state.merge);
     expect(await compactStatus(c.root)).toMatchObject({ [stateKey]: { status: 'installed', plugin_id: 'ape@ape-dev' } });
     const document = renderStatusDoc(resumed.run);
@@ -130,9 +131,9 @@ describe.each(['codex', 'claude'])('automatic %s development refresh after shipp
   it.each(['dirty', 'wrong-branch', 'wrong-tree', 'wrong-origin', 'admission-drift'])('refuses installation after %s', async scenario => {
     const c = await refreshFixture(host);
     if (scenario === 'dirty') await writeFile(path.join(c.root, 'unrelated.txt'), 'new local work');
-    if (scenario === 'wrong-branch') await git.runGit(c.root, ['switch', '-c', 'unrelated']);
+    if (scenario === 'wrong-branch') await git.runGit(c.root, ['switch', '-c', 'unrelated'], { env: gitFixtureEnv() });
     if (scenario === 'wrong-tree') c.state.gates.tree_sha = 'f'.repeat(40);
-    if (scenario === 'wrong-origin') await git.runGit(c.root, ['remote', 'set-url', 'origin', 'https://github.com/example/other.git']);
+    if (scenario === 'wrong-origin') await git.runGit(c.root, ['remote', 'set-url', 'origin', 'https://github.com/example/other.git'], { env: gitFixtureEnv() });
     if (scenario === 'admission-drift') c.state.shipping_target.repository = 'example/other';
     const result = await refreshDevPluginAfterShip({ root: c.root }, c.state, c.config, c.save);
     expect(result.status).toBe('failed');
@@ -163,16 +164,16 @@ describe.each(['codex', 'claude'])('automatic %s development refresh after shipp
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'ape-safe-shipping-cleanup-'));
   roots.push(root);
-  await git.runGit(root, ['init', '-b', 'main']);
-  await git.runGit(root, ['config', 'user.name', 'APE Test']);
-  await git.runGit(root, ['config', 'user.email', 'ape@example.test']);
-  await git.runGit(root, ['config', 'commit.gpgsign', 'false']);
-  await git.runGit(root, ['commit', '--allow-empty', '-m', 'attested head']);
-  const head = await git.runGit(root, ['rev-parse', 'HEAD']);
+  await git.runGit(root, ['init', '-b', 'main'], { env: gitFixtureEnv() });
+  await git.runGit(root, ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv() });
+  await git.runGit(root, ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv() });
+  await git.runGit(root, ['config', 'commit.gpgsign', 'false'], { env: gitFixtureEnv() });
+  await git.runGit(root, ['commit', '--allow-empty', '-m', 'attested head'], { env: gitFixtureEnv() });
+  const head = await git.runGit(root, ['rev-parse', 'HEAD'], { env: gitFixtureEnv() });
   const branch = 'ape/shipped';
-  await git.runGit(root, ['branch', branch]);
-  await git.runGit(root, ['update-ref', 'refs/remotes/origin/main', head]);
-  const newHead = await git.runGit(root, ['commit-tree', 'HEAD^{tree}', '-p', head, '-m', 'unique later local commit']);
+  await git.runGit(root, ['branch', branch], { env: gitFixtureEnv() });
+  await git.runGit(root, ['update-ref', 'refs/remotes/origin/main', head], { env: gitFixtureEnv() });
+  const newHead = await git.runGit(root, ['commit-tree', 'HEAD^{tree}', '-p', head, '-m', 'unique later local commit'], { env: gitFixtureEnv() });
   return { root, branch, head, newHead };
 }
 
@@ -180,16 +181,16 @@ describe('local shipping cleanup compare-and-delete', () => {
   it('deletes only the exact unoccupied pushed head and tolerates an already absent branch', async () => {
     const { root, branch, head } = await fixture();
     expect(await deleteLocalShippingBranch(root, branch, head)).toEqual({ present: false });
-    expect(await git.runGit(root, ['for-each-ref', '--format=%(refname)', `refs/heads/${branch}`])).toBe('');
+    expect(await git.runGit(root, ['for-each-ref', '--format=%(refname)', `refs/heads/${branch}`], { env: gitFixtureEnv() })).toBe('');
     expect(await deleteLocalShippingBranch(root, branch, head)).toEqual({ present: false });
   });
 
   it('preserves a unique later commit even when its tree is identical to the pushed head', async () => {
     const { root, branch, head, newHead } = await fixture();
-    await git.runGit(root, ['update-ref', `refs/heads/${branch}`, newHead]);
+    await git.runGit(root, ['update-ref', `refs/heads/${branch}`, newHead], { env: gitFixtureEnv() });
     await expect(deleteLocalShippingBranch(root, branch, head)).rejects.toThrow(/tip changed/);
-    expect(await git.runGit(root, ['rev-parse', branch])).toBe(newHead);
-    expect(await git.runGit(root, ['for-each-ref', '--contains', newHead, '--format=%(refname)'])).toBe(`refs/heads/${branch}`);
+    expect(await git.runGit(root, ['rev-parse', branch], { env: gitFixtureEnv() })).toBe(newHead);
+    expect(await git.runGit(root, ['for-each-ref', '--contains', newHead, '--format=%(refname)'], { env: gitFixtureEnv() })).toBe(`refs/heads/${branch}`);
   });
 
   it('atomically refuses a branch update racing the final deletion', async () => {
@@ -197,20 +198,20 @@ describe('local shipping cleanup compare-and-delete', () => {
     const originalGit = git.runGit;
     vi.spyOn(git, 'runGit').mockImplementation(async (directory, args, options) => {
       if (args[0] === 'update-ref' && args.includes('-d')) {
-        await originalGit(directory, ['update-ref', `refs/heads/${branch}`, newHead, head]);
+        await originalGit(directory, ['update-ref', `refs/heads/${branch}`, newHead, head], { env: gitFixtureEnv() });
       }
       return originalGit(directory, args, options);
     });
     await expect(deleteLocalShippingBranch(root, branch, head)).rejects.toThrow(/cannot lock ref/);
-    expect(await originalGit(root, ['rev-parse', branch])).toBe(newHead);
+    expect(await originalGit(root, ['rev-parse', branch], { env: gitFixtureEnv() })).toBe(newHead);
   });
 
   it('preserves a branch checked out in any worktree', async () => {
     const { root, branch, head } = await fixture();
     const worktree = path.join(root, 'other-worktree');
-    await git.runGit(root, ['worktree', 'add', worktree, branch]);
+    await git.runGit(root, ['worktree', 'add', worktree, branch], { env: gitFixtureEnv() });
     await expect(deleteLocalShippingBranch(root, branch, head)).rejects.toThrow(/checked out in a worktree/);
-    expect(await git.runGit(root, ['rev-parse', branch])).toBe(head);
+    expect(await git.runGit(root, ['rev-parse', branch], { env: gitFixtureEnv() })).toBe(head);
   });
 
   it('fails closed on Git read errors instead of treating them as missing branches', async () => {
@@ -222,19 +223,19 @@ describe('local shipping cleanup compare-and-delete', () => {
     });
     await expect(deleteLocalShippingBranch(root, branch, head)).rejects.toThrow('cannot read refs');
     expect(spy.mock.calls.some(([, args]) => args[0] === 'update-ref')).toBe(false);
-    expect(await originalGit(root, ['rev-parse', branch])).toBe(head);
+    expect(await originalGit(root, ['rev-parse', branch], { env: gitFixtureEnv() })).toBe(head);
   });
 
   it.each([undefined, '', 'not-a-commit'])('retains legacy branches without an exact expected head (%s)', async (expectedHead) => {
     const { root, branch, head } = await fixture();
     await expect(assertLocalShippingBranchCurrent(root, branch, expectedHead)).rejects.toThrow(/no exact pushed head/);
-    expect(await git.runGit(root, ['rev-parse', branch])).toBe(head);
+    expect(await git.runGit(root, ['rev-parse', branch], { env: gitFixtureEnv() })).toBe(head);
   });
 
   it.each(['advanced', 'legacy'])('terminal reconciliation preserves a %s shipment branch before switching the checkout', async (scenario) => {
     const { root, branch, head, newHead } = await fixture();
-    if (scenario === 'advanced') await git.runGit(root, ['update-ref', `refs/heads/${branch}`, newHead]);
-    await git.runGit(root, ['switch', branch]);
+    if (scenario === 'advanced') await git.runGit(root, ['update-ref', `refs/heads/${branch}`, newHead], { env: gitFixtureEnv() });
+    await git.runGit(root, ['switch', branch], { env: gitFixtureEnv() });
     const state = {
       branch, base_branch: 'main', base_commit_sha: head, status: 'completed',
       merge: { provider: 'github', ...(scenario === 'advanced' ? { head_oid: head } : {}) },
@@ -242,7 +243,7 @@ describe('local shipping cleanup compare-and-delete', () => {
     const result = await reconcileTerminalCheckout({ root }, state);
     expect(result).toMatchObject({ status: 'retained_error', retained: true, deleted: false });
     expect(result.reason).toMatch(scenario === 'advanced' ? /tip changed/ : /no exact pushed head/);
-    expect(await git.runGit(root, ['branch', '--show-current'])).toBe(branch);
-    expect(await git.runGit(root, ['rev-parse', branch])).toBe(scenario === 'advanced' ? newHead : head);
+    expect(await git.runGit(root, ['branch', '--show-current'], { env: gitFixtureEnv() })).toBe(branch);
+    expect(await git.runGit(root, ['rev-parse', branch], { env: gitFixtureEnv() })).toBe(scenario === 'advanced' ? newHead : head);
   });
 });

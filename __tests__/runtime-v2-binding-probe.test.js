@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
@@ -29,7 +30,7 @@ afterEach(async () => {
 
 function invokeHook(input, { canaryOnly = false, codexCwd = input.project_dir } = {}) {
   return new Promise((resolve, reject) => {
-    const env = { ...process.env };
+    const env = gitFixtureEnv();
     if (typeof codexCwd === 'string' && codexCwd.length > 0) env.CODEX_CWD = codexCwd;
     else delete env.CODEX_CWD;
     const args = [path.join(root, 'bin', 'ape-hook.mjs')];
@@ -154,11 +155,11 @@ async function project({ ape = true, runtime = true } = {}) {
     );
   }
   await writeFile(path.join(dir, 'docs', 'note.md'), '# Note\n');
-  execFileSync('git', ['init', '-q'], { cwd: dir });
-  execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: dir });
-  execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: dir });
-  execFileSync('git', ['add', '.'], { cwd: dir });
-  execFileSync('git', ['commit', '-qm', 'baseline'], { cwd: dir });
+  execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['add', '.'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['commit', '-qm', 'baseline'], { env: gitFixtureEnv(), cwd: dir });
   return dir;
 }
 
@@ -2184,6 +2185,7 @@ describe('APE v2 mandatory pre-run native binding proof', () => {
       ],
     })}\n`);
     const branchBefore = execFileSync('git', ['branch', '--show-current'], {
+    env: gitFixtureEnv(),
       cwd: dir,
       encoding: 'utf8',
     }).trim();
@@ -2196,6 +2198,7 @@ describe('APE v2 mandatory pre-run native binding proof', () => {
     );
     expect(await readJson(paths.active, null)).toBeNull();
     expect(execFileSync('git', ['branch', '--show-current'], {
+    env: gitFixtureEnv(),
       cwd: dir,
       encoding: 'utf8',
     }).trim()).toBe(branchBefore);
@@ -2364,7 +2367,7 @@ describe('APE v2 mandatory pre-run native binding proof', () => {
   it('blocks before mutation, then consumes prepared → launched → bound → acknowledged proof exactly once', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
-    const branchBefore = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
+    const branchBefore = execFileSync('git', ['branch', '--show-current'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim();
 
     const blocked = await startRun(dir, startInput());
     expect(blocked).toMatchObject({
@@ -2375,7 +2378,7 @@ describe('APE v2 mandatory pre-run native binding proof', () => {
       probe: { status: 'missing', infrastructure_status: 'required' },
     });
     expect(await readJson(paths.active, null)).toBeNull();
-    expect(execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim()).toBe(branchBefore);
+    expect(execFileSync('git', ['branch', '--show-current'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim()).toBe(branchBefore);
 
     const prepared = await prepareNativeBindingProbe(dir, {
       host: 'codex',
@@ -2601,7 +2604,7 @@ describe('APE v2 mandatory pre-run native binding proof', () => {
   it('reports an observed-but-unbound launch as infrastructure failure and never creates run state', async () => {
     const dir = await project();
     const paths = runtimePaths(dir);
-    const branchBefore = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
+    const branchBefore = execFileSync('git', ['branch', '--show-current'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim();
     const action = await prepareBindingProbe(paths, {
       host: 'codex',
       model: { model: 'gpt-5.6-terra', reasoning_effort: 'medium' },
@@ -2632,7 +2635,7 @@ describe('APE v2 mandatory pre-run native binding proof', () => {
       probe: { status: 'launched', infrastructure_status: 'awaiting_binding' },
     });
     expect(await readJson(paths.active, null)).toBeNull();
-    expect(execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim()).toBe(branchBefore);
+    expect(execFileSync('git', ['branch', '--show-current'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim()).toBe(branchBefore);
   });
 
   it('fails the canary when the production authoritative-context hash check fails', async () => {

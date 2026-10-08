@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { access, mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -44,7 +45,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project() {
@@ -313,12 +314,14 @@ describe('APE v2 service integration', () => {
     expect(overridden.reason).toMatch(/use override reset/);
     expect(await readJson(paths.active)).toEqual(before);
 
-    // next/resume against a blocked run are refused, not "ok".
+    // NEXT cannot advance a block. RESUME discovers an explicit recovery plan
+    // without retiring the run or hiding a rejected reducer action.
     state.status = 'blocked';
     state.block_reason = 'stage build failed twice';
     await atomicWriteJson(paths.active, state);
     expect(await nextRun(dir)).toEqual({ ok: false, reason: 'run is blocked' });
-    expect(await resumeRun(dir)).toEqual({ ok: false, reason: 'run is blocked' });
+    expect(await resumeRun(dir)).toMatchObject({ ok: true, recovery_plan: { kind: 'replace_run' }, next_action: { kind: 'confirm_recovery' } });
+    expect((await readJson(paths.active)).status).toBe('blocked');
   });
 
   it('reports a sealed completed run as inactive and a blocked run as active', async () => {

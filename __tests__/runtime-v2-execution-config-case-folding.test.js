@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { normalizeLifecycleEvent as neutralNormalize, evaluateLifecyclePolicy as neutralPolicy,
   parseDeletionCommand as neutralDeletion, pathResolvesWithinClaims as neutralWithin,
   pathResolvesOutsideProject as neutralOutside } from '../lib/runtime/hooks.js';
@@ -734,7 +735,7 @@ describe('GREEN GUARD — a legitimately non-ASCII scratch name stays admitted',
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project() {
@@ -775,7 +776,7 @@ async function outsideDir() {
 }
 
 function claudeEnv() {
-  const env = { ...process.env, CLAUDECODE: '1' };
+  const env = { ...gitFixtureEnv(), CLAUDECODE: '1' };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
   delete env.APE_TICKET_ID;

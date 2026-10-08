@@ -2,7 +2,7 @@
 
 import { spawn } from 'node:child_process';
 import { access, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -631,11 +631,13 @@ export async function verifyInstalledPackage(host, pluginRoot) {
   await initializeInstalled(host, pluginRoot);
 }
 
-function requestedOptions(argv) {
+export function requestedOptions(argv) {
   let mode = 'blocking';
+  let linux = false;
   let hosts = new Set(Object.keys(compatibility.hosts));
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === '--linux') { linux = true; continue; }
     if (token === '--edge') {
       if (mode === 'installed') throw new Error('--edge and --installed-hosts are mutually exclusive');
       mode = 'edge';
@@ -651,9 +653,88 @@ function requestedOptions(argv) {
       index += 1;
       continue;
     }
-    throw new Error('usage: node scripts/smoke-marketplace-install.mjs [--host codex|claude] [--edge | --installed-hosts]');
+    throw new Error('usage: node scripts/smoke-marketplace-install.mjs [--host codex|claude] [--linux | --edge | --installed-hosts]');
   }
-  return { hosts, mode };
+  if (linux && mode !== 'blocking') throw new Error('--linux requires pinned hosts; it cannot combine with --edge or --installed-hosts');
+  return { hosts, mode, linux };
+}
+
+// Only the public package inputs and this probe's source closure cross into
+// Linux. Never mount the checkout, its ancestry, node_modules, or user homes.
+const LINUX_INPUTS = Object.freeze([
+  'package.json', 'package-lock.json', 'compatibility.json',
+  '.agents/plugins/marketplace.json', '.claude-plugin/marketplace.json',
+  'plugins/ape', 'plugins/ape-claude', 'lib/runtime',
+  'scripts/smoke-marketplace-install.mjs', 'scripts/marketplace-host-invocation.mjs',
+  'scripts/reinstall-codex-plugin.mjs', 'scripts/dev-plugin-files.mjs',
+]);
+
+export async function linuxMarketplaceSmoke({ hosts = new Set(Object.keys(compatibility.hosts)),
+  execute = command, repoRoot = REPO_ROOT } = {}) {
+  if ([...hosts].some(host => !Object.hasOwn(compatibility.hosts, host)) || hosts.size === 0) {
+    throw new Error('unsupported Linux smoke host');
+  }
+  // Reserve the final minute of the published 15-minute profile for cleanup.
+  const deadline = Date.now() + 840_000;
+  const runDocker = (args, limit = COMMAND_TIMEOUT_MS) => execute('docker', args, {
+    timeoutMs: Math.max(1, Math.min(limit, deadline - Date.now())),
+  });
+  // Fail before allocating a snapshot when Docker is unavailable.
+  await runDocker(['info', '--format', '{{.ServerVersion}}']);
+  const image = `node:${compatibility.node.blocking}-bookworm`;
+  await runDocker(['pull', image], 300_000);
+  const scratch = await mkdtemp(join(tmpdir(), 'ape-linux-marketplace-'));
+  const snapshot = join(scratch, 'public');
+  const name = `ape-marketplace-${randomUUID()}`;
+  let allocated = false;
+  let createAttempted = false;
+  let interrupted = false;
+  let cleanup;
+  const removeContainer = () => cleanup ??= execute('docker', ['rm', '--force', name]).catch(error => {
+    if (!allocated && /No such container/iu.test(error.message)) return;
+    throw error;
+  });
+  const onSignal = () => {
+    interrupted = true;
+    if (allocated) void removeContainer().catch(() => {});
+  };
+  try {
+    for (const relative of LINUX_INPUTS) {
+      const destination = join(snapshot, relative);
+      await mkdir(dirname(destination), { recursive: true });
+      await cp(join(repoRoot, relative), destination, { recursive: true, filter: async source => {
+        const entry = await lstat(source);
+        if (!entry.isFile() && !entry.isDirectory()) throw new Error('Linux smoke refuses linked or special snapshot inputs');
+        return true;
+      } });
+    }
+    const hostArgs = hosts.size === 1 ? ['--host', [...hosts][0]] : [];
+    const script = 'mkdir -p "$HOME" /workspace && cp -R /ape-input/. /workspace/ && cd /workspace && ' +
+      'npm ci --ignore-scripts --no-audit --no-fund && exec node scripts/smoke-marketplace-install.mjs "$@"';
+    process.once('SIGINT', onSignal);
+    process.once('SIGTERM', onSignal);
+    createAttempted = true;
+    await runDocker(['create', '--name', name, '--init',
+      '--mount', `type=bind,source=${snapshot},target=/ape-input,readonly`,
+      '--env', 'HOME=/tmp/ape-linux-home', image, 'sh', '-ec', script, 'ape-linux-smoke', ...hostArgs]);
+    allocated = true;
+    if (interrupted) throw new Error('Linux marketplace smoke interrupted');
+    const result = await runDocker(['start', '--attach', name], 720_000);
+    process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    const observed = await runDocker(['inspect', '--format', '{{json .State}}', name]);
+    const state = JSON.parse(observed.stdout);
+    if (interrupted || state.Status !== 'exited' || state.ExitCode !== 0 || state.OOMKilled !== false) {
+      throw new Error(`Linux marketplace container did not complete successfully (${state.Status}/${state.ExitCode})`);
+    }
+    return { platform: 'linux', node: compatibility.node.blocking, hosts: [...hosts] };
+  } finally {
+    process.removeListener('SIGINT', onSignal);
+    process.removeListener('SIGTERM', onSignal);
+    // Keep the snapshot if owned-container removal fails; it may still be in use.
+    if (createAttempted) await removeContainer();
+    await rm(scratch, { recursive: true, force: true });
+  }
 }
 
 async function assertHostVersion(identity, mode, modulesRoot, options) {
@@ -670,7 +751,8 @@ async function assertHostVersion(identity, mode, modulesRoot, options) {
 }
 
 async function main(argv = process.argv.slice(2)) {
-  const { hosts, mode } = requestedOptions(argv);
+  const { hosts, mode, linux } = requestedOptions(argv);
+  if (linux) return linuxMarketplaceSmoke({ hosts });
   const scratch = await mkdtemp(join(tmpdir(), 'ape-clean-marketplace-'));
   const toolsRoot = join(scratch, 'host-tools');
   const codexHome = join(scratch, 'codex-home');

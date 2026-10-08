@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -21,7 +22,7 @@ async function checkedInSession(messages, envHints, cwd) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, argv, {
       cwd,
-      env: { ...process.env, ...envHints },
+      env: { ...gitFixtureEnv(), ...envHints },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -49,7 +50,7 @@ describe('the checked-in Claude MCP declaration has a bounded, executable host-r
       mkdir(path.join(claudeRoot, '.ape'), { recursive: true }),
       mkdir(path.join(codexRoot, '.ape'), { recursive: true }),
     ]);
-    execFileSync('git', ['init', '-q'], { cwd: claudeRoot });
+    execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: claudeRoot });
 
     const [response] = await checkedInSession([{
       jsonrpc: '2.0',

@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { normalizeLifecycleEvent as neutralNormalize, evaluateLifecyclePolicy as neutralPolicy,
   parseDeletionCommand as neutralDeletion, pathResolvesWithinClaims as neutralWithin,
   pathResolvesOutsideProject as neutralOutside } from '../lib/runtime/hooks.js';
@@ -996,7 +997,7 @@ describe('PUBLISHED RESIDUALS — these arms ASSERT UNCLOSED HOLES so the closur
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project(status = 'running') {
@@ -1042,7 +1043,7 @@ async function outsideDir() {
 // Force the Claude host and strip host-provided project hints so only the
 // payload under test decides.
 function claudeEnv() {
-  const env = { ...process.env, CLAUDECODE: '1' };
+  const env = { ...gitFixtureEnv(), CLAUDECODE: '1' };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
   delete env.APE_TICKET_ID;

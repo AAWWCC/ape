@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { describe, it, expect, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,12 +30,12 @@ describe('ape v2 doctor bundle-drift notice (friction #18/#11)', () => {
   function gitProject() {
     const dir = mkdtempSync(join(tmpdir(), 'ape-bundle-drift-'));
     dirs.push(dir);
-    execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['init'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
     return dir;
   }
 
   function commitAll(dir, message) {
-    execFileSync('git', ['add', '--all'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['add', '--all'], { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' });
     execFileSync(
       'git',
       [
@@ -48,7 +49,7 @@ describe('ape v2 doctor bundle-drift notice (friction #18/#11)', () => {
         '-m',
         message,
       ],
-      { cwd: dir, stdio: 'ignore' },
+      { env: gitFixtureEnv(), cwd: dir, stdio: 'ignore' },
     );
   }
 

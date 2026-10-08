@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,7 +19,7 @@ afterEach(async () => Promise.all(cleanups.splice(0).map((dir) => rm(dir, { recu
 async function nativeCapabilityFixture() {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-task-native-recovery-'));
   cleanups.push(dir);
-  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+  const git = (...args) => execFileSync('git', args, { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim();
   await mkdir(path.join(dir, 'src'));
   await mkdir(path.join(dir, 'tests'));
   await writeFile(path.join(dir, 'src/value.js'), 'module.exports = { value: 1 };\n');

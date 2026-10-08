@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -238,7 +239,7 @@ describe('APE v2 history effective records (superseding completions)', () => {
 
 describe('APE v2 cross-run supersession (friction #10)', () => {
   function git(cwd, ...args) {
-    execFileSync('git', args, { cwd, encoding: 'utf8' });
+    execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' });
   }
 
   async function gitProject() {

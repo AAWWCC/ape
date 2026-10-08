@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { readFile, mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -61,7 +62,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 async function project(label) {
@@ -140,7 +141,7 @@ function invokeClaudeHook(input) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [hookBinary], {
       cwd: root,
-      env: { ...process.env, CLAUDECODE: '1' },
+      env: { ...gitFixtureEnv(), CLAUDECODE: '1' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';

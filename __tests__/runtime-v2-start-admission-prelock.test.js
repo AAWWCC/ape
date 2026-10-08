@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { previewRun, startRun } from '../lib/runtime/lifecycle-service.js';
 
 const directories = [];
-const git = (root, ...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+const git = (root, ...args) => execFileSync('git', args, { env: gitFixtureEnv(), cwd: root, encoding: 'utf8' }).trim();
 afterEach(async () => {
   await Promise.all(directories.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -70,16 +71,16 @@ describe('supersession admission precedes receipt-lock storage', () => {
     expect(await snapshot(root)).toEqual(before);
   });
 
-  it('refuses an undeliverable complete preview before start can mutate even with a supplied digest', async () => {
+  it('pages a large preview but refuses a forged digest before start can mutate', async () => {
     const root = await fixture();
     const input = request({ claimed_paths: Array.from({ length: 60 }, (_, index) =>
       `docs/${'a'.repeat(190)}/${'b'.repeat(190)}/${index}.md`) });
     const before = await snapshot(root);
     const preview = await previewRun(root, input);
-    expect(preview).toMatchObject({ ok: false, code: 'admission-response-too-large', attempts_consumed: 0 });
+    expect(preview).toMatchObject({ ok: true, admission_delivery: { kind: 'paged', offset: 0 } });
     expect(preview).not.toHaveProperty('admission_digest');
     const started = await startRun(root, { ...input, expected_admission_digest: 'f'.repeat(64) });
-    expect(started).toMatchObject({ ok: false, code: 'admission-response-too-large', attempts_consumed: 0 });
+    expect(started).toMatchObject({ ok: false, code: 'admission-drift', attempts_consumed: 0 });
     expect(await snapshot(root)).toEqual(before);
   });
 

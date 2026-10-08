@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -21,14 +22,14 @@ async function heldProject({ runContract = false } = {}) {
   await mkdir(path.join(dir, 'tests'));
   await writeFile(path.join(dir, 'src', 'value.js'), 'export const value = 1;\n');
   await writeFile(path.join(dir, 'tests', 'value.test.js'), 'throw new Error("red");\n');
-  execFileSync('git', ['init', '-q'], { cwd: dir });
-  execFileSync('git', ['config', 'user.email', 'ape@example.test'], { cwd: dir });
-  execFileSync('git', ['config', 'user.name', 'APE Test'], { cwd: dir });
-  execFileSync('git', ['add', '.'], { cwd: dir });
-  execFileSync('git', ['commit', '-qm', 'test: baseline'], { cwd: dir });
-  const branch = execFileSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8' }).trim();
-  const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
-  const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: dir, encoding: 'utf8' }).trim();
+  execFileSync('git', ['init', '-q'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['config', 'user.email', 'ape@example.test'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['config', 'user.name', 'APE Test'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['add', '.'], { env: gitFixtureEnv(), cwd: dir });
+  execFileSync('git', ['commit', '-qm', 'test: baseline'], { env: gitFixtureEnv(), cwd: dir });
+  const branch = execFileSync('git', ['branch', '--show-current'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim();
+  const commit = execFileSync('git', ['rev-parse', 'HEAD'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim();
+  const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { env: gitFixtureEnv(), cwd: dir, encoding: 'utf8' }).trim();
   await atomicWriteJson(runtimePaths(dir).config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
     test_commands: { full: 'node --test' },

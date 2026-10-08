@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import childProcess, { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -80,12 +81,12 @@ function certificationParentFixture({
   const codexHome = path.join(root, 'codex-home');
   const promptPath = path.join(root, 'prompt.txt');
   mkdirSync(projectDir, { recursive: true });
-  execFileSync('git', ['init', '--initial-branch=main'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['config', '--local', 'user.name', 'APE Certification'], { cwd: projectDir });
+  execFileSync('git', ['init', '--initial-branch=main'], { env: gitFixtureEnv(), cwd: projectDir, stdio: 'ignore' });
+  execFileSync('git', ['config', '--local', 'user.name', 'APE Certification'], { env: gitFixtureEnv(), cwd: projectDir });
   execFileSync(
     'git',
     ['config', '--local', 'user.email', 'ape-certification@users.noreply.github.com'],
-    { cwd: projectDir },
+    { env: gitFixtureEnv(), cwd: projectDir },
   );
   mkdirSync(path.join(projectDir, '.ape', 'runtime'), { recursive: true });
   writeFileSync(
@@ -268,7 +269,7 @@ function git(repo, ...args) {
     cwd: repo,
     encoding: 'utf8',
     env: {
-      ...process.env,
+      ...gitFixtureEnv(),
       GIT_AUTHOR_NAME: 'APE Certification Test',
       GIT_AUTHOR_EMAIL: 'ape-certification@example.invalid',
       GIT_COMMITTER_NAME: 'APE Certification Test',
@@ -1059,6 +1060,7 @@ describe('live certification Codex parent launcher', () => {
   it('fails closed before launch when the effective Git identity is overridden', () => {
     const fixture = certificationParentFixture();
     execFileSync('git', ['config', '--local', 'user.email', 'developer@example.invalid'], {
+      env: gitFixtureEnv(),
       cwd: fixture.projectDir,
     });
     expect(() => buildCodexParentInvocation(fixture)).toThrow(
@@ -1874,7 +1876,7 @@ describe('owner-authorized 2.25.8 publication exception', () => {
       tagType: git(fixture.repo, 'cat-file', '-t', `refs/tags/${tag}`),
       tagCommit: git(fixture.repo, 'rev-parse', `${tag}^{commit}`),
       packageVersion: JSON.parse(git(fixture.repo, 'show', `${fixture.head}:package.json`)).version,
-      rawRecord: execFileSync('git', ['show', `${fixture.head}:evals/release-owner-exception-2.25.8.json`], { cwd: fixture.repo }),
+      rawRecord: execFileSync('git', ['show', `${fixture.head}:evals/release-owner-exception-2.25.8.json`], { env: gitFixtureEnv(), cwd: fixture.repo }),
       // The pure proof boundary models the authorized product inventory. The
       // synthetic repository is deliberately not the real tested product.
       inventorySha256: authorizedInventory,

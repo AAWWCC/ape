@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -41,10 +42,8 @@ async function fixture(host, failGate) {
   await expect(lstat(path.join(plugin, 'node_modules'))).rejects.toMatchObject({ code: 'ENOENT' });
   const control = path.join(root, 'gate-control.json');
   await writeFile(control, JSON.stringify({ fail: failGate }));
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:APE_|CLAUDE|CODEX_CWD|GIT_)/.test(key)));
-  const gitConfig = path.join(root, 'empty-git-config');
-  await writeFile(gitConfig, '');
-  Object.assign(env, { GIT_CONFIG_GLOBAL: gitConfig, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' });
+  const env = gitFixtureEnv(Object.fromEntries(Object.entries(process.env)
+    .filter(([key]) => !/^(?:APE_|CLAUDE|CODEX_CWD)/.test(key))));
   const git = (...args) => execFileSync('git', args, { cwd: project, env, encoding: 'utf8' }).trim();
   await writeFile(path.join(project, '.gitignore'), '.ape/\n');
   await writeFile(path.join(project, 'package.json'), JSON.stringify({ private: true, scripts: { test: 'node --test value.test.cjs' } }));

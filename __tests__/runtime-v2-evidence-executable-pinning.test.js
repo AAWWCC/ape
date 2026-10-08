@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -37,7 +38,7 @@ async function executable(directory, name) {
 }
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 function invokeHook(input, cwd, env) {
@@ -108,7 +109,7 @@ describe('trusted-start evidence executable resolution', () => {
       tool_name: 'Bash',
       tool_input: { command: 'npm test' },
     };
-    const baseEnv = { ...process.env, CODEX_CWD: project };
+    const baseEnv = { ...gitFixtureEnv(), CODEX_CWD: project };
     delete baseEnv.CLAUDECODE;
     delete baseEnv.CLAUDE_CODE;
     delete baseEnv.CLAUDE_PROJECT_DIR;

@@ -144,7 +144,7 @@ async function check(root) {
   requireFullActionPins(edge, '.github/workflows/host-edge.yml');
 
   const smoke = await text(root, 'scripts/smoke-marketplace-install.mjs');
-  requireContains(smoke, 'compatibility.json', 'scripts/smoke-marketplace-install.mjs');
+  requireContains(smoke, "readFile(join(REPO_ROOT, 'compatibility.json'), 'utf8')", 'scripts/smoke-marketplace-install.mjs');
   requireContains(smoke, 'host.version', 'scripts/smoke-marketplace-install.mjs');
   requireContains(smoke, "mode === 'edge'", 'scripts/smoke-marketplace-install.mjs');
   requireContains(smoke, 'npm_execpath', 'scripts/smoke-marketplace-install.mjs');

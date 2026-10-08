@@ -55,11 +55,12 @@ from this evidence summary.
 
 Disagreement can add one additional deep-tier judge dispatch without spending a retry or remediation cycle.
 The judge receives bounded `review_findings` and advances, requests a directed replan, or blocks.
-For new runs, directed replans have no fixed count quota. After the first, the
-normalized assurance identities must strictly shrink. Preview includes the initial
-plan; recovery totals that depend on future progress are `null` (unknown).
-Historical frozen execution policies retain their original replan quotas. The
-judge never writes code.
+For new v4 runs, directed replans follow recorded resolution evidence rather than
+a fixed count quota. A repair must resolve prior blockers with material changes;
+new legitimate findings can coexist with that progress. Repeated, cyclic, missing,
+or cosmetic evidence stops recovery. Preview includes the initial plan; totals
+that depend on future progress are `null` (unknown). Historical runs retain their
+frozen recovery rules. The judge never writes code.
 
 ### Tests and plan contracts
 
@@ -75,12 +76,14 @@ are rejected before branch creation. `green-maintenance` is also phase-only.
 
 ## Retries and remediation
 
-A failed stage gets one retry by default, according to the run's frozen execution policy. A blocking code review instead enters remediation:
+A failed stage follows the run's frozen execution policy. New v4 runs use recorded
+progress instead of a fixed retry quota; historical runs retain their admitted
+limits. A blocking code review enters remediation.
 
-An implementer's test-contradiction report first receives independent read-only reconciliation.
-If confirmed, one `test-recheck` ticket narrows writes to the confirmed test paths. Its
+An eligible implementer's test-contradiction report receives independent read-only reconciliation.
+If confirmed, a `test-recheck` ticket narrows writes to the confirmed test paths. Its
 `test-correction` check executes changed tests twice and accepts either stable passing or stable
-failing results; a corrected test can still expose production work for the implementer's remaining
+failing results; a corrected test can still expose production work for an eligible implementer
 retry. Initial `red-test` admission still requires failure. Recheck rejects absent tests, missing
 execution verdicts, flaky outcomes, and execution-side tree changes, and seals the actual results
 as `evidence.test_correction`.
@@ -92,11 +95,11 @@ as `evidence.test_correction`.
 | Mixed findings or `both` | Remediation test → remediation build |
 
 Writers stay serialized, and security review remains in the final group when
-required. New runs have no fixed remediation-cycle quota. After the first cycle,
-normalized blocker identities must strictly shrink. Repeated, expanded,
-incomparable, or malformed blocker sets stop. Historical frozen execution policies
-retain their original cycle quotas. Stage retries, worker replacements and
-validation submissions still have finite limits.
+required. V4 applies the same recorded-progress policy to remediation, worker
+replacement, receipt correction, and reconciliation. Historical frozen policies
+retain their original quotas and convergence rules. Scope, binding, evidence, and
+resource checks remain required. See [execution policy](configuration.md) for the
+current recovery rules.
 
 New review tickets use `review_contract_version: 1`. Advisory findings use `blocking: false`
 without remediation. Blocking findings name an owner; `test` and `both` also name exact
@@ -118,8 +121,9 @@ remediation-test tickets use `test_scope: "exact"`; sibling test writes are deni
   frozen validation and physical-worker limits. New growth contract v2 checks canonical unique
   test paths against the shared structural guard and actual rendered command/manifest budgets.
   Historical growth contract v1 retains its 64-path and 4096-byte union bounds.
-- `failure_kind: test-contradiction` blocks immediately. It is the implementer's claim, not an
-  independent runtime finding. It does not authorize rewriting tests or inventing a recovery path.
+- `failure_kind: test-contradiction` is an implementer's claim, not an independent runtime
+  finding. The runtime may schedule the reconciliation described above; otherwise it reports
+  the block. The claim alone does not authorize rewriting tests or inventing a recovery path.
 
 Follow the current `next_action` or recovery descriptor, not generic reset advice. A receipt
 rejection descriptor states the cause, current status, eligible actions, preconditions, and

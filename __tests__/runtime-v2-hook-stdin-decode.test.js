@@ -1,3 +1,4 @@
+import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -46,7 +47,7 @@ afterEach(async () => {
 });
 
 function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', args, { env: gitFixtureEnv(), cwd, encoding: 'utf8' }).trim();
 }
 
 // A running APE project whose root directory name carries a 4-byte emoji.
@@ -76,7 +77,7 @@ async function emojiProject(status = 'running') {
 // the project root from the spawn cwd (process.cwd()) — the emoji never travels
 // stdin via project_dir/cwd, only via file_path.
 function claudeEnv() {
-  const env = { ...process.env, CLAUDECODE: '1' };
+  const env = { ...gitFixtureEnv(), CLAUDECODE: '1' };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.CODEX_CWD;
   return env;
