@@ -1,8 +1,9 @@
+import { localExecutionIdentity } from '../lib/runtime/host-identity.js';
 import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { hostname, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { doctor, validateCodexHookWiring } from '../lib/runtime/doctor.js';
 import { configAction } from '../lib/runtime/service.js';
@@ -173,17 +174,32 @@ describe('ape v2 config doctor diagnosis mode', () => {
     expect(check(report, 'lock-health').detail).toContain('override reset');
   });
 
+  it('reports hostname-only legacy locks as unverifiable and preserves their bytes', async () => {
+    const dir = gitProject();
+    mkdirSync(join(dir, '.ape', 'runtime'), { recursive: true });
+    const lockFile = join(dir, '.ape', 'runtime', 'active.lock');
+    const deadPid = spawnSync(process.execPath, ['-e', '']).pid;
+    const bytes = JSON.stringify({ version: 1, run_id: 'run-legacy', pid: deadPid, host: 'legacy-hostname' });
+    writeFileSync(lockFile, bytes);
+    const report = await doctor(dir, {});
+    expect(report.healthy).toBe(false);
+    expect(check(report, 'lock-health').passed).toBe(false);
+    expect(check(report, 'lock-health').detail).toMatch(/legacy-or-malformed/);
+    expect(check(report, 'lock-health').detail).toMatch(/preserve ownership/);
+    expect(readFileSync(lockFile, 'utf8')).toBe(bytes);
+  });
+
   it('treats a stale lock from a dead holder as recoverable, and a live lock with its active run as held', async () => {
     const dir = gitProject();
     mkdirSync(join(dir, '.ape', 'runtime'), { recursive: true });
     const lockFile = join(dir, '.ape', 'runtime', 'active.lock');
     const deadPid = spawnSync(process.execPath, ['-e', '']).pid; // exited, so the pid is free
-    writeFileSync(lockFile, JSON.stringify({ version: 1, run_id: 'run-x', pid: deadPid, host: hostname() }));
+    writeFileSync(lockFile, JSON.stringify({ version: 1, run_id: 'run-x', pid: deadPid, host: localExecutionIdentity() }));
     let report = await doctor(dir, {});
     expect(check(report, 'lock-health').passed).toBe(true);
     expect(check(report, 'lock-health').detail).toContain('stale');
 
-    writeFileSync(lockFile, JSON.stringify({ version: 1, run_id: 'run-x', pid: process.pid, host: hostname() }));
+    writeFileSync(lockFile, JSON.stringify({ version: 1, run_id: 'run-x', pid: process.pid, host: localExecutionIdentity() }));
     // Held is healthy only alongside the run that holds it; without this
     // active.json the same fixture is the orphan state tested below.
     writeFileSync(join(dir, '.ape', 'runtime', 'active.json'), JSON.stringify({ run_id: 'run-x', status: 'running' }));
@@ -200,7 +216,7 @@ describe('ape v2 config doctor diagnosis mode', () => {
     const dir = gitProject();
     mkdirSync(join(dir, '.ape', 'runtime'), { recursive: true });
     const lockFile = join(dir, '.ape', 'runtime', 'active.lock');
-    writeFileSync(lockFile, JSON.stringify({ version: 1, run_id: 'run-x', pid: process.pid, host: hostname() }));
+    writeFileSync(lockFile, JSON.stringify({ version: 1, run_id: 'run-x', pid: process.pid, host: localExecutionIdentity() }));
     let report = await doctor(dir, {});
     expect(report.healthy).toBe(false);
     expect(check(report, 'lock-health').passed).toBe(false);

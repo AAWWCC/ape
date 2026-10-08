@@ -21,6 +21,15 @@ and artifact-specific bounds still apply. Responses summarize larger records; fu
 
 ## History observability and metrics
 
+`ape_status` and `ape_config doctor` classify unusable local gate execution
+identity as `unavailable`, `legacy-or-malformed`, or `foreign-execution`.
+`ape_run next` and `resume` block such ownership rather than reporting indefinitely
+progressing tests. These diagnostics never certify descendant retirement or
+authorize deleting records. Preserve the original reservation and use explicit
+audited recovery only after verifying all owned work is retired. Normal hostname
+changes do not invalidate current execution-identity records; legacy hostname
+records cannot be migrated by inserting the current identity.
+
 `ape_history explain` shows the saved run record and its lifecycle: dispatches,
 retries, remediation, and recovery. The summary keeps preflight question IDs and
 counts, not the operator's answer text.
@@ -128,6 +137,14 @@ changed test paths twice and accepts either stable pass/pass or stable fail/fail
 before the implementer retries. This is a scheduler-owned recovery check, not a
 new `test_intent` input. Worker-reported observations cannot replace the sealed
 `evidence.test_correction` result.
+
+During the initial test stage, capability and worker-transport recovery can carry
+unchanged authored tests into a successor's runtime observation. APE verifies the
+original test writer's committed receipt, immutable tickets, recovery transaction,
+and exact file diff before executing those paths twice against the current tree.
+The successor's receipt still attributes only its own writes. Baseline tests,
+unrecorded expired-worker output, changed inherited files, and prior-stage results
+do not become authored evidence through this handoff.
 
 An implementer in `build` or `remediation-build` can request independent coverage
 with a capability receipt naming `required_role: "test_writer"`. Its successor

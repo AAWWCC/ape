@@ -453,7 +453,7 @@ afterEach(async () => {
   );
 });
 
-async function fixture({ fail = false, nativeFail = false, sourceType = 'local', omitRuntimeFile = false, omitGateRunner = false, omitFileStats = false } = {}) {
+async function fixture({ fail = false, nativeFail = false, sourceType = 'local', omitRuntimeFile = false, omitGateRunner = false, omitFileStats = false, omitHostIdentity = false } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'ape-development-refresh-test-'));
   temporaryRoots.push(root);
   const pluginRoot = path.join(root, 'plugin');
@@ -509,10 +509,11 @@ async function fixture({ fail = false, nativeFail = false, sourceType = 'local',
   if (!omitGateRunner) {
     await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'runner.js'), "import './spawn.js';\n");
   }
-  await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'spawn.js'), "import './file-stats.js';\nexport const fixture = true;\n");
+  await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'spawn.js'), "import './file-stats.js';\nimport './host-identity.js';\nexport const fixture = true;\n");
   if (!omitFileStats) {
     await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'file-stats.js'), 'export const fixture = true;\n');
   }
+  if (!omitHostIdentity) await writeFile(path.join(pluginRoot, 'lib', 'runtime', 'host-identity.js'), 'export const fixture = true;\n');
   await writeFile(path.join(pluginRoot, 'package.json'), '{"name":"ape-fixture","type":"module"}\n');
   await writeFile(path.join(pluginRoot, 'hooks', 'hooks.json'), '{}\n');
   await writeFile(path.join(pluginRoot, 'prompts', 'common.md'), 'common\n');
@@ -631,7 +632,7 @@ async function runFixture(context) {
 }
 
 
-const pinnedFiles = ['dist/ape-hooks.bundle.mjs', 'lib/runtime/runner.js'];
+const pinnedFiles = ['dist/ape-hooks.bundle.mjs', 'lib/runtime/runner.js', 'lib/runtime/spawn.js', 'lib/runtime/file-stats.js', 'lib/runtime/host-identity.js'];
 
 async function capture(root) {
   return Promise.all(pinnedFiles.map(async (relative) => ({
@@ -699,4 +700,12 @@ describe('development reinstall exact-path contract (synthetic host)', () => {
       expect(JSON.parse(await readFile(path.join(context.pluginRoot, '.codex-plugin/plugin.json'), 'utf8')).version).toBe(context.oldVersion);
     },
   );
+});
+
+it('rejects a development package missing the detached host identity dependency', async () => {
+  const context = await fixture({ omitHostIdentity: true });
+  const result = await runFixture(context);
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain('host-identity.js');
+  expect(result.stdout).not.toContain('Installed development version:');
 });

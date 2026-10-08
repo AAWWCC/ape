@@ -14,14 +14,19 @@ afterEach(async () => {
   await Promise.all(fixtures.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-function inspectWitness(file) {
+function inspectWitness(file, identity = 'current') {
   return spawnSync(process.execPath, ['--input-type=module', '-e', `
     import { hostname } from 'node:os';
+    import { localExecutionIdentity } from ${JSON.stringify(new URL('../lib/runtime/host-identity.js', import.meta.url).href)};
     import { killProcessTree } from ${JSON.stringify(new URL('../lib/runtime/spawn.js', import.meta.url).href)};
+    const local = localExecutionIdentity();
+    const foreign = local.slice(0, -1) + (local.endsWith('0') ? '1' : '0');
+    const host = ${JSON.stringify(identity)} === 'legacy' ? hostname()
+      : ${JSON.stringify(identity)} === 'foreign' ? foreign : local;
     const calls = [];
     // Never send a real signal from a malformed stored-witness fixture.
     process.kill = (...args) => { calls.push(args); throw Object.assign(new Error('absent'), { code: 'ESRCH' }); };
-    await killProcessTree({ host: hostname(), pid: 1234567,
+    await killProcessTree({ host, pid: 1234567,
       heartbeat_file: ${JSON.stringify(file)}, created_at: new Date().toISOString(), timeout_ms: 1000 });
     console.log(JSON.stringify(calls));
   `], { timeout: 3000, killSignal: 'SIGKILL', encoding: 'utf8' });
@@ -57,7 +62,16 @@ describe('fourth-pass detached runner file boundaries', () => {
     const result = inspectWitness(file);
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual([[-1234567, 0]]);
+    expect(JSON.parse(result.stdout)).toEqual([[process.platform === 'win32' ? 1234567 : -1234567, 0]]);
+  });
+
+  it.each(['legacy', 'foreign'])('refuses %s ownership even with an ordinary fresh witness', async (identity) => {
+    const file = path.join(await fixture(), 'heartbeat');
+    await writeFile(file, JSON.stringify({ pid: 1234567, beat_at: Date.now() }));
+    const result = inspectWitness(file, identity);
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([]);
   });
 
   it.skipIf(process.platform === 'win32')('exits a gate runner whose job descriptor is a FIFO before suite launch', async () => {

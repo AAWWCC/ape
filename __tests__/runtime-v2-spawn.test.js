@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { GATE_RUNNER_SENTINEL } from '../lib/runtime/runner.js';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -27,6 +27,96 @@ async function fixtureDir() {
   cleanups.push(dir);
   return dir;
 }
+
+// Isolated synthetic transport schedules exercise the real completion state
+// machine on every host. Native Job retirement is covered separately on Windows.
+async function windowsCompletionSchedule(mode) {
+  const dir = await fixtureDir();
+  const moduleUrl = pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../lib/runtime/spawn.js')).href;
+  const file = path.join(dir, 'completion-schedule.mjs');
+  await writeFile(file, `
+    import cp from 'node:child_process';
+    import net from 'node:net';
+    import {EventEmitter} from 'node:events';
+    import {syncBuiltinESMExports} from 'node:module';
+    Object.defineProperty(process, 'platform', {value:'win32'});
+    const mode = ${JSON.stringify(mode)};
+    let accept, settled = false, checkpoint, killed = false;
+    const order = [];
+    net.createServer = (listener) => {
+      accept = listener;
+      const server = new EventEmitter();
+      server.listen = (_pipe, ready) => { queueMicrotask(ready); return server; };
+      server.close = () => server;
+      return server;
+    };
+    cp.spawn = () => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+      child.stdout.setEncoding = child.stderr.setEncoding = () => {};
+      child.unref = () => {};
+      child.kill = () => { killed = true; };
+      child.stdin = new EventEmitter(); child.stdin.end = () => {};
+      child.stdin.write = (encoded) => {
+        const config = JSON.parse(Buffer.from(encoded.trim(), 'base64').toString());
+        setImmediate(async () => {
+          const socket = new EventEmitter();
+          socket.setTimeout = socket.end = socket.destroy = () => {};
+          accept(socket);
+          const proof = () => {
+            order.push('proof');
+            socket.emit('data', JSON.stringify({secret:mode === 'invalid' ? 'wrong-secret' : config.secret,
+              result:{status:'confirmed', exit_code:7, cause:'synthetic retirement'}}) + '\\n');
+          };
+          const close = () => {
+            child.stdout.emit('data', 'drain-tail');
+            child.stderr.emit('data', 'stderr-tail');
+            order.push('close'); child.emit('close', 0);
+          };
+          if (mode === 'close-first') close(); else proof();
+          await new Promise(resolve => setImmediate(resolve));
+          checkpoint = settled;
+          if (mode === 'proof-first' || mode === 'invalid') close();
+          else if (mode === 'close-first') proof();
+        });
+      };
+      return child;
+    };
+    syncBuiltinESMExports();
+    const {spawnWithTimeout} = await import(${JSON.stringify(moduleUrl)});
+    const result = await spawnWithTimeout('synthetic-suite', [], {
+      supervise:true, collect:'separate', timeout_ms:5000, drain_ms:100,
+    }).then(value => { settled = true; order.push('result'); return value; });
+    process.stdout.write(JSON.stringify({result, checkpoint, order, killed,
+      error:result.spawn_error?.message}));
+  `);
+  const observed = await spawnWithTimeout(process.execPath, [file], {
+    cwd:dir, timeout_ms:5000, collect:'separate',
+  });
+  expect(observed).toMatchObject({exit_code:0, timed_out:false, spawn_error:null, stderr:''});
+  return JSON.parse(observed.stdout);
+}
+
+describe('Windows completion with controlled transport ordering', () => {
+  it.each(['proof-first', 'close-first'])('%s requires both boundaries and collects the drain tail', async (mode) => {
+    const observed = await windowsCompletionSchedule(mode);
+    expect(observed.checkpoint).toBe(false);
+    expect(observed.order).toEqual(mode === 'proof-first'
+      ? ['proof', 'close', 'result'] : ['close', 'proof', 'result']);
+    expect(observed.killed).toBe(false);
+    expect(observed.result).toMatchObject({exit_code:7, spawn_error:null,
+      stdout:'drain-tail', stderr:'stderr-tail', cleanup:{status:'confirmed'}});
+  });
+
+  it.each(['stalled', 'invalid'])('%s fails closed at the bounded drain deadline', async (mode) => {
+    const observed = await windowsCompletionSchedule(mode);
+    expect(observed.checkpoint).toBe(false);
+    expect(observed.result).toMatchObject({exit_code:null, cleanup:{status:'unknown'}});
+    expect(observed.error).toContain(mode === 'stalled'
+      ? 'did not close after completion proof' : 'closed without completion proof');
+    expect(observed.killed).toBe(mode === 'stalled');
+  });
+});
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

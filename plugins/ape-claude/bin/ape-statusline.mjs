@@ -37,7 +37,7 @@
  */
 import { constants as fsConstants, openSync, closeSync, fstatSync, readSync, readFileSync, readdirSync, existsSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { hostname, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolveGovernedRoot } from '../lib/runtime/paths.js';
@@ -45,6 +45,7 @@ import { lstatFileSync, statFileDescriptor } from '../lib/runtime/file-stats.js'
 import { RUNTIME_STATE_MAX_BYTES } from '../lib/runtime/resource-limits.js';
 import { projectRunDiagnostic, safeDiagnosticText, strictIsoMs } from '../lib/runtime/diagnostics.js';
 import { workerDeadlinesEnabled } from '../lib/runtime/pipeline-limits.js';
+import { isLocalExecution } from '../lib/runtime/host-identity.js';
 
 const RESET = '\x1b[0m';
 const DIM = '\x1b[2m';
@@ -599,7 +600,7 @@ function statuslineDispatchState(dir, run) {
   if (!['claude', 'codex'].includes(run.host)) return 'pending';
 
   const lock = boundedArtifactJson(join(dir, '.ape', 'runtime', 'active.lock'));
-  if (!validLockArtifact(lock, run) || (lock.host === hostname() && !processExists(lock.pid))) return 'pending';
+  if (!validLockArtifact(lock, run) || !isLocalExecution(lock.host) || !processExists(lock.pid)) return 'pending';
 
   const intentsDir = join(dir, '.ape', 'runtime', 'dispatch-intents');
   const now = Date.now();

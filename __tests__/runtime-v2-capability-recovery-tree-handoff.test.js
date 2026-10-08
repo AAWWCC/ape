@@ -55,7 +55,8 @@ const ADMITTED_PRODUCTION = ['src/value.js', 'scripts/native-test-process.mjs', 
 const ADMITTED_TESTS = ['tests/value.test.js', 'tests/sibling.test.js'];
 
 async function fixture({ fullLane = false, productionPaths = ADMITTED_PRODUCTION,
-  testPaths = ADMITTED_TESTS, physicalTestPaths = testPaths, fullTestCommand = 'node --test' } = {}) {
+  testPaths = ADMITTED_TESTS, physicalTestPaths = testPaths, fullTestCommand = 'node --test',
+  testIntent = 'red-first', multiRunner = false } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'ape-tree-handoff-'));
   cleanups.push(dir);
   await mkdir(path.join(dir, 'src'));
@@ -80,6 +81,8 @@ async function fixture({ fullLane = false, productionPaths = ADMITTED_PRODUCTION
   await atomicWriteJson(paths.config, {
     shipping: { auto_merge: false, provider: 'github', required_remote_checks: false },
     test_commands: { full: fullTestCommand, targeted_template: 'node --test {paths}' },
+    ...(multiRunner ? { runners: [{ id: 'node', root: '.', owns: ['tests/**'],
+      profile: { full: fullTestCommand, targeted_template: 'node --test {paths}' } }] } : {}),
   });
   const started = await startRun(dir, {
     objective: 'Preserve production work while recovering exact test authority',
@@ -87,7 +90,7 @@ async function fixture({ fullLane = false, productionPaths = ADMITTED_PRODUCTION
     claimed_paths: ['src/value.js'], test_paths: [], requirements: [], risk_triggers: [],
     hooks_trusted: true, subagents_available: true, explicit_invocation: true,
     binding_protocol: 'native-v1', capability_contract_required: true,
-    ...(fullLane ? { lane: 'full', behavioral: true, plan_contract_version: 1,
+    ...(fullLane ? { lane: 'full', behavioral: true, plan_contract_version: 1, test_intent: testIntent,
       claimed_paths: productionPaths, test_paths: testPaths } : {}),
   });
   expect(started.ok, JSON.stringify(started)).toBe(true);
@@ -213,6 +216,105 @@ async function recover(value, claims, ordinal) {
   return { ...value, action, ticket: action.ticket, sourceReceipt, result, payload,
     binding: await bindCodexDispatchContext(root, value.dir, action, ordinal) };
 }
+
+describe('recovered authored-test observation', () => {
+  it.each([
+    { transportRetry: false, multiRunner: false, green: false },
+    { transportRetry: true, multiRunner: false, green: false },
+    { transportRetry: true, multiRunner: true, green: false },
+    { transportRetry: true, multiRunner: true, green: true },
+  ])('observes the original writer tests after a production handoff (retry=$transportRetry, runners=$multiRunner, green=$green)', async ({ transportRetry, multiRunner, green }) => {
+    const author = await fixture({ fullLane: true, multiRunner,
+      testIntent: green ? 'green-maintenance' : 'red-first' });
+    await writeThroughHooks(author, 'tests/value.test.js', TEST.replace(', 22)', ', 23)'));
+    let implementation = await recover(author, { required_role: 'implementer' }, 5);
+    const sourceReceipt = implementation.sourceReceipt;
+    const sourceFile = path.join(author.paths.receipts, `${sourceReceipt.receipt_id}.json`);
+    const sourceBytes = await readFile(sourceFile, 'utf8');
+    if (transportRetry) {
+      const result = await seal(implementation, { ...draft(implementation), status: 'failed',
+        evidence: { failure_kind: 'host-transport', summary: 'The host stopped before restoring the dependency.' } });
+      const action = result.actions.find((entry) => entry.type === 'dispatch_agent');
+      implementation = { ...implementation, action, ticket: action.ticket,
+        binding: await bindCodexDispatchContext(root, author.dir, action, 6) };
+    }
+    await writeThroughHooks(implementation, 'src/value.js', green ? V2.replace('22', '23') : V2);
+    const payload = draft(implementation);
+    const result = await seal(implementation, payload);
+    const receipt = result.run.receipts.find((entry) => entry.ticket_id === implementation.ticket.ticket_id);
+    expect(receipt.changed_files).toEqual(['src/value.js']);
+    const observation = receipt.evidence[green ? 'green_test' : 'red_test'];
+    expect(observation).toMatchObject({ observed: true, tree_sha: receipt.head_tree_sha });
+    for (const part of multiRunner ? observation.participants : [observation]) {
+      expect(part.test_paths).toEqual(['tests/value.test.js']);
+      expect(part.runs.map((run) => run.exit_code)).toEqual(green ? [0, 0] : [1, 1]);
+    }
+    expect(result.actions.find((entry) => entry.type === 'dispatch_agent').ticket)
+      .toMatchObject({ stage_id: 'build', role: 'implementer' });
+    expect(await recordReceipt(author.dir, payload)).toMatchObject({ ok: true, idempotent: true });
+    expect(await readFile(sourceFile, 'utf8')).toBe(sourceBytes);
+  }, 30_000);
+
+  it('refuses altered source authority before executing inherited tests', async () => {
+    const author = await fixture({ fullLane: true });
+    await writeThroughHooks(author, 'tests/value.test.js', TEST.replace(', 22)', ', 23)'));
+    const implementation = await recover(author, { required_role: 'implementer' }, 5);
+    await writeThroughHooks(implementation, 'src/value.js', V2);
+    const payload = draft(implementation);
+    expect(await validateReceiptForDispatch(author.dir, payload, implementation.ticket.ticket_id))
+      .toMatchObject({ valid: true });
+    expect(await hook(implementation, { hook_event_name: 'SubagentStop', last_assistant_message: JSON.stringify(payload) }))
+      .toEqual({});
+    const files = [
+      path.join(author.paths.receiptTransactions, `${sha256(author.ticket.ticket_id)}.json`),
+      path.join(author.paths.tickets, `${author.ticket.ticket_id.replaceAll(':', '_')}.json`),
+    ];
+    authoringFault.runs = [];
+    for (const file of files) {
+      const saved = await readFile(file, 'utf8');
+      await writeFile(file, '{}\n');
+      const result = await recordReceipt(author.dir, payload).catch((error) => ({ ok: false, errors: [error.message] }));
+      expect(result.ok, JSON.stringify(result)).toBe(false);
+      expect(result.errors.join(' ')).toMatch(/source.*evidence|recovery.*source|frozen.*authority/);
+      expect(authoringFault.calls).toBe(0);
+      expect((await readJson(author.paths.active)).receipts.some((entry) => entry.ticket_id === implementation.ticket.ticket_id))
+        .toBe(false);
+      await writeFile(file, saved);
+    }
+  }, 30_000);
+
+  it('does not count unchanged baseline tests as authored recovery evidence', async () => {
+    const author = await fixture({ fullLane: true });
+    const implementation = await recover(author, { required_role: 'implementer' }, 5);
+    await writeThroughHooks(implementation, 'src/value.js', V2);
+    const payload = draft(implementation);
+    expect(await validateReceiptForDispatch(author.dir, payload, implementation.ticket.ticket_id))
+      .toMatchObject({ valid: true });
+    expect(await hook(implementation, { hook_event_name: 'SubagentStop', last_assistant_message: JSON.stringify(payload) }))
+      .toEqual({});
+    authoringFault.runs = [];
+    const result = await recordReceipt(author.dir, payload);
+    expect(result).toMatchObject({ ok: false, rejected: true });
+    expect(result.errors.join(' ')).toContain('no runtime-verifiable authored test files');
+    expect(authoringFault.calls).toBe(0);
+  }, 30_000);
+
+  it('observes fresh tests after expiry without inheriting the expired worker baseline', async () => {
+    const author = await fixture({ fullLane: true });
+    await writeThroughHooks(author, 'tests/value.test.js', TEST.replace(', 22)', ', 23)'));
+    const expanded = await recover(author, { test_paths: ['tests/extra.test.js'] }, 5);
+    const expired = await expireDispatch(author.dir, expanded.ticket.ticket_id, 'Synthetic disconnected recovery worker');
+    expect(expired.ok, JSON.stringify(expired)).toBe(true);
+    const action = expired.actions.find((entry) => entry.type === 'dispatch_agent');
+    const retry = { ...expanded, action, ticket: action.ticket,
+      binding: await bindCodexDispatchContext(root, author.dir, action, 6) };
+    await writeThroughHooks(retry, 'tests/extra.test.js', TEST);
+    const result = await seal(retry, draft(retry));
+    const receipt = result.run.receipts.find((entry) => entry.ticket_id === retry.ticket.ticket_id);
+    expect(receipt.changed_files).toEqual(['tests/extra.test.js']);
+    expect(receipt.evidence.red_test).toMatchObject({ observed: true, test_paths: ['tests/extra.test.js'] });
+  }, 30_000);
+});
 
 async function expectWritePermission(value, file, allowed) {
   const result = await hook(value, { hook_event_name: 'PreToolUse', tool_name: 'Write',

@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { GATE_RUNNER_STALE_MS } from '../lib/runtime/constants.js';
 // NAMESPACE import, deliberately: arm A7 reads a constant that does not exist
 // on the pre-fix tree. A static named import of a missing export can fail at
@@ -9,7 +9,17 @@ import { GATE_RUNNER_STALE_MS } from '../lib/runtime/constants.js';
 // every arm below vacuous. A namespace property read is just `undefined`.
 import * as spawnModule from '../lib/runtime/spawn.js';
 
+import { acquireRunLock, releaseRunLock } from '../lib/runtime/lock.js';
 const { killProcessTree } = spawnModule;
+let currentHost;
+beforeAll(async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'ape-signal-identity-'));
+  try {
+    const probe = path.join(dir, 'identity.lock');
+    currentHost = (await acquireRunLock(probe, 'identity-fixture')).host;
+    await releaseRunLock(probe, 'identity-fixture');
+  } finally { await rm(dir, {recursive:true,force:true}); }
+});
 
 // ===========================================================================
 // killProcessTree STALE-PID PARITY — DECISION LOG (roadmap:
@@ -537,7 +547,7 @@ function watchFor(dir, overrides) {
     artifact_file: path.join(dir, 'artifact.json'),
     heartbeat_file: path.join(dir, 'heartbeat.json'),
     pid: null,
-    host: hostname(),
+    host: currentHost,
     spawn_attempts: 1,
     poll_count: 0,
     last_poll_at: null,
@@ -785,11 +795,16 @@ describe('killProcessTree — the persisted pid must be authorized by the runner
     });
     expect(spy.drainSignals()).toEqual([]);
 
-    // THE TIGHTENING, pinned separately: the old fence was `typeof host ===
-    // 'string' && host && host !== hostname()`, which skipped only a NON-EMPTY
-    // mismatch — so a watch carrying no host at all was signalled on whatever
-    // machine happened to read it. An exact `watch.host === hostname()` refuses
-    // it.
+    // Hostname-only legacy ownership never gains authority from a fresh PID.
+    const legacy = watchFor(dir, {
+      pid: A9_FOREIGN_PID,
+      host: hostname(),
+      heartbeat_file: foreign.heartbeat_file,
+    });
+    await killProcessTree(legacy, { stale_ms: STALE_MS, kill_grace_ms: 200, platform: 'linux' });
+    expect(spy.drainSignals(), 'a current hostname and fresh PID witness cannot upgrade legacy ownership').toEqual([]);
+
+    // The absent-host case remains independently refused.
     const hostless = watchFor(dir, {
       pid: A9_HOSTLESS_PID,
       host: undefined,
