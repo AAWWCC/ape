@@ -46,32 +46,17 @@ On a recovery conflict or changed working files, preserve both versions and repo
 decision needed. If no active run or checkpoint exists, say so; never reconstruct files from memory.
 
 Follow [`references/run-resume-protocol.md`](references/run-resume-protocol.md) for dispatch,
-receipt recording, waiting, and advancement. Never spawn a replacement for an already-bound ticket
-unless the runtime returns `next_action: {"kind":"redispatch_same_ticket", ...}`; that action authorizes
-the returned replacement after the runtime confirms the original has stopped, within the run's frozen policy.
-When the runtime instead returns `next_action.kind: "capability_recovery"`, dispatch only the
-included runtime-derived successor. It consumes no product attempt and already binds the exact
-additive scope, policy, deadlines, manifests, run contract, lineage ceilings, and provenance. Never
-mint or alter a successor. If the response was lost, record the identical source receipt again; the
-runtime validates and adopts the same complete immutable generation rather than charging another
-successor. Follow the issued growth contract and frozen validation/worker limits. New growth
-contract v2 checks canonical unique paths against the shared structural guard and actual rendered
-command and manifest budgets. Historical growth contract v1 retains its 64-item/4096-byte bounds;
-never apply those historical bounds to a current successor or enlarge an issued contract.
-After recovery, drive the fresh execution to its next terminal result. A new terminal block ends
-this invocation; do not call resume again to create another execution without a new explicit
-resume request. Completion can leave separately reported branch cleanup pending; report retained
-branches and reasons without treating successful work as a failed run. Checkpoint refs remain.
+receipt recording, waiting, and advancement, including `redispatch_same_ticket` and
+`capability_recovery`. Use only the runtime-returned replacement or successor and follow its
+frozen contract. Follow `required_control_action` before a generic continuation label:
+recording an identical attested receipt does not require another worker validation.
 
-The resume invocation authorizes continuous scheduler-owned progress. Drive every returned
-transition, wait, review, replan, remediation, gate, and configured shipping action to a terminal
-result without asking the user to say continue. Yield only for completion, a terminal block, or
-input that would change the requested outcome.
-When a dispatch remains active, wait through the host's native agent primitive. Follow returned
-`required_control_action` before interpreting a generic continuation label: retrying an identical
-attested receipt does not require another worker validation. Use `expire-dispatch` only for an
-explicitly authorized orphaned or wedged flight, with the exact pending ticket ID and a non-empty
-audit reason grounded in that authorization.
+Drive the recovered execution through every returned transition and configured shipping action
+to its next terminal result without asking the user to say continue. A new terminal block ends
+this invocation; do not create another execution without a new explicit resume request. Yield
+earlier only for input that would change the requested outcome. Completion can leave separately
+reported branch cleanup pending; report retained branches and reasons. Checkpoint refs remain.
 
-Accept the runtime's current lane, model policy, retry count, remediation state, and gate state.
-Do not redo stages, free-hand transitions, or edit files from the parent session.
+During the invocation, accept the runtime's lane, model policy, recovery decisions, and gate state;
+stage workers own file edits. Do not redo completed stages or invent transitions. After the
+invocation ends, follow the user's next request under the protocol's scope boundary.

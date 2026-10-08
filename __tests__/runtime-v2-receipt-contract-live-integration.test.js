@@ -2009,6 +2009,43 @@ describe('live receipt contract integration', () => {
     });
   });
 
+  it.each(['codex', 'claude'].flatMap(host => ['historical', 'current'].flatMap(policy =>
+    [['resume', resumeRun], ['next', nextRun]].map(([name, advance]) => ({ host, policy, name, advance })))))
+    ('preserves a stopped $host $policy worker attestation through $name until exact recording', async ({ host, policy, advance }) => {
+    const value = await fixture(host, { agent_stopped_at: new Date().toISOString(),
+      ...(policy === 'current' ? { execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) } : {}) });
+    const payload = draft(value.ticket, value.capability);
+    expect(await validateReceiptForDispatch(value.directory, payload, value.ticket.ticket_id))
+      .toMatchObject({ valid: true, attested: true });
+    const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
+    const before = await readJson(intentFile);
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      const result = await advance(value.directory);
+      expect(result).toMatchObject({ ok: true, actions: [], next_action: {
+        ticket_id: value.ticket.ticket_id, required_control_action: 'record_exact_attested_receipt',
+      } });
+      expect(await readJson(intentFile)).toEqual(before);
+    }
+    expect(await recordReceipt(value.directory, payload)).toMatchObject({ ok: true,
+      receipt: { ticket_id: value.ticket.ticket_id } });
+  });
+
+  it('labels a stopped unreceipted worker replacement and its lost-response replay explicitly', async () => {
+    const value = await fixture('codex', { agent_stopped_at: new Date().toISOString(),
+      execution_policy: executionPolicySnapshot(DEFAULT_CONFIG) });
+    const resumed = await resumeRun(value.directory);
+    const replacement = resumed.actions.find(action => action.type === 'dispatch_agent');
+    expect(replacement).toMatchObject({ ticket: { ticket_id: value.ticket.ticket_id },
+      recovery_kind: 'redispatch_same_ticket', source_ticket_id: value.ticket.ticket_id,
+      failure_domain: 'orchestration' });
+    const intentFile = path.join(value.paths.dispatchIntents, `${rawDigest(value.ticket.ticket_id)}.json`);
+    const prepared = await readJson(intentFile);
+    const replay = await nextRun(value.directory);
+    expect(replay.actions.find(action => action.type === 'dispatch_agent'))
+      .toMatchObject({ ...replacement, idempotent_replay: true });
+    expect(await readJson(intentFile)).toEqual(prepared);
+  });
+
   it('does not recount an exhausted physical summary when its earlier valid attestation records', async () => {
     const value = await fixture();
     const attestedDraft = draft(value.ticket, value.capability);

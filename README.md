@@ -145,8 +145,9 @@ scope, tree identity, tests, reviews, and the configured gates before shipping.
 
 GitHub is the only shipping provider. Each project needs its own explicit
 repository target. By default, green work waits for an audited `ship` action.
-With `shipping.auto_merge: true`, a run also needs explicit per-run shipping
-approval before APE may push, open a PR, and merge.
+With `shipping.auto_merge: true`, an explicit APE run or resume invocation
+authorizes configured shipping: push, PR creation, and merge after the gates pass.
+APE does not ask for a second shipping approval within that workflow.
 
 APE waits for required checks and proof of the remote merge. A failed local
 cleanup does not undo a proven remote success. A blocked run does not authorize

@@ -18,10 +18,11 @@ import { admittedStartIdentityHash } from '../lib/runtime/admitted-start-identit
 import { currentTreeSha } from '../lib/runtime/git.js';
 import { loadSessionGuidance } from '../lib/runtime/session-guidance.js';
 import { projectRunResponse, RESPONSE_BUDGET_BYTES } from '../lib/runtime/projection.js';
+import { fixtureGit, packagedFixtureEnv } from './recovery-pagination-test-helper.js';
 
 const dirs = [];
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
-const git = (dir, args, options = {}) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', ...options }).trim();
+const git = (dir, args, options = {}) => fixtureGit(dir, args, options);
 const input = { objective: 'Recover the unfinished documentation', mode: 'phase', lane: 'mechanical', host: 'claude',
   behavioral: false, claimed_paths: ['README.md', 'new.txt', 'deleted.txt'], test_paths: [], requirements: [], risk_triggers: [],
   hooks_trusted: true, subagents_available: true, explicit_invocation: true };
@@ -63,7 +64,7 @@ async function freshStart(dir, restored) {
 describe('explicit resume recovers a task with fresh execution', () => {
   it.each(['ape', 'ape-claude'])('recovers through the %s packaged MCP boundary and rejects recovery fields on other actions', async (hostPackage) => {
     const dir = await project(); await blocked(dir);
-    const env = { ...process.env }; delete env.CODEX_CWD; delete env.CLAUDE_PROJECT_DIR;
+    const env = packagedFixtureEnv();
     const tool = (args) => {
       const request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ape_run', arguments: { ...args, project_dir: dir } } };
       const output = execFileSync(process.execPath, [fileURLToPath(new URL(`../plugins/${hostPackage}/dist/ape-mcp.bundle.mjs`, import.meta.url))], {

@@ -20,9 +20,9 @@ as `project_dir`; apply only changes covered by the user's instruction. Call `ap
   slots from a complete grounded proposal. Compare with `get`; preserve existing values, using
   scoped `set` calls if applying the proposal would overwrite them. Enroll `evidence_scripts` only
   when the user explicitly accepts those exact discovered script IDs.
-  APE never creates or edits `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, or
-  another repository instruction file; bounded, versioned operational orientation is injected by
-  the runtime at session start.
+  `init` does not create or edit repository instruction files such as `AGENTS.md`,
+  `AGENTS.override.md`, or `CLAUDE.md`. Those files are optional and repository-owned;
+  the runtime injects its operational orientation at session start.
 - `wire` / `unwire`: change statusline integration for an explicitly named host.
 
 Do not translate host-neutral test commands into platform-specific shell strings. Do not claim the

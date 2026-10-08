@@ -1,9 +1,10 @@
 import { gitFixtureEnv } from '../test-support/git-fixtures.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, resolveTicketDeadline } from '../lib/runtime/config.js';
 import { evaluateLifecyclePolicy } from '../lib/runtime/hooks.js';
 import { pipelineRunSpec, projectedPipeline } from '../lib/runtime/pipeline.js';
@@ -12,6 +13,8 @@ import { RunStartInputSchema } from '../lib/runtime/schemas.js';
 import { executionPolicySnapshot } from '../lib/runtime/pipeline-limits.js';
 import { historicalExecutionPolicy } from './historical-execution-policy-helper.js';
 import { previewRun, startRun } from '../lib/runtime/service.js';
+import { runtimePaths } from '../lib/runtime/paths.js';
+import { bindCodexDispatchContext, invokeCodexHook } from './codex-native-test-helper.js';
 
 const PROFILE = Object.freeze({
   id: 'spike.measure.once',
@@ -145,6 +148,53 @@ describe('run-scoped read-only command profiles', () => {
       code: 'run-command-profile-id-conflict',
       profile_id: PROFILE.id,
     });
+  });
+
+  it('authorizes only the frozen verification command with verified paths and executable', async () => {
+    const dir = initRepository();
+    dirs.push(dir);
+    const profile = { id: 'linux-check', description: 'Isolated Linux marketplace verification',
+      command: 'node scripts/smoke-marketplace-install.mjs --linux', root: '.', timeout_ms: 900000 };
+    const configFile = runtimePaths(dir).config;
+    mkdirSync(dirname(configFile), { recursive: true });
+    writeFileSync(configFile, JSON.stringify({ verification: { profiles: [profile] } }));
+    mkdirSync(join(dir, 'scripts'));
+    writeFileSync(join(dir, 'scripts/smoke-marketplace-install.mjs'), 'export const verified = true;\n');
+    execFileSync('git', ['add', 'scripts'], { cwd: dir, env: gitFixtureEnv() });
+    execFileSync('git', ['commit', '-qm', 'verification fixture'], { cwd: dir, env: gitFixtureEnv() });
+    const started = await startRun(dir, spikeInput({ host: 'codex' }));
+    expect(started.ok, JSON.stringify(started)).toBe(true);
+    const context = { state: started.run, ticket: started.run.tickets[0] };
+    expect(context.ticket.capability_manifest.allowed_evidence_commands).toContain(profile.command);
+    const event = { host: 'codex', is_subagent: true, ape_managed: true, tool_name: 'Bash',
+      project_dir: dir, command: profile.command,
+      evidence: { safe: true, cwd_safe: true, executable_safe: true, session_cwd: dir } };
+    expect(evaluateLifecyclePolicy(event, context)).toMatchObject({ decision: 'allow' });
+    for (const changed of [
+      { command: `${profile.command} --host codex` }, { command: 'node scripts/other.mjs' },
+      { command: `${profile.command}; touch injected` },
+      { evidence: undefined }, { evidence: { ...event.evidence, safe: false } },
+      { evidence: { ...event.evidence, executable_safe: false } },
+      { evidence: { ...event.evidence, session_cwd: join(dir, 'nested') } },
+    ]) expect(evaluateLifecyclePolicy({ ...event, ...changed }, context)).toMatchObject({ decision: 'deny' });
+    const changed = structuredClone(context);
+    changed.state.capability_snapshot.verification_profiles[0].command = 'node changed.mjs';
+    expect(evaluateLifecyclePolicy(event, changed)).toMatchObject({ decision: 'deny' });
+    const writer = structuredClone(context);
+    writer.state.capability_snapshot.command_profiles.push({ id: 'declared-writer', command: profile.command,
+      effect: 'write', roles: ['implementer'], output_paths: ['generated.js'] });
+    expect(evaluateLifecyclePolicy(event, writer)).toMatchObject({ decision: 'deny' });
+    const root = dirname(dirname(fileURLToPath(import.meta.url)));
+    const action = started.actions.find(entry => entry.type === 'dispatch_agent');
+    const binding = await bindCodexDispatchContext(root, dir, action);
+    const nativeEvent = { hook_event_name: 'PreToolUse', project_dir: dir, cwd: dir,
+      session_id: binding.sessionId, turn_id: binding.turnId, agent_id: binding.agentId,
+      agent_type: 'default', model: action.ticket.model.model, is_subagent: true,
+      tool_name: 'Bash', tool_input: { command: profile.command } };
+    expect(await invokeCodexHook(root, nativeEvent)).toEqual({});
+    expect(await invokeCodexHook(root, { ...nativeEvent,
+      tool_input: { command: `${profile.command} --host codex` } }))
+      .toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
   });
 
   it('freezes the exact profile without imposing a worker deadline despite full classification', async () => {

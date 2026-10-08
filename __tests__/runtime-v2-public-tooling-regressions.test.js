@@ -133,9 +133,9 @@ describe('public source and exported CI regressions', () => {
     const paths = Array.from({ length: 65 }, (_, index) => `tests/fixture-${index}.test.js`);
     expect(capabilityTestPathBoundErrors(paths).valid).toBe(true);
     expect(capabilityTestPathBoundErrors(paths, { version: 1 }).valid).toBe(false);
-    const resume = await readFile(path.join(ROOT, 'plugin-src/skills/resume/body.md'), 'utf8');
-    expect(resume).toMatch(/growth\s+contract v2[\s\S]*actual rendered[\s\S]*command and manifest budgets/iu);
-    expect(resume).toMatch(/Historical growth contract v1 retains its 64-item\/4096-byte bounds/u);
+    const protocol = await readFile(path.join(ROOT, 'plugin-src/skills/references/run-resume-protocol.md'), 'utf8');
+    expect(protocol).toMatch(/growth\s+contract v2[\s\S]*actual rendered[\s\S]*command and manifest budgets/iu);
+    expect(protocol).toMatch(/Historical growth contract v1 retains its 64-item\/4096-byte bounds/u);
     const roadmap = await readFile(path.join(ROOT, 'plugin-src/skills/roadmap/body.md'), 'utf8');
     expect(roadmap).toMatch(/shared input-byte and\s+structural guards/u);
     expect(roadmap).not.toContain('at most 64 entries');

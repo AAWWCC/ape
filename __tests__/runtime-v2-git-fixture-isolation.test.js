@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runNativeJson } from '../test-support/native-process.js';
+import { fixtureGit, packagedFixtureEnv } from './recovery-pagination-test-helper.js';
 
 const roots = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -89,6 +90,133 @@ function hostileFiles(f) {
 }
 
 describe('shared Git fixture child environment', () => {
+  it.each(['config', 'malformed', 'redirect'])('isolates recovery/pagination Git entry points from %s inputs', async (kind) => {
+    const build = await builder();
+    const f = fixture();
+    const h = hostileFiles(f);
+    const decoy = f.dir('decoy');
+    commit(decoy, build(f.env));
+    const decoyBefore = treeBytes(decoy);
+    const parent = { ...process.env };
+    const poison = Object.freeze({ ...f.env,
+      ...(kind === 'config' ? { GIT_CONFIG_GLOBAL: h.global, GIT_CONFIG_SYSTEM: h.system,
+        GIT_CONFIG_NOSYSTEM: '0', GIT_TEMPLATE_DIR: h.template } : {}),
+      ...(kind === 'malformed' ? { GIT_CONFIG_COUNT: 'not-a-number' } : {}),
+      ...(kind === 'redirect' ? { GIT_DIR: path.join(decoy, '.git'), GIT_WORK_TREE: decoy,
+        GIT_INDEX_FILE: path.join(decoy, '.git', 'index'), GIT_OBJECT_DIRECTORY: path.join(decoy, '.git', 'objects') } : {}),
+    });
+    const before = { ...poison };
+    const intended = f.dir('intended');
+    const invoke = (...args) => fixtureGit(intended, args, {}, poison);
+    try {
+      invoke('init', '-q');
+      writeFileSync(path.join(intended, 'payload.txt'), 'boundary payload\n');
+      invoke('add', 'payload.txt');
+      invoke('commit', '-qm', 'boundary');
+      invoke('branch', 'boundary-branch');
+      expect(invoke('branch', '--show-current')).toBe('main');
+      expect(invoke('log', '-1', '--format=%an <%ae>|%cn <%ce>')).toBe(
+        'APE Test <ape-test@example.invalid>|APE Test <ape-test@example.invalid>');
+      expect(git(intended, build(f.env), 'show', 'boundary-branch:payload.txt')).toBe('boundary payload\n');
+      expect(realpathSync(invoke('rev-parse', '--show-toplevel'))).toBe(realpathSync(intended));
+      expect(() => invoke('rev-parse', '--verify', 'missing-fixture-ref')).toThrow();
+    } finally {
+      expect(poison).toEqual(before);
+      expect(process.env).toEqual(parent);
+      expect(treeBytes(decoy)).toEqual(decoyBefore);
+      expect(existsSync(h.hookMarker)).toBe(false);
+      expect(existsSync(h.signerMarker)).toBe(false);
+      for (const [file, bytes] of Object.entries(h.configBytes)) expect(readFileSync(file, 'utf8')).toBe(bytes);
+    }
+  });
+
+  it('preserves deliberate recovery/pagination identity and index overrides after sanitization', async () => {
+    const f = fixture();
+    const parent = { ...process.env };
+    const poison = Object.freeze({ ...f.env, GIT_CONFIG_COUNT: 'malformed', GIT_DIR: path.join(f.root, 'missing') });
+    const before = { ...poison };
+    const dir = f.dir('override-repo');
+    const invoke = (...args) => fixtureGit(dir, args, {}, poison);
+    invoke('init', '-q');
+    writeFileSync(path.join(dir, 'payload.txt'), 'original\n');
+    invoke('add', 'payload.txt');
+    invoke('commit', '-qm', 'original');
+    const originalIndex = readFileSync(path.join(dir, '.git', 'index'));
+    const env = Object.freeze({ ...packagedFixtureEnv(poison),
+      GIT_INDEX_FILE: path.join(f.root, 'intentional-index'),
+      GIT_AUTHOR_NAME: 'Explicit Author', GIT_AUTHOR_EMAIL: 'explicit@example.invalid',
+      GIT_COMMITTER_NAME: 'Explicit Committer', GIT_COMMITTER_EMAIL: 'committer@example.invalid' });
+    const overrideBefore = { ...env };
+    const explicit = (...args) => fixtureGit(dir, args, { env }, poison);
+    try {
+      explicit('read-tree', 'HEAD');
+      writeFileSync(path.join(dir, 'payload.txt'), 'override payload\n');
+      explicit('add', 'payload.txt');
+      expect(readFileSync(path.join(dir, '.git', 'index'))).toEqual(originalIndex);
+      explicit('commit', '-qm', 'explicit override');
+      expect(invoke('show', 'HEAD:payload.txt')).toBe('override payload');
+      expect(invoke('log', '-1', '--format=%an <%ae>|%cn <%ce>')).toBe(
+        'Explicit Author <explicit@example.invalid>|Explicit Committer <committer@example.invalid>');
+      expect(readFileSync(path.join(dir, '.git', 'index'))).toEqual(originalIndex);
+      expect(() => explicit('rev-parse', '--verify', 'missing-fixture-ref')).toThrow();
+    } finally {
+      expect(env).toEqual(overrideBefore);
+      expect(poison).toEqual(before);
+      expect(process.env).toEqual(parent);
+    }
+  });
+
+  it.each(['ape', 'ape-claude'])('isolates the %s recovery/pagination package launch from ambient repository/config overrides', async (hostPackage) => {
+    const build = await builder();
+    const f = fixture();
+    const h = hostileFiles(f);
+    const intended = f.dir('intended');
+    const decoy = f.dir('decoy');
+    commit(intended, build(f.env));
+    commit(decoy, build(f.env));
+    const decoyBefore = treeBytes(decoy);
+    const intendedBefore = treeBytes(intended);
+    const parent = { ...process.env };
+    const poison = Object.freeze({ ...f.env, GIT_CONFIG_COUNT: 'malformed', GIT_CONFIG_GLOBAL: h.global,
+      GIT_CONFIG_SYSTEM: h.system, GIT_CONFIG_NOSYSTEM: '0', GIT_TEMPLATE_DIR: h.template,
+      GIT_CONFIG_PARAMETERS: "'commit.gpgSign=true'", GIT_DIR: path.join(decoy, '.git'),
+      GIT_WORK_TREE: decoy, GIT_INDEX_FILE: path.join(decoy, '.git', 'index'),
+      CODEX_CWD: decoy, CLAUDE_PROJECT_DIR: decoy });
+    const before = { ...poison };
+    const env = packagedFixtureEnv(poison);
+    expect(env).not.toBe(poison);
+    expect(packagedFixtureEnv(poison)).not.toBe(env);
+    expect(env.CODEX_CWD).toBeUndefined();
+    expect(env.CLAUDE_PROJECT_DIR).toBeUndefined();
+    const host = hostPackage === 'ape' ? 'codex' : 'claude';
+    const entry = new URL(`../plugins/${hostPackage}/dist/ape-mcp.bundle.mjs`, import.meta.url);
+    const { fileURLToPath } = await import('node:url');
+    const request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ape_run', arguments: {
+      project_dir: intended, action: 'preview', host, objective: 'Review isolated fixture', mode: 'phase', lane: 'mechanical',
+      behavioral: false, claimed_paths: ['payload.txt'], test_paths: [], hooks_trusted: true,
+      subagents_available: true, explicit_invocation: true, admission_contract_version: 1,
+    } } };
+    try {
+      const output = execFileSync(process.execPath, [fileURLToPath(entry), '--host', host], {
+        cwd: intended, env, encoding: 'utf8', input: `${JSON.stringify(request)}\n`, timeout: 20000,
+      });
+      const response = output.trim().split('\n').map(line => JSON.parse(line)).find(item => item.id === 1);
+      expect(response.error).toBeUndefined();
+      expect(response.result.isError).not.toBe(true);
+      const preview = JSON.parse(response.result.content[0].text);
+      expect(preview.admission.ready, JSON.stringify(preview)).toBe(true);
+      expect(preview.admission.request.objective).toBe('Review isolated fixture');
+    } finally {
+      expect(process.env).toEqual(parent);
+      expect(poison).toEqual(before);
+      expect(treeBytes(decoy)).toEqual(decoyBefore);
+      expect(treeBytes(intended)).toEqual(intendedBefore);
+      expect(existsSync(h.hookMarker)).toBe(false);
+      expect(existsSync(h.signerMarker)).toBe(false);
+      for (const [file, bytes] of Object.entries(h.configBytes)) expect(readFileSync(file, 'utf8')).toBe(bytes);
+    }
+  });
+
   it('copies inputs freshly, removes arbitrary Git residue and preserves parent state on success and failure', async () => {
     const build = await builder();
     const f = fixture();

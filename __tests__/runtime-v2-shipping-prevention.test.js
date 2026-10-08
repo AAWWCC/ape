@@ -514,6 +514,8 @@ describe('prevention-first shipping admission', () => {
   it('refuses to push when a commit hook changes the committed tree', async () => {
     const directory = await project();
     const { state, events, originalGit } = await preparedShipping(directory);
+    // Sanitized init omits template hooks; this test owns its deliberate hook.
+    await mkdir(path.join(directory, '.git', 'hooks'), { recursive: true });
     await writeFile(path.join(directory, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nprintf "hook mutation\\n" > value.txt\ngit add -- value.txt\n', { mode: 0o755 });
     await expect(shipping.autoMergeGithub(directory, state, config)).rejects.toThrow(/committed shipping tree.*push refused/);
     expect(await originalGit(directory, ['rev-parse', 'HEAD^{tree}'], { env: gitFixtureEnv() })).not.toBe(state.gates.tree_sha);

@@ -129,6 +129,7 @@
   "__tests__/runtime-v2-gates-verification.test.js": 12419,
   "__tests__/runtime-v2-gates.test.js": 3,
   "__tests__/runtime-v2-gating-watch.test.js": 20563,
+  "__tests__/runtime-v2-git-fixture-isolation.test.js": 7278,
   "__tests__/runtime-v2-git-plumbing.test.js": 15776,
   "__tests__/runtime-v2-git-status.test.js": 214,
   "__tests__/runtime-v2-github-host-selection.test.js": 206.30570899999998,

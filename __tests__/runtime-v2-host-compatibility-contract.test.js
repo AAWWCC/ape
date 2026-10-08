@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveMarketplaceHostInvocation } from '../scripts/marketplace-host-invocation.mjs';
+import { linuxMarketplaceSmoke, requestedOptions } from '../scripts/smoke-marketplace-install.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -214,6 +215,48 @@ describe('host compatibility contract', () => {
 });
 
 describe('marketplace host executable resolution', () => {
+  it('keeps Linux verification pinned and rejects host installation mode overrides', () => {
+    expect(requestedOptions(['--linux', '--host', 'codex'])).toEqual({ linux: true,
+      mode: 'blocking', hosts: new Set(['codex']) });
+    for (const mode of ['--edge', '--installed-hosts']) {
+      expect(() => requestedOptions(['--linux', mode])).toThrow('requires pinned hosts');
+    }
+  });
+
+  it.each(['success', 'failed', 'running', 'transport-error', 'create-error'])(
+    'uses only disposable Linux inputs and cleans its container after %s', async outcome => {
+      const calls = [];
+      let snapshot;
+      const execute = async (program, args) => {
+        expect(program).toBe('docker');
+        calls.push(args);
+        if (args[0] === 'create') {
+          const mount = args[args.indexOf('--mount') + 1];
+          snapshot = mount.match(/^type=bind,source=(.+),target=\/ape-input,readonly$/u)?.[1];
+          expect(snapshot).toBeTruthy();
+          const entries = await readdir(snapshot);
+          for (const excluded of ['.git', '.ape', 'node_modules']) expect(entries).not.toContain(excluded);
+          expect(await readFile(path.join(snapshot, 'compatibility.json'), 'utf8'))
+            .toBe(await readFile(path.join(ROOT, 'compatibility.json'), 'utf8'));
+          expect(args).toContain('node:24.15.0-bookworm');
+          expect(args).toContain('HOME=/tmp/ape-linux-home');
+          expect(args.slice(-2)).toEqual(['--host', 'codex']);
+          expect(args).not.toContain('--privileged');
+          if (outcome === 'create-error') throw new Error('create response lost');
+        }
+        if (args[0] === 'start' && outcome === 'transport-error') throw new Error('attached process timed out');
+        return { stdout: args[0] === 'inspect'
+          ? JSON.stringify({ Status: outcome === 'running' ? 'running' : 'exited',
+            ExitCode: outcome === 'failed' ? 1 : 0, OOMKilled: false }) : '', stderr: '' };
+      };
+      const result = linuxMarketplaceSmoke({ execute, hosts: new Set(['codex']) });
+      if (outcome === 'success') await expect(result).resolves.toMatchObject({ platform: 'linux', hosts: ['codex'] });
+      else await expect(result).rejects.toThrow();
+      const created = calls.find(args => args[0] === 'create');
+      expect(calls.at(-1)).toEqual(['rm', '--force', created[created.indexOf('--name') + 1]]);
+      await expect(readdir(snapshot)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
   it('rejects combining pinned installed hosts with informational edge mode before invoking hosts', async () => {
     for (const flags of [['--edge', '--installed-hosts'], ['--installed-hosts', '--edge']]) {
       await expect(run(process.execPath, [path.join(ROOT, 'scripts/smoke-marketplace-install.mjs'), ...flags]))

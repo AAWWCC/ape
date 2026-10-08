@@ -46,6 +46,13 @@ Release checks use these exact versions:
 | Codex CLI | 0.153.4 |
 | Claude Code | 2.1.228 |
 
+With Docker running, `node scripts/smoke-marketplace-install.mjs --linux` checks
+the pinned marketplace installs and Codex refresh behavior in Linux. It copies
+only the public package inputs into disposable container storage, uses the
+pinned Node image, and removes its container after success or failure. Add
+`--host codex` or `--host claude` to select one host. The Linux route requires
+the pinned mode and cannot combine with `--edge` or `--installed-hosts`.
+
 The Codex pin changes explicitly from 0.147.0 to 0.153.4 for GPT-6 Astra
 worker defaults. The catalog returned to 0.147.0 omitted Astra, so native
 `spawn_agent` rejected the requested model even though the parent could run.

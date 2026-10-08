@@ -8,9 +8,10 @@ import { canonicalJson, sha256 } from '../lib/runtime/canonical.js';
 import { previewRun, startRun } from '../lib/runtime/lifecycle-service.js';
 import { ADMISSION_PAGE_BUDGET_BYTES, projectAdmissionPreview, projectRunResponse, RESPONSE_BUDGET_BYTES } from '../lib/runtime/projection.js';
 import { handle as handleMcp } from '../bin/ape-mcp.mjs';
+import { fixtureGit, packagedFixtureEnv } from './recovery-pagination-test-helper.js';
 
 const roots = [];
-const git = (root, ...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+const git = (root, ...args) => fixtureGit(root, args);
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'ape-admission-pages-'));
@@ -190,9 +191,7 @@ describe('lossless read-only admission delivery', () => {
   it.each(['codex', 'claude'])('delivers pages through the generated %s package', async host => {
     const root = await fixture();
     const entry = fileURLToPath(new URL(`../plugins/${host === 'codex' ? 'ape' : 'ape-claude'}/dist/ape-mcp.bundle.mjs`, import.meta.url));
-    const env = { ...process.env };
-    delete env.CLAUDE_PROJECT_DIR;
-    delete env.CODEX_CWD;
+    const env = packagedFixtureEnv();
     const args = { ...input(host), action: 'preview', project_dir: root };
     const pages = await collect(async page => {
       const message = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ape_run',

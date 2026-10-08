@@ -219,9 +219,12 @@ Existing runs and historical ticket hashes remain unchanged.
 
 ### Typed recovery status
 
-Control responses use only these `next_action.kind` values:
+Execution responses use these `next_action.kind` values:
 `continue_same_agent`, `redispatch_same_ticket`, `stage_retry`, `directed_replan`,
 `remediate_product_finding`, `wait`, `answer_preflight`, or `blocked`.
+Capability expansion can return `capability_recovery`. Resume also returns
+source-selection and checkpoint recovery actions described below. Follow a
+returned `required_control_action` before interpreting a generic continuation kind.
 `failure_domain` is `product`, `orchestration`, `configuration`, `infrastructure`,
 `operator`, or `unknown`. Protocol/infrastructure failures are not product findings.
 A blocked response sets `automatic_successor: false`; a new run needs explicit
