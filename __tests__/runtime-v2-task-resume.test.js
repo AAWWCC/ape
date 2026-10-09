@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { previewRun, resumeRun, startRun } from '../lib/runtime/service.js';
 import { statusRun, compactStatus } from '../lib/runtime/status-service.js';
+import { statusDocPath } from '../lib/runtime/receipt-service.js';
 import { runtimePaths } from '../lib/runtime/paths.js';
 import * as storage from '../lib/runtime/storage.js';
 import * as checkpoints from '../lib/runtime/work-checkpoints.js';
@@ -38,14 +39,14 @@ async function project() {
     test_commands: { full: 'node --test', targeted_template: 'node --test {paths}' } });
   return dir;
 }
-async function blocked(dir, { dirt = true } = {}) {
+async function blocked(dir, { dirt = true, retainLock = false } = {}) {
   expect((await startRun(dir, input)).ok).toBe(true);
   const paths = runtimePaths(dir);
   const state = await storage.readJson(paths.active);
   state.status = 'blocked'; state.stage = 'build'; state.block_reason = 'Worker failed to complete the documentation';
   await storage.atomicWriteJson(paths.active, state);
   await storage.atomicWriteJson(path.join(paths.runs, `${state.run_id}.json`), state);
-  await releaseRunLock(paths.lock, state.run_id);
+  if (!retainLock) await releaseRunLock(paths.lock, state.run_id);
   if (dirt) {
     await writeFile(path.join(dir, 'README.md'), 'staged\n'); git(dir, ['add', 'README.md']);
     await writeFile(path.join(dir, 'README.md'), 'work\n');
@@ -62,6 +63,85 @@ async function freshStart(dir, restored) {
 }
 
 describe('explicit resume recovers a task with fresh execution', () => {
+  it('recovers a blocked run that retained its own live-process writer lock', async () => {
+    const dir = await project();
+    const state = await blocked(dir, { retainLock: true });
+    const paths = runtimePaths(dir);
+    const lock = await readFile(paths.lock, 'utf8');
+    const plan = await resumeRun(dir);
+    expect(plan.recovery_plan.kind).toBe('replace_run');
+    expect(await readFile(paths.lock, 'utf8')).toBe(lock);
+    const restored = await resumeRun(dir, confirm(plan));
+    expect(restored.next_action.kind).toBe('start_recovered_work');
+    expect(restored.start_input.supersedes_run).toBe(state.run_id);
+    expect(await readFile(path.join(dir, 'README.md'), 'utf8')).toBe('work\n');
+    const checkpoint = await checkpoints.readWorkCheckpoint(paths, restored.start_input.checkpoint_id);
+    expect(git(dir, ['show', `${checkpoint.git_ref}-index:README.md`])).toBe('staged');
+    await expect(readFile(paths.lock)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('retains the owned writer lock when checkpoint publication fails, then recovers on retry', async () => {
+    const dir = await project();
+    const state = await blocked(dir, { retainLock: true });
+    const paths = runtimePaths(dir);
+    const lock = await readFile(paths.lock, 'utf8');
+    const plan = await resumeRun(dir);
+    vi.spyOn(checkpoints, 'saveWorkCheckpoint').mockRejectedValueOnce(new Error('checkpoint unavailable'));
+    await expect(resumeRun(dir, confirm(plan))).rejects.toThrow('checkpoint unavailable');
+    expect(await readFile(paths.lock, 'utf8')).toBe(lock);
+    expect((await storage.readJson(paths.active)).run_id).toBe(state.run_id);
+    const restored = await resumeRun(dir, confirm(plan));
+    expect(restored.next_action.kind).toBe('start_recovered_work');
+    await expect(readFile(paths.lock)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('replays partial retirement after active-state deletion without wedging a retained live-process lock', async () => {
+    const dir = await project();
+    const state = await blocked(dir, { retainLock: true });
+    const paths = runtimePaths(dir);
+    const lock = await readFile(paths.lock, 'utf8');
+    const plan = await resumeRun(dir);
+    const digest = plan.recovery_plan.expected_recovery_digest;
+    const publish = checkpoints.publishRecoveryJournal;
+    vi.spyOn(checkpoints, 'publishRecoveryJournal').mockImplementationOnce(async (...args) => {
+      await publish(...args);
+      expect(await readFile(paths.lock, 'utf8')).toBe(lock);
+      // Fail the real reset handler's status cleanup after it removes active.json.
+      // Install the fault only after the checkpoint and recovery intent are durable.
+      await rm(statusDocPath(paths), { force: true });
+      await mkdir(statusDocPath(paths));
+    });
+    await expect(resumeRun(dir, confirm(plan))).rejects.toThrow(/EISDIR/);
+    await expect(readFile(paths.active)).rejects.toMatchObject({ code: 'ENOENT' });
+    const journal = await checkpoints.readRecoveryJournal(paths, digest);
+    expect(journal.source_run_id).toBe(state.run_id);
+    const checkpoint = await checkpoints.readWorkCheckpoint(paths, journal.checkpoint_id);
+    expect(checkpoint.source_run_id).toBe(state.run_id);
+    expect(git(dir, ['show', `${checkpoint.git_ref}:README.md`])).toBe('work');
+    expect(git(dir, ['show', `${checkpoint.git_ref}-index:README.md`])).toBe('staged');
+    expect(git(dir, ['show', `${checkpoint.git_ref}:new.txt`])).toBe('new');
+    expect(await readFile(path.join(dir, 'README.md'), 'utf8')).toBe('work\n');
+
+    // Remove only the injected filesystem fault, never the retained writer lock.
+    await rm(statusDocPath(paths), { recursive: true });
+    vi.restoreAllMocks();
+    const [restored, replay] = await Promise.all([
+      resumeRun(dir, confirm(plan)), resumeRun(dir, confirm(plan)),
+    ]);
+    expect(restored.ok).toBe(true);
+    expect(restored.next_action.kind).toBe('start_recovered_work');
+    expect(restored.start_input).toMatchObject({ checkpoint_id: checkpoint.checkpoint_id, supersedes_run: state.run_id });
+    expect(replay.ok).toBe(true);
+    expect(replay.start_input).toEqual(restored.start_input);
+    expect(await checkpoints.readRecoveryJournal(paths, digest)).toEqual(journal);
+    expect(await checkpoints.readWorkCheckpoint(paths, checkpoint.checkpoint_id)).toEqual(checkpoint);
+    expect(git(dir, ['branch', '--list', 'ape/recover-*']).split('\n')).toHaveLength(1);
+    expect(await readFile(path.join(dir, 'README.md'), 'utf8')).toBe('work\n');
+    expect(await readFile(path.join(dir, 'new.txt'), 'utf8')).toBe('new\n');
+    await expect(readFile(path.join(dir, 'deleted.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(paths.lock)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it.each(['ape', 'ape-claude'])('recovers through the %s packaged MCP boundary and rejects recovery fields on other actions', async (hostPackage) => {
     const dir = await project(); await blocked(dir);
     const env = packagedFixtureEnv();
