@@ -361,19 +361,37 @@ Readiness also checks these runtime boundaries. See [pipeline](pipeline.md) and
   may be followed by reassessment; reset is available only in blocked, aborted,
   or completed state. Advice never authorizes automatic cleanup or repair.
 - **Receipts:** contract v1 changes only object-key order and JSON negative zero
-  for hashing. It does not rewrite content or add defaults. Corrections are
-  bounded and exact; parent agents cannot reconstruct authenticated receipts.
+  for hashing. It does not rewrite content or add defaults. Corrections must
+  satisfy the exact immutable contract; parent agents cannot reconstruct authenticated receipts.
+  New execution policy v4 uses durable correction progress, with no fixed
+  submission or physical-worker quota. `null` limits and corrections remaining
+  do not mean exhaustion; follow the returned recovery decision. Historical
+  v1-v3 execution policies retain their frozen receipt limits.
   Capability-bearing output is redacted using the verified canonical field.
   Missing, invalid, or substituted authority gets a fixed non-reflective refusal.
-- **Convergence:** planning and remediation may continue only when the normalized
-  finding set strictly shrinks with no additions. Evidence anchors are provenance,
-  not finding identity. Equality, expansion, incomparable or malformed evidence,
-  or the frozen replan/remediation ceilings cause the existing blocked outcome.
+- **Convergence:** new execution policy v4 records resolved, remaining, and added
+  blockers. Materially resolving prior blockers may permit new legitimate
+  findings, even when the total count grows. Repeated sets, reintroduced resolved
+  blockers, missing evidence, stalled or cosmetic progress, and recovery-evidence
+  resource limits stop recovery. Plan resolution needs the independent judge's
+  evidence bound to both plans and changed related coverage; review remediation
+  needs retained, authorized writer changes supporting the resolution.
+  Historical v1-v3 planning/remediation retains strict-subset convergence; v1
+  also retains its frozen replan/remediation ceilings. See the
+  [version table and progressing-recovery example](pipeline.md#retries-and-remediation).
+- **Operational bounds:** v3 and v4 workers have `deadline_at: null`; v1-v2 keep
+  their frozen worker deadlines. Command/suite timeouts, launch-token expiry,
+  lock leases, gate watchdogs, and detached-runner respawn limits still apply.
+  These are separate from worker and recovery quotas. V4 `null` attempt limits
+  mean no fixed count quota; `null` forecasts mean unknown future totals.
+  Evidence-size and safe-integer guards remain, and cancellation, revocation,
+  scope, binding, and confirmed-retirement checks still govern continuation.
 - **Capability recovery:** additive test paths must be unique, project-relative,
   non-reserved, and within the shared structural guard and actual expanded-command
   and manifest budgets. Historical version-1 contracts retain 64 items and 4,096
   bytes. Validation rejects invalid input before mutation. The lineage retains
-  its frozen submission and worker policy (defaults: three and two).
+  its frozen submission and worker policy: v4 has no fixed count quotas;
+  historical policies normally allow three submissions per worker and two workers.
 - **Durability:** recovery reuses one hash-bound immutable generation and successor
   after response loss or restart. It does not mint replacements or double-charge
   attempts. Selector edges—not mutable projections—choose the recovery head.

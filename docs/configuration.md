@@ -33,6 +33,10 @@ a retry. Explicit cancellation, revocation and recovery after a confirmed worker
 stop still apply. Historical execution policies v1 and v2 keep their frozen
 worker deadlines. The existing `deadlines_ms` settings continue to bound command
 and test-suite execution; they do not set a worker time quota for new runs.
+Every full-suite merge gate uses `deadlines_ms.full`, regardless of the run's
+lane, including each full runner in a multi-runner gate, re-gates, and shipping.
+Targeted and impacted checks retain their lane-specific allowance. A documentation
+change therefore does not shorten the watchdog for the same repository-wide suite.
 Launch-token expiry, lock leases, polling and shutdown grace periods remain in force.
 
 New runs have no fixed count quota for product retries, directed replans,
@@ -75,9 +79,9 @@ checked byte-for-byte by `npm run docs:check`.
 | `policy.full_suite_cache` | boolean | `true` | Reuse passing suites for the same tree and resolved command. |
 | `policy.evidence_scripts` | string array | `[]` | Exact extra package scripts allowed as read-only evidence. |
 | `policy.command_profiles` | object array | `[]` | Exact external-tool commands approved by the operator. |
-| `deadlines_ms.mechanical` | number | `900000` | Mechanical command/suite timeout (15 minutes); new workers have no duration limit. |
-| `deadlines_ms.fast` | number | `1800000` | Fast command/suite timeout (30 minutes); new workers have no duration limit. |
-| `deadlines_ms.full` | number | `3600000` | Full command/suite timeout (60 minutes); new workers have no duration limit. |
+| `deadlines_ms.mechanical` | number | `900000` | Mechanical command, targeted, and impacted-check timeout (15 minutes); full-suite gates use `deadlines_ms.full`. |
+| `deadlines_ms.fast` | number | `1800000` | Fast command, targeted, and impacted-check timeout (30 minutes); full-suite gates use `deadlines_ms.full`. |
+| `deadlines_ms.full` | number | `3600000` | Full-lane command/check timeout and full-suite gate timeout in every lane (60 minutes); new workers have no duration limit. |
 | `deadlines_ms.debug` | number | `900000` | Debug timeout retained for historical worker contracts (15 minutes); new debug workers have no duration limit. |
 | `deadlines_ms.spike` | number | `900000` | Spike timeout retained for historical worker contracts (15 minutes); new spike workers have no duration limit. |
 | `models.claude.fast.model` | string | `"haiku"` | Claude fast-tier model. |
