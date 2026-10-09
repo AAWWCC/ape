@@ -260,6 +260,102 @@ async function detachedGate(project, paths, state, config) {
   return verdict;
 }
 
+describe.each([
+  ['inline', runMergeGates],
+  ['detached', detachedGate],
+])('%s full-suite timeout selection', (_name, evaluate) => {
+  it.each([
+    ['initial gate', {}],
+    ['re-gate', { regate_attempts: 1 }],
+    ['explicit ship', { ship_requested: true }],
+  ])('uses the full-suite allowance for a mechanical %s', async (_operation, extra) => {
+    const { project, paths, suite } = await harness();
+    const full = suite('full');
+    await full.arm();
+    const state = { ...stateFor(await currentTreeSha(project)), ...extra };
+    const result = await evaluate(project, paths, state, {
+      deadlines_ms: { mechanical: 0, full: 5000 },
+      test_commands: { full: full.command },
+    });
+    // A full suite must be allowed to finish even when the documentation
+    // lane's narrower checks would expire immediately.
+    expect(result.passed).toBe(true);
+    expect(result.checks.full_suite).toMatchObject({ passed: true, cached: false });
+    expect(await full.executions()).toBe(1);
+  });
+
+  it('gives every full runner its full-suite allowance', async () => {
+    const { project, paths, suite } = await harness();
+    const a = suite('a');
+    const b = suite('b');
+    await a.arm();
+    await b.arm();
+    const result = await evaluate(project, paths, stateFor(await currentTreeSha(project)), {
+      deadlines_ms: { mechanical: 0, full: 5000 },
+      runners: [a, b].map((entry, index) => ({
+        id: `runner-${index}`, root: '.', owns: ['src/**'], profile: { full: entry.command },
+      })),
+    });
+    expect(result.passed).toBe(true);
+    expect(result.checks.full_suite.runners).toEqual([
+      expect.objectContaining({ id: 'runner-0', mode: 'full', passed: true }),
+      expect.objectContaining({ id: 'runner-1', mode: 'full', passed: true }),
+    ]);
+    expect(await a.executions()).toBe(1);
+    expect(await b.executions()).toBe(1);
+  });
+
+  it.each([
+    ['full', 'impacted'],
+    ['impacted', 'full'],
+  ])('uses each runner\'s own scope when advancing from %s to %s', async (first, second) => {
+    const { project, paths, suite } = await harness();
+    const entries = [suite('a'), suite('b')];
+    await Promise.all(entries.map((entry) => entry.arm()));
+    const modes = [first, second];
+    const result = await evaluate(project, paths, stateFor(await currentTreeSha(project)), {
+      deadlines_ms: { mechanical: 0, full: 5000 },
+      shipping: { required_remote_checks: true },
+      runners: entries.map((entry, index) => ({
+        id: `runner-${index}`, root: '.', owns: ['src/**'], profile: {
+          full: entry.command,
+          ...(modes[index] === 'impacted' ? { impacted_template: `${entry.command} {paths}` } : {}),
+        },
+      })),
+    });
+    expect(result.passed).toBe(false);
+    expect(result.checks.full_suite.runners).toEqual(modes.map((mode, index) =>
+      expect.objectContaining({ id: `runner-${index}`, mode, passed: mode === 'full' })));
+    expect(await entries[modes.indexOf('full')].executions()).toBe(1);
+  });
+
+  it.each([0, -1])('honors an explicitly immediate full-suite timeout of %s', async (fullTimeout) => {
+    const { project, paths, suite } = await harness();
+    const full = suite('full');
+    await full.arm();
+    const result = await evaluate(project, paths, stateFor(await currentTreeSha(project)), {
+      deadlines_ms: { mechanical: 5000, full: fullTimeout },
+      test_commands: { full: full.command },
+    });
+    expect(result.passed).toBe(false);
+    expect(result.checks.full_suite).toMatchObject({ passed: false, timed_out: true });
+  });
+
+  it.each([true, false])('keeps impacted checks on their lane allowance (immediate: %s)', async (immediate) => {
+    const { project, paths, suite } = await harness();
+    const impacted = suite('impacted');
+    await impacted.arm();
+    const result = await evaluate(project, paths, stateFor(await currentTreeSha(project)), {
+      deadlines_ms: { mechanical: immediate ? 0 : 5000, full: immediate ? 5000 : 0 },
+      shipping: { required_remote_checks: true },
+      test_commands: { full: impacted.command, impacted_template: `${impacted.command} {paths}` },
+    });
+    expect(result.passed).toBe(!immediate);
+    expect(result.checks.full_suite).toMatchObject({ mode: 'impacted', passed: !immediate });
+    expect(result.checks.full_suite.timed_out === true).toBe(immediate);
+  });
+});
+
 describe('detached gate runner coverage and cache identity', () => {
   it.skipIf(process.platform === 'win32').each([true, false])('detects the full runner at its own root (root runner present: %s)', async (rootRunner) => {
     const { project, paths } = await harness();

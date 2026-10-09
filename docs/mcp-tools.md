@@ -176,7 +176,9 @@ Refused control actions return `ok: false`, not an error hidden inside a success
 
 ### Receipt validation and recovery
 
-A bound worker calls `ape_validate_receipt` with `{ ticket_id, draft }`.
+A bound worker calls `ape_validate_receipt` with `{ project_dir, ticket_id, draft }`.
+Use the exact governed project root from the successful Codex bind or Claude's
+host-provided context; do not rely on the MCP server's working directory.
 `ticket_id` must equal `draft.ticket_id`; `draft` must be the complete object the
 parent will submit as `ape_run record`'s `receipt`. Apart from the child bootstrap,
 this is the worker's only APE tool.
@@ -198,6 +200,8 @@ Execution policy v4 uses durable correction progress without a submission or
 worker-count quota. Removing errors at schema-declared locations can advance;
 repeated or reintroduced errors cannot. Follow the returned recovery decision
 for same-worker correction or replacement after the exact predecessor retires.
+`null` validation/worker limits or `corrections_remaining` mean no fixed count
+quota, not zero attempts or exhaustion; a stalled recovery decision still stops work.
 Historical tickets retain their frozen limits, normally three submissions per
 worker and two workers. A terminal correction failure blocks as
 `worker_protocol_failure`; it does not count as reviewer dissent or trigger
@@ -261,10 +265,11 @@ call `next` again to advance that watch.
 
 Long synchronous calls send progress every ten seconds when `_meta.progressToken`
 is present. Wait for native workers using the host's agent-wait tool.
-`SubagentStop` records termination. New workers have no elapsed-time cutoff:
-their execution policy v3 tickets carry `deadline_at: null`. Explicit cancellation,
-revocation and confirmed-stop recovery still apply. Historical tickets keep their
-original deadlines; an elapsed historical deadline alone does not authorize a
+`SubagentStop` records termination. New execution policy v4 workers have no
+elapsed-time cutoff: their tickets carry `deadline_at: null`, as do supported
+historical v3 tickets. Explicit cancellation, revocation and confirmed-stop
+recovery still apply. Historical v1-v2 tickets keep their original deadlines;
+an elapsed historical deadline alone does not authorize a
 duplicate worker. Command/suite timeouts, launch-token expiry, lock leases,
 polling and shutdown grace periods remain separate operational timers.
 
@@ -312,12 +317,16 @@ retryable.
 
 ### Recovery actions
 
-- `regate`: rerun a failed merge gate within the attempt budget.
+- `regate`: rerun a failed merge gate. V4 has no fixed fresh re-gate count quota;
+  historical v1-v3 runs keep their frozen attempt budgets. Command/suite
+  watchdogs and `gates.max_spawns` still bound each detached gate execution.
 - `ship`: release a green run held by `shipping.auto_merge: false`. Requires an audit
   reason and rechecks all gates against the current tree.
 - `expire-dispatch`: void an orphaned or wedged dispatch. Requires a pending
   `ticket_id` and audit reason; consumes the attempt and issues a new ticket only
-  if the retry budget permits.
+  if the frozen recovery policy permits. V4 uses recorded recovery evidence;
+  historical v1-v3 runs retain their attempt quotas. Expiry is an audited
+  revocation, not permission to launch an overlapping worker.
 - `abort`: seal the current run.
 - `override`: reason-audited `abort` or `reset`. An unaimed reset can recover an
   orphaned lock; unexplained tree changes are not a reason to reset automatically.
@@ -565,13 +574,18 @@ so that creates a distinct intent. Once the ID is known, repeated `tasks/get` is
 
 ## Developing this repository
 
-The installed plugin already registers the `ape` MCP server. This repository's `.mcp.json` also
-registers a source/development server, so a checkout can expose it twice. For Claude development,
-disable the checkout registration in `.claude/settings.local.json` when using the installed copy:
+The installed plugin registers the `ape` MCP server through its packaged declaration:
 
-```json
-{ "disabledMcpjsonServers": ["ape"] }
-```
+| Host package | Registration file | Bundle invocation |
+| --- | --- | --- |
+| Codex | [`plugins/ape/.mcp.json`](../plugins/ape/.mcp.json), referenced by [`plugins/ape/.codex-plugin/plugin.json`](../plugins/ape/.codex-plugin/plugin.json) | `node ./dist/ape-mcp.bundle.mjs --host codex`, with `cwd: "."` in the installed plugin directory. |
+| Claude | [`plugins/ape-claude/.mcp.json`](../plugins/ape-claude/.mcp.json) at the plugin root | `node ${CLAUDE_PLUGIN_ROOT}/dist/ape-mcp.bundle.mjs --host claude`. |
+
+The [package builder](../scripts/build-plugin-packages.mjs) generates both declarations.
+The public checkout has no root `.mcp.json` registration to disable. If a developer
+has separately added a source server in local host configuration, inspect that
+actual registration before resolving a duplicate; the checkout alone does not
+create a second server.
 
 Regenerate the host packages with `npm run package:plugins`. Development updates can use
 `npm run reinstall:codex` or `npm run reinstall:claude` after explicit installation approval.

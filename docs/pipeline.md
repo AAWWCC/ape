@@ -80,6 +80,40 @@ A failed stage follows the run's frozen execution policy. New v4 runs use record
 progress instead of a fixed retry quota; historical runs retain their admitted
 limits. A blocking code review enters remediation.
 
+Execution policy versions are independent of receipt, plan, and review contract
+versions. The [policy implementation](../lib/runtime/pipeline-limits.js) preserves
+these differences:
+
+| Execution policy | Recovery and worker lifetime |
+| --- | --- |
+| Historical v1 | Frozen numeric quotas and worker deadlines; repeated planning/remediation requires strict-subset progress. |
+| Historical v2 | Removes directed-replan and remediation-cycle quotas, retaining strict-subset progress, other frozen quotas, and worker deadlines. |
+| Historical v3 | Keeps v2 recovery rules and remaining quotas; worker tickets have `deadline_at: null`. |
+| New v4 | Recorded material progress replaces recovery count quotas; worker tickets have `deadline_at: null`. |
+
+In v4, `null` attempt, physical-worker, and validation-submission limits mean no
+fixed count quota, not zero permitted attempts. A `null` admission forecast means
+the eventual total is unknown. Neither grants unconditional continuation: exact
+binding, scope, attestation, safe-integer counters, and evidence-size guards still
+apply. Existing v1-v3 runs and tickets are not upgraded by installing a newer runtime.
+
+The [recovery decision](../lib/runtime/recovery-progress.js) records resolved,
+remaining, and added blockers. After the initial recovery observation, another
+episode must resolve at least one prior blocker with material evidence. A repeated
+blocker set, reintroduction of a previously resolved blocker, missing evidence,
+no resolved blocker, cosmetic changes, or the recovery-evidence resource limit
+stops continuation. Passing the stage or review ends that recovery path normally.
+Cancellation, revocation, and authorization failures still apply.
+
+For example, a review initially finds an incorrect boundary check and a missing
+error path. A scoped repair fixes the boundary check and remains in the reviewed
+tree; the next review confirms that resolution but discovers two different
+legitimate failures alongside the remaining error path. V4 can continue even
+though the blocker count grew from two to three. Merely renaming the first
+finding, reverting its fix, or later reintroducing it cannot establish progress.
+For directed replans, the independent judge must bind resolution evidence to the
+exact previous/current plans and related implementation and acceptance coverage.
+
 An eligible implementer's test-contradiction report receives independent read-only reconciliation.
 If confirmed, a `test-recheck` ticket narrows writes to the confirmed test paths. Its
 `test-correction` check executes changed tests twice and accepts either stable passing or stable
@@ -160,6 +194,14 @@ in a detached process while the run is `gating`. Poll with `ape_run next`, optio
 `wait_ms`. Tree drift, a crashed runner, timeout, or an exhausted respawn budget blocks.
 A safe impacted suite may replace the local full suite only when remote CI remains required.
 Re-gate and `ship` always run a fresh full suite.
+
+Command/suite timeouts, heartbeat staleness, and `gates.max_spawns` bound each
+gate execution and its detached-runner respawns. They are separate from worker
+lifetime and recovery quotas: v4 has no fixed quota for deliberate fresh re-gates,
+but does not remove these watchdogs or permit replacing an unretired process.
+Full-suite gates use `deadlines_ms.full` in every lane, including each full runner,
+re-gates, and shipping. Targeted and impacted checks keep their lane-specific
+timeout; selecting the mechanical lane does not shorten the full-suite watchdog.
 
 ## Shipping
 
