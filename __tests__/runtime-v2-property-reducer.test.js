@@ -1,6 +1,9 @@
 import * as fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { reduceRun } from '../lib/runtime/scheduler.js';
+import { executionPolicySnapshot, pipelineLimits } from '../lib/runtime/pipeline-limits.js';
+import { recoveryDecision } from '../lib/runtime/recovery-progress.js';
+import { GENERAL_INPUT_MAX_BYTES } from '../lib/runtime/input-guard.js';
 import {
   AUTO_MERGE_HOLD_REASON,
   MAX_REGATE_ATTEMPTS,
@@ -14,7 +17,8 @@ import {
 // failing run replays the failure exactly: re-run this file unchanged and
 // fast-check regenerates the identical scripts.
 //
-// Three properties over generated event sequences:
+// Historical (unversioned policy) properties over generated event sequences.
+// The separate v4 suite below deliberately does not reuse finite-quota oracles.
 //  - purity/replay determinism: reduceRun is a pure action-emitting function —
 //    calling it twice on a deep-frozen state yields identical frozen action
 //    lists and never mutates its input, and replaying the same generated
@@ -434,7 +438,7 @@ const failHeavyScriptArb = fc.record({
   commands: fc.array(fc.constantFrom(...FAIL_HEAVY_POOL), { minLength: 2, maxLength: 12 }),
 });
 
-describe('APE v2 scheduler reducer properties (seeded, deterministic replay)', () => {
+describe('historical unversioned scheduler properties (seeded, finite quotas)', () => {
   it('replay determinism: the identical generated event script reduces to the identical state and action log', () => {
     fc.assert(
       fc.property(scriptArb, ({ lane, commands }) => {
@@ -454,6 +458,139 @@ describe('APE v2 scheduler reducer properties (seeded, deterministic replay)', (
       }),
       { seed: SEED, numRuns: 150, verbose: 2 },
     );
+  });
+});
+
+// Synthetic failed build receipts model material repairs on an authorized file.
+// Each script necessarily crosses the historical retry ceiling; random scripts
+// that terminate before a second failure cannot distinguish v4 from legacy.
+const V4_SEED = 20261008;
+const recoveryScriptArb = fc.record({
+  ids: fc.uniqueArray(fc.integer({ min: 0, max: 10_000 }), { minLength: 5, maxLength: 12 }),
+  attempt: fc.integer({ min: 1, max: 8 }),
+  stop: fc.constantFrom('repeat', 'cycle', 'nonmaterial', 'no-resolution'),
+});
+
+function v4Run(attempt) {
+  const state = { ...runTemplate('fast'), status: 'running', stage: 'build',
+    execution_policy: executionPolicySnapshot({}), attempts: { build: attempt } };
+  expect(state.execution_policy.version).toBe(4);
+  expect(pipelineLimits(state)).toEqual({ version: 4 });
+  return state;
+}
+
+function recoveryStep(state, ids, material, index, reducer = reduceRun) {
+  const ticket = { ticket_id: `v4-build-${index}`, stage_id: 'build', role: 'implementer',
+    model_tier: 'balanced', writable: true, parallel_group: null, required_checks: [],
+    claimed_paths: ['src/example.js'], test_paths: [], execution_limits: { version: 4 },
+    deadline_at: null };
+  const receipt = { ticket_id: ticket.ticket_id, status: 'failed', evidence: {},
+    findings: ids.map((id) => ({ file: 'src/example.js', id: `fault-${id}`, blocking: true })),
+    base_tree_sha: 'a'.repeat(40),
+    head_tree_sha: material ? index.toString(16).padStart(40, '0') : 'a'.repeat(40),
+    changed_files: material ? ['src/example.js'] : [] };
+  const input = deepFreeze({ ...state, tickets: [...state.tickets, ticket],
+    receipts: [...state.receipts, receipt] });
+  const event = deepFreeze({ type: 'RECEIPT_RECORDED', ticket, receipt,
+    stage: stageOfTicket(ticket), next_state: input });
+  const before = JSON.stringify(input);
+  const actions = reducer(input, event);
+  expect(reducer(input, event)).toEqual(actions);
+  expect(JSON.stringify(input)).toBe(before);
+  let next = input;
+  for (const action of actions) {
+    if (action.type === 'transition') next = { ...next, ...action.patch };
+  }
+  return { state: next, actions };
+}
+
+function expectProgress(step, attempt, episodes) {
+  expect(step.actions.filter((entry) => entry.type === 'issue_ticket')).toHaveLength(1);
+  expect(step.actions).toContainEqual(expect.objectContaining({ type: 'issue_ticket', recovery_kind: 'stage_retry' }));
+  expect(step.state.status).toBe('running');
+  expect(step.state.attempts.build).toBe(attempt);
+  expect(step.state.recovery_progress['stage:build']).toHaveLength(episodes);
+  expect(Buffer.byteLength(JSON.stringify(step.state.recovery_progress['stage:build'])))
+    .toBeLessThanOrEqual(GENERAL_INPUT_MAX_BYTES);
+}
+
+function runRecoveryScript({ ids, attempt, stop }, reducer = reduceRun) {
+  let state = v4Run(attempt);
+  const log = [];
+  for (let index = 0; index < ids.length - 1; index += 1) {
+    const before = state;
+    const step = recoveryStep(before, ids.slice(index), true, index, reducer);
+    expectProgress(step, attempt + index + 1, index + 1);
+    state = step.state;
+    log.push(step.actions);
+    // Persist/reload replay must not change the next decision.
+    const replay = recoveryStep(JSON.parse(JSON.stringify(before)),
+      ids.slice(index), true, index, reducer);
+    expect(replay).toEqual(step);
+  }
+  const remaining = ids.slice(-2);
+  const finalIds = stop === 'repeat' ? [...remaining].reverse().concat(remaining[0])
+    : stop === 'cycle' ? [ids[0], ids.at(-1)]
+      : stop === 'nonmaterial' ? [ids.at(-1)] : [...remaining, 10_001];
+  const blocked = recoveryStep(state, finalIds, stop !== 'nonmaterial', ids.length, reducer);
+  const reason = ['repeat', 'cycle'].includes(stop) ? 'repeated_or_cyclic_failure' : 'stalled_progress';
+  expect(blocked.actions.some((entry) => entry.type === 'issue_ticket')).toBe(false);
+  expect(blocked.state).toMatchObject({ status: 'blocked', terminal_reason_code: 'recovery_stalled',
+    blocked_recovery: { version: 4, reason_code: reason } });
+  expect(blocked.state.attempts).toEqual(state.attempts);
+  const terminal = deepFreeze(blocked.state);
+  expect(reduceRun(terminal, { type: 'STATUS' })).toEqual([{ type: 'status', state: terminal }]);
+  expect(reduceRun(terminal, { type: 'NEXT' }).some((entry) => entry.type === 'issue_ticket')).toBe(false);
+  // Re-delivery after the terminal decision is idempotent for scheduling:
+  // neither another recovery episode nor a counter update may be emitted.
+  const finalTicket = terminal.tickets.at(-1);
+  const redelivery = { type: 'RECEIPT_RECORDED', ticket: finalTicket,
+    receipt: terminal.receipts.at(-1), stage: stageOfTicket(finalTicket), next_state: terminal };
+  expect(reduceRun(terminal, redelivery)).toEqual([{ type: 'reject', reason: 'run is blocked' }]);
+  expect(reduceRun(JSON.parse(JSON.stringify(terminal)), redelivery)).toEqual(reduceRun(terminal, redelivery));
+  return { state: blocked.state, log: [...log, blocked.actions] };
+}
+
+describe('v4 evidence-based recovery properties (seeded)', () => {
+  it('continues material repairs beyond historical quotas, then terminates nonprogress or cycles with replay determinism', () => {
+    fc.assert(fc.property(recoveryScriptArb, (script) => {
+      expect(runRecoveryScript(script)).toEqual(runRecoveryScript(script));
+    }), { seed: V4_SEED, numRuns: 60, verbose: 2 });
+  });
+
+  it('rejects a test-local substitution of historical quotas for the v4 snapshot', () => {
+    const legacyReducer = (state, event) => {
+      const legacy = { ...state };
+      delete legacy.execution_policy;
+      return reduceRun(legacy, { ...event, next_state: legacy });
+    };
+    const script = { ids: [1, 2, 3, 4, 5], attempt: MAX_STAGE_ATTEMPTS, stop: 'repeat' };
+    runRecoveryScript(script);
+    expect(() => runRecoveryScript(script, legacyReducer))
+      .toThrow();
+  });
+
+  it('admits the exact serialized UTF-8 history limit and rejects one additional byte without losing prior evidence', () => {
+    fc.assert(fc.property(fc.integer({ min: 0, max: 200 }), (salt) => {
+      const first = recoveryDecision([], { blockers: [`old-${salt}`, 'remaining'], artifact: 'a'.repeat(40) });
+      expect(first.continue).toBe(true);
+      const observation = { blockers: ['remaining'], material: true, artifact: '' };
+      const base = recoveryDecision(first.history, observation);
+      const padding = GENERAL_INPUT_MAX_BYTES - Buffer.byteLength(JSON.stringify(base.history));
+      // Multibyte characters make this an actual byte-bound oracle, not a
+      // JavaScript string-length assertion. Artifact is synthetic guard data.
+      observation.artifact = 'é'.repeat(Math.floor(padding / 2)) + 'x'.repeat(padding % 2);
+      const history = deepFreeze(first.history);
+      const snapshot = JSON.stringify(history);
+      const exact = recoveryDecision(history, observation);
+      expect(exact.continue).toBe(true);
+      expect(exact.reason_code).toBe('evidenced_recovery');
+      expect(Buffer.byteLength(JSON.stringify(exact.history))).toBe(GENERAL_INPUT_MAX_BYTES);
+      expect(recoveryDecision(history, observation)).toEqual(exact);
+      const overflow = recoveryDecision(history, { ...observation, artifact: `${observation.artifact}x` });
+      expect(overflow).toMatchObject({ continue: false, reason_code: 'recovery_evidence_resource_limit', history });
+      expect(JSON.stringify(history)).toBe(snapshot);
+    }), { seed: V4_SEED + 1, numRuns: 20, verbose: 2 });
   });
 });
 

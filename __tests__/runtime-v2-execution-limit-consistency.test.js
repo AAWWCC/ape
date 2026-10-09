@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG, loadRuntimeConfig, resolveTicketDeadline, setRuntimeConfig } from '../lib/runtime/config.js';
 import { MAX_TIMER_DELAY_MS } from '../lib/runtime/constants.js';
 import { classifyLane, resolveLaneScope } from '../lib/runtime/lane-policy.js';
-import { sha256 } from '../lib/runtime/canonical.js';
+import { hashRecord, sha256 } from '../lib/runtime/canonical.js';
 import {
   GENERAL_INPUT_MAX_BYTES,
   RECEIPT_INPUT_MAX_BYTES,
@@ -14,7 +14,7 @@ import {
 } from '../lib/runtime/input-guard.js';
 import { receiptOutputSchemaForTicket, validateReceiptDraft } from '../lib/runtime/receipt-validator.js';
 import { recoverReceiptLocked } from '../lib/runtime/receipt-service.js';
-import { executionConfigForRun, pipelineLimits, receiptLimits } from '../lib/runtime/pipeline-limits.js';
+import { executionConfigForRun, executionPolicySnapshot, pipelineLimits, receiptLimits } from '../lib/runtime/pipeline-limits.js';
 import { historicalExecutionPolicy } from './historical-execution-policy-helper.js';
 import { pipelineRunSpec, projectedPipeline } from '../lib/runtime/pipeline.js';
 import { evaluateRunReadiness } from '../lib/runtime/readiness.js';
@@ -101,6 +101,30 @@ function failedStage(run, stageId, evidence = {}) {
   run.receipts = [receipt];
   return reduceRun(run, { type: 'RECEIPT_RECORDED', ticket, receipt,
     stage: { id: stageId, role: ticket.role }, next_state: run });
+}
+
+function ticketFixture(overrides = {}) {
+  return { schema_version: '2.0.0', ticket_id: 'run-policy:build:t', run_id: 'run-policy',
+    stage_id: 'build', parallel_group: null, role: 'implementer', objective: 'change one file',
+    claimed_paths: ['a.js'], test_paths: [], model_tier: 'balanced', model: {},
+    deadline_at: '2026-10-08T12:00:00.000Z', output_schema: {}, required_checks: [], parent_hash: null,
+    base_tree_sha: 'a'.repeat(40), attempt: 1, writable: true, issued_at: '2026-10-08T00:00:00.000Z',
+    ...overrides };
+}
+
+// Hash malformed variants after mutation so an unrelated hash mismatch can
+// never satisfy the rejection oracle. Valid controls go through finalization.
+function rehashTicket(ticket) {
+  return { ...ticket, ticket_hash: hashRecord(ticket, ['ticket_hash']) };
+}
+
+function expectTicketRejection(ticket, field, message, validator = validateTicket) {
+  const result = validator(ticket);
+  expect(result.valid).toBe(false);
+  expect(result.errors).toEqual(expect.arrayContaining([
+    expect.objectContaining({ path: expect.arrayContaining([field]), message: expect.stringMatching(message) }),
+  ]));
+  expect(result.errors.some((error) => error.path.includes('ticket_hash'))).toBe(false);
 }
 
 describe('operator execution policy stays exact across run and ticket boundaries', () => {
@@ -219,17 +243,58 @@ describe('operator execution policy stays exact across run and ticket boundaries
   });
 
   it('validates new ticket policy exactly while retaining legacy attempt bounds', () => {
-    const ticket = { schema_version: '2.0.0', ticket_id: 'run-policy:build:t', run_id: 'run-policy',
-      stage_id: 'build', parallel_group: null, role: 'implementer', objective: 'change one file',
-      claimed_paths: ['a.js'], test_paths: [], model_tier: 'balanced', model: {},
-      deadline_at: new Date().toISOString(), output_schema: {}, required_checks: [], parent_hash: null,
-      base_tree_sha: 'a'.repeat(40), attempt: 3, writable: true, issued_at: new Date().toISOString(),
-      execution_limits: pipelineLimits({ policy: { max_stage_attempts: 3 } }) };
-    expect(finalizeTicket(ticket).attempt).toBe(3);
+    const ticket = finalizeTicket(ticketFixture({ attempt: 3,
+      execution_limits: pipelineLimits({ policy: { max_stage_attempts: 3 } }) }));
+    expect(validateTicket(ticket)).toMatchObject({ valid: true, value: { attempt: 3 } });
     const { execution_limits, ...legacy } = ticket;
     expect(() => finalizeTicket(legacy)).toThrow(/attempt/);
-    expect(() => validateTicket({ ...ticket, ticket_hash: 'b'.repeat(64),
-      execution_limits: { ...execution_limits, max_stage_attempts: -1 } })).not.toThrow();
+    expectTicketRejection(rehashTicket(legacy), 'attempt', /immutable stage attempt policy/);
+    expect(validateTicket(finalizeTicket({ ...legacy, attempt: 2 })).valid).toBe(true);
+    expectTicketRejection(rehashTicket({ ...ticket,
+      execution_limits: { ...execution_limits, max_stage_attempts: -1 } }), 'execution_limits', /Invalid input/i);
+    expectTicketRejection(rehashTicket({ ...ticket, attempt: 4 }), 'attempt', /immutable stage attempt policy/);
+  });
+
+  it.each([1, 2, 3, 4])('accepts internally consistent policy version %s and rejects mixed snapshot markers', (version) => {
+    const snapshot = version === 4 ? executionPolicySnapshot(DEFAULT_CONFIG)
+      : version === 1 ? { ...historicalExecutionPolicy(), version: 1, limits: pipelineLimits({}) }
+        : historicalExecutionPolicy(version);
+    expect(pipelineLimits({ execution_policy: snapshot })).toEqual(snapshot.limits);
+    const ticket = finalizeTicket(ticketFixture({ execution_limits: snapshot.limits,
+      deadline_at: version >= 3 ? null : '2026-10-08T12:00:00.000Z' }));
+    expect(validateTicket(ticket)).toMatchObject({ valid: true });
+    for (const other of [1, 2, 3, 4].filter((value) => value !== version)) {
+      expect(() => pipelineLimits({ execution_policy: { ...snapshot, version: other } }))
+        .toThrow(/inconsistent immutable execution policy/);
+    }
+    expectTicketRejection(rehashTicket({ ...ticket,
+      deadline_at: version >= 3 ? '2026-10-08T12:00:00.000Z' : null }), 'deadline_at', /deadline/i);
+  });
+
+  it('accepts v4 attempts beyond historical quotas but rejects quotas, unknown versions, and unsafe counters', () => {
+    const ticket = finalizeTicket(ticketFixture({ deadline_at: null, attempt: 100,
+      execution_limits: executionPolicySnapshot(DEFAULT_CONFIG).limits }));
+    expect(validateTicket(ticket)).toMatchObject({ valid: true, value: { attempt: 100, execution_limits: { version: 4 } } });
+    for (const execution_limits of [
+      { version: 4, max_stage_attempts: 2 },
+      { version: 4, max_remediation_cycles: 0 },
+      { version: 5 },
+      { ...historicalExecutionPolicy(3).limits, max_directed_replans: 1 },
+    ]) expectTicketRejection(rehashTicket({ ...ticket, execution_limits }), 'execution_limits', /Invalid input/i);
+    for (const attempt of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expectTicketRejection(rehashTicket({ ...ticket, attempt }), 'attempt', /integer|small|big/i);
+    }
+  });
+
+  it('detects unconditional invalid-ticket acceptance and hash-only rejection in the test-local oracle', () => {
+    const valid = finalizeTicket(ticketFixture());
+    expect(validateTicket(valid).valid).toBe(true);
+    const invalid = rehashTicket({ ...valid, attempt: 3 });
+    expectTicketRejection(invalid, 'attempt', /immutable stage attempt policy/);
+    expect(() => expectTicketRejection(invalid, 'attempt', /immutable stage attempt policy/,
+      () => ({ valid: true, value: invalid }))).toThrow();
+    expect(() => expectTicketRejection(invalid, 'attempt', /immutable stage attempt policy/,
+      () => ({ valid: false, errors: [{ path: ['ticket_hash'], message: 'ticket hash mismatch' }] }))).toThrow();
   });
 
   it('retains complete modern assurance feedback and still requires strict progress after two replans', () => {
