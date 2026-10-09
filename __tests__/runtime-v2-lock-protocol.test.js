@@ -300,6 +300,29 @@ describe('APE v2 shared dir lock: release-window contention', () => {
 });
 
 describe('APE v2 run-lock crash recovery (invariant 7)', () => {
+  it('reuses an owned lock only when a serialized recovery explicitly requests it', async () => {
+    const lock = path.join(await scratch(), 'active.lock');
+    const owner = await acquireRunLock(lock, 'run-retained');
+    const bytes = await readFile(lock, 'utf8');
+    await expect(acquireRunLock(lock, 'run-retained')).rejects.toThrow(/another APE writing run/);
+    expect(await acquireRunLock(lock, 'run-retained', { reuseOwned: true }))
+      .toEqual({ ...owner, reused: true });
+    expect(await readFile(lock, 'utf8')).toBe(bytes);
+  });
+
+  it.each(['run', 'host', 'process'])('owned-lock reuse refuses a different %s identity', async (identity) => {
+    const lock = path.join(await scratch(), 'active.lock');
+    const owner = { version: 1, run_id: 'run-retained', pid: process.pid, host: hostname() };
+    if (identity === 'run') owner.run_id = 'run-unrelated';
+    if (identity === 'host') owner.host += '-elsewhere';
+    if (identity === 'process') owner.pid = process.ppid;
+    const bytes = `${JSON.stringify(owner)}\n`;
+    await writeFile(lock, bytes);
+    await expect(acquireRunLock(lock, 'run-retained', { reuseOwned: true, recoverStale: true }))
+      .rejects.toThrow(/another APE writing run/);
+    expect(await readFile(lock, 'utf8')).toBe(bytes);
+  });
+
   it('recovers a same-host dead-pid lock only under recoverStale, and audits the steal', async () => {
     const dir = await scratch();
     const lock = path.join(dir, 'active.lock');

@@ -251,7 +251,7 @@ describe('operator execution policy stays exact across run and ticket boundaries
     expectTicketRejection(rehashTicket(legacy), 'attempt', /immutable stage attempt policy/);
     expect(validateTicket(finalizeTicket({ ...legacy, attempt: 2 })).valid).toBe(true);
     expectTicketRejection(rehashTicket({ ...ticket,
-      execution_limits: { ...execution_limits, max_stage_attempts: -1 } }), 'execution_limits', /Invalid input/i);
+      execution_limits: { ...execution_limits, max_stage_attempts: -1 } }), 'execution_limits', /max_stage_attempts must be a safe integer/i);
     expectTicketRejection(rehashTicket({ ...ticket, attempt: 4 }), 'attempt', /immutable stage attempt policy/);
   });
 
@@ -282,7 +282,7 @@ describe('operator execution policy stays exact across run and ticket boundaries
       { ...historicalExecutionPolicy(3).limits, max_directed_replans: 1 },
     ]) expectTicketRejection(rehashTicket({ ...ticket, execution_limits }), 'execution_limits', /Invalid input/i);
     for (const attempt of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
-      expectTicketRejection(rehashTicket({ ...ticket, attempt }), 'attempt', /integer|small|big/i);
+      expectTicketRejection(rehashTicket({ ...ticket, attempt }), 'attempt', /expected int|small|big/i);
     }
   });
 

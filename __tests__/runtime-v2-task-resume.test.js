@@ -38,14 +38,14 @@ async function project() {
     test_commands: { full: 'node --test', targeted_template: 'node --test {paths}' } });
   return dir;
 }
-async function blocked(dir, { dirt = true } = {}) {
+async function blocked(dir, { dirt = true, retainLock = false } = {}) {
   expect((await startRun(dir, input)).ok).toBe(true);
   const paths = runtimePaths(dir);
   const state = await storage.readJson(paths.active);
   state.status = 'blocked'; state.stage = 'build'; state.block_reason = 'Worker failed to complete the documentation';
   await storage.atomicWriteJson(paths.active, state);
   await storage.atomicWriteJson(path.join(paths.runs, `${state.run_id}.json`), state);
-  await releaseRunLock(paths.lock, state.run_id);
+  if (!retainLock) await releaseRunLock(paths.lock, state.run_id);
   if (dirt) {
     await writeFile(path.join(dir, 'README.md'), 'staged\n'); git(dir, ['add', 'README.md']);
     await writeFile(path.join(dir, 'README.md'), 'work\n');
@@ -62,6 +62,38 @@ async function freshStart(dir, restored) {
 }
 
 describe('explicit resume recovers a task with fresh execution', () => {
+  it('recovers a blocked run that retained its own live-process writer lock', async () => {
+    const dir = await project();
+    const state = await blocked(dir, { retainLock: true });
+    const paths = runtimePaths(dir);
+    const lock = await readFile(paths.lock, 'utf8');
+    const plan = await resumeRun(dir);
+    expect(plan.recovery_plan.kind).toBe('replace_run');
+    expect(await readFile(paths.lock, 'utf8')).toBe(lock);
+    const restored = await resumeRun(dir, confirm(plan));
+    expect(restored.next_action.kind).toBe('start_recovered_work');
+    expect(restored.start_input.supersedes_run).toBe(state.run_id);
+    expect(await readFile(path.join(dir, 'README.md'), 'utf8')).toBe('work\n');
+    const checkpoint = await checkpoints.readWorkCheckpoint(paths, restored.start_input.checkpoint_id);
+    expect(git(dir, ['show', `${checkpoint.git_ref}-index:README.md`])).toBe('staged');
+    await expect(readFile(paths.lock)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('retains the owned writer lock when checkpoint publication fails, then recovers on retry', async () => {
+    const dir = await project();
+    const state = await blocked(dir, { retainLock: true });
+    const paths = runtimePaths(dir);
+    const lock = await readFile(paths.lock, 'utf8');
+    const plan = await resumeRun(dir);
+    vi.spyOn(checkpoints, 'saveWorkCheckpoint').mockRejectedValueOnce(new Error('checkpoint unavailable'));
+    await expect(resumeRun(dir, confirm(plan))).rejects.toThrow('checkpoint unavailable');
+    expect(await readFile(paths.lock, 'utf8')).toBe(lock);
+    expect((await storage.readJson(paths.active)).run_id).toBe(state.run_id);
+    const restored = await resumeRun(dir, confirm(plan));
+    expect(restored.next_action.kind).toBe('start_recovered_work');
+    await expect(readFile(paths.lock)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it.each(['ape', 'ape-claude'])('recovers through the %s packaged MCP boundary and rejects recovery fields on other actions', async (hostPackage) => {
     const dir = await project(); await blocked(dir);
     const env = packagedFixtureEnv();
