@@ -1,5 +1,34 @@
 # Changelog
 
+## 3.0.0 — 2026-10-09
+
+This major release brings together the autonomy and recovery changes developed
+since the published 2.25.8 release. It retains runtime v2 and state schema 2.0.0;
+existing runs keep their frozen policies. See [release notes](docs/releases/3.0.0.md).
+
+- Replace fixed recovery quotas with evidence-based progress and remove worker
+  duration limits for new runs. Preserve historical execution contracts and
+  retain separate command, suite, and operational timeouts.
+- Preserve unfinished work in durable checkpoints and resume blocked tasks with
+  explicit recovery plans. Page oversized admission previews and improve setup
+  continuation, worker binding, and completed-worker cleanup guidance.
+- Recover attested test handoffs without deadlocks, preserve scoped test evidence,
+  verify effective Vitest serialization, and use the full-suite timeout across
+  build lanes.
+- Persist gate launch ownership, retire invalidated gate generations, clean up
+  artifacts across test runners, and supervise native test helper processes.
+- Reconcile terminal pull-request state before waiting on CI, distinguish failed
+  checks from observation errors, and keep the admitted GitHub host fixed.
+- Refresh Codex and Claude development plugins after verified shipping while
+  preserving paths used by open tasks; support the default Windows Codex launcher.
+- Preserve Claude's own permission decisions and exact patch-path identity;
+  update vulnerable dependencies and isolate Git test fixtures.
+- Require executed passing canary cases and expand execution-policy recovery
+  coverage. Regenerate both public host packages at 3.0.0.
+
+Fresh live release certification is not claimed. The 2.25.8 owner exception does
+not apply to this version.
+
 ## 2.29.0 — 2026-09-29
 
 - Report native-worker cleanup support and unknown host capacity explicitly;
