@@ -18,13 +18,20 @@ async function jsonProcess(binary, input, cwd, env) {
     const child = spawn(process.execPath, [binary], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     let output = '';
     let errors = '';
-    const timer = setTimeout(() => child.kill('SIGKILL'), 20_000);
+    let timedOut = false;
+    const operation = input.method === 'tools/call'
+      ? `${input.params.name} ${input.params.arguments.action ?? ''}`.trim()
+      : input.hook_event_name;
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 20_000);
     child.stdout.on('data', (data) => { output += data; });
     child.stderr.on('data', (data) => { errors += data; });
     child.once('error', (error) => { clearTimeout(timer); reject(error); });
-    child.once('close', (code) => {
+    child.once('close', (code, signal) => {
       clearTimeout(timer);
-      if (code !== 0) { reject(new Error(`packaged process exited ${code}: ${errors}`)); return; }
+      if (code !== 0) {
+        reject(new Error(`packaged ${path.basename(binary)} ${operation} exited ${code} (signal=${signal}, timed_out=${timedOut}, stdout_bytes=${Buffer.byteLength(output)}): ${errors}`));
+        return;
+      }
       try { resolve(output.trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))); }
       catch (error) { reject(new Error(`invalid packaged JSON: ${error.message}; ${output}; ${errors}`)); }
     });

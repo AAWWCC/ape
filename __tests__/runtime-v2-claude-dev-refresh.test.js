@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
+import { APE_VERSION } from '../lib/runtime/versions.js';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -82,7 +83,7 @@ describe('Claude APE development installer', () => {
     const result = await c.invoke();
     expect(result.code, result.stderr).toBe(0);
     expect(result.stdout).toContain('Verified local Claude installation: ape@ape-dev');
-    expect(await c.selected()).toMatchObject({ id: 'ape@ape-dev', scope: 'local', enabled: true, version: '2.29.0+claude.first' });
+    expect(await c.selected()).toMatchObject({ id: 'ape@ape-dev', scope: 'local', enabled: true, version: `${APE_VERSION}+claude.first` });
     expect(await readFile(path.join(c.plugin, '.claude-plugin', 'plugin.json'), 'utf8')).toBe(before);
     const commands = (await readFile(c.log, 'utf8')).trim().split('\n').map(JSON.parse);
     expect(commands.filter(command => ['install', 'update'].includes(command[1]))).toEqual([
@@ -101,7 +102,7 @@ describe('Claude APE development installer', () => {
       pinned.push({ installPath: old.installPath, bytes: await readFile(path.join(old.installPath, 'dist', 'ape-mcp.bundle.mjs')) });
       await writeFile(path.join(c.plugin, 'dist', 'ape-mcp.bundle.mjs'), `updated fixture build ${token}`);
       expect((await c.invoke(token, { FAKE_CLAUDE_ORPHAN: mode === 'marks for eviction' ? '1' : '0' })).code).toBe(0);
-      expect((await c.selected()).version).toBe(`2.29.0+claude.${token}`);
+      expect((await c.selected()).version).toBe(`${APE_VERSION}+claude.${token}`);
       for (const previous of pinned) {
         expect(await readFile(path.join(previous.installPath, 'dist', 'ape-mcp.bundle.mjs'))).toEqual(previous.bytes);
         await expect(readFile(path.join(previous.installPath, '.orphaned_at'))).rejects.toMatchObject({ code: 'ENOENT' });

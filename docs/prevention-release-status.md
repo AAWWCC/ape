@@ -1,5 +1,25 @@
 # Prevention-first reliability status
 
+## 3.0.0 release candidate
+
+The candidate consolidates the completed autonomy and recovery roadmap: durable
+unfinished-work checkpoints, paged admission, task and test-handoff recovery,
+gate ownership and cancellation, shipping reconciliation, development plugin
+refresh, and execution-policy regression coverage. The version bump retains
+runtime v2, state schema 2.0.0, and the pinned host compatibility contract.
+
+Local preparation passed type checking, host compatibility, prompt checks and
+planning, package parity, plugin and release reproducibility, both MCP package
+smoke checks, Claude manifest validation, and public-safety checks. The dependency
+audit reported no vulnerabilities. Operational replay passed 709 tests across 23
+files, with all 342 required canary identities confirmed executed and passing.
+The release pull request records the full-suite and CI results.
+
+See the [3.0.0 release notes](releases/3.0.0.md) for upgrade behavior and retained
+limits. Fresh live release certification is not claimed. The 2.25.8 owner
+exception remains specific to that earlier release; tagged publication still
+requires the [release checks](operational-readiness.md).
+
 ## 2.29.0 native-worker retirement and shipping recovery
 
 Completed native children can be archived through the supported Codex desktop
