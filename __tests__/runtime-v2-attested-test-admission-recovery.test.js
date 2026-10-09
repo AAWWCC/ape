@@ -17,6 +17,8 @@ import { settleReceiptValidationSubagentStop } from '../lib/runtime/receipt-serv
 import * as storage from '../lib/runtime/storage.js';
 import * as runner from '../lib/runtime/runner.js';
 import { currentTreeSha } from '../lib/runtime/git.js';
+import { acquireRunLock } from '../lib/runtime/lock.js';
+import { readRecoveryJournal, readWorkCheckpoint } from '../lib/runtime/work-checkpoints.js';
 
 const cleanups = [];
 afterEach(async () => {
@@ -281,6 +283,80 @@ describe('attested authored-test admission recovery', () => {
       expect(refused.errors.join(' ')).toMatch(check === 'green-test' ? /failed twice/ : /red-test passed/);
       await assertDurableRefusal(value);
     }, 30000);
+
+  it('recovers failed green admission with its retained live-process lock and exact authored bytes', async () => {
+    const value = await fixture();
+    const testFile = path.join(value.directory, 'tests/value.test.js');
+    // Hold a real generation throughout admission, as the writing run does.
+    const owner = await acquireRunLock(value.paths.lock, value.state.run_id);
+    expect(owner).toMatchObject({ run_id: value.state.run_id, pid: process.pid, host: os.hostname() });
+    const lockBytes = await readFile(value.paths.lock, 'utf8');
+    await writeFile(testFile, FAIL);
+    const authoredBytes = await readFile(testFile);
+    const authoredBlob = fixtureGit(value.directory, ['hash-object', '--stdin'], { input: authoredBytes });
+    await attest(value, false);
+
+    const refused = await recordReceipt(value.directory, value.draft);
+    expect(refused).toMatchObject({ ok: false, rejected: true });
+    expect(refused.errors.join(' ')).toMatch(/failed twice/);
+    const blocked = await assertDurableRefusal(value);
+    expect(await readFile(value.paths.lock, 'utf8')).toBe(lockBytes);
+    expect(await readFile(testFile)).toEqual(authoredBytes);
+    // A validated receipt is not native worker retirement evidence.
+    const waiting = await resumeRun(value.directory);
+    expect(waiting.recovery_plan).toMatchObject({ kind: 'wait_for_owners',
+      owners: { clear: false, unresolved_worker_count: 1 } });
+    expect(waiting.recovery_plan.expected_recovery_digest).toBeUndefined();
+    expect(await observeCodexSubagentStop(value.paths, blocked, identity)).toMatchObject({ observed: true });
+    const stoppedIntent = await readFile(value.intentFile, 'utf8');
+
+    const beforeDiscovery = { active: await readFile(value.paths.active, 'utf8'),
+      head: fixtureGit(value.directory, ['rev-parse', 'HEAD']),
+      status: fixtureGit(value.directory, ['status', '--porcelain']),
+      checkpoints: await readdir(value.paths.checkpoints).catch(() => []) };
+    const plan = await resumeRun(value.directory);
+    expect(plan.recovery_plan.kind).toBe('replace_run');
+    const confirmation = { explicit_invocation: true,
+      expected_recovery_digest: plan.recovery_plan.expected_recovery_digest };
+    expect(confirmation.expected_recovery_digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(await resumeRun(value.directory, {
+      expected_recovery_digest: confirmation.expected_recovery_digest,
+    })).toMatchObject({ ok: false });
+    expect({ active: await readFile(value.paths.active, 'utf8'),
+      head: fixtureGit(value.directory, ['rev-parse', 'HEAD']),
+      status: fixtureGit(value.directory, ['status', '--porcelain']),
+      checkpoints: await readdir(value.paths.checkpoints).catch(() => []) }).toEqual(beforeDiscovery);
+    expect(await readFile(value.paths.lock, 'utf8')).toBe(lockBytes);
+    expect(await readFile(value.intentFile, 'utf8')).toBe(stoppedIntent);
+
+    const restored = await resumeRun(value.directory, confirmation);
+    expect(restored).toMatchObject({ ok: true, recovered: 'work-checkpoint', active: false,
+      next_action: { kind: 'start_recovered_work' },
+      start_input: { supersedes_run: value.state.run_id, test_paths: value.state.test_paths } });
+    const checkpoint = await readWorkCheckpoint(value.paths, restored.start_input.checkpoint_id);
+    expect(checkpoint).toMatchObject({ source_run_id: value.state.run_id, source_status: 'blocked',
+      source_branch: value.state.branch, start_input: { objective: value.state.objective } });
+    // Blob identity checks every byte, including trailing newlines, without
+    // the fixture Git helper's text trimming weakening the assertion.
+    expect(fixtureGit(value.directory, ['rev-parse', `${checkpoint.git_ref}:tests/value.test.js`]))
+      .toBe(authoredBlob);
+    expect(await readFile(testFile)).toEqual(authoredBytes);
+    expect(await readRecoveryJournal(value.paths, confirmation.expected_recovery_digest))
+      .toMatchObject({ source_run_id: value.state.run_id, checkpoint_id: checkpoint.checkpoint_id,
+        kind: 'replace_run' });
+    await expect(readFile(value.paths.active)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(value.paths.lock)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const branch = fixtureGit(value.directory, ['branch', '--show-current']);
+    const replay = await resumeRun(value.directory, confirmation);
+    expect(replay.start_input).toEqual(restored.start_input);
+    expect(fixtureGit(value.directory, ['branch', '--show-current'])).toBe(branch);
+    expect(fixtureGit(value.directory, ['branch', '--list', 'ape/recover-*']).split('\n')).toHaveLength(1);
+    expect(await readFile(testFile)).toEqual(authoredBytes);
+    expect(await readFile(value.intentFile, 'utf8')).toBe(stoppedIntent);
+    expect((await storage.readJson(path.join(value.paths.runs, `${value.state.run_id}.json`))).receipts).toEqual([]);
+    await expect(readFile(value.paths.lock)).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 30000);
 
   it.each(['template', 'runners'])('keeps malformed %s routing actionable without accepting evidence', async route => {
     const value = await fixture('green-test', route, { config: route === 'template'
