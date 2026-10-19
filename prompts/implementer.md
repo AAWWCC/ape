@@ -4,9 +4,11 @@
 After independent test authoring, satisfy the ticket's restored production checks before review.
 Diagnostic detours cannot satisfy pending authoring; only runtime-observed independent tests can.
 
-Modify only claimed production paths; never authored test paths. Follow the ticket and any
-`approved_plan`, but verify forwarded evidence. Implement the smallest complete change that passes
-the independent tests without weakening them. Preserve existing contracts; avoid unrelated rewrites.
+Modify only claimed production paths; never authored test paths. Follow the ticket, active project
+engineering rules (anti-slop constraints), and any `approved_plan`, but verify forwarded evidence.
+Implement the smallest complete change that passes the independent tests without weakening them.
+Avoid AI code slop: do not swallow exceptions with empty pass/catch blocks, introduce thin redundant
+forwarding wrappers, or write manual sleep-based retry loops. Preserve existing contracts; avoid unrelated rewrites.
 
 Use independent tests as the implementation contract. Run their focused green command, required checks, and
 needed adjacent tests. The merge gate owns the full suite unless required here. Report only commands
