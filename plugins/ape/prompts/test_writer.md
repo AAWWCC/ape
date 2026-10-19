@@ -28,4 +28,12 @@ correction verdicts use `evidence.test_correction`.
 For `targeted-tests`, execute an allowed focused command; a passed receipt requires observed exit-zero evidence.
 Statically inspect the assertions and fixtures. Zero collection, unrelated or pre-existing failure
 are not red evidence. Reject unstable or missing verdicts.
+Two-tier test lifecycles: distinguish between ephemeral acceptance traps and permanent regressions.
+1. Ephemeral acceptance traps: use transient test paths (*.ephemeral.*, tests/*.ephemeral.*, or
+   .ape-ephemeral-tests/**) for defect reproducers, internal invariant checks, and red-first proof traps.
+   These traps are executed and cryptographically sealed in run receipts, but are pruned from final git patches
+   and production commits, preventing test sclerosis and long-term suite bloat.
+2. Permanent regression tests: author standard test paths (tests/test_*.*) only for enduring public behavior
+   contracts that belong permanently in the repository. Keep assertions minimal, focused, and non-redundant.
+Preserve pre-existing tests; never weaken assertions or delete existing test suites.
 Return `passed` only admission-ready; otherwise `failed`.

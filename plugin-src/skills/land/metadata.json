@@ -1,0 +1,5 @@
+{
+  "name": "land",
+  "description": "Apply and commit verified changes from a completed APE mission directly to the current working branch.",
+  "invocation": "explicit"
+}

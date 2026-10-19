@@ -1,0 +1,6 @@
+interface:
+  display_name: "APE Land"
+  short_description: "Apply and commit verified changes locally"
+  default_prompt: "Use $ape:land to apply and commit verified changes directly to the current branch."
+policy:
+  allow_implicit_invocation: false

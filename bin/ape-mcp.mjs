@@ -24,6 +24,7 @@ import {
   regateRun,
   resumeRun,
   shipRun,
+  landRun,
   shouldTaskWrapApeRun,
   startRun,
   statusRun,
@@ -129,7 +130,7 @@ const TOOLS = Object.freeze([
       properties: {
         action: {
           type: 'string',
-          enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'recover-receipt', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'expire-dispatch', 'abort', 'override'],
+          enum: ['probe', 'probe-status', 'probe-ack', 'preview', 'start', 'next', 'record', 'recover-receipt', 'answer-preflight', 'status', 'resume', 'regate', 'ship', 'land', 'expire-dispatch', 'abort', 'override'],
           description: 'Preview and start require identical complete prospective facts, including objective and host; start additionally requires the ready inline admission_digest or fully reviewed admission_delivery.digest as expected_admission_digest. Structured successor starts are unavailable because current host hooks do not authenticate human provenance; after explicit operator direction recover a blocked run with audited override reset, then start an ordinary fresh run. recover-receipt is the reason-audited emergency path for the exact draft of a host-observed stopped worker when normal worker attestation is unavailable. For the initial call of Codex action probe, include host: "codex", explicit_invocation: true, hooks_trusted: true, and subagents_available: true. For action status, send only action and project_dir; never send run_id.',
         },
         project_dir: {
@@ -833,6 +834,7 @@ async function dispatchApeRun(projectDir, input) {
   });
   if (action === 'regate') return regateRun(projectDir);
   if (action === 'ship') return shipRun(projectDir, input.reason);
+  if (action === 'land') return landRun(projectDir, { commit: input.commit !== false, message: input.message ?? null });
   if (action === 'expire-dispatch') return expireDispatch(projectDir, input.ticket_id, input.reason);
   if (action === 'abort') {
     // operation is override's parameter; silently dropping it would misroute a

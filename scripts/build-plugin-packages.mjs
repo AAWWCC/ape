@@ -40,7 +40,7 @@ const CLAUDE_STATUSLINE_FILES = Object.freeze([
   ['lib/runtime', 'resource-limits.js'],
   ['lib/runtime', 'paths.js'],
 ]);
-const SKILL_NAMES = Object.freeze(['config', 'history', 'override', 'resume', 'roadmap', 'run', 'status']);
+const SKILL_NAMES = Object.freeze(['config', 'history', 'land', 'override', 'resume', 'roadmap', 'run', 'status']);
 const ROLE_NAMES = Object.freeze([
   'preflight_analyst',
   'planner',
@@ -64,6 +64,7 @@ const PINNED_TIME = new Date(
 const SKILL_INTERFACE = Object.freeze({
   config: ['APE Config', 'Configure and diagnose the APE runtime', 'Use $ape:config to inspect or update APE runtime configuration.'],
   history: ['APE History', 'Inspect and maintain durable APE history', 'Use $ape:history to inspect or explicitly maintain APE run history.'],
+  land: ['APE Land', 'Apply and commit verified changes locally', 'Use $ape:land to apply and commit verified changes directly to the current branch.'],
   override: ['APE Override', 'Audit and recover blocked APE state', 'Use $ape:override to perform a reason-audited APE recovery action.'],
   resume: ['APE Resume', 'Resume an interrupted durable APE run', 'Use $ape:resume to continue the active APE run from persisted state.'],
   roadmap: ['APE Roadmap', 'Inspect and evolve the governed roadmap', 'Use $ape:roadmap to inspect or explicitly evolve the APE roadmap.'],

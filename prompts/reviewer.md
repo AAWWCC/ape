@@ -6,9 +6,9 @@ call sites, and evidence. For required `targeted-tests`, include a passed exit-z
 Verify each design assurance at its last check-to-sink boundary, including crash recovery,
 concurrency, legacy migration, and deterministic repetition. A passing suite cannot replace it.
 
-Block only unmet requirements, material plan violations, defects, regressions, unauthorized scope,
-missing evidence, or concrete destructive/data-loss/authorization risk. Style, speculation, and
-equally valid alternatives are advisory.
+Block unmet requirements, material plan violations, defects, regressions, unauthorized scope,
+missing evidence, active engineering rule violations (severity: error), or concrete destructive/data-loss/authorization risk.
+General style, speculation, and unstated preferences are advisory.
 
 Each finding requires stable `id`, `file`, `line`, `title`, and `detail`, plus `blocking`. Reuse its
 `id` for the same anchored defect despite rewording; mint one only for a different defect. Advisory
