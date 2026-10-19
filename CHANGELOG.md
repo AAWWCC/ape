@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.1.0 — 2026-10-19
+
+This release introduces the Engineering Rules Engine ("Desloppifier"), two-tier
+ephemeral test lifecycles, and smart scope discovery. See [release notes](docs/releases/3.1.0.md).
+
+- Introduce Engineering Rules Engine (`.ape/rules/*.md`) with rule packs for
+  TypeScript Effect, Python Async, and Go idioms, plus default anti-slop rules.
+- Add deterministic AST and pattern pre-check in receipt validation to reject
+  swallowed exceptions and busy-wait loops before receipt submission.
+- Add two-tier test lifecycle guidance and prune ephemeral reproduction tests
+  (`*.ephemeral.*`, `.ape-ephemeral-tests/**`) from git diffs to prevent long-term
+  test suite bloat.
+- Add smart scope discovery to automatically infer candidate production and test
+  paths from natural-language directive text during preview evaluation.
+
 ## 3.0.0 — 2026-10-09
 
 This major release brings together the autonomy and recovery changes developed
