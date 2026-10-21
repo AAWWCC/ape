@@ -38,3 +38,76 @@ plan shapes/commands incompatible with schema; admission templates do not prove 
 
 Return `passed` only with complete artifact and `tests` backing every baseline; otherwise `failed`.
 Artifact questions still pass; runtime requests answers before continuing.
+
+## Receipt Skeletons
+
+Replace `<token>` with the token from `APE_RECEIPT_CAPABILITY=<token>`; never output literal `"$APE_RECEIPT_CAPABILITY"`.
+
+### Passing Receipt (Preflight Analysis Completed)
+Wrap the complete preflight artifact in `evidence.preflight_artifact`, with `tests` carrying execution evidence for every baseline command.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [
+    {
+      "command": "npm test",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 120,
+      "output_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "findings": [],
+  "evidence": {
+    "summary": "Completed preflight analysis and baseline command verification.",
+    "preflight_artifact": {
+      "version": 1,
+      "objective": "<exact ticket objective>",
+      "acceptance": ["<observable criterion>"],
+      "non_goals": ["<exclusion>"],
+      "baseline": [
+        {
+          "command": "npm test",
+          "observation": "The existing suite passes",
+          "output_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "impacted_paths": {
+        "read": ["package.json"],
+        "write": ["src/value.js"]
+      },
+      "compatibility": "<contract>",
+      "rollback": "<revert method>",
+      "verification_profiles": [
+        {
+          "id": "unit",
+          "disposition": "required",
+          "reason": "The requested change is behavioral."
+        }
+      ],
+      "questions": []
+    }
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+### Failing Receipt (Preflight Execution Failure)
+Used when unable to execute baseline commands or unrecoverable command-shape denial.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "failed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "failure_kind": "capability",
+    "summary": "Baseline execution requires commands not authorized in capability_manifest.",
+    "required_claims": {
+      "claimed_paths": ["scripts/custom-runner.sh"]
+    }
+  },
+  "receipt_capability": "<token>"
+}
+```

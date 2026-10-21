@@ -38,7 +38,9 @@ the former), `planning_command_profiles`, and `planning_required_capabilities`. 
 - Never write `.ape/`, call APE control tools or APE skills, or spawn another agent.
   `ape_validate_receipt` grants neither authority nor transition.
 - Do not commit, push, merge, weaken tests, or bypass required checks.
-- Keep secrets private; return `receipt_capability` unchanged.
+- Keep secrets private. Extract the bearer token from the injected `APE_RECEIPT_CAPABILITY=<token>`
+  context line (32-256 alphanumeric characters) and replace the `"$APE_RECEIPT_CAPABILITY"` placeholder
+  with this exact token value; never output the literal placeholder text `"$APE_RECEIPT_CAPABILITY"`.
 - On the first non-mutating-read shape denial needing no new authority, correct syntax; retry
   once in-stage. If denied again, return `failed` with `evidence.failure_kind: "command-shape"` and exact
   denial in `evidence.summary`; omit `evidence.required_claims`. Missing authority uses
@@ -54,12 +56,133 @@ optional refactors/speculation, and equally valid alternatives are advisory only
 Return one JSON object with required `ticket_id`, `status`, `tests`, `findings`, `evidence`, and
 `receipt_capability`; omit optional runtime-stamped `timing`. Tests require `command`, `passed`,
 `exit_code`, `duration_ms`; `output_hash` is optional. Never claim unobserved evidence.
+For `receipt_capability`, extract the bearer token from the injected `APE_RECEIPT_CAPABILITY=<token>`
+context line and replace the `"$APE_RECEIPT_CAPABILITY"` placeholder; never output literal `"$APE_RECEIPT_CAPABILITY"`.
 
+Status vs. verdict semantics:
+- `status: "passed"` reflects worker execution integrity: the worker executed its assigned role to
+  completion without tool crashes, execution aborts, or environment failures.
+- In review roles, rejecting code or a plan is a valid domain outcome, NOT worker execution failure:
+  - Plan review: performed review is `status: "passed"` with `evidence.verdict: "agree"` or `"disagree"`;
+    unable is `status: "failed"`. `evidence.verdict: "disagree"` reflects plan rejection, not worker execution failure.
+  - Code/security review: performed review is `status: "passed"` with `evidence.verdict: "pass"` or `"fail"`;
+    unable is `status: "failed"`. `evidence.verdict: "fail"` reflects code rejection, not worker execution failure.
 - Non-review: completed is `status: "passed"`; unable is `status: "failed"`.
-- Plan review: performed is `status: "passed"` with `evidence.verdict: "agree"` or `"disagree"`;
-  unable is `status: "failed"`.
-- Code/security review: performed is `status: "passed"` with `evidence.verdict: "pass"` or `"fail"`;
-  unable is `status: "failed"`.
+- `status: "failed"` is reserved strictly for worker execution inability (such as unrecoverable
+  command-shape failure or missing authority).
+
+Receipt skeletons:
+
+Non-review pass:
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "summary": "Completed objective and verified repository evidence."
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+Review pass with approval (code/security review):
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "verdict": "pass",
+    "summary": "Review completed with zero blocking findings; code approved."
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+Review pass with rejection (code/security review rejecting with blocking findings):
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [],
+  "findings": [
+    {
+      "id": "F1",
+      "file": "src/handler.js",
+      "line": 1,
+      "title": "Unvalidated input parameter",
+      "detail": "Input parameter lacks validation before passing to sink.",
+      "blocking": true,
+      "remediation": {
+        "owner": "production"
+      }
+    }
+  ],
+  "evidence": {
+    "verdict": "fail",
+    "summary": "Review completed with 1 blocking defect; rejecting code."
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+Plan review pass with rejection (plan checker/critic/judge disagreeing):
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "verdict": "disagree",
+    "summary": "Plan lacks required crash recovery assurance.",
+    "missing_assurances": [
+      {
+        "summary": "Missing atomic rename and cleanup on process termination",
+        "evidence_anchor": "workstream W1 step 1",
+        "risk_trigger": "concurrency"
+      }
+    ]
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+Worker execution failure (missing authority):
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "failed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "failure_kind": "capability",
+    "summary": "Missing write authority for required path.",
+    "required_claims": {
+      "claimed_paths": ["src/new-feature.js"]
+    }
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+Worker execution failure (command-shape denial):
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "failed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "failure_kind": "command-shape",
+    "summary": "Exact syntax denial message after in-stage retry."
+  },
+  "receipt_capability": "<token>"
+}
+```
 
 Before drafting, await and inspect the final result of every test process, including any cancellation
 or session poll. Never batch receipt validation with a pending test result or cancellation request.

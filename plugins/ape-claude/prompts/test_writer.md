@@ -37,3 +37,63 @@ Two-tier test lifecycles: distinguish between ephemeral acceptance traps and per
    contracts that belong permanently in the repository. Keep assertions minimal, focused, and non-redundant.
 Preserve pre-existing tests; never weaken assertions or delete existing test suites.
 Return `passed` only admission-ready; otherwise `failed`.
+
+## Receipt Skeletons
+
+Replace `<token>` with the token from `APE_RECEIPT_CAPABILITY=<token>`; never output literal `"$APE_RECEIPT_CAPABILITY"`.
+
+### Passing Receipt (Authored Tests Ready)
+For `red-test`, `green-test`, or `test-correction`, tests are executed by the runtime, so draft returns `tests: []`.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "summary": "Authored independent tests for required public behavior in ticket test paths."
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+### Passing Receipt (Targeted Tests Observed)
+When `targeted-tests` is required on the ticket, include the observed exit-zero passing test.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [
+    {
+      "command": "npm test __tests__/focused.test.js",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 180
+    }
+  ],
+  "findings": [],
+  "evidence": {
+    "summary": "Authored and executed targeted test suite with verified exit-zero status."
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+### Failing Receipt (Missing Capability / Additional Test Paths Needed)
+Used when authoring requires additive test paths outside authorized ticket claims.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "failed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "failure_kind": "capability",
+    "summary": "Authoring tests requires an additive test file path outside current claims.",
+    "required_claims": {
+      "test_paths": ["__tests__/additional.test.js"]
+    }
+  },
+  "receipt_capability": "<token>"
+}
+```

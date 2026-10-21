@@ -49,6 +49,7 @@ import { LANES } from '../lib/runtime/constants.js';
 import { ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA, START_MODES, TaskErrorSchema } from '../lib/runtime/schemas.js';
 import { TERMINAL_REASON_CODES } from '../lib/runtime/terminal-telemetry.js';
 import { STRUCTURED_SUCCESSOR_UNAVAILABLE_ERROR } from '../lib/runtime/successor-guidance.js';
+import { extractReceiptDraftFromText } from '../lib/runtime/receipt-input.js';
 
 // Plugin manifests pin the launching host on argv. Environment markers are
 // inherited process state and can be stale when one host starts inside the
@@ -310,7 +311,7 @@ const TOOLS = Object.freeze([
         subagents_available: { type: 'boolean', description: 'Required true on the initial Codex probe call after confirming native subagents are available.' },
         explicit_invocation: { type: 'boolean', description: 'Required true on the initial Codex probe call and start after an explicit operator invocation. It authorizes autonomous scheduler-owned continuation for this objective, including configured auto-merge; it is not repeated between stages.' },
         wait_ms: { type: 'number', description: 'Optional on next: best-effort max ms to server-side wait for a run resting in gating/shipping to resolve in one call; clamped to GATE_NEXT_MAX_WAIT_MS (300000); the receipt lock is released between internal polls; a non-number/<=0/omitted value = one poll (unchanged). A gating run that resolves into required-remote-checks shipping stops at shipping_started; call next again (with wait_ms) to drive shipping to merged.' },
-        receipt: { type: 'object' },
+        receipt: { oneOf: [{ type: 'object' }, { type: 'string' }] },
         receipt_input_hash: {
           type: 'string',
           pattern: '^[0-9a-fA-F]{64}$',
@@ -576,7 +577,7 @@ function packageInfo() {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
     return { name: 'ape', version: pkg.version };
   } catch {
-    return { name: 'ape', version: '3.1.0' };
+    return { name: 'ape', version: '3.2.0' };
   }
 }
 
@@ -690,8 +691,12 @@ function assertApeRunActionFields(input) {
   if (input.run_id !== undefined && !['answer-preflight', 'abort', 'override'].includes(action)) {
     throw new Error(`action '${action}' does not take a run_id; run_id confirmation is accepted by 'answer-preflight', 'abort', and 'override', not action '${action}'`);
   }
-  if (action === 'record' && (!input.receipt || typeof input.receipt !== 'object' || Array.isArray(input.receipt))) {
-    throw new Error('record requires a receipt object from the authenticated worker; legacy tool_output is not a receipt and the parent must not reconstruct one');
+  if (action === 'record') {
+    const hasReceipt = input.receipt && (typeof input.receipt === 'object' || typeof input.receipt === 'string') && !Array.isArray(input.receipt);
+    const hasTicketId = typeof input.ticket_id === 'string' && input.ticket_id.length > 0;
+    if (!hasReceipt && !hasTicketId) {
+      throw new Error('record requires a receipt object from the authenticated worker; legacy tool_output is not a receipt and the parent must not reconstruct one');
+    }
   }
   if (action === 'answer-preflight') {
     const allowed = new Set(['action', 'project_dir', ...Object.keys(ANSWER_PREFLIGHT_INPUT_JSON_SCHEMA.properties)]);
@@ -809,10 +814,17 @@ async function dispatchApeRun(projectDir, input) {
   }
   if (action === 'next') return nextRun(projectDir, { wait_ms: input.wait_ms });
   if (action === 'record') {
-    if (!input.receipt || typeof input.receipt !== 'object' || Array.isArray(input.receipt)) {
-      throw new Error('record requires a receipt object from the authenticated worker; legacy tool_output is not a receipt and the parent must not reconstruct one');
+    let receipt = input.receipt;
+    if (typeof receipt === 'string') {
+      receipt = extractReceiptDraftFromText(receipt) ?? { text: receipt };
     }
-    return recordReceipt(projectDir, input.receipt);
+    if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+      receipt = input.ticket_id ? { ticket_id: input.ticket_id } : {};
+    }
+    if (input.ticket_id && typeof receipt === 'object' && !receipt.ticket_id) {
+      receipt.ticket_id = input.ticket_id;
+    }
+    return recordReceipt(projectDir, receipt);
   }
   if (action === 'recover-receipt') {
     return recoverReceipt(projectDir, input.receipt ?? {}, {

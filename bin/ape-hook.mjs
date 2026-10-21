@@ -89,6 +89,7 @@ import {
   redactReceiptBearer,
   receiptInputHash,
 } from '../lib/runtime/receipt-input.js';
+import { readStagedReceipt } from '../lib/runtime/receipt-service.js';
 import {
   capabilityManifestGrowthEnabled,
   mergeReceiptCapabilityGrowthResult,
@@ -879,16 +880,36 @@ try {
       : null;
     if (inspectedTicket?.receipt_contract_version === RECEIPT_CONTRACT_VERSION) {
       const assistantMessage = input.last_assistant_message ?? input.lastAssistantMessage;
-      const extractedDraft = assistantMessage && typeof assistantMessage === 'object'
+      let extractedDraft = assistantMessage && typeof assistantMessage === 'object'
         ? assistantMessage
         : extractReceiptDraftFromText(assistantMessage);
-      const { input: normalizedDraft } = normalizeReceiptInput(extractedDraft, {
+      let { input: normalizedDraft } = normalizeReceiptInput(extractedDraft, {
         receipt_contract_version: inspectedTicket.receipt_contract_version,
       });
-      const stopValidationBearer = authenticatedReceiptBearer(
+      let stopValidationBearer = authenticatedReceiptBearer(
         normalizedDraft,
         inspection.record?.capability_hash,
       );
+
+      // R3 Dual-Handoff Fallback: If conversational prose yielded no draft or bearer authentication failed,
+      // adopt the staged receipt if one exists and matches the ticket & capability.
+      if (!extractedDraft || stopValidationBearer === null) {
+        const staged = await readStagedReceipt(paths, inspectedTicket.ticket_id);
+        if (staged && typeof staged === 'object' && staged.ticket_id === inspectedTicket.ticket_id) {
+          const stagedBearer = authenticatedReceiptBearer(
+            staged,
+            inspection.record?.capability_hash,
+          );
+          if (stagedBearer !== null) {
+            extractedDraft = staged;
+            const normalized = normalizeReceiptInput(staged, {
+              receipt_contract_version: inspectedTicket.receipt_contract_version,
+            });
+            normalizedDraft = normalized.input;
+            stopValidationBearer = stagedBearer;
+          }
+        }
+      }
       let stopDraftResult = stopValidationBearer === null
         ? {
             valid: false,

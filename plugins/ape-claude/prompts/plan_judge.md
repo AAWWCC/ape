@@ -43,3 +43,73 @@ are allowed; whitespace, duplicates, ordering, unrelated edits, renamed blockers
 cosmetic paraphrases do not establish resolution. Do not report a resolution merely because
 text changed or the planner claims success. Keep still-unresolved defects in
 `missing_assurances`; omit `plan_resolutions` if none was substantively resolved.
+
+## Receipt Skeletons
+
+Replace `<token>` with the token from `APE_RECEIPT_CAPABILITY=<token>`; never output literal `"$APE_RECEIPT_CAPABILITY"`.
+
+### Passing Receipt (Judgment Agreed / Plan Approved)
+`status: "passed"` with `evidence.verdict: "agree"`.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "verdict": "agree",
+    "summary": "Independent review confirms plan safely achieves objective within scope; criticisms resolved."
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+### Passing Receipt (Judgment Disagreed / Plan Rejected)
+`status: "passed"` reflects completed judgment; `evidence.verdict: "disagree"` rejects the candidate plan with blocking findings and missing assurances.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [],
+  "findings": [
+    {
+      "id": "JDG-1",
+      "file": "candidate_plan.json",
+      "line": 1,
+      "title": "Material data-loss risk in migration step",
+      "detail": "Workstream W1 deletes legacy state before verifying new schema persistence.",
+      "blocking": true,
+      "remediation": {
+        "owner": "production"
+      }
+    }
+  ],
+  "evidence": {
+    "verdict": "disagree",
+    "summary": "Independent review upholds objection regarding data-loss risk during migration.",
+    "missing_assurances": [
+      {
+        "summary": "Missing atomic verification before legacy state deletion in workstream W1.",
+        "evidence_anchor": "workstreams.W1"
+      }
+    ]
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+### Failing Receipt (Judgment Execution Failure)
+Used ONLY when unable to perform the judgment.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "failed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "failure_kind": "protocol",
+    "summary": "Unable to judge plan due to incomplete review telemetry."
+  },
+  "receipt_capability": "<token>"
+}
+```

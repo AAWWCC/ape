@@ -133,6 +133,7 @@ export function runtimePaths(projectDir) {
     // tickets retain only a compact ref/hash pointer into this directory.
     contracts: path.join(runtime, 'contracts'),
     receipts: path.join(runtime, 'receipts'),
+    receiptsStaging: path.join(runtime, 'receipts', 'staging'),
     receiptTransactions: path.join(runtime, 'receipt-transactions'),
     // Immutable, hash-bound capability-recovery generations. A complete
     // candidate is staged beside this directory and published by one rename;

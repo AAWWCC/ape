@@ -7,6 +7,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acquireRunLock,
+  breakRunLock,
   computeFsLatencyMultiplier,
   releaseRunLock,
   stealLockFileByRename,
@@ -665,3 +666,35 @@ describe('APE v2 shared dir lock: busyMs bounds the acquisition spin (invariant 
     }
   }, 6_000);
 });
+
+describe('APE v2 breakRunLock tombstone sweeping (invariant 7)', () => {
+  it('unconditionally sweeps matching, foreign live-PID, dead-PID, and corrupt tombstones', async () => {
+    const dir = await scratch();
+    const lockPath = path.join(dir, 'active.lock');
+    await acquireRunLock(lockPath, 'held-run');
+
+    const tombstones = [
+      { name: `${lockPath}.stale.matching`, content: JSON.stringify({ version: 1, run_id: 'held-run', pid: process.pid, host: hostname() }) },
+      { name: `${lockPath}.stale.foreign-live`, content: JSON.stringify({ version: 1, run_id: 'other-run', pid: process.pid, host: hostname() }) },
+      { name: `${lockPath}.stale.dead-pid`, content: JSON.stringify({ version: 1, run_id: 'dead-run', pid: deadPid(), host: hostname() }) },
+      { name: `${lockPath}.stale.corrupt`, content: '{not valid json' },
+    ];
+
+    for (const ts of tombstones) {
+      await writeFile(ts.name, ts.content);
+    }
+
+    const { broken } = await breakRunLock(lockPath, { runId: 'held-run' });
+    expect(broken).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+
+    for (const ts of tombstones) {
+      expect(existsSync(ts.name)).toBe(false);
+    }
+
+    const acquired = await acquireRunLock(lockPath, 'fresh-run');
+    expect(acquired.run_id).toBe('fresh-run');
+    await releaseRunLock(lockPath, 'fresh-run');
+  });
+});
+

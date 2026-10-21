@@ -24,3 +24,69 @@ objective, and public contract. `pass` means tests are consistent and implementa
 Return `status: "passed"` with `evidence.verdict: "pass"` or `"fail"`; return `failed` only when
 review cannot be performed.
 Use `fail` for blocking findings and `pass` otherwise.
+
+## Receipt Skeletons
+
+Replace `<token>` with the token from `APE_RECEIPT_CAPABILITY=<token>`; never output literal `"$APE_RECEIPT_CAPABILITY"`.
+
+### Passing Receipt (Review Approved)
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "verdict": "pass",
+    "summary": "All changes verify against objective, approved plan, and design assurances with no blocking defects."
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+### Passing Receipt (Review Rejected / Defect Found)
+`status: "passed"` reflects review completion; `evidence.verdict: "fail"` rejects the code with blocking findings.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [],
+  "findings": [
+    {
+      "id": "F1",
+      "file": "src/example.js",
+      "line": 42,
+      "title": "Uncaught exception on null input",
+      "detail": "Function crashes when input argument is null or undefined without validation check.",
+      "blocking": true,
+      "remediation": {
+        "owner": "production"
+      }
+    }
+  ],
+  "evidence": {
+    "verdict": "fail",
+    "summary": "Identified 1 blocking defect in src/example.js."
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+### Failing Receipt (Review Execution Failure)
+Used ONLY when the worker is unable to execute the review.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "failed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "failure_kind": "capability",
+    "summary": "Review requires inspecting call sites in unreadable claimed paths.",
+    "required_claims": {
+      "claimed_paths": ["src/caller.js"]
+    }
+  },
+  "receipt_capability": "<token>"
+}
+```
