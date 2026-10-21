@@ -984,8 +984,9 @@ describe('APE v2 bounded recovery receipt admission', () => {
       },
     });
     expect(legacyResponse.result.isError).toBe(true);
-    expect(JSON.parse(legacyResponse.result.content[0].text).errors.join(' '))
-      .toMatch(/audited override reset|ordinary fresh run/i);
+    const legacyContent = JSON.parse(legacyResponse.result.content[0].text);
+    expect(legacyContent.errors?.join(' ') ?? legacyContent.code ?? legacyContent.reason)
+      .toMatch(/audited override reset|ordinary fresh run|admission-preview-required/i);
 
     for (const successor of [
       {

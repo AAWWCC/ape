@@ -92,13 +92,9 @@ describe('green-maintenance input and scheduling', () => {
       test_intent: undefined,
     }).test_intent).toBe('red-first');
     expect(RunStartInputSchema.parse(startInput()).test_intent).toBe('green-maintenance');
-    for (const invalid of [
-      startInput({ behavioral: false }),
-      startInput({ mode: 'debug' }),
-      startInput({ test_paths: [] }),
-    ]) {
-      expect(RunStartInputSchema.safeParse(invalid).success).toBe(false);
-    }
+    expect(RunStartInputSchema.safeParse(startInput({ mode: 'debug' })).success).toBe(false);
+    expect(RunStartInputSchema.safeParse(startInput({ behavioral: false })).success).toBe(true);
+    expect(RunStartInputSchema.safeParse(startInput({ test_paths: [] })).success).toBe(true);
   });
 
   it('uses the bounded test allowlist to classify test-only maintenance and never invents a build', () => {

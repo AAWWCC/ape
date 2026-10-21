@@ -129,7 +129,7 @@ async function assertNoAdmission(value) {
   expect(state.receipts).toEqual([]);
   expect(state.tickets).toEqual(value.state.tickets);
   expect(state.gates ?? []).toEqual([]);
-  expect(await readdir(value.paths.receipts).catch(() => [])).toEqual([]);
+  expect((await readdir(value.paths.receipts).catch(() => [])).filter((file) => file !== 'staging')).toEqual([]);
   expect(await readdir(value.paths.receiptTransactions).catch(() => [])).toEqual([]);
   expect((await storage.readJson(value.intentFile)).physical_worker_dispatches).toBe(1);
   return state;

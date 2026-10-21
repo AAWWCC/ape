@@ -1,5 +1,39 @@
 # Changelog
 
+## 3.2.0 — 2026-10-21
+
+This release delivers lifecycle resilience, single-step self-healing resume,
+dual-handoff staged receipt fallback, model-agnostic prompt hardening, automatic
+test necessity detection for non-code assets, and checkpoint TTL auto-pruning.
+
+- **Lifecycle Lock-Break & Auto-Retire (R1)**: When `/ape:run` is invoked while
+  an active run is in `blocked` or `aborted` status, automatically retire and
+  archive the superseded execution, break dead run locks cleanly without manual
+  abort rituals, and admit the prospective run.
+- **Single-Step Self-Healing Resume (R2)**: Collapse the multi-step recovery
+  sequence on `/ape:resume` for blocked runs into a single atomic transition that
+  captures a checkpoint, retires the blocked execution, injects the blocker
+  failure reason directly into the worker prompt as feedback, and launches the
+  replacement run in-place.
+- **Dual-Handoff Staged Receipt Fallback (R3)**: Atomically stage validated draft
+  receipts during `ape_validate_receipt` to
+  `.ape/runtime/receipts/staging/${ticket.ticket_id}.json`. When a worker's final
+  turn produces conversational prose rather than raw JSON, adopt the staged
+  receipt in `SubagentStop` rather than hard-blocking for missing evidence.
+- **Model-Agnostic Prompt & Schema Hardening (R4)**: Harden `prompts/common.md`
+  and role prompts with complete, self-contained JSON skeletons for pass/fail
+  cases. Clarify that `status: "passed"` reflects worker execution integrity while
+  `evidence.verdict: "fail"` / `"disagree"` reflects code/plan rejection. Guide
+  bearer token extraction so models never emit literal `"$APE_RECEIPT_CAPABILITY"`.
+- **Auto-Detect Test Necessity & Non-Code Admission (R5)**: Tasks modifying only
+  non-executable assets (`docs/**`, `*.md`, configs, prompts) or flagged as
+  non-behavioral are automatically classified as `test_intent: "green-maintenance"`,
+  cleanly admitting zero authored tests without triggering empty-test refusal loops.
+- **Checkpoint Auto-Retirement & Background TTL Pruning (R6)**: Superseded runs
+  mark associated checkpoints continued immediately. Automatically background-prune
+  checkpoints with `.continued.json` or unadopted age exceeding 14 days TTL along
+  with their Git references (`refs/ape/checkpoints/*`).
+
 ## 3.1.0 — 2026-10-19
 
 This release introduces the Engineering Rules Engine ("Desloppifier"), two-tier

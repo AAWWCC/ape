@@ -36,3 +36,68 @@ For `plan_recovery`, replace the plan, resolving every missing-assurance ID at i
 widening scope.
 
 The runtime validates and hashes the candidate; never supply a hash of the candidate.
+
+## Receipt Skeletons
+
+Replace `<token>` with the token from `APE_RECEIPT_CAPABILITY=<token>`; never output literal `"$APE_RECEIPT_CAPABILITY"`.
+
+### Passing Receipt (Plan Produced)
+Wrap the complete candidate plan in `evidence.candidate_plan`.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "passed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "summary": "Constructed complete v2 candidate plan addressing all requirements and risk triggers.",
+    "candidate_plan": {
+      "version": 2,
+      "preflight_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "requirements": [{"id": "R1", "requirement": "Implement feature X", "workstreams": ["W1"]}],
+      "workstreams": [{
+        "id": "W1",
+        "outcome": "Feature X implemented and tested",
+        "paths": [{"path": "src/feature.js", "action": "modify"}],
+        "steps": ["Implement logic"],
+        "acceptance": ["Tests pass"],
+        "evidence_commands": ["npm test"],
+        "verification_profiles": []
+      }],
+      "risks": [{"risk": "Regression in Y", "mitigation": "Run regression suite"}],
+      "assurances": [{
+        "id": "A1",
+        "risk_trigger": "concurrency",
+        "threat_model": "Concurrent updates",
+        "feasibility": "Supported by file lock",
+        "failure_modes": ["Lock timeout"],
+        "crash_recovery": "Stale lock released",
+        "migration": "N/A",
+        "determinism": "Repeatable passes",
+        "executable_tests": ["npm test"]
+      }],
+      "non_goals": ["Unrelated refactoring"]
+    }
+  },
+  "receipt_capability": "<token>"
+}
+```
+
+### Failing Receipt (Planning Blocked / Missing Scope)
+Used when objective cannot be planned within authorized scope.
+```json
+{
+  "ticket_id": "<ticket_id>",
+  "status": "failed",
+  "tests": [],
+  "findings": [],
+  "evidence": {
+    "failure_kind": "capability",
+    "summary": "Objective requires modifying files outside allowable plan scope.",
+    "required_claims": {
+      "claimed_paths": ["src/outside_scope.js"]
+    }
+  },
+  "receipt_capability": "<token>"
+}
+```

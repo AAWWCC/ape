@@ -721,7 +721,7 @@ describe('APE v2 start-time git/lock hygiene (baseline integrity)', () => {
     // so not stale). A lock with no matching active.json fails doctor as
     // orphaned and returns before any git; a dead-pid lock is stale-recovered
     // and the start SUCCEEDS — neither would be red.
-    await atomicWriteJson(paths.active, { run_id: 'run-X', status: 'aborted', stage: 'aborted' });
+    await atomicWriteJson(paths.active, { run_id: 'run-X', status: 'completed', stage: 'completed' });
     await acquireRunLock(paths.lock, 'run-X');
     const headBefore = git(dir, 'rev-parse', 'HEAD');
     const branchBefore = git(dir, 'rev-parse', '--abbrev-ref', 'HEAD');
