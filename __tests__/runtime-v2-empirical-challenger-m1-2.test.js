@@ -192,7 +192,7 @@ describe('Empirical Challenge 1: blocker_feedback string & schema/hashing/prompt
       '+ actual - expected',
       '+   { ready: false }',
       '-   { ready: true }',
-      '    at /Users/aidan/Code/apps/ape/__tests__/gate.test.js:45:12',
+      '    at /workspace/repo/__tests__/gate.test.js:45:12',
     ].join('\n');
 
     const started = await startRun(dir, baseStartInput({
