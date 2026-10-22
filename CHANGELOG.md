@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.2.1 — 2026-10-22
+
+This patch aligns the public package, CLI, and host plugin manifests at version
+3.2.1 after the security dependency updates in 3.2.0.
+
 ## 3.2.0 — 2026-10-21
 
 This release delivers lifecycle resilience, single-step self-healing resume,
