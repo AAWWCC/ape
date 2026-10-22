@@ -83,11 +83,11 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.5",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^4.1.12",
     "esbuild": "^0.28.1",
     "fast-check": "^4.9.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "smol-toml": "1.9.0",
